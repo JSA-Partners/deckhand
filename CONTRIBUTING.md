@@ -1,0 +1,23 @@
+# Contributing
+
+Open an issue before a large change, so the shape is agreed before the work.
+
+## Working on it
+
+```bash
+uv sync
+uv run pre-commit install
+uv run pytest
+claude plugin validate .
+claude --plugin-dir .        # try the skills in a repository; /reload-plugins after edits
+```
+
+`CLAUDE.md` describes the layout and the rules the tests enforce. The scripts are standard-library
+Python under `deckhand/`; every step has a test module of its own under `tests/`, driven through the
+fake `gh` in `tests/fakes/`.
+
+## Pull requests
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), with no
+trailers; the commit hook lints them. Pull requests are squash merged, and the pull request title and
+body become the commit on `main`, so write them as one. Keep a pull request to one change.

@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import pytest
+
+from deckhand import naming
+
+# --- slug ---------------------------------------------------------------
+
+
+def test_slug_lowercase_hyphenate_first_four_words():
+    assert naming.slug("Guest users see only their granted collections") == "guest-users-see-only"
+
+
+def test_slug_collapses_punctuation_and_trims():
+    assert naming.slug("  Hello,  World!  ") == "hello-world"
+
+
+def test_slug_keeps_short_titles_whole():
+    assert naming.slug("Fix login") == "fix-login"
+
+
+def test_slug_rejects_a_title_with_no_usable_characters():
+    with pytest.raises(ValueError, match="no usable characters"):
+        naming.slug("!!!")
+
+
+# --- branch-name ----------------------------------------------------------
+
+
+def test_branch_name_renders_kind_number_slug(settings):
+    result = naming.branch_name(settings, "feat", 248, "Guest users see only their granted collections")
+    assert result == "feat/248-guest-users-see-only"
+
+
+def test_branch_name_rejects_an_unknown_kind(settings):
+    with pytest.raises(ValueError, match="unknown kind"):
+        naming.branch_name(settings, "feature", 248, "x")
+
+
+def test_branch_name_rejects_a_non_numeric_issue(settings):
+    with pytest.raises(ValueError):
+        naming.branch_name(settings, "feat", "abc", "x")
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Café niño login", "feat/248-caf-ni-o-login"),
+        ("248 Fix Login", "feat/248-248-fix-login"),
+        ("Add login\nand logout", "feat/248-add-login-and-logout"),
+        ("UPPER Case And Punctuation!!", "feat/248-upper-case-and-punctuation"),
+    ],
+)
+def test_branch_name_is_a_valid_git_ref_for_awkward_titles(settings, title, expected):
+    assert naming.branch_name(settings, "feat", 248, title) == expected
+
+
+def test_branch_name_refuses_an_empty_slug(settings):
+    with pytest.raises(ValueError, match="no usable slug"):
+        naming.branch_name(settings, "feat", 248, "🚀 ✨")
+
+
+def test_branch_name_rejects_a_two_word_kind(settings):
+    with pytest.raises(ValueError):
+        naming.branch_name(settings, "feat fix", 248, "x")
+
+
+# --- pr-title ---------------------------------------------------------------
+
+
+def test_pr_title_renders_kind_title(settings):
+    result = naming.pr_title(settings, "feat", "Guest users see only their granted collections")
+    assert result == "feat: Guest users see only their granted collections"
+
+
+def test_pr_title_adds_bang_when_breaking(settings):
+    result = naming.pr_title(settings, "fix", "Drop the v0 routes", breaking=True)
+    assert result == "fix!: Drop the v0 routes"
+
+
+def test_pr_title_rejects_an_unknown_kind(settings):
+    with pytest.raises(ValueError, match="unknown kind"):
+        naming.pr_title(settings, "feature", "x")
+
+
+def test_pr_title_refuses_a_subject_over_72(settings):
+    with pytest.raises(ValueError, match="title too long for a commit subject; shorten the issue title"):
+        naming.pr_title(settings, "feat", "x" * 67)
+
+
+def test_pr_title_returns_a_subject_of_exactly_72(settings):
+    result = naming.pr_title(settings, "feat", "x" * 65, breaking=True)
+    assert result == f"feat!: {'x' * 65}"
+    assert len(result) == 72
+
+
+def test_pr_title_reserves_the_bang_it_may_not_use(settings):
+    """A title shown without the bang must still fit once a breaking change adds one."""
+    assert naming.pr_title(settings, "feat", "x" * 65) == f"feat: {'x' * 65}"
+    with pytest.raises(ValueError, match="title too long"):
+        naming.pr_title(settings, "feat", "x" * 66)
+
+
+# --- pr-body ------------------------------------------------------------
+
+STORY = "As a guest user, I want to see only the collections I was granted."
+
+
+def test_pr_body_renders_the_story_and_the_closes_footer():
+    assert naming.pr_body(248, STORY) == f"{STORY}\n\nCloses #248\n"
+
+
+def test_pr_body_adds_the_breaking_footer():
+    result = naming.pr_body(248, STORY, breaking="Drops /v0")
+    assert result == f"{STORY}\n\nBREAKING CHANGE: Drops /v0\nCloses #248\n"
+
+
+def test_pr_body_rewraps_a_story_written_over_several_lines():
+    story = (
+        "As a guest user,\nI want to see only  the collections I was granted,\n"
+        "so that I am not exposed to other organizations' data."
+    )
+
+    paragraph = naming.pr_body(248, story).split("\n\nCloses")[0]
+
+    assert paragraph == (
+        "As a guest user, I want to see only the collections I was granted, so that I am not exposed to other"
+        "\norganizations' data."
+    )
+
+
+def test_pr_body_never_splits_a_long_token():
+    url = "https://example.test/docs/very/long/path/to/the/grants/documentation/page#the-guest-collections-filter"
+    assert len(url) > 100, "the case is a token the wrap cannot fit on a line at all"
+
+    paragraph = naming.pr_body(248, f"The rule a guest is filtered by is written up at {url} today.")
+
+    assert url in paragraph.split("\n\nCloses")[0].splitlines()
+
+
+def test_pr_body_rejects_a_non_numeric_issue():
+    with pytest.raises(ValueError):
+        naming.pr_body("abc", STORY)

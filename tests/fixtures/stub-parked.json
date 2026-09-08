@@ -1,0 +1,8 @@
+{
+  "number": 60,
+  "title": "Guest sharing",
+  "state": "OPEN",
+  "url": "https://github.com/acme/widgets/issues/60",
+  "body": "## Requirements\n\nGuests should be able to share a collection with another guest, without an admin in the loop.\n\n## Stories\n",
+  "comments": []
+}

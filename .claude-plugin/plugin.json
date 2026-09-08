@@ -1,23 +1,27 @@
 {
-  "name": "essentials",
-  "version": "1.4.0",
-  "description": "Opinionated agents and skills for shipping code.",
+  "name": "deckhand",
+  "version": "2.0.0",
+  "description": "A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.",
   "author": {
     "name": "JSA+Partners",
     "url": "https://jsapartners.co"
   },
-  "homepage": "https://github.com/JSA-Partners/claude-essentials",
-  "repository": "https://github.com/JSA-Partners/claude-essentials",
+  "homepage": "https://github.com/JSA-Partners/deckhand",
+  "repository": "https://github.com/JSA-Partners/deckhand",
   "license": "MIT",
   "keywords": [
-    "workflow",
-    "code-review",
-    "commit",
-    "story-drafting",
-    "decompose",
-    "implement",
-    "pull-request",
+    "github-issues",
+    "github-projects",
     "story",
-    "agents"
+    "review",
+    "user-stories",
+    "superpowers",
+    "claude-code"
+  ],
+  "dependencies": [
+    {
+      "name": "superpowers",
+      "marketplace": "superpowers-marketplace"
+    }
   ]
 }

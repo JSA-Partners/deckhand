@@ -1,0 +1,33 @@
+[project]
+name = "deckhand"
+version = "2.0.0"
+description = "A story process for shipping code with Claude Code and superpowers"
+requires-python = ">=3.12"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=9", "pymarkdownlnt>=0.9", "gitlint>=0.19", "pre-commit>=4", "ruff>=0.14"]
+
+[tool.ruff]
+# The two launchers carry a shebang instead of an extension, and ruff finds files by name.
+extend-include = ["bin/deckhand", "tests/fakes/gh"]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# The launcher runs on whatever python3 is on PATH, so its version guard is the point of it.
+"bin/deckhand" = ["UP036"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.pymarkdown]
+plugins.md013.enabled = false
+plugins.md024.enabled = false
+extensions.front-matter.enabled = true

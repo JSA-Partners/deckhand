@@ -1,0 +1,11 @@
+{
+  "data": {
+    "repository": {
+      "projectsV2": {
+        "nodes": [
+          { "number": 2, "title": "Widgets", "owner": { "__typename": "Organization", "login": "acme" } }
+        ]
+      }
+    }
+  }
+}

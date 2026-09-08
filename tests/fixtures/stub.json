@@ -1,0 +1,8 @@
+{
+  "number": 57,
+  "title": "Grant store",
+  "state": "OPEN",
+  "url": "https://github.com/acme/widgets/issues/57",
+  "body": "## Requirements\n\nGuests should see only the collections they were granted.\n\n## Stories\n\n1. #57 Grant store | Persist grants.\n2. #58 Handler filter | Filter by grant. (after 1)\n3. #59 Admin view | Show grants. (after 1, 2)\n",
+  "comments": []
+}

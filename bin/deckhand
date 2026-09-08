@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Deckhand command line entry point. Run `deckhand --help` for the commands."""
+
+import os
+import sys
+
+if sys.version_info < (3, 12):
+    sys.exit("deckhand: requires Python 3.12 or newer")
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+from deckhand.cli import main
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

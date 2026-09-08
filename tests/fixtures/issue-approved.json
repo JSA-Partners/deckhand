@@ -1,0 +1,37 @@
+{
+  "number": 248,
+  "title": "Guest users see only their granted collections",
+  "state": "OPEN",
+  "url": "https://github.com/acme/widgets/issues/248",
+  "body": "### Story\n\nAs a guest user, I want to see only the collections I was granted, so that I am not exposed to other organizations' data.\n\n### Scope\n\n#### In\n\n- `GET /v1/collections` filtering for guest principals; the response shape is unchanged\n- Store method to list collections by grant\n\n#### Out\n\n- Admin UI for managing grants\n- Grants for non-guest roles\n\n### Acceptance Criteria\n\n- Given a guest with one grant, when they list collections, then only that collection is returned\n- Given a guest with no grants, when they list collections, then the list is empty\n- Given a member, when they list collections, then every collection is returned as before\n\n### Plan\n\n# Guest Collections Implementation Plan\n\n**Goal:** Filter the collection list by grant for guests.\n\n### Task 1: Store method\n\n**Files:**\n- Modify: `internal/store/collection.go:40-80`\n- Test: `internal/store/collection_test.go`\n\n- [ ] **Step 1: Write the failing test**\n\n### Task 2: Handler\n\n**Files:**\n- Modify: `internal/server/handlers/collections/list.go`\n\n- [ ] **Step 1: Write the failing test**\n\n### Notes\n\n- Grants live in `internal/store/grant.go`\n- Reviewed 2026-09-01: accepted red-team.1, rejected chaos.2",
+  "comments": [
+    {
+      "author": {
+        "login": "mattjmoran"
+      },
+      "createdAt": "2026-09-01T10:00:00Z",
+      "body": "## Review pass: spec\n\nFindings..."
+    },
+    {
+      "author": {
+        "login": "arjan"
+      },
+      "createdAt": "2026-09-01T12:00:00Z",
+      "body": "Approved."
+    },
+    {
+      "author": {
+        "login": "reviewer-bot"
+      },
+      "createdAt": "2026-09-02T09:00:00Z",
+      "body": "## Review\n\n### Decisions\n\n- [x] chaos.1 Retry the grant lookup once when the store times out\n- [ ] unknowns.1 Confirm the grant table is indexed on principal\n"
+    },
+    {
+      "author": {
+        "login": "lead"
+      },
+      "createdAt": "2026-09-02T10:00:00Z",
+      "body": "Approved, ship it"
+    }
+  ]
+}

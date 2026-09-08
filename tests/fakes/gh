@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Fake gh for tests: records every call to $GH_CALLS and every body file to $GH_BODY_FILE_COPY,
+answers from $GH_FIXTURES and env vars, honours --jq."""
+
+import json
+import os
+import subprocess
+import sys
+
+argv = sys.argv[1:]
+calls = os.environ.get("GH_CALLS")
+if calls:
+    with open(calls, "a") as f:
+        f.write(" ".join(argv).replace("\n", " ") + "\n")
+
+fixtures = os.environ["GH_FIXTURES"]
+jq = None
+for i, a in enumerate(argv):
+    if a in ("--jq", "-q") and i + 1 < len(argv):
+        jq = argv[i + 1]
+    elif a.startswith("--jq=") or a.startswith("-q="):
+        jq = a.split("=", 1)[1]
+
+joined = " ".join(argv)
+if "--body-file -" in joined or " -F -" in " " + joined:
+    sys.stdin.read()
+
+# A body reaches gh through a file, so $GH_BODY_FILE_COPY is the only way a test can see it.
+body_copy = os.environ.get("GH_BODY_FILE_COPY")
+if body_copy:
+    for i, a in enumerate(argv):
+        if a == "--body-file" and i + 1 < len(argv) and argv[i + 1] != "-":
+            with open(body_copy, "a") as f:
+                f.write(f"--- {' '.join(argv[:2])}\n" + open(argv[i + 1]).read())
+            break
+
+if "--slurp" in argv:
+    if jq is not None:
+        print("the --slurp option is not supported with --jq or --template", file=sys.stderr)
+        sys.exit(1)
+    if "--paginate" not in argv:
+        print("--paginate required when passing --slurp", file=sys.stderr)
+        sys.exit(1)
+
+
+def respond(text: str) -> None:
+    if "--paginate" in argv:
+        pages_env = os.environ.get("GH_PAGES")
+        if pages_env:
+            pages = [open(p).read() for p in pages_env.split(":")]
+        else:
+            pages = [text]
+        if "--slurp" in argv:
+            text = json.dumps([json.loads(p) for p in pages])
+        else:
+            text = "".join(pages)
+    if jq:
+        out = subprocess.run(["jq", "-r", jq], input=text, capture_output=True, text=True)
+        sys.stdout.write(out.stdout)
+        if out.stderr:
+            sys.stderr.write(out.stderr)
+        sys.exit(out.returncode)
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    sys.exit(0)
+
+
+def fixture(env: str, default: str) -> str:
+    return open(os.environ.get(env, os.path.join(fixtures, default))).read()
+
+
+def unhandled() -> None:
+    print(f"gh fake: unhandled call: {joined}", file=sys.stderr)
+    sys.exit(1)
+
+
+def bump(name: str) -> int:
+    """The 1-based number of this call of `name`, counted in a file next to $GH_CALLS.
+
+    Every gh call is its own process, so a test that wants one answer per call needs the count on
+    disk; without $GH_CALLS there is nowhere to keep it and every call is the first.
+    """
+    if not calls:
+        return 1
+    path = f"{calls}.{name}"
+    try:
+        with open(path) as handle:
+            made = int(handle.read().strip())
+    except (OSError, ValueError):
+        made = 0
+    with open(path, "w") as handle:
+        handle.write(str(made + 1))
+    return made + 1
+
+
+repo = "acme/widgets"
+head = " ".join(argv[:2])
+if head == "repo view":
+    respond(json.dumps({"nameWithOwner": repo}))
+elif head == "repo edit":
+    if os.environ.get("GH_REPO_EDIT_FAILS"):
+        print("gh: repository settings could not be updated", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+elif head == "project view":
+    if os.environ.get("GH_PROJECT_VIEW_FAILS"):
+        print("could not find project", file=sys.stderr)
+        sys.exit(1)
+    respond(
+        json.dumps(
+            {
+                "id": "PVT_TEST",
+                "title": "Widgets",
+                "owner": {
+                    "type": os.environ.get("GH_PROJECT_OWNER_TYPE", "Organization"),
+                    "login": os.environ.get("GH_PROJECT_OWNER", repo.split("/")[0]),
+                },
+            }
+        )
+    )
+elif head == "project field-list":
+    respond(fixture("GH_FIELDS_FILE", "fields.json"))
+elif head == "project link":
+    if os.environ.get("GH_PROJECT_LINK_FAILS"):
+        print("could not link project", file=sys.stderr)
+        sys.exit(1)
+    respond("{}")
+elif head == "project list":
+    respond(fixture("GH_PROJECT_LIST_FILE", "project-list.json"))
+elif head in ("project field-create", "project item-edit", "project item-add"):
+    respond("{}")
+elif head == "issue view":
+    number = argv[2] if len(argv) > 2 else ""
+    if number and os.environ.get("GH_ISSUE_VIEW_FAILS") == number:
+        print(f"could not resolve to an Issue with the number of {number}", file=sys.stderr)
+        sys.exit(1)
+    # A per-number fixture, so one call can answer for a sibling and another for the issue itself.
+    per_issue = f"GH_ISSUE_FILE_{number}"
+    respond(fixture(per_issue if per_issue in os.environ else "GH_ISSUE_FILE", "issue.json"))
+elif head == "issue create":
+    # $GH_NEW_ISSUE takes a comma-separated list, consumed in order across calls, so one split can
+    # open several issues; a single value answers every call, as it always did.
+    made = bump("create")
+    fails_after = os.environ.get("GH_ISSUE_CREATE_FAILS_AFTER")
+    if fails_after and made >= int(fails_after):
+        print("could not create issue", file=sys.stderr)
+        sys.exit(1)
+    numbers = os.environ.get("GH_NEW_ISSUE", "999").split(",")
+    respond(f"https://github.com/{repo}/issues/{numbers[min(made - 1, len(numbers) - 1)]}")
+elif head == "issue edit":
+    respond("ok")
+elif head == "issue close":
+    respond("ok")
+elif head == "issue comment":
+    if os.environ.get("GH_ISSUE_COMMENT_FAILS"):
+        print("could not add comment", file=sys.stderr)
+        sys.exit(1)
+    number = argv[2] if len(argv) > 2 else "0"
+    respond(f"https://github.com/{repo}/issues/{number}#issuecomment-{os.environ.get('GH_NEW_COMMENT', '77')}")
+elif head == "pr create":
+    if os.environ.get("GH_PR_EXISTS"):
+        print("a pull request for branch already exists", file=sys.stderr)
+        sys.exit(1)
+    respond(f"https://github.com/{repo}/pull/1000")
+elif head == "pr view":
+    if os.environ.get("GH_PR_EXISTS"):
+        respond(json.dumps({"url": f"https://github.com/{repo}/pull/1000"}))
+    print("no pull requests found for the branch", file=sys.stderr)
+    sys.exit(1)
+elif head == "api graphql":
+    # The other project queries match on projectV2(number, so they answer an organization( and a
+    # user( form alike; the linked-projects query is the only one that names projectsV2(first.
+    if "projectsV2(first" in joined:
+        respond(fixture("GH_LINKED_PROJECTS", "linked-one.json"))
+    if "projectV2(number" in joined and "items(" in joined:
+        respond(fixture("GH_PROJECT_ITEMS_FILE", "graphql-project-items.json"))
+    if "fieldValues" in joined:
+        respond(fixture("GH_FIELDVALUES_FILE", "graphql-fieldvalues.json"))
+    respond(fixture("GH_GRAPHQL_FILE", "graphql-item.json"))
+elif argv and argv[0] == "api":
+    value_flags = {"-H", "--header", "-q", "--jq", "-X", "--method", "-f", "-F", "--input"}
+    path = ""
+    skip = False
+    for a in argv[1:]:
+        if skip:
+            skip = False
+            continue
+        if a in value_flags:
+            skip = True
+            continue
+        if a.startswith("-"):
+            continue
+        if a in ("GET", "POST", "DELETE", "PUT", "PATCH"):
+            continue
+        path = a
+        break
+    if not path:
+        unhandled()
+    if "/dependencies/blocked_by" in path:
+        if "POST" in argv and os.environ.get("GH_DEPENDENCY_FAILS"):
+            print("could not add dependency", file=sys.stderr)
+            sys.exit(1)
+        respond(os.environ.get("GH_BLOCKED_BY", "[]"))
+    if "/issues/" in path:
+        respond('{"id":5099965156,"number":246,"title":"T","state":"open"}')
+    respond("{}")
+else:
+    unhandled()

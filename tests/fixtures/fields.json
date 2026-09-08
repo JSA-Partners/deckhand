@@ -1,0 +1,15 @@
+{
+  "fields": [
+    {"id": "PVTSSF_STATUS", "name": "Status", "type": "ProjectV2SingleSelectField",
+     "options": [{"id": "opt_backlog", "name": "Backlog"}, {"id": "opt_blocked", "name": "Blocked"},
+                 {"id": "opt_inprogress", "name": "In Progress"}, {"id": "opt_pending", "name": "Pending Review"},
+                 {"id": "opt_done", "name": "Done"}]},
+    {"id": "PVTSSF_KIND", "name": "Kind", "type": "ProjectV2SingleSelectField",
+     "options": [{"id": "opt_feat", "name": "feat"}, {"id": "opt_fix", "name": "fix"}, {"id": "opt_chore", "name": "chore"},
+                 {"id": "opt_refactor", "name": "refactor"}, {"id": "opt_docs", "name": "docs"}, {"id": "opt_perf", "name": "perf"}]},
+    {"id": "PVTF_POINTS", "name": "Story Points", "type": "ProjectV2Field"},
+    {"id": "PVTF_ACTUAL", "name": "Actual", "type": "ProjectV2Field"},
+    {"id": "PVTF_CLOSED", "name": "Closed", "type": "ProjectV2Field"}
+  ],
+  "totalCount": 5
+}

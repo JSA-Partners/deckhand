@@ -1,2 +1,5 @@
-node_modules/
 .DS_Store
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/

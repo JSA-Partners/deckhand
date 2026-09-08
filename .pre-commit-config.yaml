@@ -1,0 +1,34 @@
+default_install_hook_types: [pre-commit, commit-msg]
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python]
+        stages: [pre-commit]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python]
+        stages: [pre-commit]
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: pymarkdown
+        name: pymarkdown
+        entry: uv run pymarkdown scan
+        language: system
+        files: '^((skills|agents)/.*\.md|README\.md|CONTRIBUTING\.md|CLAUDE\.md)$'
+        stages: [pre-commit]
+      - id: gitlint
+        name: gitlint
+        entry: uv run gitlint --staged --msg-filename
+        language: system
+        stages: [commit-msg]

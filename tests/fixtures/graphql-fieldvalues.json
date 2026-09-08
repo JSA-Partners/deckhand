@@ -1,0 +1,6 @@
+{"data":{"node":{"fieldValues":{"nodes":[
+  {"name":"Backlog","field":{"name":"Status"}},
+  {"name":"feat","field":{"name":"Kind"}},
+  {"number":3.0,"field":{"name":"Story Points"}},
+  {"text":"Guest users see only their granted collections","field":{"name":"Title"}}
+]}}}}

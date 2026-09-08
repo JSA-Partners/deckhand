@@ -1,0 +1,75 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "items": {
+          "pageInfo": { "hasNextPage": false, "endCursor": null },
+          "nodes": [
+            {
+              "content": {
+                "number": 210,
+                "closedAt": "2026-08-20T00:00:00Z",
+                "title": "Tag filters on the mention list",
+                "body": "### Plan\n\n### Task 1: A\n\n### Task 2: B\n",
+                "repository": { "nameWithOwner": "acme/widgets" }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Done", "field": { "name": "Status" } },
+                  { "number": 5, "field": { "name": "Story Points" } },
+                  { "number": 8, "field": { "name": "Actual" } }
+                ]
+              }
+            },
+            {
+              "content": {
+                "number": 211,
+                "closedAt": "2026-08-28T00:00:00Z",
+                "title": "Publication tier assignments",
+                "body": "[link](https://example.com)",
+                "repository": { "nameWithOwner": "acme/widgets" }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Done", "field": { "name": "Status" } },
+                  { "number": 3, "field": { "name": "Story Points" } }
+                ]
+              }
+            },
+            {
+              "content": {
+                "number": 96,
+                "closedAt": "2026-07-01T00:00:00Z",
+                "title": "CSV export of the breakdown chart",
+                "body": "### Plan\n\n### Task 1: Only\n",
+                "repository": { "nameWithOwner": "acme/gadgets" }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Done", "field": { "name": "Status" } },
+                  { "number": 8, "field": { "name": "Story Points" } },
+                  { "number": 5, "field": { "name": "Actual" } }
+                ]
+              }
+            },
+            {
+              "content": {
+                "number": 300,
+                "closedAt": null,
+                "title": "Not done yet",
+                "body": "",
+                "repository": { "nameWithOwner": "acme/widgets" }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Backlog", "field": { "name": "Status" } },
+                  { "number": 2, "field": { "name": "Story Points" } }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

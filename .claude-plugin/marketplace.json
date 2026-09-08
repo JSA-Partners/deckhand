@@ -6,29 +6,31 @@
   },
   "metadata": {
     "description": "Claude Code plugins by JSA+Partners.",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
+  "allowCrossMarketplaceDependenciesOn": [
+    "superpowers-marketplace"
+  ],
   "plugins": [
     {
-      "name": "essentials",
-      "description": "Opinionated agents and skills for shipping code.",
-      "version": "1.4.0",
+      "name": "deckhand",
+      "description": "A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.",
+      "version": "2.0.0",
       "author": {
         "name": "JSA+Partners",
         "url": "https://jsapartners.co"
       },
-      "homepage": "https://github.com/JSA-Partners",
+      "homepage": "https://github.com/JSA-Partners/deckhand",
       "source": "./",
       "license": "MIT",
       "tags": [
-        "workflow",
-        "code-review",
-        "commit",
-        "story-drafting",
-        "decompose",
-        "implement",
-        "pull-request",
-        "agents"
+        "github-issues",
+        "github-projects",
+        "story",
+        "review",
+        "user-stories",
+        "superpowers",
+        "claude-code"
       ]
     }
   ]
