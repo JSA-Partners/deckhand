@@ -8,9 +8,6 @@
     "description": "Claude Code plugins by JSA+Partners.",
     "version": "2.0.0"
   },
-  "allowCrossMarketplaceDependenciesOn": [
-    "superpowers-marketplace"
-  ],
   "plugins": [
     {
       "name": "deckhand",

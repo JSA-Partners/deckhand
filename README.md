@@ -19,7 +19,7 @@ gate passes.
 
 ```bash
 claude plugin marketplace add obra/superpowers
-claude plugin install superpowers@superpowers-marketplace
+claude plugin install superpowers@superpowers-dev
 claude plugin marketplace add JSA-Partners/deckhand
 claude plugin install deckhand@jsapartners
 ```

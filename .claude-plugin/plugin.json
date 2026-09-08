@@ -17,11 +17,5 @@
     "user-stories",
     "superpowers",
     "claude-code"
-  ],
-  "dependencies": [
-    {
-      "name": "superpowers",
-      "marketplace": "superpowers-marketplace"
-    }
   ]
 }
