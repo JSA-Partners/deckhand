@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from deckhand import cli
+from deckhand import __version__, cli
 from deckhand.cli import command
 from tests.conftest import ROOT, run_deckhand
 
@@ -16,7 +18,20 @@ from tests.conftest import ROOT, run_deckhand
 def test_version_prints_the_package_version():
     result = run_deckhand("--version")
     assert result.returncode == 0
-    assert result.stdout.strip() == "deckhand 2.0.0"
+    assert result.stdout.strip() == f"deckhand {__version__}"
+
+
+def test_every_version_source_agrees():
+    """A release bumps five strings at once; this is the check the release rule in CLAUDE.md relies on."""
+    manifests = ROOT / ".claude-plugin"
+    marketplace = json.loads((manifests / "marketplace.json").read_text(encoding="utf-8"))
+    versions = {
+        "pyproject.toml": tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
+        "plugin.json": json.loads((manifests / "plugin.json").read_text(encoding="utf-8"))["version"],
+        "marketplace.json metadata": marketplace["metadata"]["version"],
+        "marketplace.json plugin": marketplace["plugins"][0]["version"],
+    }
+    assert all(found == __version__ for found in versions.values()), f"__version__ is {__version__}; {versions}"
 
 
 def test_unknown_command_is_a_usage_error():

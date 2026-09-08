@@ -43,12 +43,25 @@ claude --plugin-dir .        # then /reload-plugins after edits
 - Commit messages: no trailers of any kind, ever; `.gitlint` enforces the rest, at commit-msg only, so
   never commit with `--no-verify`
 
+## Releases
+
+Every change that reaches `main` and touches what users install (`skills/`, `agents/`, `deckhand/`,
+`bin/`, or the manifests) is a release, and a release is one commit and one tag:
+
+1. Bump the version in `pyproject.toml`, `deckhand/__init__.py`, `.claude-plugin/plugin.json`, and
+   both `version` fields of `.claude-plugin/marketplace.json`; semver from the conventional type of
+   what landed (`fix` patch, `feat` minor, `!` or `BREAKING CHANGE` major); `tests/test_cli.py`
+   fails when the five disagree
+2. Commit as `chore(release): X.Y.Z` with no other change in it
+3. `git tag -a vX.Y.Z -m "deckhand X.Y.Z"` on that commit, then push `main` and the tag
+
+Never leave a user-facing change on `main` untagged; the marketplace installs by tag.
+
 ## Common Mistakes
 
 - Do not fetch context by instruction when `deckhand` can inject it
 - A status is set only by a step's `apply`, never by prose
 - Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
-- Bump the version in `pyproject.toml` and both manifests together; nothing checks that they agree
 - Do not hardcode organization, project, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
 - Several agents may share one checkout's index: commit with an explicit pathspec
