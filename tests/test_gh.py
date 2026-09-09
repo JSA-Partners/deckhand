@@ -88,6 +88,22 @@ def test_field_list_asks_the_configured_project_for_every_field(fake_gh, gh_call
     assert any("project field-list 2 --owner acme --format json" in c for c in gh_calls())
 
 
+def test_project_fields_reports_every_field_with_its_data_type(fake_gh, gh_calls, settings):
+    fields = gh.project_fields(settings)
+
+    assert {"id": "PVTSSF_PRIORITY", "name": "Priority", "dataType": "SINGLE_SELECT"} in fields
+    assert {"id": "PVTF_MILESTONE", "name": "Milestone", "dataType": "MILESTONE"} in fields
+    assert any("organization(login:$owner)" in c and "fields(first:50)" in c for c in gh_calls())
+
+
+def test_project_fields_is_empty_when_the_owner_root_answers_nothing(fake_gh, tmp_path, monkeypatch, settings):
+    empty = tmp_path / "empty.json"
+    empty.write_text('{"data": {"organization": null}}')
+    monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(empty))
+
+    assert gh.project_fields(settings) == []
+
+
 def test_field_returns_the_named_field(fake_gh, settings):
     result = gh.field(settings, "Story Points")
     assert result["id"] == "PVTF_POINTS"

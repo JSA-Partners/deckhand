@@ -123,6 +123,27 @@ def test_set_title_rejects_a_malformed_repo(fake_gh, gh_calls):
     assert gh_calls() == []
 
 
+# --- assign -----------------------------------------------------------------
+
+
+def test_assign_adds_the_running_login_by_default(fake_gh, gh_calls):
+    issue.assign(REPO, 248)
+
+    assert gh_calls() == ["issue edit 248 --repo acme/widgets --add-assignee @me"]
+
+
+def test_assign_takes_a_named_login(fake_gh, gh_calls):
+    issue.assign(REPO, 248, "mjm")
+
+    assert gh_calls() == ["issue edit 248 --repo acme/widgets --add-assignee mjm"]
+
+
+def test_assign_rejects_a_malformed_repo(fake_gh, gh_calls):
+    with pytest.raises(gh.GhError):
+        issue.assign("widgets", 248)
+    assert gh_calls() == []
+
+
 # --- close ------------------------------------------------------------------
 
 
@@ -188,14 +209,35 @@ def test_blockers_accepts_repo(fake_gh, gh_calls, monkeypatch):
     assert gh_calls() == ["api repos/acme/gadgets/issues/248/dependencies/blocked_by --paginate --slurp"]
 
 
-# --- review_comment and approved_after --------------------------------------
+# --- blocking ---------------------------------------------------------------
+
+
+def test_blocking_returns_nothing_when_the_story_blocks_no_one(fake_gh):
+    assert issue.blocking(REPO, 248) == []
+
+
+def test_blocking_lists_open_issues_only_in_ascending_order(fake_gh, monkeypatch):
+    monkeypatch.setenv(
+        "GH_BLOCKING",
+        '[{"number":4,"state":"open"},{"number":9,"state":"closed"},{"number":3,"state":"open"}]',
+    )
+    assert issue.blocking(REPO, 248) == [3, 4]
+
+
+def test_blocking_accepts_repo(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_BLOCKING", '[{"number":9,"state":"open"}]')
+    assert issue.blocking("acme/gadgets", 248) == [9]
+    assert gh_calls() == ["api repos/acme/gadgets/issues/248/dependencies/blocking --paginate --slurp"]
+
+
+# --- review_comment ---------------------------------------------------------
 
 
 def test_review_comment_is_the_latest_review(fake_gh, tmp_path, monkeypatch):
     later = {
         "author": {"login": "lens-two"},
         "createdAt": "2026-09-03T09:00:00Z",
-        "body": "## Review\n\n### Decisions\n\n- [ ] chaos.2 Cache the grant lookup\n",
+        "body": "## Review\n\nTick a finding to accept it.\n\n- [ ] **chaos.2, P3** Cache the grant lookup. Plan\n",
     }
     _issue_file(tmp_path, monkeypatch, "issue-reviewed.json", [later])
     found = issue.review_comment(issue.view(REPO, 248))
@@ -209,46 +251,131 @@ def test_review_comment_is_none_without_one(fake_gh):
     assert issue.review_comment(issue.view(REPO, 248)) is None
 
 
-def test_approved_after_finds_the_later_approval(fake_gh, monkeypatch):
-    monkeypatch.setenv("GH_ISSUE_FILE", str(FIXTURES / "issue-approved.json"))
-    loaded = issue.view(REPO, 248)
-    review = issue.review_comment(loaded)
-    assert review is not None and review.author == "reviewer-bot"
-    approval = issue.approved_after(loaded, review)
-    assert approval is not None
-    assert (approval.author, approval.body) == ("lead", "Approved, ship it")
+def test_the_module_no_longer_reads_approvals():
+    """The review comment is the whole gate; nothing looks for a reply whose first word approves."""
+    assert not hasattr(issue, "approved_after")
 
 
-def test_approved_after_counts_an_approval_in_the_same_second(fake_gh, tmp_path, monkeypatch):
-    # gh timestamps are second-precision, so a fast approval shares the review's second.
-    same_second = {"author": {"login": "lead"}, "createdAt": "2026-09-02T09:00:00Z", "body": "Approved"}
-    _issue_file(tmp_path, monkeypatch, "issue-reviewed.json", [same_second])
-    loaded = issue.view(REPO, 248)
-    review = issue.review_comment(loaded)
-    assert review is not None
-    approval = issue.approved_after(loaded, review)
-    assert approval is not None and approval.author == "lead"
+# --- pull_request -----------------------------------------------------------
 
 
-def test_approved_after_accepts_a_bold_approval(fake_gh, tmp_path, monkeypatch):
-    bold = {"author": {"login": "lead"}, "createdAt": "2026-09-03T09:00:00Z", "body": "**Approved**, ship it"}
-    _issue_file(tmp_path, monkeypatch, "issue-reviewed.json", [bold])
-    loaded = issue.view(REPO, 248)
-    review = issue.review_comment(loaded)
-    assert review is not None
-    approval = issue.approved_after(loaded, review)
-    assert approval is not None and approval.body == "**Approved**, ship it"
+def test_pull_request_returns_the_open_ones_url(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_PR_EXISTS", "1")
+
+    assert issue.pull_request(REPO, "feat/248-guests") == "https://github.com/acme/widgets/pull/1000"
+    assert gh_calls() == ["pr list --repo acme/widgets --head feat/248-guests --state open --json url"]
 
 
-def test_approved_after_ignores_earlier_and_non_approval_comments(fake_gh, tmp_path, monkeypatch):
-    # "Approved." predates the review; "I approve of this" does not open with the word; and a
-    # quoted "> Approved" is someone repeating an approval, not giving one.
-    later = [
-        {"author": {"login": "arjan"}, "createdAt": "2026-09-03T09:00:00Z", "body": "> Approved\n\nWhen?"},
-        {"author": {"login": "lead"}, "createdAt": "2026-09-03T10:00:00Z", "body": "I approve of this"},
-    ]
-    _issue_file(tmp_path, monkeypatch, "issue-reviewed.json", later)
-    loaded = issue.view(REPO, 248)
-    review = issue.review_comment(loaded)
-    assert review is not None
-    assert issue.approved_after(loaded, review) is None
+def test_pull_request_is_none_when_the_branch_has_none(fake_gh):
+    assert issue.pull_request(REPO, "feat/248-guests") is None
+
+
+def test_pull_request_survives_an_answer_it_did_not_expect(fake_gh, monkeypatch):
+    """gh answers a list here, and a shape that is not one must read as no pull request."""
+    monkeypatch.setenv("GH_PR_LIST_BODY", '{"url": "no"}')
+
+    assert issue.pull_request(REPO, "feat/248-guests") is None
+
+
+def test_pull_request_rejects_a_malformed_repo(fake_gh, gh_calls):
+    with pytest.raises(gh.GhError):
+        issue.pull_request("widgets", "feat/248-guests")
+    assert gh_calls() == []
+
+
+# --- the REST comments ------------------------------------------------------
+
+
+def _comments(tmp_path: Path, monkeypatch, *raw: dict) -> None:
+    """Point the fake's REST comments endpoint at `raw`, the shape the API returns."""
+    path = tmp_path / "comments.json"
+    path.write_text(json.dumps(list(raw)), encoding="utf-8")
+    monkeypatch.setenv("GH_COMMENTS_FILE", str(path))
+
+
+def _raw(body: str, created: str, updated: str | None = None, login: str = "arjan") -> dict:
+    return {
+        "body": body,
+        "created_at": created,
+        "updated_at": updated or created,
+        "user": {"login": login},
+        "html_url": f"https://github.com/acme/widgets/issues/248#issuecomment-{created}",
+    }
+
+
+def test_feedback_state_reads_the_edit_the_amend_and_the_replies_in_one_call(fake_gh, gh_calls, tmp_path, monkeypatch):
+    _comments(
+        tmp_path,
+        monkeypatch,
+        _raw("## Review\n\n- [ ] spec.1", "2026-09-01T09:00:00Z"),
+        _raw("Before the amend.", "2026-09-02T09:00:00Z"),
+        _raw("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
+        _raw("Split: #250 Grant store, blocked by this story.", "2026-09-04T09:00:00Z"),
+        _raw("Deviation: the retry path moved", "2026-09-05T09:00:00Z"),
+        _raw("Also cover the empty case.", "2026-09-06T09:00:00Z", login="mattjmoran"),
+    )
+
+    edited, reviewed_at, amended, since = issue.feedback_state(REPO, 248)
+
+    assert edited == "2026-09-01T09:00:00Z"
+    assert reviewed_at == "2026-09-01T09:00:00Z"
+    assert amended == "2026-09-03T09:00:00Z"
+    assert [(c.author, c.body) for c in since] == [("mattjmoran", "Also cover the empty case.")]
+    assert since[0].created_at == "2026-09-06T09:00:00Z"
+    assert since[0].url == "https://github.com/acme/widgets/issues/248#issuecomment-2026-09-06T09:00:00Z"
+    assert len(gh_calls()) == 1
+
+
+def test_feedback_state_takes_the_edit_stamp_off_the_latest_review(fake_gh, tmp_path, monkeypatch):
+    _comments(
+        tmp_path,
+        monkeypatch,
+        _raw("## Review\n\n- [ ] spec.1", "2026-09-01T09:00:00Z"),
+        _raw("## Review\n\n- [x] spec.1", "2026-09-02T09:00:00Z", "2026-09-04T11:00:00Z"),
+    )
+
+    assert issue.feedback_state(REPO, 248)[:2] == ("2026-09-04T11:00:00Z", "2026-09-02T09:00:00Z")
+
+
+def test_feedback_state_is_empty_when_nothing_has_been_said(fake_gh):
+    assert issue.feedback_state(REPO, 248) == (None, "", "", [])
+
+
+def test_a_review_pass_comment_is_not_a_review(fake_gh, tmp_path, monkeypatch):
+    """The old process headed its comments `## Review pass:`; only `## Review` is one now."""
+    _comments(
+        tmp_path,
+        monkeypatch,
+        _raw("## Review pass: spec\n\nFindings...", "2026-09-01T09:00:00Z"),
+        _raw("Drop the second criterion.", "2026-09-02T09:00:00Z"),
+    )
+
+    edited, _, _, since = issue.feedback_state(REPO, 248)
+
+    assert edited is None
+    assert [c.body for c in since] == ["Drop the second criterion."]
+
+
+def test_feedback_since_reads_what_a_person_wrote_after_the_last_amend(fake_gh, tmp_path, monkeypatch):
+    _comments(
+        tmp_path,
+        monkeypatch,
+        _raw("## Review\n\n- [ ] spec.1", "2026-09-01T09:00:00Z"),
+        _raw("Before the amend.", "2026-09-02T09:00:00Z"),
+        _raw("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
+        _raw("Also cover the empty case.", "2026-09-06T09:00:00Z", login="mattjmoran"),
+    )
+
+    assert [c.body for c in issue.feedback_since(REPO, 248)] == ["Also cover the empty case."]
+
+
+def test_feedback_since_reads_everything_after_the_review_when_nothing_was_amended(fake_gh, tmp_path, monkeypatch):
+    _comments(
+        tmp_path,
+        monkeypatch,
+        _raw("Before the review.", "2026-09-01T09:00:00Z"),
+        _raw("## Review\n\n- [ ] spec.1", "2026-09-02T09:00:00Z"),
+        _raw("Drop the second criterion.", "2026-09-03T09:00:00Z"),
+    )
+
+    assert [c.body for c in issue.feedback_since(REPO, 248)] == ["Drop the second criterion."]

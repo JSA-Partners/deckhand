@@ -192,4 +192,6 @@ def test_commit_context_never_fails_under_an_os_error(repo, monkeypatch, capsys)
     monkeypatch.setattr(commit.git, "run", boom)
 
     assert cli.main(["commit", "context"]) == 0
-    assert capsys.readouterr().out == "(deckhand commit context failed: disk on fire. Continue without it.)\n"
+    assert capsys.readouterr().out == (
+        "(deckhand commit context failed: disk on fire. Say what could not be read and stop.)\n"
+    )

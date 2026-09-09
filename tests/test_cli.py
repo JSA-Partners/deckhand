@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -171,8 +172,9 @@ def test_handler_error_with_unencodable_argv_is_still_one_line(tmp_path):
 
 
 def _verbs(parser: argparse.ArgumentParser) -> list[str]:
-    """The verbs one command answers to, in name order."""
-    return sorted(next(a for a in parser._actions if getattr(a, "choices", None)).choices)
+    """The verbs one command answers to, in name order; none at all for a plain command."""
+    verbs = next((a for a in parser._actions if getattr(a, "choices", None)), None)
+    return sorted(verbs.choices) if verbs is not None else []
 
 
 def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
@@ -181,12 +183,31 @@ def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
 
     assert {name: _verbs(sub) for name, sub in commands.items()} == {
         "amend": ["apply", "context"],
+        "comment": [],
         "commit": ["context"],
         "document": ["context"],
         "finish": ["apply", "context"],
         "new": ["apply", "context"],
+        "next": ["context"],
         "ready": ["apply", "context"],
         "review": ["apply", "context"],
         "setup": ["apply", "context"],
         "start": ["apply", "context"],
     }
+
+
+# A step runs from `next` and nowhere else, so the line that ends a command never sends a person to
+# one; the commands they type are the whole of what a `Next:` line may name.
+_STEP_COMMAND = re.compile(r"/deckhand:(amend|finish|ready|review|start)\b")
+
+
+def test_no_printed_next_line_names_a_step_command():
+    """Every `Next:` line in the package, read the way a person reads it on the screen."""
+    offenders = [
+        f"{path.name}:{number}: {line.strip()}"
+        for path in sorted((ROOT / "deckhand").glob("*.py"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        if "Next:" in line and _STEP_COMMAND.search(line)
+    ]
+
+    assert offenders == []

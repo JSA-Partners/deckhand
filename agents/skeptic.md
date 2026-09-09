@@ -1,6 +1,6 @@
 ---
 name: skeptic
-description: "Marks every finding from the reviewer CONFIRMED or REJECTED; used by /deckhand:review."
+description: "Marks every finding from the reviewer CONFIRMED or REJECTED; used by the review step, which /deckhand:next runs."
 tools: Read, Grep, Glob
 model: opus
 effort: xhigh

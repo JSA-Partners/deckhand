@@ -14,6 +14,11 @@ if TYPE_CHECKING:  # a runtime import would be circular: config resolves the pro
 OWNER_ROOT = "OWNER_ROOT"
 OWNER_FIELDS = {"Organization": "organization", "User": "user"}
 
+FIELDS_QUERY = (
+    "query($owner:String!,$number:Int!){ OWNER_ROOT(login:$owner){ projectV2(number:$number){ "
+    "fields(first:50){ nodes{ ... on ProjectV2FieldCommon{ id name dataType } } } } } }"
+)
+
 LINKED_QUERY = (
     "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){"
     "projectsV2(first:20){nodes{number title owner{__typename "
@@ -169,6 +174,23 @@ def field_list(settings: Settings) -> list[dict[str, Any]]:
     """Every field on the configured project, as `gh project field-list` reports it."""
     return json_out("project", "field-list", str(settings.project), "--owner", settings.owner, "--format", "json")[
         "fields"
+    ]
+
+
+def project_fields(settings: Settings) -> list[dict[str, Any]]:
+    """Every field on the configured project as `{id, name, dataType}`, first page of 50.
+
+    `field-list` reports a field's GraphQL class, and only the `dataType` the API itself uses says
+    which fields a person made and which GitHub built in, so this reads them through GraphQL.
+    """
+    query = owner_query(FIELDS_QUERY, settings.owner_type)
+    data = graphql(query, {"owner": settings.owner, "number": settings.project})[0]
+    root = (data.get("data") or {}).get(owner_field(settings.owner_type)) or {}
+    nodes = ((root.get("projectV2") or {}).get("fields") or {}).get("nodes") or []
+    return [
+        {"id": node.get("id"), "name": node.get("name") or "", "dataType": node.get("dataType") or ""}
+        for node in nodes
+        if node and node.get("id")
     ]
 
 

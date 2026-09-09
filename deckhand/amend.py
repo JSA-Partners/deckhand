@@ -1,33 +1,40 @@
 """The amend step: a discovery, or the ticked findings of a review, reaches the story it belongs to.
 
-`context` prints the body to edit and the latest review in full, because the ticks in it are the
-amendment. `apply` has two modes, and they are the same decision the process has always made about a
-discovery: `--note` keeps the work in this story, and `--new-issue` gives it its own story, blocked
-by this one, which is what the split step used to do.
+`context` prints the board's column, because it says which moment of the story this is and whether
+the plan is frozen, the body to edit, the latest review in full, because the ticks in it are the
+amendment, and every comment a person has left since the last amend. `apply` has two modes, and they
+are the same decision the process has always made about a discovery: `--note` keeps the work in this
+story, and `--new-issue` gives it its own story, blocked by this one, which is what the split step
+used to do.
 
 The body mode never rewrites more than the model drafted: the draft's section headings have to match
 the ones the issue carries, so a body that lost a section is a refusal rather than a silent deletion.
-A review's decisions reach Notes only once a human has ticked one of them, and each finding keeps one
-line there however many amends a story takes.
+The plan itself is frozen once the board says the story is In Progress: a discovery during execution
+is a Notes line or a new issue, never a rewritten plan.
+
+The record is the issue's own comments, not a block inside the story: every amend posts one
+`Amended: <note>` comment, so the body the draft carries reaches GitHub as it was drafted and the
+log reads in the order it was written. Both modes end on the one command a person types, so nothing
+here has to say which moment of the story this was.
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime
-import re
 from pathlib import Path
 
-from deckhand import gh, issue, lint, sections
+from deckhand import config, fields, gh, issue, lint, sections
 from deckhand.step import Refusal, block, draft_line, read_draft, reason, refuse_stub, step, usable
 
 DRAFT_RULE = "Write the whole edited body to the draft; keep every section heading."
+BODY_HEADING = "## Body"
 REVIEW_HEADING = "## Latest review"
+FEEDBACK_HEADING = "## Feedback"
 
-_DECISIONS = re.compile(r"^#+\s+Decisions\s*$")
-_HEADING = re.compile(r"^#+\s")
-# One task list box in the review's Decisions list: the tick, then the finding's id.
-_BOX = re.compile(r"^\s*[-*+]\s+\[([ xX])\]\s+(\S+)")
+FROZEN = (
+    "the plan is frozen once the story is In Progress; "
+    "record the change under Notes or open a new issue with --new-issue"
+)
 
 
 def _draft_name(number: int) -> str:
@@ -36,8 +43,30 @@ def _draft_name(number: int) -> str:
 
 
 def next_line(number: int) -> str:
-    """The one line both modes end on: an amend never decides what happens next by itself."""
-    return f"Next: continue where execution stopped, or reply Approved and /deckhand:ready {number}."
+    """The line the note mode ends on: read the story, and when it reads right run the one command.
+
+    The board's Status decides what happens next, and the command reads it: a story that is running
+    is told to carry on, a story that is not is boarded. Neither is this line's to guess.
+    """
+    return f"Next: /deckhand:next {number} when it reads right."
+
+
+def split_next_line(number: int, new: int) -> str:
+    """The line the split mode ends on; the story being amended is already on the board and running."""
+    return f"Next: carry on; /deckhand:next {new} after #{number} merges."
+
+
+def _status(repo: str, number: int) -> str | None:
+    """The board's Status for the story, or None off the board and when the board cannot be read.
+
+    It is read once, before the write, because the freeze turns on it; the line printed after the
+    write reads the same answer. A board that cannot be read at all leaves the plan free to change,
+    since a story is stopped by a rule it broke, never by a lookup that failed.
+    """
+    try:
+        return fields.get_field(config.load(), repo, number, "Status")
+    except Exception:
+        return None
 
 
 # --- context ----------------------------------------------------------------
@@ -51,11 +80,26 @@ def _story(number: int) -> issue.Issue | Exception:
         return error
 
 
-def _body_block(story: issue.Issue | Exception) -> str:
-    """The body to edit, or one line saying why it could not be read."""
-    if isinstance(story, Exception):
-        return f"Body: unavailable ({reason(story)})"
-    return story.body.strip("\n")
+def _status_line(number: int) -> str:
+    """The board's column, which is the moment the story is at and whether its plan is frozen.
+
+    One read, and never a failure: a context that cannot reach the board still has a body to edit,
+    and the freeze is enforced by `apply`, which reads the board again before it writes.
+    """
+    try:
+        status = fields.get_field(config.load(), gh.repo_slug(), number, "Status")
+    except Exception as error:
+        return f"Status: unavailable ({reason(error)})"
+    return f"Status: {status or 'off the board'}"
+
+
+def _body_lines(story: issue.Issue | Exception) -> list[str]:
+    """The body to edit, under its own heading, so nothing above it reads as part of the story.
+
+    The plan comes out of its fold here: the fold is how the body is written to GitHub, and a draft
+    that copied it back would be editing the wrapper as if it were the story's own text.
+    """
+    return sections.bare(usable(story).body).strip("\n").splitlines()
 
 
 def _review_lines(story: issue.Issue | Exception) -> list[str]:
@@ -66,12 +110,30 @@ def _review_lines(story: issue.Issue | Exception) -> list[str]:
     return review.body.strip("\n").splitlines()
 
 
+def _feedback_lines(number: int) -> list[str]:
+    """Every comment left since the last amend, as `- <author>: <body>`, or `  none`.
+
+    A body of several lines keeps its shape under the line that names its author, so a reply reads
+    as the person wrote it rather than as one run-on line.
+    """
+    lines: list[str] = []
+    for reply in issue.feedback_since(gh.repo_slug(), number):
+        body = reply.body.strip("\n").splitlines() or [""]
+        lines.append(f"- {reply.author}: {body[0]}")
+        lines.extend(f"  {rest}" for rest in body[1:])
+    return lines or ["  none"]
+
+
 def context(args: argparse.Namespace) -> int:
-    """Print the body to edit, the latest review in full, and where the edited body goes."""
+    """Print the column, the body to edit, the latest review, the feedback since, and where it goes."""
     story = _story(args.issue)
-    print(_body_block(story))
+    print(_status_line(args.issue))
+    print()
+    block(BODY_HEADING, lambda: _body_lines(story))
     print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
+    print()
+    block(FEEDBACK_HEADING, lambda: _feedback_lines(args.issue))
     print()
     print(draft_line("Draft", _draft_name(args.issue)))
     print(DRAFT_RULE)
@@ -81,58 +143,9 @@ def context(args: argparse.Namespace) -> int:
 # --- apply ------------------------------------------------------------------
 
 
-def decisions(review: str) -> list[tuple[str, bool]]:
-    """`(id, accepted)` for each box in the review's Decisions list, in the order they appear."""
-    found: list[tuple[str, bool]] = []
-    inside = False
-    for line in review.splitlines():
-        if _DECISIONS.match(line):
-            inside = True
-            continue
-        if inside and _HEADING.match(line):
-            break
-        box = _BOX.match(line) if inside else None
-        if box:
-            found.append((box.group(2), box.group(1).lower() == "x"))
-    return found
-
-
-def triaged(story: issue.Issue) -> list[tuple[str, bool]]:
-    """The latest review's decisions, but only once a human has ticked one of them.
-
-    An amend can run at any point in a story's life, and most of them have nothing to do with a
-    review. Recording every box the moment a review is posted would write the whole list off as
-    rejected before anyone had read it, so an untriaged list records nothing at all.
-    """
-    review = issue.review_comment(story)
-    found = decisions(review.body if review else "")
-    return found if any(accepted for _, accepted in found) else []
-
-
-def _verdict(line: str, name: str, verdict: str) -> str | None:
-    """`line` with its verdict set to `verdict` when it is `name`'s line, else None.
-
-    Only the verdict word changes, so a line a human added words to keeps them when a later review
-    flips it.
-    """
-    match = re.match(rf"^(-\s+)(?:Accepted|Rejected)(\s+{re.escape(name)}(?:\s.*)?)$", line)
-    return None if match is None else f"{match.group(1)}{verdict}{match.group(2)}"
-
-
-def _amended(notes: str, note: str, story: issue.Issue) -> str:
-    """`notes` with the amend line, then this review's decisions, each recorded on one line only."""
-    lines = notes.split("\n") if notes else []
-    lines.append(f"- Amended {datetime.datetime.now(datetime.UTC).date().isoformat()}: {note}")
-    for name, accepted in triaged(story):
-        verdict = "Accepted" if accepted else "Rejected"
-        for index, line in enumerate(lines):
-            rewritten = _verdict(line, name, verdict)
-            if rewritten is not None:  # an earlier amend recorded it; a flipped verdict wins
-                lines[index] = rewritten
-                break
-        else:
-            lines.append(f"- {verdict} {name}")
-    return "\n".join(lines)
+def _plan_lines(body: str) -> list[str]:
+    """The plan's lines with their trailing whitespace off; a space at a line's end is not a change."""
+    return [line.rstrip() for line in sections.get(body, "Plan", "").splitlines()]
 
 
 def _same_headings(draft: str, body: str) -> None:
@@ -144,15 +157,24 @@ def _same_headings(draft: str, body: str) -> None:
 
 
 def _amend(repo: str, number: int, draft: str, note: str, story: issue.Issue) -> int:
-    """Put the drafted body on the issue, with the amend line and the review's decisions in Notes."""
+    """Put the drafted body on the issue and post the amend as a comment, unless the plan is frozen.
+
+    The body is the draft as it was written: what changed and why goes on the issue's own log, where
+    a later amend reads it, and never into the story the draft is a rewrite of.
+    """
     note = " ".join(note.split())
     if not note:
         raise Refusal("--note needs a line saying what changed and why")
     _same_headings(draft, story.body)
-    notes = _amended(sections.get(draft, "Notes", ""), note, story)
-    body = lint.checked(sections.replace(draft, "Notes", notes))
-    issue.update_body(repo, number, body)
-    print(f"Updated #{number} {story.url}")
+    status = _status(repo, number)
+    if status == "In Progress" and _plan_lines(draft) != _plan_lines(story.body):
+        raise Refusal(FROZEN)
+    issue.update_body(repo, number, lint.checked(draft))
+    # Flushed as it is printed: the body is already on GitHub, and a comment that fails below has to
+    # leave the edit where the user can see it rather than in a buffer that never reaches the screen.
+    print(f"Updated #{number} {story.url}", flush=True)
+    issue.comment(repo, number, f"Amended: {note}")
+    print(f"Commented on #{number}")
     print(next_line(number))
     return 0
 
@@ -170,7 +192,7 @@ def _new_issue(repo: str, number: int, draft: str, title: str) -> int:
     issue.comment(repo, number, f"Split: #{new} {title}, blocked by this story.")
     print(f"Blocked by #{number}")
     print(f"Commented on #{number}")
-    print(next_line(number))
+    print(split_next_line(number, new))
     return 0
 
 

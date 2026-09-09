@@ -16,10 +16,10 @@ from deckhand import gh
 
 REVIEW_HEADING = "## Review"
 VIEW_FIELDS = "number,title,body,url,state,comments"
+# The comments the process writes itself; everything else on an issue was written by a person.
+PROCESS_PREFIXES = ("Amended:", "Deviation:", "Split:", REVIEW_HEADING)
 
 _ISSUE_URL = re.compile(r"https://\S+/issues/([0-9]+)(?:#\S+)?")
-# Leading bold or italic markers are decoration, not the word: **Approved** approves.
-_FIRST_WORD = re.compile(r"[\s*_]*([A-Za-z]+)")
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,15 @@ def set_title(repo: str, number: int, title: str) -> None:
     gh.run("issue", "edit", str(number), "--repo", repo, "--title", title)
 
 
+def assign(repo: str, number: int, login: str = "@me") -> None:
+    """Add `login` to the issue's assignees, leaving the ones already there alone.
+
+    GitHub takes an assignee it already holds as a no-op, so this is safe to run on every start.
+    """
+    gh.split_repo(repo)
+    gh.run("issue", "edit", str(number), "--repo", repo, "--add-assignee", login)
+
+
 def close(repo: str, number: int) -> None:
     """Close the issue."""
     gh.split_repo(repo)
@@ -152,6 +161,17 @@ def blockers(repo: str, number: int) -> list[tuple[int, str]]:
     ]
 
 
+def blocking(repo: str, number: int) -> list[int]:
+    """The numbers of the open issues `number` blocks, in ascending order.
+
+    A story that unblocks others is the one place the process has to look forward: whoever merges it
+    is the person who can say what is now ready to be reviewed.
+    """
+    gh.split_repo(repo)
+    items = gh.paginated(f"repos/{repo}/issues/{number}/dependencies/blocking")
+    return sorted(item["number"] for item in items if item.get("state") == "open")
+
+
 def _heading(body: str) -> str:
     """The comment's first non-blank line, stripped."""
     for line in body.splitlines():
@@ -160,24 +180,79 @@ def _heading(body: str) -> str:
     return ""
 
 
+def _is_review(body: str) -> bool:
+    """Whether a comment is a review the process posted.
+
+    The heading has to be the whole line: the old process headed its passes `## Review pass: spec`,
+    and one of those on an issue is not a review this process can read ticks off.
+    """
+    return _heading(body) == REVIEW_HEADING
+
+
 def review_comment(issue: Issue) -> Comment | None:
     """The issue's last review comment in list order, or None when no review has been posted."""
     for candidate in reversed(issue.comments):
-        if _heading(candidate.body) == REVIEW_HEADING:
+        if _is_review(candidate.body):
             return candidate
     return None
 
 
-def approved_after(issue: Issue, comment: Comment) -> Comment | None:
-    """The latest comment posted after `comment` that opens with the word `approved`."""
-    origin = next((i for i, c in enumerate(issue.comments) if c is comment or c == comment), -1)
-    for position in range(len(issue.comments) - 1, -1, -1):
-        candidate = issue.comments[position]
-        # gh stamps every comment ...Z at second precision, so string order is time order; a tie
-        # goes to list position, and an approval in the same second as the review still counts.
-        if (candidate.created_at, position) <= (comment.created_at, origin):
-            continue
-        word = _FIRST_WORD.match(candidate.body)
-        if word is not None and word.group(1).lower() == "approved":
-            return candidate
-    return None
+def pull_request(repo: str, branch: str) -> str | None:
+    """The URL of the open pull request whose head is `branch`, or None when it has none."""
+    gh.split_repo(repo)
+    data = gh.json_out("pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "url")
+    return data[0].get("url") if isinstance(data, list) and data else None
+
+
+def _rest_comments(repo: str, number: int) -> list[dict[str, Any]]:
+    """Every comment as the REST API reports it, oldest first.
+
+    `gh issue view` gives no edit stamp and no id, and an edit is how a person ticks a finding, so
+    the process reads the comments a second way when it needs to know that one was touched.
+    """
+    gh.split_repo(repo)
+    return [raw for raw in gh.paginated(f"repos/{repo}/issues/{number}/comments") if isinstance(raw, dict)]
+
+
+def _amended(body: str) -> bool:
+    """Whether a comment is the record an amend posts."""
+    return _heading(body).startswith("Amended:")
+
+
+def feedback_state(repo: str, number: int) -> tuple[str | None, str, str, list[Comment]]:
+    """`(review edited at, review posted at, last amended at, the comments since)`, from one read.
+
+    The four answer one question between them, and asking it four times would be four round trips
+    for the same list: has anyone said something the last amend has not already answered. Ticking a
+    finding edits the review comment rather than adding one, so the edit stamp is the only trace a
+    tick leaves, and the stamp the review was posted with is what tells an edit from a review that
+    nobody has touched.
+    """
+    raws = _rest_comments(repo, number)
+    edited: str | None = None
+    reviewed_at = ""
+    amended = ""
+    for raw in raws:
+        body = raw.get("body") or ""
+        created = raw.get("created_at") or ""
+        if _is_review(body) and created >= reviewed_at:
+            reviewed_at, edited = created, raw.get("updated_at")
+        elif _amended(body):
+            amended = max(amended, created)
+    cutoff = max(reviewed_at, amended)
+    since = [
+        Comment(
+            author=(raw.get("user") or {}).get("login") or "",
+            body=raw.get("body") or "",
+            created_at=raw.get("created_at") or "",
+            url=raw.get("html_url"),
+        )
+        for raw in raws
+        if (raw.get("created_at") or "") > cutoff and not _heading(raw.get("body") or "").startswith(PROCESS_PREFIXES)
+    ]
+    return edited, reviewed_at, amended, since
+
+
+def feedback_since(repo: str, number: int) -> list[Comment]:
+    """Comments a person wrote after the later of the review and the last `Amended:` comment."""
+    return feedback_state(repo, number)[3]

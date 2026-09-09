@@ -6,12 +6,26 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import review
+from deckhand import review, sections
 from tests.conftest import FIXTURES, ROOT, run_deckhand
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 ISSUE = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
 COMMENT_URL = "https://github.com/acme/widgets/issues/248#issuecomment-77"
+GUIDANCE = (
+    "Tick a finding to accept it; leave it unticked to decline. A finding marked rejected by the "
+    "skeptic is shown for the record; tick it only to overrule them. Replies here are read the "
+    "next time the story is amended. Then run `/deckhand:next 248`: it applies what you ticked and "
+    "replied, or boards the story when you accepted nothing."
+)
+CLEAN_LINE = "Reply here with anything still wrong, then run `/deckhand:next 248`."
+NEXT = "Next: /deckhand:next 248 when you have ticked and replied."
+
+
+def _withheld(n: int) -> str:
+    """The closing count the comment ends on when the cap left `n` confirmed findings off."""
+    word = "finding" if n == 1 else "findings"
+    return f"{n} further {word} withheld; after amending, choose Review it again when /deckhand:next 248 offers it."
 
 
 @pytest.fixture
@@ -208,6 +222,20 @@ def test_context_still_prints_when_the_issue_cannot_be_read(fake_gh, tmp_path):
     assert lines[-2] == review.FINDING_FORMAT
 
 
+def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
+    """The reviewer reads the plan, and on GitHub the plan sits inside a collapsed block."""
+    preamble, parsed = sections.parse(ISSUE["body"])
+    folded = sections.render(preamble, parsed)
+    assert "<details>" in folded
+
+    result = run_deckhand("review", "context", "248", env=_issue_file(tmp_path, folded))
+
+    assert result.returncode == 0, result.stderr
+    assert "<details>" not in result.stdout
+    assert "</details>" not in result.stdout
+    assert "### Task 1: Store method" in result.stdout
+
+
 # --- apply ------------------------------------------------------------------
 
 
@@ -264,7 +292,7 @@ def test_apply_reads_past_a_byte_order_mark(fake_gh, tmp_path):
     result = run_deckhand("review", "apply", "248", str(path), env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
-    assert _posted(copy) == "## Review\n\nNothing found.\n"
+    assert _posted(copy) == f"## Review\n\nNothing found.\n\n{CLEAN_LINE}\n"
 
 
 def test_apply_refuses_an_unknown_lens(fake_gh, gh_calls, tmp_path):
@@ -277,7 +305,7 @@ def test_apply_refuses_an_unknown_lens(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls) == []
 
 
-def test_apply_posts_confirmed_rejected_and_decisions(fake_gh, gh_calls, tmp_path):
+def test_apply_posts_every_finding_as_a_box(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "comment.md"
 
     result = run_deckhand(
@@ -294,23 +322,37 @@ def test_apply_posts_confirmed_rejected_and_decisions(fake_gh, gh_calls, tmp_pat
     assert _posted(copy) == (
         "## Review\n"
         "\n"
-        "**red-team.1, P1, CONFIRMED** A guest reads another organization's collection by id. "
-        "Scope In names filtering but no ownership check\n"
+        f"{GUIDANCE}\n"
         "\n"
-        "**chaos.1, P2, CONFIRMED** A retried job writes the grant twice. "
-        "Acceptance Criteria says nothing about a repeated list\n"
-        "\n"
-        "Rejected: unknowns.1 (Notes points at internal/store/grant.go)\n"
-        "\n"
-        "### Decisions\n"
-        "\n"
-        "- [ ] red-team.1\n"
-        "- [ ] chaos.1\n"
+        "- [ ] **red-team.1, P1** A guest reads another organization's collection by id. "
+        "Scope In names filtering but no ownership check.\n"
+        "- [ ] **chaos.1, P2** A retried job writes the grant twice. "
+        "Acceptance Criteria says nothing about a repeated list.\n"
+        "- [ ] **unknowns.1, P3, rejected by the skeptic** The existing store method is undefined. "
+        "Notes points at internal/store/grant.go.\n"
     )
-    assert result.stdout.splitlines() == [
-        COMMENT_URL,
-        "Next: tick the findings to accept, run /deckhand:amend 248, then reply Approved and /deckhand:ready 248",
-    ]
+    assert result.stdout.splitlines() == [COMMENT_URL, NEXT]
+
+
+def test_a_box_ends_the_claim_and_the_evidence_with_a_stop(fake_gh, tmp_path):
+    """A finding is two sentences on one line, so neither half may run into what follows it."""
+    copy = tmp_path / "comment.md"
+    text = "chaos.1 | P2 | CONFIRMED | A retry writes twice | Scope In names one write\n"
+
+    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert "**chaos.1, P2** A retry writes twice. Scope In names one write.\n" in _posted(copy)
+
+
+def test_a_box_adds_no_second_stop_to_a_half_that_has_one(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+    text = "chaos.1 | P2 | CONFIRMED | Does a retry write twice? | Scope In names one write.\n"
+
+    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert "**chaos.1, P2** Does a retry write twice? Scope In names one write.\n" in _posted(copy)
 
 
 def test_apply_posts_nothing_found(fake_gh, tmp_path):
@@ -325,19 +367,56 @@ def test_apply_posts_nothing_found(fake_gh, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert _posted(copy) == "## Review\n\nNothing found.\n"
+    assert _posted(copy) == f"## Review\n\nNothing found.\n\n{CLEAN_LINE}\n"
+    assert result.stdout.splitlines() == [COMMENT_URL, NEXT]
 
 
-def test_apply_next_step_depends_on_confirmed_findings(fake_gh, tmp_path):
+def test_apply_boxes_a_rejected_finding_too(fake_gh, tmp_path):
+    """A rejection is the skeptic's, not the reader's, so it is still a box the reader can tick."""
+    copy = tmp_path / "comment.md"
     only_rejected = "unknowns.1 | P2 | REJECTED | The store method is undefined | Notes names the file\n"
 
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, only_rejected))
+    result = run_deckhand(
+        "review",
+        "apply",
+        "248",
+        _findings(tmp_path, only_rejected),
+        env={"GH_BODY_FILE_COPY": str(copy)},
+    )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [
-        COMMENT_URL,
-        "Next: reply Approved on the issue, then /deckhand:ready 248",
-    ]
+    assert _posted(copy) == (
+        "## Review\n"
+        "\n"
+        f"{GUIDANCE}\n"
+        "\n"
+        "- [ ] **unknowns.1, P2, rejected by the skeptic** The store method is undefined. "
+        "Notes names the file.\n"
+    )
+    assert result.stdout.splitlines() == [COMMENT_URL, NEXT]
+
+
+def test_the_guidance_names_both_ends_of_the_next_step():
+    """Ticking nothing is an answer, so the guidance says what the one command does either way."""
+    assert "or boards the story when you accepted nothing." in review.guidance(248)
+
+
+def test_the_withheld_line_names_the_choice_that_asks_for_a_second_pass():
+    """The rest are had by choosing Review it again at the board question, not by rerunning next."""
+    assert "choose Review it again" in review.comment_body(248, [], [], withheld=2)
+
+
+def test_the_guidance_says_a_reply_is_read_at_the_next_amend():
+    """A reply is not lost and not free: the amend step reads it, so the guidance says when."""
+    assert "Replies here are read the next time the story is amended." in review.guidance(248)
+
+
+def test_the_guidance_names_the_issue_the_comment_is_posted_on():
+    """The comment stands alone, so the commands in it have to carry the number, not a placeholder."""
+    assert review.comment_body(931, [], []) == (
+        "## Review\n\nNothing found.\n\nReply here with anything still wrong, then run `/deckhand:next 931`.\n"
+    )
+    assert "/deckhand:next 931" in review.guidance(931)
 
 
 def test_apply_refuses_an_empty_findings_file(fake_gh, gh_calls, tmp_path):
@@ -351,4 +430,107 @@ def test_apply_refuses_an_empty_findings_file(fake_gh, gh_calls, tmp_path):
 def test_apply_heading_is_the_one_amend_looks_for():
     from deckhand import issue as issue_module
 
-    assert review.comment_body([], []).splitlines()[0] == issue_module.REVIEW_HEADING
+    assert review.comment_body(248, [], []).splitlines()[0] == issue_module.REVIEW_HEADING
+
+
+# --- the cap ----------------------------------------------------------------
+
+
+def _confirmed(*specs: tuple[str, int, str]) -> str:
+    """A findings file from `(lens, ordinal, severity)` triples, every line confirmed."""
+    return "".join(f"{lens}.{n} | {sev} | CONFIRMED | Claim {lens}{n} | Section {lens}\n" for lens, n, sev in specs)
+
+
+def _ids(body: str) -> list[str]:
+    """The finding ids the comment boxed, in the order they appear."""
+    return [line.split("**")[1].split(",")[0] for line in body.splitlines() if line.startswith("- [ ] **")]
+
+
+def test_apply_posts_at_most_seven_confirmed_findings_and_counts_the_rest(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+    text = _confirmed(
+        *[("coverage", n, "P1") for n in (1, 2, 3)],
+        *[("chaos", n, "P2") for n in (1, 2, 3, 4)],
+        *[("unknowns", n, "P3") for n in (1, 2, 3)],
+    )
+
+    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    body = _posted(copy)
+    assert body.count("- [ ] **") == 7
+    assert body.rstrip().endswith(_withheld(3))
+
+
+def test_the_seven_are_the_most_severe_in_lens_order(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+    text = _confirmed(
+        ("red-team", 1, "P1"),
+        ("chaos", 1, "P1"),
+        ("unknowns", 1, "P3"),
+        *[("coverage", n, "P2") for n in (1, 2, 3)],
+        ("pen-test", 1, "P2"),
+        ("principles", 1, "P2"),
+    )
+
+    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    body = _posted(copy)
+    assert _ids(body) == [
+        "chaos.1",
+        "red-team.1",
+        "coverage.1",
+        "coverage.2",
+        "coverage.3",
+        "pen-test.1",
+        "principles.1",
+    ]
+    assert "unknowns.1" not in body
+    assert body.rstrip().endswith(_withheld(1))
+
+
+def test_every_rejected_finding_is_shown_and_none_counts_against_the_cap(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+    text = _confirmed(
+        *[("coverage", n, "P1") for n in (1, 2, 3, 4)],
+        *[("chaos", n, "P2") for n in (1, 2, 3)],
+    ) + "".join(f"unknowns.{n} | P2 | REJECTED | Claim u{n} | Notes\n" for n in (1, 2, 3))
+
+    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    body = _posted(copy)
+    assert body.count("- [ ] **") == 10
+    boxes = [line for line in body.splitlines() if line.startswith("- [ ] **")]
+    assert len([line for line in boxes if "rejected by the skeptic" in line]) == 3
+    assert "withheld" not in body
+
+
+def test_the_withheld_line_is_absent_when_seven_or_fewer_are_confirmed(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+    text = _confirmed(*[("coverage", n, "P2") for n in (1, 2, 3, 4, 5, 6, 7)])
+
+    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    body = _posted(copy)
+    assert body.count("- [ ] **") == 7
+    assert "withheld" not in body
+
+
+def test_comment_body_reports_a_count_it_was_given_with_no_findings():
+    """The count is the caller's, so it is never swallowed by the clean line."""
+    body = review.comment_body(248, [], [], withheld=2)
+
+    assert review.CLEAN not in body
+    assert body.rstrip().endswith(_withheld(2))
+
+
+def test_comment_body_counts_only_what_it_was_told_was_withheld():
+    """The count is the caller's, so the comment never has to know what it was not given."""
+    one = review.Finding("chaos", 1, "P1", "CONFIRMED", "A retry writes twice", "Scope In")
+
+    assert "withheld" not in review.comment_body(248, [one], [])
+    assert review.comment_body(248, [one], [], withheld=1).rstrip().endswith(_withheld(1))
+    assert review.comment_body(248, [one], [], withheld=2).rstrip().endswith(_withheld(2))

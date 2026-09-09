@@ -98,7 +98,57 @@ class ParseTests(unittest.TestCase):
         self.assertIn("### Task 2", plan)
         self.assertIn("# Guest Collections Implementation Plan", plan)
         rendered = sections.render(preamble, parsed)
-        self.assertIn(rendered, (body, body + "\n"))
+        self.assertEqual(rendered.count("<details>"), 1)
+        self.assertEqual(sections.parse(rendered), (preamble, parsed))
+
+    def test_render_folds_the_plan_and_only_the_plan(self):
+        story = ("Story", "As a x, I want y, so that z.")
+        body = sections.render("", [story, ("Plan", "### Task 1\n\n- [ ] step")])
+        folded = "### Plan\n\n<details>\n<summary>Show the plan</summary>\n\n### Task 1\n\n- [ ] step\n\n</details>\n"
+        self.assertIn(folded, body)
+        self.assertEqual(body.count("<details>"), 1)
+
+    def test_get_returns_the_plan_without_its_fold(self):
+        body = sections.render("", [("Plan", "### Task 1\n\n- [ ] step")])
+        self.assertEqual(sections.get(body, "Plan"), "### Task 1\n\n- [ ] step")
+
+    def test_render_does_not_fold_a_plan_that_is_already_folded(self):
+        once = sections.render("", [("Plan", "### Task 1")])
+        twice = sections.render("", sections.parse(once)[1])
+        self.assertEqual(once, twice)
+
+    def test_replace_keeps_the_fold_when_another_section_changes(self):
+        body = sections.render("", [("Plan", "### Task 1"), ("Notes", "a")])
+        changed = sections.replace(body, "Notes", "b")
+        self.assertEqual(sections.get(changed, "Plan"), "### Task 1")
+        self.assertEqual(changed.count("<details>"), 1)
+
+    def test_an_empty_plan_is_not_folded(self):
+        self.assertNotIn("<details>", sections.render("", [("Plan", "")]))
+
+    def test_a_fold_the_plan_comes_back_with_is_unwrapped(self):
+        for wrapper in (
+            "<details open>\n<summary>Plan</summary>\n\nPLAN\n\n</details>",
+            "<details>\n<summary> Plan </summary>\n\nPLAN\n\n</details>",
+            "<details>\n\n<summary>Plan</summary>\n\nPLAN\n\n</details>",
+            "<details>\n<summary><b>Plan</b></summary>\n\nPLAN\n\n</details>",
+        ):
+            with self.subTest(wrapper=wrapper[:40]):
+                body = f"### Plan\n\n{wrapper.replace('PLAN', '### Task 1\n\n- [ ] step')}\n"
+                self.assertEqual(sections.get(body, "Plan"), "### Task 1\n\n- [ ] step")
+
+    def test_a_plan_that_opens_with_a_fold_of_its_own_is_left_alone(self):
+        plan = (
+            "<details>\n<summary>Context</summary>\n\nbackground\n\n</details>\n\n"
+            "### Task 1\n\n<details>\n<summary>Detail</summary>\n\nmore\n\n</details>"
+        )
+        self.assertEqual(sections.get(f"### Plan\n\n{plan}\n", "Plan"), plan)
+
+    def test_bare_renders_the_body_the_model_edits_without_the_fold(self):
+        body = sections.render("", [("Plan", "### Task 1"), ("Notes", "a")])
+        bare = sections.bare(body)
+        self.assertNotIn("<details>", bare)
+        self.assertEqual(sections.parse(bare), sections.parse(body))
 
 
 if __name__ == "__main__":

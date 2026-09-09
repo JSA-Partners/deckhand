@@ -35,11 +35,29 @@ REPO_EDIT = (
 )
 SLUG = "repo view --json nameWithOwner"
 LINKED = "api graphql linked-projects"
+FIELDS_QUERY = "api graphql project-fields"
+
+
+def _short(call: str) -> str:
+    """One recorded call, with either project query shortened to the name the assertions use."""
+    if not call.startswith("api graphql"):
+        return call
+    return FIELDS_QUERY if "fields(first" in call else LINKED
 
 
 def _calls(gh_calls) -> list[str]:
-    """The recorded gh calls, with the project-link query shortened to its name."""
-    return [LINKED if call.startswith("api graphql") else call for call in gh_calls()]
+    """The recorded gh calls, with the two project queries shortened to their names."""
+    return [_short(call) for call in gh_calls()]
+
+
+def _deletes(gh_calls) -> list[str]:
+    return [call for call in gh_calls() if call.startswith("project field-delete")]
+
+
+def _project_fields_file(tmp_path, name, nodes):
+    path = tmp_path / name
+    path.write_text(json.dumps({"data": {"organization": {"projectV2": {"fields": {"nodes": nodes}}}}}))
+    return str(path)
 
 
 # --- the command surface ------------------------------------------------
@@ -172,6 +190,81 @@ def test_context_reads_the_fields_of_a_user_owned_linked_project(repo, fake_gh, 
     assert any("project field-list 4 --owner mjm" in c for c in gh_calls())
 
 
+def _plugins_file(tmp_path, name, data) -> dict[str, str]:
+    """An `installed_plugins.json` of `data`, as the env that points setup at it."""
+    path = tmp_path / name
+    path.write_text(json.dumps(data))
+    return {"DECKHAND_PLUGINS_FILE": str(path)}
+
+
+INSTALLED = {"version": 2, "plugins": {"superpowers@superpowers-marketplace": [{"scope": "user"}]}}
+
+
+def test_context_reports_superpowers_installed(repo, fake_gh, tmp_path):
+    env = _plugins_file(tmp_path, "installed.json", INSTALLED)
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert "superpowers: installed" in result.stdout
+
+
+def test_context_reads_a_plugin_map_at_the_top_level(repo, fake_gh, tmp_path):
+    """Older files are the map itself rather than a `plugins` key over it."""
+    env = _plugins_file(tmp_path, "flat.json", {"superpowers@sp": [{"scope": "user"}]})
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert "superpowers: installed" in result.stdout
+
+
+def test_context_ignores_the_top_level_when_a_plugins_key_is_there(repo, fake_gh, tmp_path):
+    """A `plugins` key that is not a map is a file this cannot read, not a reason to read around it."""
+    env = _plugins_file(tmp_path, "wrong-shape.json", {"plugins": ["superpowers@sp"], "superpowers@sp": []})
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert "superpowers: unknown (no plugin list in the file)" in result.stdout
+
+
+def test_context_reports_superpowers_unknown_when_the_file_is_not_a_map(repo, fake_gh, tmp_path):
+    """Valid JSON that is not an object holds no plugin list at either shape."""
+    env = _plugins_file(tmp_path, "list.json", ["superpowers@sp"])
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert "superpowers: unknown (no plugin list in the file)" in result.stdout
+
+
+def test_context_reports_superpowers_missing(repo, fake_gh, tmp_path):
+    env = _plugins_file(tmp_path, "other.json", {"plugins": {"deckhand@jsapartners": [{"scope": "user"}]}})
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert "superpowers: not found; install it first" in result.stdout
+
+
+def test_context_reports_superpowers_unknown_when_the_file_is_not_there(repo, fake_gh, tmp_path):
+    result = run_deckhand("setup", "context", cwd=repo, env={"DECKHAND_PLUGINS_FILE": str(tmp_path / "gone.json")})
+
+    assert result.returncode == 0
+    assert "superpowers: unknown (" in result.stdout
+
+
+def test_context_reports_superpowers_unknown_when_the_file_is_not_json(repo, fake_gh, tmp_path):
+    path = tmp_path / "broken.json"
+    path.write_text("{")
+
+    result = run_deckhand("setup", "context", cwd=repo, env={"DECKHAND_PLUGINS_FILE": str(path)})
+
+    assert result.returncode == 0
+    assert "superpowers: unknown (" in result.stdout
+
+
 def test_context_reports_no_open_projects_when_every_project_is_closed(repo, fake_gh, tmp_path):
     listing = tmp_path / "closed.json"
     listing.write_text(json.dumps({"projects": [{"number": 9, "title": "Archive", "closed": True}]}))
@@ -230,6 +323,8 @@ def test_apply_links_when_given_a_project(repo, fake_gh, gh_calls, tmp_path, mon
         REPO_EDIT,
         "project field-list 5 --owner acme --format json",
         "project field-create 5 --owner acme --name Story Points --data-type NUMBER",
+        FIELDS_QUERY,
+        "project field-delete --id PVTSSF_PRIORITY",
     ]
     assert "linked acme #5 to acme/widgets" in result.stdout
     assert "merge: squash only, message from the pull request" in result.stdout
@@ -240,6 +335,7 @@ def test_apply_accepts_an_explicit_owner(repo, fake_gh, gh_calls):
         "GH_LINKED_PROJECTS": str(FIXTURES / "linked-none.json"),
         "GH_PROJECT_OWNER": "mjm",
         "GH_PROJECT_OWNER_TYPE": "User",
+        "GH_PROJECT_FIELDS_FILE": str(FIXTURES / "project-fields-user.json"),
     }
 
     result = run_deckhand("setup", "apply", "--project", "4", "--owner", "@me", cwd=repo, env=env)
@@ -253,6 +349,8 @@ def test_apply_accepts_an_explicit_owner(repo, fake_gh, gh_calls):
         "project view 4 --owner acme --format json",
         REPO_EDIT,
         "project field-list 4 --owner mjm --format json",
+        FIELDS_QUERY,
+        "project field-delete --id PVTSSF_PRIORITY",
     ]
     assert "linked @me #4 to acme/widgets" in result.stdout
 
@@ -272,6 +370,8 @@ def test_apply_targets_the_named_project_when_another_is_linked(repo, fake_gh, g
         "project view 9 --owner acme --format json",
         REPO_EDIT,
         "project field-list 9 --owner acme --format json",
+        FIELDS_QUERY,
+        "project field-delete --id PVTSSF_PRIORITY",
     ]
 
 
@@ -286,6 +386,8 @@ def test_apply_skips_the_link_when_the_named_project_is_already_linked(repo, fak
         LINKED,
         REPO_EDIT,
         "project field-list 7 --owner acme --format json",
+        FIELDS_QUERY,
+        "project field-delete --id PVTSSF_PRIORITY",
     ]
     assert "linked" not in result.stdout
 
@@ -299,6 +401,8 @@ def test_apply_without_a_project_uses_the_linked_one(repo, fake_gh, gh_calls):
         LINKED,
         REPO_EDIT,
         "project field-list 2 --owner acme --format json",
+        FIELDS_QUERY,
+        "project field-delete --id PVTSSF_PRIORITY",
     ]
     assert "linked" not in result.stdout
 
@@ -313,6 +417,7 @@ def test_apply_refuses_without_a_linked_project(repo, fake_gh, gh_calls):
     assert "--project N" in result.stderr
     assert not [c for c in gh_calls() if c.startswith("repo edit")]
     assert not [c for c in gh_calls() if c.startswith("project field-create")]
+    assert _deletes(gh_calls) == []
 
 
 def test_apply_refuses_with_several_linked_projects_and_no_override(repo, fake_gh, gh_calls):
@@ -325,6 +430,7 @@ def test_apply_refuses_with_several_linked_projects_and_no_override(repo, fake_g
     assert "DECKHAND_PROJECT" in result.stderr
     assert not [c for c in gh_calls() if c.startswith("repo edit")]
     assert not [c for c in gh_calls() if c.startswith("project field-create")]
+    assert _deletes(gh_calls) == []
 
 
 def test_apply_honors_the_override(repo, fake_gh, gh_calls):
@@ -390,7 +496,7 @@ def test_apply_creates_only_missing_fields_and_prints_the_checklist(repo, fake_g
     assert "--name Story Points" in created[0]
     assert "Kind: already present" in result.stdout
     assert "Actual: already present" in result.stdout
-    assert "1. Rename or reorder the Status options" in result.stdout
+    assert "1. Set the Status options to:" in result.stdout
 
 
 def test_apply_creates_kind_as_single_select_with_configured_kinds(repo, fake_gh, gh_calls, tmp_path, monkeypatch):
@@ -448,15 +554,44 @@ def test_apply_reports_a_field_of_the_wrong_type_and_leaves_it_alone(repo, fake_
     assert "(currently: unknown)" in result.stdout
 
 
-def test_apply_prints_the_two_step_checklist(repo, fake_gh):
+def test_apply_prints_the_three_step_checklist(repo, fake_gh):
     result = run_deckhand("setup", "apply", cwd=repo)
 
     assert result.returncode == 0, result.stderr
-    assert "1. Rename or reorder the Status options" in result.stdout
-    assert "Backlog, Blocked, In Progress, Pending Review, Done" in result.stdout
-    assert "2. Hide the Milestone column" in result.stdout
-    assert "3." not in result.stdout
+    lines = result.stdout.splitlines()
+    start = lines.index("Finish the project setup by hand (the API cannot do this):")
+    assert lines[start:] == [
+        "Finish the project setup by hand (the API cannot do this):",
+        "  1. Set the Status options to: Backlog, In Progress, Pending Review, Done.",
+        "     (currently: Backlog, Blocked, In Progress, Pending Review, Done)",
+        "  2. On the board view, show only Title, Status, Kind, Story Points, Actual, Assignees, and",
+        "     Repository; hide every other field.",
+        "  3. In the repository or organization issue settings, turn off issue Types and any issue",
+        "     Fields you do not use.",
+        "",
+        "Next: /deckhand:new to open the first story.",
+    ]
+    assert "4." not in result.stdout
     assert "DECKHAND_TOKEN" not in result.stdout
+
+
+def test_apply_names_the_project_it_resolved_before_it_writes(repo, fake_gh):
+    """Every later line is about one project, so the run says which one before it changes anything."""
+    result = run_deckhand("setup", "apply", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "Project: acme #2" in lines
+    assert lines.index("Project: acme #2") < lines.index("merge: squash only, message from the pull request")
+
+
+def test_apply_separates_the_next_line_from_the_checklist(repo, fake_gh):
+    """The checklist is a list of chores and the Next line is not one of them."""
+    result = run_deckhand("setup", "apply", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[lines.index("Next: /deckhand:new to open the first story.") - 1] == ""
 
 
 def test_apply_reports_the_current_status_options(repo, fake_gh):
@@ -464,6 +599,85 @@ def test_apply_reports_the_current_status_options(repo, fake_gh):
 
     assert result.returncode == 0, result.stderr
     assert "(currently: Backlog, Blocked, In Progress, Pending Review, Done)" in result.stdout
+
+
+# --- apply: the fields the process did not make -------------------------
+
+
+def test_apply_deletes_a_template_field_after_the_creates_and_before_the_checklist(repo, fake_gh, gh_calls):
+    result = run_deckhand("setup", "apply", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert _deletes(gh_calls) == ["project field-delete --id PVTSSF_PRIORITY"]
+    lines = result.stdout.splitlines()
+    assert "deleted field Priority" in lines
+    assert lines.index("Kind: already present") < lines.index("deleted field Priority")
+    checklist = lines.index("Finish the project setup by hand (the API cannot do this):")
+    assert lines.index("deleted field Priority") < checklist
+
+
+def test_apply_deletes_nothing_when_the_project_has_only_the_fields_the_process_uses(repo, fake_gh, gh_calls, tmp_path):
+    nodes = [
+        {"id": "PVTF_TITLE", "name": "Title", "dataType": "TITLE"},
+        {"id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTSSF_KIND", "name": "Kind", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER"},
+        {"id": "PVTF_ACTUAL", "name": "Actual", "dataType": "NUMBER"},
+    ]
+    env = {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, "no-extras.json", nodes)}
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _deletes(gh_calls) == []
+    assert "deleted field" not in result.stdout
+
+
+def test_apply_never_deletes_a_built_in_whose_name_looks_deletable(repo, fake_gh, gh_calls, tmp_path):
+    nodes = [
+        {"id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTF_MILESTONE", "name": "Milestone", "dataType": "MILESTONE"},
+        {"id": "PVTF_PARENT", "name": "Parent issue", "dataType": "PARENT_ISSUE"},
+        {"id": "PVTF_PROGRESS", "name": "Sub-issues progress", "dataType": "SUB_ISSUES_PROGRESS"},
+        {"id": "PVTF_TRACKS", "name": "Tracks", "dataType": "TRACKS"},
+        {"id": "PVTF_CLOSED", "name": "Closed", "dataType": "CLOSED"},
+    ]
+    env = {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, "built-ins.json", nodes)}
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _deletes(gh_calls) == []
+
+
+def test_apply_never_deletes_status_even_beside_other_single_selects(repo, fake_gh, gh_calls, tmp_path):
+    nodes = [
+        {"id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTSSF_PRIORITY", "name": "Priority", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTF_SIZE", "name": "Size", "dataType": "TEXT"},
+        {"id": "PVTIF_SPRINT", "name": "Sprint", "dataType": "ITERATION"},
+        {"id": "PVTF_DUE", "name": "Due", "dataType": "DATE"},
+    ]
+    env = {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, "many.json", nodes)}
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _deletes(gh_calls) == [
+        "project field-delete --id PVTSSF_PRIORITY",
+        "project field-delete --id PVTF_SIZE",
+        "project field-delete --id PVTIF_SPRINT",
+        "project field-delete --id PVTF_DUE",
+    ]
+    assert "PVTSSF_STATUS" not in result.stdout
+
+
+def test_context_reads_no_fields_query_and_deletes_nothing(repo, fake_gh, gh_calls):
+    result = run_deckhand("setup", "context", cwd=repo)
+
+    assert result.returncode == 0
+    assert _deletes(gh_calls) == []
+    assert FIELDS_QUERY not in _calls(gh_calls)
 
 
 @pytest.mark.parametrize("verb", ["context", "apply"])

@@ -5,8 +5,12 @@
 - Python package: `deckhand/`, standard library only, behind the entry point `bin/deckhand`
 - One module per step, `deckhand/<step>.py`, the story steps with `context` and `apply`, commit and
   document with `context` alone; there is no `plan` step, `new` writes a plan and `amend` rewrites
-  one; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers; `issue.py`
-  every issue read and write; `git.py` every git call; `drift.py` the plan references `start` checks
+  one until the board says In Progress; `sections.py` folds the Plan into a details block on the way
+  out and unfolds it for every reader; `comment` is the one plain command, for the comments the
+  process writes; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
+  `issue.py` every issue read and write; `git.py` every git call; `drift.py` the plan references
+  `start` checks; `next.py` the dispatcher, context alone and no apply: it reads the story's state,
+  picks the step, and prints that step's skill body and its context
 - Skills: `skills/<name>/SKILL.md` with YAML frontmatter; lenses in `skills/review/lenses/`; agents
   `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
@@ -40,8 +44,8 @@ claude --plugin-dir .        # then /reload-plugins after edits
   under 200 words; `tests/test_skills.py` enforces the shape
 - Severity P1, P2, P3; a clean result is `Nothing found.`
 - kebab-case file names; no em dashes or en dashes in prose
-- Commit messages: no trailers of any kind, ever; `.gitlint` enforces the rest, at commit-msg only, so
-  never commit with `--no-verify`
+- Commit messages: body wrapped at 72, no trailers of any kind, ever; `.gitlint` enforces the rest,
+  at commit-msg only, so never commit with `--no-verify`
 
 ## Releases
 

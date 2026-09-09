@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Reviews a story against the lenses in its brief; used by /deckhand:review."
+description: "Reviews a story against the lenses in its brief; used by the review step, which /deckhand:next runs."
 model: opus
 effort: high
 tools: Read, Grep, Glob
@@ -21,4 +21,6 @@ The lens is the brief's section name, `<n>` counts from one within it, and the s
 asks for it. Never write a `|` inside a column. P1 breaks an acceptance criterion or corrupts
 data; P2 is a gap a reviewer would send back; P3 is worth a sentence.
 
-Three strong findings beat ten weak ones. Finding nothing is one line: `Nothing found.`
+Report at most seven findings, the ones that would most change the story, each a claim and its
+evidence in two sentences; a P3 belongs in the seven only when nothing bigger was found. Finding
+nothing is one line: `Nothing found.`

@@ -28,8 +28,17 @@ def test_invalid_body_lists_every_failing_rule():
     assert "process line" in failures
 
 
+def test_a_body_whose_plan_is_folded_passes():
+    body = sections.render(*sections.parse(VALID))
+    assert "<details>" in body
+    assert lint.lint(body) == []
+
+
 def test_checked_returns_a_body_that_passes():
-    assert lint.checked(VALID) == VALID
+    body = lint.checked(VALID)
+    assert body.count("<details>") == 1
+    assert sections.get(body, "Plan") == sections.get(VALID, "Plan")
+    assert lint.lint(body) == []
 
 
 def test_checked_refuses_a_body_that_fails_with_every_rule_on_one_line():
@@ -37,6 +46,16 @@ def test_checked_refuses_a_body_that_fails_with_every_rule_on_one_line():
         lint.checked(INVALID)
     assert str(refused.value).startswith("body: ")
     assert "; ".join(lint.lint(INVALID)) in str(refused.value)
+
+
+def test_checked_measures_the_body_as_it_is_written():
+    body = VALID + "x" * (BODY_LIMIT - len(VALID))
+    assert len(body) == BODY_LIMIT
+    assert lint.lint(body) == []
+
+    with pytest.raises(Refusal) as refused:
+        lint.checked(body)
+    assert f"the limit is {BODY_LIMIT}" in str(refused.value)
 
 
 def test_a_missing_section_reports_only_itself():

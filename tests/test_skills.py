@@ -24,15 +24,29 @@ INJECTS = {
     "document": "document context",
     "finish": "finish context",
     "new": "new context",
+    "next": "next context",
     "ready": "ready context",
     "review": "review context",
     "setup": "setup context",
-    "start": "start apply",
+    "start": "start context",
 }
 
-# The skills a person invokes and nothing else does. The other three are called by a skill:
-# start and finish run commit and document, and both of those and amend answer a step's own prose.
-USER_DRIVEN = {"setup", "new", "review", "ready", "start", "finish"}
+# The skills a person types and the model never picks: each one writes to GitHub, so its timing
+# belongs to the person.
+TYPED = {"setup", "new", "next"}
+
+# The steps `next` runs. They are off the person's menu because `next` is the one way in, and their
+# instructions are printed by it rather than read from a slash command.
+HIDDEN = {"review", "amend", "ready", "start", "finish"}
+
+# What every hidden step's description ends with, so the menu it is missing from is not a mystery.
+USED_BY = "Used by /deckhand:next."
+
+# The two skills that close a person's turn, each with the same recipe.
+CLOSING = {"new", "next"}
+
+# Ban clauses the close used to carry; the recipe says what to do instead of what not to.
+BANNED = ("nothing after", "belongs on the issue")
 
 GRANT = 'Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *)'
 BARE_GRANT = "Bash(deckhand *)"
@@ -66,6 +80,11 @@ RETIRED = [
     )
 ]
 
+# A step is reached through `next` and nowhere else, so nothing a person reads may name one as a
+# command to type; nor may anything name the Approved reply, which the ticked review replaced.
+_STEP_COMMAND = re.compile(rf"/deckhand:({'|'.join(sorted(HIDDEN))})\b")
+_APPROVED = re.compile(r"\bApproved\b")
+
 _INJECTION = re.compile(r"^!`(.+)`\s*$", re.MULTILINE)
 _INVOCATION = re.compile(r'deckhand"?\s+([a-z][a-z0-9-]*)')
 _SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
@@ -97,9 +116,13 @@ def test_every_skill_is_named_for_its_directory(skill):
 
 
 def test_every_description_is_one_sentence(skill):
-    _, front, _ = skill
+    """One sentence for what the skill does, and for a hidden step one more saying who runs it."""
+    name, front, _ = skill
     description = front.get("description", "")
     assert description, "no description"
+    if name in HIDDEN:
+        assert description.endswith(USED_BY), description
+        description = description[: -len(USED_BY)].strip()
     assert len(_SENTENCE_END.findall(description)) == 1, description
 
 
@@ -127,6 +150,14 @@ def test_no_skill_names_a_retired_command_or_file(skill):
     assert [name.pattern for name in RETIRED if name.search(body)] == []
 
 
+def test_no_skill_names_a_step_command_or_the_approved_reply(skill):
+    """A skill is read by a person as well as by Claude, and a step is never a person's to type."""
+    name, front, body = skill
+    text = "\n".join([*front.values(), body])
+    assert not _STEP_COMMAND.search(text), name
+    assert not _APPROVED.search(text), name
+
+
 def _surface() -> set[str]:
     """Every command name the CLI answers to."""
     return set(next(a for a in cli.build_parser()._actions if getattr(a, "choices", None)).choices)
@@ -137,11 +168,48 @@ def test_every_command_a_skill_invokes_still_exists(skill):
     assert sorted(set(_INVOCATION.findall(body)) - _surface()) == []
 
 
-def test_only_the_user_driven_skills_are_hidden_from_automatic_invocation(skill):
-    """A step a person starts is never started for them; the ones a step calls stay invocable."""
+def test_the_typed_commands_are_the_ones_the_model_never_picks(skill):
+    """A command that writes to GitHub is typed; a step is hidden from the menu and nothing else."""
     name, front, _ = skill
-    hidden = front.get("disable-model-invocation") == "true"
-    assert hidden == (name in USER_DRIVEN), name
+    if name in TYPED:
+        assert front.get("disable-model-invocation") == "true", name
+        assert "user-invocable" not in front, name
+    elif name in HIDDEN:
+        assert front.get("user-invocable") == "false", name
+        assert "disable-model-invocation" not in front, name
+    else:
+        assert "user-invocable" not in front and "disable-model-invocation" not in front, name
+
+
+def test_no_hidden_step_writes_a_next_line_of_its_own(skill):
+    """The step's command prints the one line the person acts on; the skill never composes another."""
+    name, _, body = skill
+    if name not in HIDDEN:
+        return
+    assert "Next:" not in body, name
+
+
+def test_the_closing_skills_hand_over_what_the_commands_printed(skill):
+    """The turn ends where a person reads: the printed lines, the link, and the next line, as is."""
+    name, _, body = skill
+    if name not in CLOSING:
+        return
+    for phrase in ("verbatim", "Next:"):
+        assert phrase in body, (name, phrase)
+
+
+def test_no_skill_closes_with_a_ban(skill):
+    """The close is a recipe: what to print, in what order. Nothing is forbidden in its place."""
+    _, _, body = skill
+    assert [phrase for phrase in BANNED if phrase in body] == []
+
+
+def test_the_document_skill_reads_right_with_no_arguments(skill):
+    """Both of its arguments are optional, so no sentence may render an empty pair of backticks."""
+    name, _, body = skill
+    if name != "document":
+        return
+    assert "``" not in body.replace("$mode", "").replace("$topic", "")
 
 
 def test_every_skill_stays_under_the_word_limit(skill):
@@ -178,6 +246,14 @@ def test_every_agent_names_a_model(agent):
     assert front.get("model")
 
 
+def test_no_agent_names_a_step_command_or_the_approved_reply(agent):
+    """An agent's description is a menu entry, so it points at the command a person actually types."""
+    name, front, body = agent
+    text = "\n".join([*front.values(), body])
+    assert not _STEP_COMMAND.search(text), name
+    assert not _APPROVED.search(text), name
+
+
 def test_every_agent_stays_under_the_word_limit(agent):
     _, _, body = agent
     assert len(body.split()) < WORD_LIMIT
@@ -190,3 +266,31 @@ def test_the_author_runs_the_deckhand_its_message_hands_it():
     assert "new apply --stub" in body
     assert BARE_GRANT not in front.get("tools", "")
     assert [name for name in _INVOCATION.findall(body) if name in _surface()] == []
+
+
+def test_the_finish_skill_names_both_rounds_of_the_branch_review():
+    """The review is finish's first act, and a loop: the first pass reads the branch, the rest the new commits."""
+    _, body = _split((ROOT / "skills" / "finish" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "tuicr -r origin/main..HEAD --stdout" in body
+    assert "tuicr -r <clean sha>..HEAD --stdout" in body
+
+
+def test_the_start_skill_ends_at_the_implementation():
+    """The branch review moved to finish, so nothing in start asks for an export."""
+    _, body = _split((ROOT / "skills" / "start" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "tuicr" not in body
+
+
+def test_the_next_skill_asks_for_the_number_it_was_not_given():
+    """The argument is optional in the hint, so the skill has to say what to do without one."""
+    front, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+    assert front.get("argument-hint") == "<issue-number>"
+    assert "If no number was given, ask which story." in body
+    for grant in ("Skill(deckhand:*)", "Skill(superpowers:*)"):
+        assert grant in front.get("allowed-tools", ""), grant
+
+
+def test_the_reviewer_names_the_cap():
+    """The command posts seven, so the brief has to ask for seven rather than leave the count open."""
+    _, body = _split((ROOT / "agents" / "reviewer.md").read_text(encoding="utf-8"))
+    assert "seven" in body

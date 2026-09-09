@@ -7,18 +7,30 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import lint, new, sections, stub
+from deckhand import lint, naming, new, sections, stub
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
 from tests.conftest import FIXTURES, ROOT, run_deckhand
 
 VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
-STORY_TITLE = "To see only the collections I was granted"
+STORY_TITLE = "See only the collections I was granted"
+WANT = "to see only the collections I was granted"
+SPLIT_NEXT = ["Next: /deckhand:next 57.", "Next: /deckhand:next 58.", "Next: /deckhand:next 59."]
+
+
+def _next(number: int) -> str:
+    """The line every one-story path ends on: the review to run, and what the review does."""
+    return f"Next: /deckhand:next {number}."
 
 
 def _valid() -> str:
     return VALID.read_text(encoding="utf-8")
+
+
+def _written() -> str:
+    """The valid body as a command writes it: every section rendered, so the plan carries its fold."""
+    return sections.render(*sections.parse(_valid()))
 
 
 def _without(name: str) -> str:
@@ -40,6 +52,11 @@ def _printed_rules(lines: list[str]) -> list[str]:
 
 def _criteria(bullet: str) -> str:
     return sections.replace(_valid(), "Acceptance Criteria", bullet)
+
+
+def _want(clause: str) -> str:
+    """The valid body with the Story's I want clause replaced by `clause`."""
+    return _valid().replace(WANT, clause)
 
 
 # Each printed rule, keyed by a phrase that appears in exactly one of them, with bodies that break
@@ -75,7 +92,7 @@ def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
         "### Notes",
     ]
     rules = _printed_rules(lines)
-    assert len(rules) == len(new.RULES)
+    assert len(rules) == len(new.rules())
     assert lines[lines.index("Rules:") - 1] == ""
     assert any("so that" in rule for rule in rules)
     assert any("Out" in rule and "empty" in rule for rule in rules)
@@ -121,24 +138,25 @@ def test_apply_creates_the_issue_and_names_the_next_step(fake_gh, gh_calls, tmp_
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Created #999 https://github.com/acme/widgets/issues/999",
-        "Next: /deckhand:review 999",
+        _next(999),
     ]
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
     assert call.startswith(f"issue create --repo acme/widgets --title {STORY_TITLE} --body-file ")
-    assert copy.read_text(encoding="utf-8") == "--- issue create\n" + VALID.read_text(encoding="utf-8")
+    assert copy.read_text(encoding="utf-8") == "--- issue create\n" + _written()
 
 
-def test_apply_title_comes_from_the_story_or_the_flag(fake_gh, gh_calls):
-    body = VALID.read_text(encoding="utf-8")
-    assert new.title(None, body) == STORY_TITLE
-    assert new.title("  Guest filtering  ", body) == "Guest filtering"
-    wordy = body.replace("to see only the collections I was granted", "see every collection " * 6)
-    trimmed = new.title(None, wordy)
-    assert len(trimmed) <= new.TITLE_LIMIT
-    assert trimmed == "See every collection see every collection see every collection see every"
-    unbroken = body.replace("to see only the collections I was granted", "x" * 100)
-    assert new.title(None, unbroken) == "X" + "x" * (new.TITLE_LIMIT - 1)
+def test_apply_folds_the_plan_in_the_issue_body(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "body-copy.md"
 
+    result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    written = copy.read_text(encoding="utf-8")
+    assert written.count("<details>") == 1
+    assert sections.get(written, "Plan") == sections.get(_valid(), "Plan")
+
+
+def test_apply_title_comes_from_the_flag(fake_gh, gh_calls):
     result = run_deckhand("new", "apply", str(VALID), "--title", "Guest filtering")
 
     assert result.returncode == 0, result.stderr
@@ -146,12 +164,60 @@ def test_apply_title_comes_from_the_story_or_the_flag(fake_gh, gh_calls):
     assert "--title Guest filtering --body-file " in call
 
 
-def test_apply_refuses_when_no_title_can_be_found(fake_gh, gh_calls):
+def test_apply_refuses_a_derived_title_the_subject_cannot_carry(fake_gh, gh_calls, tmp_path):
+    clause = " ".join(["see every collection"] * 4)
+    draft = tmp_path / "draft.md"
+    draft.write_text(_want(f"to {clause}"), encoding="utf-8")
+
+    result = run_deckhand("new", "apply", str(draft))
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        f"deckhand new apply: title is {len(clause)} characters; "
+        f"the pull request subject allows {naming.title_limit()}. Pass --title with a shorter one"
+    )
+    assert result.stdout == ""
+    assert _writes(gh_calls()) == []
+
+
+def test_apply_refuses_a_title_flag_the_subject_cannot_carry(fake_gh, gh_calls):
+    over = "x" * (naming.title_limit() + 1)
+
+    result = run_deckhand("new", "apply", str(VALID), "--title", over)
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        f"deckhand new apply: title is {len(over)} characters; "
+        f"the pull request subject allows {naming.title_limit()}. Pass --title with a shorter one"
+    )
+    assert result.stdout == ""
+    assert _writes(gh_calls()) == []
+
+
+def test_apply_takes_a_title_of_exactly_the_limit(fake_gh, gh_calls):
+    exact = "x" * naming.title_limit()
+
+    result = run_deckhand("new", "apply", str(VALID), "--title", exact)
+
+    assert result.returncode == 0, result.stderr
+    (call,) = [c for c in gh_calls() if c.startswith("issue create")]
+    assert f"--title {exact} --body-file " in call
+
+
+def test_context_prints_the_title_rule_with_its_limit(fake_gh):
+    result = run_deckhand("new", "context")
+
+    assert result.returncode == 0, result.stderr
+    (rule,) = [line for line in _printed_rules(result.stdout.splitlines()) if "--title" in line]
+    assert str(naming.title_limit()) in rule
+
+
+def test_a_title_naming_rejects_is_refused_here(fake_gh, gh_calls):
     # Not reachable through the CLI: lint runs first, and it already requires the I want clause.
     with pytest.raises(Refusal, match="no title"):
         new.title(None, "### Story\n\nGuests should see fewer collections.\n")
-    with pytest.raises(Refusal, match="no title"):
-        new.title("   ", "### Notes\n\n- none\n")
+    with pytest.raises(Refusal, match="pull request subject"):
+        new.fits("x" * (naming.title_limit() + 1))
 
     assert gh_calls() == []
 
@@ -168,10 +234,15 @@ def test_apply_refuses_a_draft_that_is_not_utf_8(fake_gh, gh_calls, tmp_path):
     assert gh_calls() == []
 
 
-def test_every_printed_rule_is_one_lint_enforces(fake_gh):
+def test_every_printed_rule_is_one_that_is_enforced(fake_gh):
     result = run_deckhand("new", "context")
 
-    assert _printed_rules(result.stdout.splitlines()) == [f"- {rule}" for rule in new.RULES]
+    assert _printed_rules(result.stdout.splitlines()) == [f"- {rule}" for rule in new.rules()]
+    # The one printed rule lint does not carry; `new.title` is what refuses a title over the limit.
+    (title_rule,) = [rule for rule in new.rules() if rule not in new.RULES]
+    assert "--title" in title_rule
+    with pytest.raises(Refusal, match="pull request subject"):
+        new.title("x" * (naming.title_limit() + 1), _valid())
     covered = set()
     for phrase, bodies in BROKEN.items():
         matched = [rule for rule in new.RULES if phrase in rule]
@@ -204,8 +275,11 @@ def test_context_from_a_file_prints_its_requirements(fake_gh, tmp_path):
     assert "Rules:" in lines
 
 
-def test_context_says_so_when_the_file_cannot_be_read(fake_gh, tmp_path):
-    result = run_deckhand("new", "context", str(tmp_path / "nope.md"))
+def test_context_says_so_when_an_existing_file_cannot_be_read(fake_gh, tmp_path):
+    source = tmp_path / "request.md"
+    source.write_bytes(b"\xff\xfe bad bytes")
+
+    result = run_deckhand("new", "context", str(source))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("Requirements: unavailable (")
@@ -213,12 +287,62 @@ def test_context_says_so_when_the_file_cannot_be_read(fake_gh, tmp_path):
     assert "Rules:" in result.stdout
 
 
-def test_context_on_a_story_says_to_amend_it(fake_gh):
+def test_context_prints_a_prose_argument_as_the_requirements(fake_gh):
+    result = run_deckhand("new", "context", "A release command that opens the pull request")
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "## Requirements"
+    assert lines[2] == "A release command that opens the pull request"
+    assert "unavailable" not in result.stdout
+    assert "### Story" in lines
+    assert "Rules:" in lines
+
+
+def test_context_does_not_repeat_a_heading_the_prose_already_has(fake_gh):
+    result = run_deckhand("new", "context", "## Requirements\n\nGuests should share collections.")
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "## Requirements"
+    # One from the argument, one from the split file's shape; never two in a row from the argument.
+    assert lines.count("## Requirements") == 2
+    assert lines[1] == ""
+    assert lines[2] == "Guests should share collections."
+
+
+def test_context_keeps_the_line_breaks_of_a_multi_line_request(fake_gh):
+    request = "Guests should share collections.\n\n- One link per collection\n- The link is revocable"
+
+    result = run_deckhand("new", "context", request)
+
+    assert result.returncode == 0, result.stderr
+    assert request in result.stdout
+
+
+def test_context_still_reads_a_file_argument(fake_gh):
+    result = run_deckhand("new", "context", str(FIXTURES / "split.md"))
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "## Requirements"
+    assert "Guests should see only the collections they were granted." in lines
+    assert str(FIXTURES / "split.md") not in result.stdout
+
+
+def test_context_still_reads_a_digits_argument(fake_gh):
+    result = run_deckhand("new", "context", "57", env=STUB)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "## Stub #57"
+
+
+def test_context_on_a_story_says_to_run_next(fake_gh):
     result = run_deckhand("new", "context", "248")
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "#248 is already a story; use /deckhand:amend 248"
+    assert lines[0] == "#248 is already a story; run /deckhand:next 248"
     assert "Rules:" in lines
     assert "### Story" not in lines
 
@@ -284,18 +408,18 @@ def test_apply_stub_writes_the_drafted_story_into_the_stub(fake_gh, gh_calls, tm
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
-        "Next: /deckhand:review 57",
+        _next(57),
     ]
     (call,) = _writes(gh_calls())
     assert call.startswith("issue edit 57 --repo acme/widgets --body-file ")
-    assert copy.read_text(encoding="utf-8") == "--- issue edit\n" + _valid()
+    assert copy.read_text(encoding="utf-8") == "--- issue edit\n" + _written()
 
 
 def test_apply_stub_refuses_a_story_and_writes_nothing(fake_gh, gh_calls):
     result = run_deckhand("new", "apply", "--stub", "248", str(VALID))
 
     assert result.returncode == 1
-    assert result.stderr.strip() == "deckhand new apply: #248 is already a story; use /deckhand:amend 248"
+    assert result.stderr.strip() == "deckhand new apply: #248 is already a story; run /deckhand:next 248"
     assert result.stdout == ""
     assert _writes(gh_calls()) == []
 
@@ -325,7 +449,7 @@ def test_apply_stub_sets_the_title_after_the_body(fake_gh, gh_calls):
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
         "Title: Grant store",
-        "Next: /deckhand:review 57",
+        _next(57),
     ]
     body_edit, title_edit = _writes(gh_calls())
     assert body_edit.startswith("issue edit 57 --repo acme/widgets --body-file ")
@@ -437,7 +561,7 @@ def test_apply_stub_keeps_the_stubs_title_when_the_flag_is_blank(fake_gh, gh_cal
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
-        "Next: /deckhand:review 57",
+        _next(57),
     ]
     (call,) = _writes(gh_calls())
     assert call.startswith("issue edit 57 --repo acme/widgets --body-file ")
@@ -448,12 +572,13 @@ def test_apply_stub_keeps_the_stubs_title_when_the_flag_is_blank(fake_gh, gh_cal
 SPLIT_FILE = FIXTURES / "split.md"
 NUMBERS = {"GH_NEW_ISSUE": "57,58,59"}
 STORIES = ["Grant store", "Handler filter", "Admin view"]
-DISPATCH = "Next: dispatch deckhand:author for each of #57 #58 #59 with "
+DISPATCH = "Dispatch deckhand:author for each of #57 #58 #59 with "
 
 
 def _dispatch(line: str) -> None:
-    """The last line a split prints: the stubs to write, and the deckhand the authors are to run."""
+    """The stubs to write and the deckhand the authors are to run; it is not the step's `Next:` line."""
     assert line.startswith(DISPATCH), line
+    assert not line.startswith("Next:")
     assert Path(line.rsplit(" with ", 1)[1]) == (ROOT / "bin" / "deckhand").resolve()
 
 
@@ -482,7 +607,7 @@ def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:-1] == [
+    assert lines[:-4] == [
         "Created #57 Grant store",
         "Created #58 Handler filter",
         "Created #59 Admin view",
@@ -493,7 +618,9 @@ def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_
         "#59 blocked by #57",
         "#59 blocked by #58",
     ]
-    _dispatch(lines[-1])
+    _dispatch(lines[-4])
+    assert lines[-3:] == SPLIT_NEXT
+    assert [line for line in lines if line.startswith("Next:")] == SPLIT_NEXT
     calls = gh_calls()
     creates = [call for call in calls if call.startswith("issue create")]
     assert [call.split(" --title ")[1].split(" --body-file ")[0] for call in creates] == STORIES
@@ -532,8 +659,9 @@ def test_apply_split_from_a_parked_feature_comments_and_closes_it_last(fake_gh, 
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[-2] == "Closed #60"
-    _dispatch(lines[-1])
+    assert lines[-5] == "Closed #60"
+    _dispatch(lines[-4])
+    assert lines[-3:] == SPLIT_NEXT
     calls = gh_calls()
     comment = next(call for call in calls if call.startswith("issue comment"))
     close = next(call for call in calls if call.startswith("issue close"))

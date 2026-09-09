@@ -17,7 +17,10 @@ IN_PROGRESS = (
     "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
     "--single-select-option-id opt_inprogress"
 )
-NEXT = "Next: implement the plan with superpowers:subagent-driven-development, then /deckhand:finish 248."
+ASSIGN = "issue edit 248 --repo acme/widgets --add-assignee @me"
+ISSUE_URL = "https://github.com/acme/widgets/issues/248"
+NEXT = "Next: /deckhand:next 248 to finish."
+# The plan's Create line is absent: a file the plan will write is not drift.
 DRIFT = [
     "  internal/server/handlers/collections/list.go  missing",
     "  internal/store/collection.go:40-80  missing",
@@ -34,7 +37,7 @@ def _branches(path: Path) -> list[str]:
 
 
 def _writes(gh_calls) -> list[str]:
-    return [call for call in gh_calls() if "item-edit" in call or "item-add" in call]
+    return [call for call in gh_calls() if "item-edit" in call or "item-add" in call or "issue edit" in call]
 
 
 def _fields_without(tmp_path: Path, *names: str) -> dict[str, str]:
@@ -88,7 +91,7 @@ def test_apply_refuses_when_not_on_the_board(fake_gh, gh_calls, repo, origin, tm
     result = _start("apply", repo, _fields_without(tmp_path, "Status"))
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand start apply: #248 is not on the board; run /deckhand:ready 248\n"
+    assert result.stderr == "deckhand start apply: #248 is not on the board; run /deckhand:next 248\n"
     assert _writes(gh_calls) == []
     assert _branches(repo) == ["main"]
 
@@ -97,7 +100,7 @@ def test_apply_refuses_without_a_kind(fake_gh, gh_calls, repo, origin, tmp_path)
     result = _start("apply", repo, _fields_without(tmp_path, "Kind"))
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand start apply: #248 has no Kind; run /deckhand:ready 248\n"
+    assert result.stderr == "deckhand start apply: #248 has no Kind; run /deckhand:next 248\n"
     assert _writes(gh_calls) == []
     assert _branches(repo) == ["main"]
 
@@ -106,14 +109,15 @@ def test_apply_creates_pushes_and_sets_in_progress(fake_gh, gh_calls, repo, orig
     result = _start("apply", repo)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:3] == [
+    assert result.stdout.splitlines()[:4] == [
         f"Branch {BRANCH} created from origin/main",
         "Pushed",
         "Status=In Progress",
+        "Assigned @me",
     ]
     assert _git(repo, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
     assert _branches(origin) == [BRANCH, "main"]
-    assert [call for call in gh_calls() if "item-edit" in call] == [IN_PROGRESS]
+    assert _writes(gh_calls) == [IN_PROGRESS, ASSIGN]
 
 
 def test_apply_on_an_existing_branch_leaves_status_alone(fake_gh, gh_calls, repo, origin):
@@ -122,9 +126,9 @@ def test_apply_on_an_existing_branch_leaves_status_alone(fake_gh, gh_calls, repo
     result = _start("apply", repo)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[0] == f"Existing branch {BRANCH}; status unchanged"
+    assert result.stdout.splitlines()[:2] == [f"Existing branch {BRANCH}; status unchanged", "Assigned @me"]
     assert _git(repo, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
-    assert _writes(gh_calls) == []
+    assert _writes(gh_calls) == [ASSIGN]
 
 
 def test_apply_fast_forwards_a_local_branch_that_has_no_upstream(fake_gh, repo, origin):
@@ -150,13 +154,16 @@ def test_apply_finishes_an_interrupted_start(fake_gh, gh_calls, repo, origin, tm
     result = _start("apply", repo)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:3] == [
+    assert result.stdout.splitlines()[:5] == [
         f"Branch {BRANCH} is local only; finishing the interrupted start",
         "Pushed",
         "Status=In Progress",
+        "Assigned @me",
+        f"Issue: {ISSUE_URL}",
     ]
     assert _branches(origin) == [BRANCH, "main"]
     assert [call for call in gh_calls() if "item-edit" in call] == [IN_PROGRESS]
+    assert gh_calls().index(ASSIGN) > gh_calls().index(IN_PROGRESS)
 
 
 def test_apply_prints_plan_commits_and_drift(fake_gh, repo, origin):
@@ -198,6 +205,16 @@ def test_context_prints_branch_blockers_plan_commits_and_drift(fake_gh, gh_calls
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[:3] == [f"Branch: {BRANCH} (none)", "Blockers:", "  240  Grant store"]
+    # The skill judges whether the Story and the Scope still hold, so both come before the plan.
+    assert [line for line in lines if line.startswith("## ")] == [
+        "## Story",
+        "## Scope",
+        "## Plan",
+        "## Commits",
+        "## Plan drift",
+    ]
+    assert lines[lines.index("## Story") + 1].startswith("  As a guest user, I want")
+    assert lines[lines.index("## Scope") + 1] == "  #### In"
     assert lines[lines.index("## Commits") : lines.index("## Plan drift")] == ["## Commits", "  none"]
     assert lines[lines.index("## Plan drift") :] == ["## Plan drift", *DRIFT]
     assert _branches(repo) == ["main"]
@@ -255,6 +272,8 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
     assert [line for line in lines if not line.startswith("  ")] == [
         lines[0],
         "Blockers:",
+        "## Story",
+        "## Scope",
         "## Plan",
         "## Commits",
         "## Plan drift",

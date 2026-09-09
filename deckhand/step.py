@@ -18,13 +18,15 @@ import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from deckhand import config, gh, git, issue, stub
+from deckhand import config, gh, git, issue, naming, stub
 from deckhand.cli import Configure, Handler, command
 from deckhand.config import Settings
 
 VERB = "_deckhand_verb"  # a private dest, so a step's own flags can never route the verb
 MAIN = "main"  # the trunk every story branches from and returns to
 ORIGIN_MAIN = f"origin/{MAIN}"  # what has landed on it, which is what every range is read against
+# The checkout or installed plugin this package sits in, which is where the skill files are.
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Refusal(Exception):
@@ -101,6 +103,17 @@ def refuse_stub(number: int, body: str) -> None:
     """
     if stub.is_stub(body):
         raise Refusal(f"#{number} is a stub; run /deckhand:new {number} first")
+
+
+def branch_for(settings: Settings, kind: str | None, title: str, number: int) -> str:
+    """The story's branch name; a `ValueError` when the board has no Kind or the title has no slug.
+
+    One derivation for every caller, so the branch `next` looks for on origin is the branch `start`
+    pushed there, and a story with no Kind is sent to the one command that can give it one.
+    """
+    if kind is None:
+        raise ValueError(f"#{number} has no Kind; run /deckhand:next {number}")
+    return naming.branch_name(settings, kind, number, title)
 
 
 def blockers_block(repo: str, number: int) -> list[str]:
@@ -224,12 +237,12 @@ def _context(name: str, verb: Handler, args: argparse.Namespace, issue_bound: bo
     The lookup itself sits outside the guard: a step module without `context` is a deckhand bug and
     must reach `cli.main` as an error, not be injected into a prompt as if it were content.
 
-    The one line the guard prints ends with what the model can still do about it, and that differs
-    by step: an issue-bound step's skill may run gh, and the steps that read a repository instead of
-    an issue are allowed no such thing.
+    The one line the guard prints ends with what the model does about it, and it is the same
+    answer for every step: a context that could not be read is a fact nobody knows, and a step run
+    on a guess writes the wrong thing to GitHub.
     """
     context = sys.modules[verb.__module__].context
-    tail = "Fetch what you need with gh." if issue_bound else "Continue without it."
+    tail = "Say what could not be read and stop."
     try:
         return context(args) or 0
     except Exception as error:  # a skill injects this output; one line beats a failed prompt

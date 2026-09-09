@@ -126,7 +126,7 @@ elif head == "project link":
     respond("{}")
 elif head == "project list":
     respond(fixture("GH_PROJECT_LIST_FILE", "project-list.json"))
-elif head in ("project field-create", "project item-edit", "project item-add"):
+elif head in ("project field-create", "project field-delete", "project item-edit", "project item-add"):
     respond("{}")
 elif head == "issue view":
     number = argv[2] if len(argv) > 2 else ""
@@ -161,11 +161,22 @@ elif head == "pr create":
         print("a pull request for branch already exists", file=sys.stderr)
         sys.exit(1)
     respond(f"https://github.com/{repo}/pull/1000")
+elif head == "pr edit":
+    sys.exit(0)
 elif head == "pr view":
     if os.environ.get("GH_PR_EXISTS"):
         respond(json.dumps({"url": f"https://github.com/{repo}/pull/1000"}))
     print("no pull requests found for the branch", file=sys.stderr)
     sys.exit(1)
+elif head == "pr list":
+    # A list answers with an array where a view answers with an object, and an empty one where a
+    # view fails; $GH_PR_EXISTS says the same thing for both.
+    if os.environ.get("GH_PR_LIST_FAILS"):
+        print("could not list pull requests", file=sys.stderr)
+        sys.exit(1)
+    if os.environ.get("GH_PR_EXISTS"):
+        respond(json.dumps([{"url": f"https://github.com/{repo}/pull/1000"}]))
+    respond(os.environ.get("GH_PR_LIST_BODY", "[]"))
 elif head == "api graphql":
     # The other project queries match on projectV2(number, so they answer an organization( and a
     # user( form alike; the linked-projects query is the only one that names projectsV2(first.
@@ -173,6 +184,8 @@ elif head == "api graphql":
         respond(fixture("GH_LINKED_PROJECTS", "linked-one.json"))
     if "projectV2(number" in joined and "items(" in joined:
         respond(fixture("GH_PROJECT_ITEMS_FILE", "graphql-project-items.json"))
+    if "projectV2(number" in joined and "fields(first" in joined:
+        respond(fixture("GH_PROJECT_FIELDS_FILE", "project-fields.json"))
     if "fieldValues" in joined:
         respond(fixture("GH_FIELDVALUES_FILE", "graphql-fieldvalues.json"))
     respond(fixture("GH_GRAPHQL_FILE", "graphql-item.json"))
@@ -195,11 +208,22 @@ elif argv and argv[0] == "api":
         break
     if not path:
         unhandled()
+    if "/dependencies/blocking" in path:
+        if os.environ.get("GH_BLOCKING_FILE"):
+            respond(open(os.environ["GH_BLOCKING_FILE"]).read())
+        respond(os.environ.get("GH_BLOCKING", "[]"))
     if "/dependencies/blocked_by" in path:
         if "POST" in argv and os.environ.get("GH_DEPENDENCY_FAILS"):
             print("could not add dependency", file=sys.stderr)
             sys.exit(1)
         respond(os.environ.get("GH_BLOCKED_BY", "[]"))
+    if path.endswith("/comments"):
+        if os.environ.get("GH_COMMENTS_FAILS"):
+            print("could not read the comments", file=sys.stderr)
+            sys.exit(1)
+        if os.environ.get("GH_COMMENTS_FILE"):
+            respond(open(os.environ["GH_COMMENTS_FILE"]).read())
+        respond(os.environ.get("GH_COMMENTS", "[]"))
     if "/issues/" in path:
         respond('{"id":5099965156,"number":246,"title":"T","state":"open"}')
     respond("{}")

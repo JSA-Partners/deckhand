@@ -3,6 +3,17 @@ from __future__ import annotations
 import pytest
 
 from deckhand import naming
+from tests.conftest import FIXTURES
+
+VALID = FIXTURES / "body-valid.md"
+STORY_TITLE = "See only the collections I was granted"
+WANT = "to see only the collections I was granted"
+
+
+def _want(clause: str) -> str:
+    """The valid body with the Story's I want clause replaced by `clause`."""
+    return VALID.read_text(encoding="utf-8").replace(WANT, clause)
+
 
 # --- slug ---------------------------------------------------------------
 
@@ -101,6 +112,46 @@ def test_pr_title_reserves_the_bang_it_may_not_use(settings):
         naming.pr_title(settings, "feat", "x" * 66)
 
 
+# --- title ------------------------------------------------------------------
+
+
+def test_title_comes_from_the_story_or_the_flag():
+    body = VALID.read_text(encoding="utf-8")
+
+    assert naming.title(None, body) == STORY_TITLE
+    assert naming.title("  Guest filtering  ", body) == "Guest filtering"
+
+
+def test_a_derived_title_drops_the_clauses_leading_to():
+    assert naming.title(None, _want("to hand one command both versions")) == "Hand one command both versions"
+    assert naming.title(None, _want("total control of the version")) == "Total control of the version"
+
+
+def test_title_rejects_a_body_with_no_i_want_clause():
+    with pytest.raises(ValueError, match="no title"):
+        naming.title(None, "### Story\n\nGuests should see fewer collections.\n")
+    with pytest.raises(ValueError, match="no title"):
+        naming.title("   ", "### Notes\n\n- none\n")
+
+
+def test_the_title_limit_is_what_the_pull_request_subject_leaves(settings):
+    limit = naming.title_limit()
+    longest = max(settings.kinds, key=len)
+
+    assert limit == naming.SUBJECT - len(longest) - len(f"{naming.BANG}: ")
+    assert naming.pr_title(settings, longest, "x" * limit, breaking=True)
+    with pytest.raises(ValueError, match="too long"):
+        naming.pr_title(settings, longest, "x" * (limit + 1))
+
+
+def test_fits_takes_a_title_of_exactly_the_limit_and_rejects_one_over():
+    limit = naming.title_limit()
+
+    assert naming.fits("x" * limit) == "x" * limit
+    with pytest.raises(ValueError, match=f"title is {limit + 1} characters; the pull request subject allows"):
+        naming.fits("x" * (limit + 1))
+
+
 # --- pr-body ------------------------------------------------------------
 
 STORY = "As a guest user, I want to see only the collections I was granted."
@@ -124,9 +175,26 @@ def test_pr_body_rewraps_a_story_written_over_several_lines():
     paragraph = naming.pr_body(248, story).split("\n\nCloses")[0]
 
     assert paragraph == (
-        "As a guest user, I want to see only the collections I was granted, so that I am not exposed to other"
-        "\norganizations' data."
+        "As a guest user, I want to see only the collections I was granted, so"
+        "\nthat I am not exposed to other organizations' data."
     )
+
+
+def test_pr_body_wraps_at_72():
+    assert naming.WRAP == 72
+
+    story = " ".join(f"word{i}" for i in range(30))
+    paragraph = naming.pr_body(248, story).split("\n\nCloses")[0]
+
+    assert all(len(line) <= 72 for line in paragraph.splitlines())
+
+
+def test_pr_body_keeps_a_73_character_word_whole():
+    word = "x" * 73
+
+    paragraph = naming.pr_body(248, f"See {word} here.").split("\n\nCloses")[0]
+
+    assert word in paragraph.splitlines()
 
 
 def test_pr_body_never_splits_a_long_token():

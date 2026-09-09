@@ -1,19 +1,25 @@
-"""Setup: report what a repository has, then link its project, set its merges, and make its fields.
+"""Setup: report what a repository has, then link its project, set its merges, and fix its fields.
 
 Nothing here writes into a repository's files. The project comes from the GitHub project link, the
 merge settings come from `gh repo edit`, the board's three fields come from the API, and everything
 the API cannot do is printed as a checklist for a person to finish by hand.
+
+A project keeps exactly the three fields this module creates and GitHub's own Status. Whatever else
+a person or a template added is deleted, because a field the process does not set is a column nobody
+fills in; GitHub's own built-in fields cannot be deleted and are never touched.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
+from typing import Any
 
 from deckhand import config, gh
 from deckhand.config import SETTINGS_FILE, Settings
-from deckhand.step import Refusal, step
+from deckhand.step import Refusal, reason, step
 
 PROJECT_FIELDS: list[tuple[str, str]] = [
     ("Kind", "SINGLE_SELECT"),
@@ -24,7 +30,21 @@ PROJECT_FIELDS: list[tuple[str, str]] = [
 # What `gh project field-list` reports as `type` for each `field-create --data-type`.
 FIELD_TYPES = {"SINGLE_SELECT": "ProjectV2SingleSelectField", "NUMBER": "ProjectV2Field"}
 
-STATUS_OPTIONS = "Backlog, Blocked, In Progress, Pending Review, Done"
+STATUS_OPTIONS = "Backlog, In Progress, Pending Review, Done"
+
+NEXT = "Next: /deckhand:new to open the first story."
+
+# Where Claude Code records the plugins it installed. deckhand does not declare superpowers as a
+# dependency, so the one thing setup can do about it is say whether it is there.
+PLUGINS_FILE = Path(".claude") / "plugins" / "installed_plugins.json"
+SUPERPOWERS = "superpowers@"
+NO_PLUGIN_LIST = "superpowers: unknown (no plugin list in the file)"
+
+# The fields the process reads; every other field a person could have made is deleted. Status is
+# GitHub's own, and a single select like any other, so it is kept by name.
+KEPT_FIELDS = frozenset({"Status", *(name for name, _ in PROJECT_FIELDS)})
+# The GraphQL data types `gh project field-create` can make, which are the ones it can delete.
+DELETABLE_TYPES = frozenset({"TEXT", "NUMBER", "DATE", "SINGLE_SELECT", "ITERATION"})
 
 # A story lands on main as one squash commit, and the pull request deckhand computes is its message.
 MERGE_SETTINGS = (
@@ -50,6 +70,36 @@ def _settings_path() -> Path:
     return Path.cwd() / SETTINGS_FILE
 
 
+def _plugins_path() -> Path:
+    """The installed-plugins file; `DECKHAND_PLUGINS_FILE` moves it, which is how the tests read one."""
+    override = os.environ.get("DECKHAND_PLUGINS_FILE")
+    return Path(override) if override else Path.home() / PLUGINS_FILE
+
+
+def superpowers_line() -> str:
+    """Whether superpowers is in the plugin cache, as the one line context prints about it.
+
+    The cache says Claude Code installed the plugin, not that the session has it enabled, and that
+    is as much as this can honestly report.
+
+    The file has held the plugin map under a `plugins` key and, in older versions, at the top level;
+    the top level is read only when there is no `plugins` key at all, so a `plugins` value of the
+    wrong shape is a file this cannot read rather than a map to look through.
+    """
+    try:
+        data = json.loads(_plugins_path().read_text(encoding="utf-8"))
+    except Exception as error:
+        return f"superpowers: unknown ({reason(error)})"
+    if not isinstance(data, dict):
+        return NO_PLUGIN_LIST
+    plugins = data["plugins"] if "plugins" in data else data
+    if not isinstance(plugins, dict):
+        return NO_PLUGIN_LIST
+    if any(str(name).startswith(SUPERPOWERS) for name in plugins):
+        return "superpowers: installed"
+    return "superpowers: not found; install it first"
+
+
 def _override_source() -> str:
     """Where the override `load` picked up came from: the environment wins over the settings file."""
     if os.environ.get("DECKHAND_PROJECT"):
@@ -66,7 +116,7 @@ def _configure_apply(parser: argparse.ArgumentParser) -> None:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the repository, its linked and open projects, any override, and the three fields."""
+    """Print the repository, its linked and open projects, the override, the fields, and superpowers."""
     settings = config.load(Path.cwd())  # a malformed .claude/settings.json is worth reporting
     try:
         repo = gh.repo_slug()
@@ -90,6 +140,7 @@ def context(args: argparse.Namespace) -> int:
             settings.resolved = project
 
     _print_fields(settings)
+    print(superpowers_line())
     return 0
 
 
@@ -156,14 +207,17 @@ def _print_fields(settings: Settings) -> None:
 
 @step("setup", _configure_apply, issue_bound=False)
 def apply(args: argparse.Namespace) -> int:
-    """Point this repository at its project, make squash the only merge, and create the fields."""
+    """Point this repository at its project, make squash the only merge, and fix the fields."""
     repo = gh.repo_slug()
     settings = config.load(Path.cwd())
     if args.project is not None:
         _target(settings, repo, args.project, args.owner)
     _resolve(settings, repo)
+    print(f"Project: {settings.owner} #{settings.project}")
     _set_merges()
-    _create_fields(settings)
+    fields = _create_fields(settings)
+    _delete_extra_fields(settings)
+    _checklist(fields)
     return 0
 
 
@@ -210,8 +264,8 @@ def _set_merges() -> None:
     print("merge: squash only, message from the pull request")
 
 
-def _create_fields(settings: Settings) -> None:
-    """Create the missing project fields, then print the checklist for what the API cannot do."""
+def _create_fields(settings: Settings) -> list[dict[str, Any]]:
+    """Create the project fields that are missing; returns the field list it read to decide."""
     fields = gh.field_list(settings)
     existing = {f["name"]: f.get("type", "") for f in fields}
 
@@ -238,13 +292,36 @@ def _create_fields(settings: Settings) -> None:
             cmd += ["--single-select-options", ",".join(settings.kinds)]
         gh.run(*cmd)
         print(f"{name}: created")
+    return fields
 
+
+def _delete_extra_fields(settings: Settings) -> None:
+    """Delete every field a person added that the process does not read.
+
+    A field's data type says who made it: only the five `field-create` offers can be deleted, and
+    GitHub's own columns report a type of their own, so nothing here can reach them by accident.
+    """
+    for field in gh.project_fields(settings):
+        name = str(field.get("name") or "")
+        if field.get("dataType") not in DELETABLE_TYPES or name in KEPT_FIELDS:
+            continue
+        gh.run("project", "field-delete", "--id", str(field.get("id")))
+        print(f"deleted field {name}")
+
+
+def _checklist(fields: list[dict[str, Any]]) -> None:
+    """Print what the API cannot do, with the Status options the board has now beside the ones it wants."""
     status = next((f for f in fields if f["name"] == "Status"), None)
-    current = ", ".join(o["name"] for o in (status.get("options") or [])) if status else ""
-    current = current or "unknown"
+    options = (status.get("options") or []) if status else []
+    current = ", ".join(option["name"] for option in options) or "unknown"
 
     print()
     print("Finish the project setup by hand (the API cannot do this):")
-    print(f"  1. Rename or reorder the Status options to: {STATUS_OPTIONS}.")
+    print(f"  1. Set the Status options to: {STATUS_OPTIONS}.")
     print(f"     (currently: {current})")
-    print("  2. Hide the Milestone column.")
+    print("  2. On the board view, show only Title, Status, Kind, Story Points, Actual, Assignees, and")
+    print("     Repository; hide every other field.")
+    print("  3. In the repository or organization issue settings, turn off issue Types and any issue")
+    print("     Fields you do not use.")
+    print()
+    print(NEXT)

@@ -6,7 +6,7 @@ ignore = body-is-missing
 line-length = 72
 
 [body-max-line-length]
-line-length = 100
+line-length = 72
 
 [contrib-title-conventional-commits]
 types = feat,fix,chore,refactor,docs,perf,test,ci,build,style,revert

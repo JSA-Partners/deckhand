@@ -232,7 +232,7 @@ def test_audit_reports_a_failure_as_the_steps_one_line(repo, monkeypatch, capsys
     exit_code = cli.main(["document", "context"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == "(deckhand document context failed: boom. Continue without it.)\n"
+    assert capsys.readouterr().out == "(deckhand document context failed: boom. Say what could not be read and stop.)\n"
 
 
 def test_audit_never_exits_non_zero_when_git_is_unavailable(repo, monkeypatch):

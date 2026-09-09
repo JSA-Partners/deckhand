@@ -1,8 +1,11 @@
-"""Slugs, branch names, and the pull request message for the story process.
+"""Slugs, branch names, issue titles, and the pull request message for the story process.
 
 The repository squashes with the pull request title and body as the commit message, so the title is
 a commit subject and the body is a commit body: the subject has a length a reader can scan, and the
-body is the story as one wrapped paragraph over the footers a tool reads.
+body is the story as one wrapped paragraph over the footers a tool reads. An issue title is that
+subject too, less the kind it will be given, so it is measured here as well.
+
+A name that cannot be made is a `ValueError`; the step that asked for it turns that into a refusal.
 """
 
 from __future__ import annotations
@@ -10,13 +13,16 @@ from __future__ import annotations
 import re
 import textwrap
 
+from deckhand import config, sections
 from deckhand.config import Settings
 
 SUBJECT = 72  # the longest commit subject a git log, a terminal, and GitHub all show whole
 BANG = "!"  # marks a breaking change, and is reserved in every title so a late one cannot overflow
-WRAP = 100  # the commit body's width, the same one the project's own prose is written to
+WRAP = 72  # the commit body's width: git's own convention, and what GitHub shows verbatim
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
+_WANT = re.compile(r"\bI want (.+?), so that\b", re.IGNORECASE)
+_LEADING_TO = re.compile(r"^to\s+", re.IGNORECASE)
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _NUMBER_RE = re.compile(r"^[0-9]+$")
 
@@ -55,6 +61,46 @@ def pr_title(settings: Settings, kind: str, title: str, breaking: bool = False) 
     if len(f"{kind}{BANG}: {title}") > SUBJECT:
         raise ValueError("title too long for a commit subject; shorten the issue title")
     return f"{kind}{BANG if breaking else ''}: {title}"
+
+
+def title_limit() -> int:
+    """The longest issue title the pull request subject can still carry.
+
+    The subject is `<kind>[!]: <title>` and the bang counts whether or not it is asked for, so what
+    is left for the title is `SUBJECT` less the longest prefix the configured kinds make.
+    """
+    kinds = config.load().kinds
+    return SUBJECT - (max(len(kind) for kind in kinds) + len(f"{BANG}: "))
+
+
+def title(flag: str | None, body: str) -> str:
+    """The issue title: `flag` when it has text, else the Story's I want clause."""
+    return fits((flag or "").strip() or _derived(body))
+
+
+def _derived(body: str) -> str:
+    """The Story's I want clause as a title: the leading `to` dropped, the first letter raised."""
+    story = " ".join(sections.get(body, "Story", "").split())
+    found = _WANT.search(story)
+    want = _LEADING_TO.sub("", found.group(1).strip() if found else "")
+    if not want:
+        raise ValueError("no title: pass --title, or write the Story as 'As a ..., I want ..., so that ...'")
+    return want[0].upper() + want[1:]
+
+
+def fits(subject: str) -> str:
+    """`subject`, or a `ValueError` naming both lengths; nothing is cut, because a title is a sentence.
+
+    `finish` builds the pull request subject from this title and refuses one it cannot carry, and
+    the moment to hear that is now, while a shorter title is still free to write.
+    """
+    limit = title_limit()
+    if len(subject) > limit:
+        raise ValueError(
+            f"title is {len(subject)} characters; the pull request subject allows {limit}. "
+            "Pass --title with a shorter one"
+        )
+    return subject
 
 
 def pr_body(number: str | int, story: str, breaking: str | None = None) -> str:

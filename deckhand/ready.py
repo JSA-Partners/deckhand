@@ -1,16 +1,18 @@
-"""The ready step: an approved story goes on the board with its kind, its points, and its blockers.
+"""The ready step: a reviewed story goes on the board with its kind, its points, and its blockers.
 
-`context` prints the open blockers, the fields as the board has them, whether a human approved after
-the last review, and the analogy table the estimate comes from. Each block degrades to one line of
-its own, so a lookup that fails never costs the model the rest of the prompt.
+`context` prints the kinds the project defines, the story itself, the open blockers, the fields as
+the board has them, and the analogy table the estimate comes from. The kinds and the story are what
+the board question is answered from, and the question is asked in the turn this prints into. Each
+block degrades to one line of its own, so a lookup that fails never costs the model the rest of the
+prompt.
 
-`apply` validates the kind, the points, the review, the approval, and every blocker before it writes
-anything, then records the dependencies, adds the item, and sets the fields, printing one line per
-write. Status follows the dependencies GitHub holds once those writes are in, not the flags the run
-was given, so a story that already waits on something boards Blocked either way. The board's own
-automation sets Status after an item is added, asynchronously, so `apply` waits, reads Status back,
-and puts it right once if the automation moved it. `DECKHAND_SETTLE` is that wait in seconds; the
-tests set it to 0.
+`apply` validates the kind, the points, the review, and every blocker before it writes anything,
+then records the dependencies, adds the item, and sets the fields, printing one line per write. A
+review comment is the whole gate: nobody has to reply, and Status is always Backlog, because the
+board has no Blocked column and `start` reads the blockers live. The board's own automation sets
+Status after an item is added, asynchronously, so `apply` waits, reads Status back, and puts it
+right once if the automation moved it. `DECKHAND_SETTLE` is that wait in seconds; the tests set it
+to 0.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import re
 import time
 from typing import Any
 
-from deckhand import config, fields, gh, issue
+from deckhand import config, fields, gh, issue, sections
 from deckhand.config import Settings
 from deckhand.fields import format_number
 from deckhand.step import (
@@ -124,28 +126,22 @@ def analogy_rows(pages: list[Any], limit: int, root: str = "organization") -> li
 # --- context ----------------------------------------------------------------
 
 
-def _date(comment: issue.Comment) -> str:
-    return comment.created_at.split("T")[0]
+def _kinds_line(settings: Settings | Exception) -> str:
+    """The kinds this project defines, which is the list `apply` refuses anything outside of."""
+    try:
+        return "Kinds: " + ", ".join(usable(settings).kinds)
+    except Exception as error:
+        return f"Kinds: unavailable ({reason(error)})"
+
+
+def _story_lines(number: int) -> list[str]:
+    """The Story section, which is what the points are estimated against."""
+    return sections.get(issue.view(gh.repo_slug(), number).body, "Story", "").strip("\n").splitlines()
 
 
 def _fields_block(settings: Settings | Exception, number: int) -> list[str]:
     values = fields.get_fields(usable(settings), gh.repo_slug(), number, FIELDS)
     return [f"  {name}: {'unset' if value is None else value}" for name, value in values.items()]
-
-
-def _approval(story: issue.Issue) -> str:
-    """The one line the approval block prints: who approved, who is waited on, or no review yet."""
-    review = issue.review_comment(story)
-    if review is None:
-        return "no review yet"
-    approved = issue.approved_after(story, review)
-    if approved is None:
-        return f"waiting: no Approved comment after the review of {_date(review)}"
-    return f"approved by {approved.author} on {_date(approved)}"
-
-
-def _approval_block(number: int) -> list[str]:
-    return [f"  {_approval(issue.view(gh.repo_slug(), number))}"]
 
 
 def _table_block(settings: Settings | Exception) -> list[str]:
@@ -158,11 +154,13 @@ def _table_block(settings: Settings | Exception) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the open blockers, the current fields, the approval, and the Done stories to compare to."""
+    """Print the kinds, the story, the open blockers, the fields, and the Done stories to compare to."""
     settings = settings_or_error()
+    print(_kinds_line(settings))
+    print()
+    block("## Story", lambda: _story_lines(args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Fields:", lambda: _fields_block(settings, args.issue))
-    block("Approval:", lambda: _approval_block(args.issue))
     block(f"Done stories (last {LIMIT}):", lambda: _table_block(settings))
     return 0
 
@@ -176,13 +174,10 @@ def _points(value: str) -> int:
     return int(value)
 
 
-def _approved(story: issue.Issue, number: int) -> None:
-    """Refuse unless the story carries a review comment with a human approval after it."""
-    review = issue.review_comment(story)
-    if review is None:
-        raise Refusal(f"no review comment on #{number}; run /deckhand:review {number}")
-    if issue.approved_after(story, review) is None:
-        raise Refusal(f"no Approved comment after the review of {_date(review)}")
+def _reviewed(story: issue.Issue, number: int) -> None:
+    """Refuse unless the story carries a review comment, which is the only gate this step holds."""
+    if issue.review_comment(story) is None:
+        raise Refusal(f"no review comment on #{number}; run /deckhand:next {number}")
 
 
 def _open_issue(repo: str, number: int) -> None:
@@ -234,7 +229,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 @step("ready", _configure)
 def apply(args: argparse.Namespace) -> int:
-    """Put an approved story on the board with its kind, its points, and its blockers."""
+    """Put a reviewed story on the board with its kind, its points, and its blockers."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
     refuse_stub(args.issue, story.body)
@@ -242,7 +237,7 @@ def apply(args: argparse.Namespace) -> int:
     if args.kind not in settings.kinds:
         raise Refusal(f"kind must be one of: {', '.join(settings.kinds)}")
     points = _points(args.points)
-    _approved(story, args.issue)
+    _reviewed(story, args.issue)
     blockers = list(dict.fromkeys(args.blocked_by or []))
     if args.issue in blockers:
         raise Refusal(f"#{args.issue} cannot block itself")
@@ -251,9 +246,9 @@ def apply(args: argparse.Namespace) -> int:
     for number in blockers:
         issue.add_dependency(repo, args.issue, number)
         print(f"Blocked by #{number}")
-    # The board follows the dependencies GitHub holds, not the flags: a story split off by an amend
-    # already carries one, and it boards Blocked without anyone passing it again.
-    status = "Blocked" if blockers or issue.blockers(repo, args.issue) else "Backlog"
+    # Every story boards in the same column: a blocker is a dependency GitHub holds and `start`
+    # reads live, not a column that would need clearing when the last blocker closed.
+    status = "Backlog"
     gh.run(
         "project", "item-add", str(settings.project), "--owner", settings.owner, "--url", story.url, "--format", "json"
     )
@@ -262,5 +257,5 @@ def apply(args: argparse.Namespace) -> int:
     print(fields.set_field(settings, repo, args.issue, "Story Points", str(points)))
     print(fields.set_field(settings, repo, args.issue, "Status", status))
     _hold_status(settings, repo, args.issue, status)
-    print(f"Next: /deckhand:start {args.issue} when it is at the top of the Backlog.")
+    print(f"Next: /deckhand:next {args.issue} when you want to build.")
     return 0

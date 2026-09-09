@@ -2,6 +2,9 @@
 
 Only the story's own section names start a section. Any other heading, such as the
 `### Task N` blocks inside Plan, belongs to the section above it.
+
+The collapsed block round the Plan belongs to these commands rather than to the story: `render`
+puts it on, `parse` takes it off, so no reader and no draft ever carries it.
 """
 
 from __future__ import annotations
@@ -11,6 +14,13 @@ from typing import Any
 
 SECTIONS = ["Story", "Scope", "Acceptance Criteria", "Plan", "Notes"]
 HEADING = re.compile(r"^### (" + "|".join(re.escape(s) for s in SECTIONS) + r")\s*$")
+
+FOLD_OPEN = "<details>\n<summary>Show the plan</summary>"
+FOLD_CLOSE = "</details>"
+# The fold as it comes back, which is rarely the fold that went out: GitHub's editor, a model
+# rewriting the draft, or a hand edit all reshape it, and any of those still has to be recognised.
+_FOLD = re.compile(r"\A<details[^>]*>\s*<summary>.*?</summary>\s*(?P<body>.*?)\s*</details>\Z", re.DOTALL)
+_DETAILS_TAG = re.compile(r"<details[^>]*>|</details>")
 
 # `get` has to tell "no default" from a default of None, and None is a default a caller wants.
 _RAISE = object()
@@ -23,8 +33,42 @@ class MissingSection(KeyError):
         return self.args[0]
 
 
+def _nested(text: str) -> bool:
+    """True when every `</details>` in `text` closes a `<details>` opened inside it, and none is left open."""
+    depth = 0
+    for tag in _DETAILS_TAG.findall(text):
+        depth += -1 if tag.startswith("</") else 1
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def _unfolded(name: str, body: str) -> str:
+    """The section body without the fold `render` puts round a plan; every reader sees this.
+
+    Any `<details>` whose first element is a `<summary>` and which closes at the end of the plan is
+    that fold, however it was reshaped on the way out and back. A plan that merely opens with a
+    block of its own leaves its own tags unbalanced inside the match, and is left as it is.
+    """
+    text = body.strip("\n")
+    if name != "Plan":
+        return text
+    found = _FOLD.match(text)
+    if found and _nested(found.group("body")):
+        return found.group("body").strip("\n")
+    return text
+
+
+def _folded(name: str, body: str) -> str:
+    """The section body as it is written: a plan with content sits in a collapsed block on GitHub."""
+    text = _unfolded(name, body)
+    if name != "Plan" or not text:
+        return text
+    return f"{FOLD_OPEN}\n\n{text}\n\n{FOLD_CLOSE}"
+
+
 def parse(text: str) -> tuple[str, list[tuple[str, str]]]:
-    """Return (preamble, [(name, body)]). Bodies exclude the heading and outer blank lines."""
+    """Return (preamble, [(name, body)]). Bodies exclude the heading, outer blank lines, and the fold."""
     preamble, parsed, current, buf = [], [], None, []
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for line in lines:
@@ -33,22 +77,30 @@ def parse(text: str) -> tuple[str, list[tuple[str, str]]]:
             if current is None:
                 preamble = buf
             else:
-                parsed.append((current, "\n".join(buf).strip("\n")))
+                parsed.append((current, _unfolded(current, "\n".join(buf))))
             current, buf = match.group(1), []
         else:
             buf.append(line)
     if current is None:
         preamble = buf
     else:
-        parsed.append((current, "\n".join(buf).strip("\n")))
+        parsed.append((current, _unfolded(current, "\n".join(buf))))
     return "\n".join(preamble).strip("\n"), parsed
 
 
-def render(preamble: str, parsed: list[tuple[str, str]]) -> str:
+def render(preamble: str, parsed: list[tuple[str, str]], fold: bool = True) -> str:
+    """The body as text; `fold` off leaves the plan bare, which is what a model is handed to edit."""
     parts = [preamble] if preamble else []
     for name, body in parsed:
-        parts.append(f"### {name}\n\n{body}".rstrip("\n"))
+        content = _folded(name, body) if fold else _unfolded(name, body)
+        parts.append(f"### {name}\n\n{content}".rstrip("\n"))
     return "\n\n".join(parts) + "\n"
+
+
+def bare(text: str) -> str:
+    """`text` with the plan out of its fold: the body as the model reads it and drafts it back."""
+    preamble, parsed = parse(text)
+    return render(preamble, parsed, fold=False)
 
 
 def get(text: str, name: str, default: Any = _RAISE) -> Any:

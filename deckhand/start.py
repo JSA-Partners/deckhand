@@ -1,14 +1,17 @@
 """The start step: a story on the board gets its branch, and the model gets the plan to implement.
 
-`context` prints where the branch is, the open blockers, the plan, what is already committed on the
-branch, and the plan references that no longer resolve, and never writes anything.
+`context` prints where the branch is, the open blockers, the story and its scope, the plan, what is
+already committed on the branch, and the plan references that no longer resolve, and never writes
+anything. The story and the scope are there because the skill reads the plan against the repository
+before it branches, and a story that no longer holds is the one case that sends it back to review.
 
 `apply` refuses a story that is blocked or off the board, then puts the branch on origin: created
 from `origin/main`, or pushed from the local branch an interrupted run left behind, and sets In
 Progress either way. A branch origin already has is a story being picked back up, so it is checked
 out, fast-forwarded, and the status left alone. Starting is therefore idempotent, and the status
-write is last: a push that fails leaves the board saying the story never started. Both verbs end
-with the same plan, commits, and drift blocks, because the model needs them either way.
+write follows the push: a push that fails leaves the board saying the story never started. Whoever
+ran it is then assigned the issue, on both paths, so the board says who has it. Both verbs end with
+the same plan, commits, and drift blocks, because the model needs them either way.
 """
 
 from __future__ import annotations
@@ -16,13 +19,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, drift, fields, gh, git, issue, naming, sections
+from deckhand import config, drift, fields, gh, git, issue, sections
 from deckhand.config import Settings
 from deckhand.step import (
     MAIN,
     Refusal,
     block,
     blockers_block,
+    branch_for,
     indented,
     reason,
     refuse_git,
@@ -59,10 +63,8 @@ def _where(local: bool, remote: bool) -> str:
 
 def _branch_name(settings: Settings, kind: str | None, title: str, number: int) -> str:
     """The story's branch name; refuses when the board has no Kind or the title yields no slug."""
-    if kind is None:
-        raise Refusal(f"#{number} has no Kind; run /deckhand:ready {number}")
     try:
-        return naming.branch_name(settings, kind, number, title)
+        return branch_for(settings, kind, title, number)
     except ValueError as error:
         raise Refusal(str(error)) from error
 
@@ -148,17 +150,38 @@ def _branch_line(settings: Settings | Exception, story: issue.Issue | Exception,
     return f"Branch: {branch} ({_where(local, remote)})"
 
 
+def _agreement(story: issue.Issue | Exception) -> None:
+    """The Story and the Scope: what the session judges still holds before the branch is made."""
+
+    def text(name: str) -> list[str]:
+        return indented(sections.get(usable(story).body, name, "").splitlines())
+
+    block("## Story", lambda: text("Story"))
+    block("## Scope", lambda: text("Scope"))
+
+
 def context(args: argparse.Namespace) -> int:
-    """Print where the branch is, the open blockers, the plan, the commits, and the plan's drift."""
+    """Print the branch, the blockers, the story and its scope, the plan, the commits, and the drift."""
     settings = settings_or_error()
     story = _story(args.issue)
     print(_branch_line(settings, story, args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
+    _agreement(story)
     _report(story)
     return 0
 
 
 # --- apply ------------------------------------------------------------------
+
+
+def next_line(number: int) -> str:
+    """The line the step ends on; the build runs on in the same turn as this, and ends the turn.
+
+    What the person reads at the end of that turn is this line, so it names the one command they
+    type when the branch is built rather than the step that has only just started. The branch
+    review belongs to finish, which is what that command reaches next.
+    """
+    return f"Next: /deckhand:next {number} to finish."
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -177,7 +200,7 @@ def apply(args: argparse.Namespace) -> int:
     settings = config.load()
     values = fields.get_fields(settings, repo, args.issue, ("Status", "Kind"))
     if values["Status"] is None:
-        raise Refusal(f"#{args.issue} is not on the board; run /deckhand:ready {args.issue}")
+        raise Refusal(f"#{args.issue} is not on the board; run /deckhand:next {args.issue}")
     branch = _branch_name(settings, values["Kind"], story.title, args.issue)
     local, remote = _exists(branch)
     if remote:
@@ -186,6 +209,11 @@ def apply(args: argparse.Namespace) -> int:
     else:
         _start_branch(branch, local)
         print(fields.set_field(settings, repo, args.issue, "Status", "In Progress"))
+    # Bookkeeping, so it comes after the status write the step exists to make: whoever started the
+    # story owns it, and adding an assignee GitHub already has changes nothing.
+    issue.assign(repo, args.issue)
+    print("Assigned @me")
+    print(f"Issue: {story.url}")
     _report(story)
-    print(f"Next: implement the plan with superpowers:subagent-driven-development, then /deckhand:finish {args.issue}.")
+    print(next_line(args.issue))
     return 0

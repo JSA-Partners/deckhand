@@ -17,7 +17,9 @@ run `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply --stub $source <draft>`. If 
 write it with its plan and run `... new apply <draft>`. If it is more than one story, settle the
 requirements, write the split file with one bullet per story in dependency order, confirm the list
 with the user in one question, and run `... new apply --split <file>` (add `--from $source` for a
-parked feature), then dispatch one deckhand:author agent per stub on the line it printed, all at
-once, and relay what each returned; park any other feature the discussion produced with
-`... new apply --park <file>`. Say what each command printed; if one refuses, fix what it names and
-run it again.
+parked feature), then dispatch one deckhand:author agent per stub on the Dispatch line it
+printed, all at once, and relay what each returned; park any other feature the discussion produced with
+`... new apply --park <file>`. If a command refuses, fix what it names and run it again.
+
+Close with three parts: the lines the commands printed, in a code block; the issue URL each printed;
+and every `Next:` line they printed, verbatim, one per story.

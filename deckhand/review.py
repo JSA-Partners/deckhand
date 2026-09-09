@@ -2,8 +2,11 @@
 
 `context` prints the story body and a reviewer brief, which is the text of every lens the body
 selects, so one reviewer agent carries them all. `apply` reads the skeptic's findings, validates
-every line before it writes anything, and posts one comment: the confirmed findings, the rejected
-ones, and a Decisions task list the human ticks before `/deckhand:amend`.
+every line before it writes anything, and posts one comment: what the reader does with it, then each
+finding on a line the human ticks before the amend step, the skeptic's rejections marked as such.
+
+A review is read in one sitting, so only the `CAP` most severe confirmed findings are posted and the
+rest are counted in a closing line; a rejection is the skeptic's own and is always shown.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from deckhand import gh, issue, sections
-from deckhand.step import Refusal, draft_line, read_draft, reason, refuse_stub, step
+from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, reason, refuse_stub, step
 
 BRIEF_HEADING = "## Reviewer brief"
 CLEAN = "Nothing found."
@@ -24,6 +27,7 @@ FINDING_FORMAT = (
     "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
     f"<evidence, citing the section>; or exactly `{CLEAN}`"
 )
+CAP = 7
 SEVERITIES = ("P1", "P2", "P3")
 VERDICTS = ("CONFIRMED", "REJECTED")
 
@@ -39,7 +43,7 @@ def lenses_dir() -> Path:
     override = os.environ.get("DECKHAND_LENSES")
     if override:
         return Path(override)
-    return Path(__file__).resolve().parent.parent / "skills" / "review" / "lenses"
+    return PLUGIN_ROOT / "skills" / "review" / "lenses"
 
 
 def _lens_files() -> dict[str, str]:
@@ -129,12 +133,15 @@ def named_lenses(body: str) -> list[str]:
 
 
 def _body(number: int) -> tuple[str, str]:
-    """`(the block to print, the text to select lenses from)`; the text is empty when the read fails."""
+    """`(the block to print, the text to select lenses from)`; the text is empty when the read fails.
+
+    The plan sits in a collapsed block on GitHub; the reviewer is handed it bare, as the story reads.
+    """
     try:
         body = issue.view(gh.repo_slug(), number).body
     except Exception as error:  # the brief is still worth printing without the story
         return f"Body: unavailable ({reason(error)})", ""
-    return body.strip("\n"), body
+    return sections.bare(body).strip("\n"), body
 
 
 def context(args: argparse.Namespace) -> int:
@@ -216,25 +223,63 @@ def findings(text: str) -> list[Finding]:
     return parsed
 
 
-def _claim(finding: Finding) -> str:
-    """The claim ended with a stop, so the evidence reads as the sentence after it."""
-    claim = finding.claim.rstrip()
-    return claim if claim.endswith((".", "!", "?", ":")) else claim + "."
+def _stop(text: str) -> str:
+    """`text` ended with a stop, so the claim and the evidence each read as a sentence of their own."""
+    stripped = text.rstrip()
+    return stripped if stripped.endswith((".", "!", "?", ":")) else stripped + "."
 
 
-def comment_body(confirmed: list[Finding], rejected: list[Finding]) -> str:
-    """The review comment: the confirmed findings, the rejected ones, and the Decisions task list."""
-    if not confirmed and not rejected:
-        return f"{issue.REVIEW_HEADING}\n\n{CLEAN}\n"
-    blocks = [issue.REVIEW_HEADING]
-    for finding in confirmed:
-        blocks.append(f"**{finding.id}, {finding.severity}, CONFIRMED** {_claim(finding)} {finding.evidence}")
-    if rejected:
-        blocks.append("\n".join(f"Rejected: {finding.id} ({finding.evidence})" for finding in rejected))
-    if confirmed:
-        blocks.append("### Decisions")
-        blocks.append("\n".join(f"- [ ] {finding.id}" for finding in confirmed))
-    return "\n\n".join(blocks) + "\n"
+def guidance(number: int) -> str:
+    """What the person reading the issue does: what a tick means, and which command follows."""
+    return (
+        "Tick a finding to accept it; leave it unticked to decline. A finding marked rejected by the "
+        "skeptic is shown for the record; tick it only to overrule them. Replies here are read the "
+        f"next time the story is amended. Then run `/deckhand:next {number}`: it applies what you "
+        "ticked and replied, or boards the story when you accepted nothing."
+    )
+
+
+def next_line(number: int) -> str:
+    """The line the step ends on: the decision is the person's, on the issue, and then one command.
+
+    A clean review ends on it too. There is nothing to tick, but a reply is still read, and the
+    person types the same thing either way rather than remembering which review they had.
+    """
+    return f"Next: /deckhand:next {number} when you have ticked and replied."
+
+
+def _line(finding: Finding, rejected: bool = False) -> str:
+    """One finding as the box the reader ticks, its id and severity bold and the skeptic's verdict in."""
+    verdict = ", rejected by the skeptic" if rejected else ""
+    return f"- [ ] **{finding.id}, {finding.severity}{verdict}** {_stop(finding.claim)} {_stop(finding.evidence)}"
+
+
+def _withheld_line(number: int, withheld: int) -> str:
+    """The closing count: what was found and not posted, and the choice that asks for it again."""
+    findings_word = "finding" if withheld == 1 else "findings"
+    return (
+        f"{withheld} further {findings_word} withheld; after amending, choose Review it again when "
+        f"/deckhand:next {number} offers it."
+    )
+
+
+def comment_body(number: int, confirmed: list[Finding], rejected: list[Finding], withheld: int = 0) -> str:
+    """The review comment: what to do with it, then one tickable line per finding.
+
+    The comment is all most readers ever see of a review, so the decision sits on the finding it
+    belongs to, the rejected ones included, and the guidance sits above them all. `withheld` is the
+    count of confirmed findings the cap left off, so the reader knows the list is not the whole of it.
+    """
+    if not confirmed and not rejected and not withheld:
+        clean = f"Reply here with anything still wrong, then run `/deckhand:next {number}`."
+        return f"{issue.REVIEW_HEADING}\n\n{CLEAN}\n\n{clean}\n"
+    lines = [_line(finding) for finding in confirmed] + [_line(finding, True) for finding in rejected]
+    parts = [issue.REVIEW_HEADING, guidance(number)]
+    if lines:
+        parts.append("\n".join(lines))
+    if withheld > 0:
+        parts.append(_withheld_line(number, withheld))
+    return "\n\n".join(parts) + "\n"
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -249,14 +294,9 @@ def apply(args: argparse.Namespace) -> int:
     refuse_stub(args.issue, story.body)
     found = findings(read_draft(args.file))
     confirmed = sorted((f for f in found if f.verdict == "CONFIRMED"), key=lambda f: f.order)
-    rejected = [f for f in found if f.verdict == "REJECTED"]
-    url = issue.comment(repo, args.issue, comment_body(confirmed, rejected))
+    rejected = sorted((f for f in found if f.verdict == "REJECTED"), key=lambda f: f.order)
+    posted, rest = confirmed[:CAP], confirmed[CAP:]
+    url = issue.comment(repo, args.issue, comment_body(args.issue, posted, rejected, len(rest)))
     print(url)
-    if confirmed:
-        print(
-            f"Next: tick the findings to accept, run /deckhand:amend {args.issue}, "
-            f"then reply Approved and /deckhand:ready {args.issue}"
-        )
-    else:
-        print(f"Next: reply Approved on the issue, then /deckhand:ready {args.issue}")
+    print(next_line(args.issue))
     return 0

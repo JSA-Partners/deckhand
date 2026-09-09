@@ -8,14 +8,13 @@ from deckhand import ready
 from tests.conftest import FIXTURES, ROOT, run_deckhand
 
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
-APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 NO_WAIT = {"DECKHAND_SETTLE": "0"}
 ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
 HEADER = "| # | Repo | Title | Estimate | Actual | Tasks | Note |"
 RULE = "| --- | --- | --- | --- | --- | --- | --- |"
-NEXT = "Next: /deckhand:start 248 when it is at the top of the Backlog."
+NEXT = "Next: /deckhand:next 248 when you want to build."
 
 
 def _wrapper(tmp_path: Path, script: str) -> dict[str, str]:
@@ -65,7 +64,7 @@ def _calls(gh_calls) -> list[str]:
 
 
 def _apply(*args: str, env: dict[str, str] | None = None):
-    return run_deckhand("ready", "apply", "248", *args, env={**APPROVED, **NO_WAIT, **(env or {})})
+    return run_deckhand("ready", "apply", "248", *args, env={**REVIEWED, **NO_WAIT, **(env or {})})
 
 
 def _blocked(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -202,54 +201,60 @@ def test_the_table_stops_at_the_limit():
 # --- context ----------------------------------------------------------------
 
 
-def test_context_reports_blockers_fields_approval_and_the_table(fake_gh):
-    result = run_deckhand("ready", "context", "248", env={**APPROVED, "GH_BLOCKED_BY": ONE_BLOCKER})
+def test_context_reports_blockers_fields_and_the_table(fake_gh):
+    result = run_deckhand("ready", "context", "248", env={**REVIEWED, "GH_BLOCKED_BY": ONE_BLOCKER})
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:11] == [
+    assert lines[0] == "Kinds: feat, fix, chore, refactor, docs, perf"
+    assert lines[2] == "## Story"
+    assert lines[3].startswith("As a guest user, I want to see only")
+    blockers = lines.index("Blockers:")
+    assert lines[blockers : blockers + 9] == [
         "Blockers:",
         "  240  Grant store",
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
         "  Actual: unset",
-        "Approval:",
-        "  approved by lead on 2026-09-02",
         "Done stories (last 20):",
         HEADER,
         RULE,
     ]
 
 
+def test_context_says_nothing_about_approval(fake_gh):
+    """The review is the only gate now, so there is no approval to report."""
+    result = run_deckhand("ready", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    assert "Approval:" not in result.stdout
+    assert "approved" not in result.stdout.lower()
+
+
+def test_context_prints_the_story_the_points_are_estimated_from(fake_gh):
+    """The estimate is a comparison, so the story being estimated is on the page beside the table."""
+    result = run_deckhand("ready", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[2] == "## Story"
+    assert "### Scope" not in lines
+    assert lines.index("## Story") < lines.index("Blockers:")
+
+
 def test_context_reads_every_field_in_one_pass(fake_gh, gh_calls):
-    result = run_deckhand("ready", "context", "248", env=APPROVED)
+    result = run_deckhand("ready", "context", "248", env=REVIEWED)
 
     assert result.returncode == 0, result.stderr
     assert len([c for c in _calls(gh_calls) if c == "api graphql field-values"]) == 1
 
 
 def test_context_reads_the_project_link_once(fake_gh, gh_calls):
-    result = run_deckhand("ready", "context", "248", env=APPROVED)
-
-    assert result.returncode == 0, result.stderr
-    assert len([c for c in gh_calls() if "projectsV2(first" in c]) == 1
-
-
-def test_context_reports_waiting_after_a_review(fake_gh):
     result = run_deckhand("ready", "context", "248", env=REVIEWED)
 
     assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines[1] == "  none"
-    assert lines[7] == "  waiting: no Approved comment after the review of 2026-09-02"
-
-
-def test_context_reports_no_review_yet(fake_gh):
-    result = run_deckhand("ready", "context", "248")
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[7] == "  no review yet"
+    assert len([c for c in gh_calls() if "projectsV2(first" in c]) == 1
 
 
 def test_context_degrades_each_block_on_its_own(fake_gh, tmp_path):
@@ -260,13 +265,13 @@ def test_context_degrades_each_block_on_its_own(fake_gh, tmp_path):
         f'exec "{FAKE_GH}" "$@"\n',
     )
 
-    result = run_deckhand("ready", "context", "248", env={**APPROVED, **env})
+    result = run_deckhand("ready", "context", "248", env={**REVIEWED, **env})
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[1] == "  none"
-    assert lines[3] == "  unavailable (the field read failed)"
-    assert lines[5] == "  approved by lead on 2026-09-02"
+    blockers = lines.index("Blockers:")
+    assert lines[blockers + 1] == "  none"
+    assert lines[blockers + 3] == "  unavailable (the field read failed)"
     assert HEADER in lines
 
 
@@ -278,9 +283,11 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert [line for line in lines if not line.startswith("  ")] == [
+        "Kinds: feat, fix, chore, refactor, docs, perf",
+        "",
+        "## Story",
         "Blockers:",
         "Fields:",
-        "Approval:",
         "Done stories (last 20):",
     ]
     assert lines.count("  unavailable (nope)") == 4
@@ -319,16 +326,24 @@ def test_apply_refuses_without_a_review(fake_gh, gh_calls):
     result = _apply("--kind", "feat", "--points", "3", env={"GH_ISSUE_FILE": str(FIXTURES / "issue.json")})
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: no review comment on #248; run /deckhand:review 248\n"
+    assert result.stderr == "deckhand ready apply: no review comment on #248; run /deckhand:next 248\n"
     assert _writes(gh_calls) == []
 
 
-def test_apply_refuses_without_approval_after_the_review(fake_gh, gh_calls):
+def test_apply_boards_a_reviewed_story_with_no_approval_reply(fake_gh):
+    """The review comment is the whole gate; no reply on the issue is read as an approval."""
     result = _apply("--kind", "feat", "--points", "3", env=REVIEWED)
 
-    assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: no Approved comment after the review of 2026-09-02\n"
-    assert _writes(gh_calls) == []
+    assert result.returncode == 0, result.stderr
+    assert "Status=Backlog" in result.stdout
+
+
+def test_apply_reads_no_approval(fake_gh, gh_calls):
+    """Nothing in the run looks for an approving comment, so nothing can wait on one."""
+    result = _apply("--kind", "feat", "--points", "3")
+
+    assert result.returncode == 0, result.stderr
+    assert "approv" not in result.stdout.lower()
 
 
 def test_apply_refuses_a_closed_blocker(fake_gh, gh_calls, tmp_path):
@@ -378,10 +393,8 @@ def test_apply_refuses_a_blocker_it_cannot_read(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls) == []
 
 
-def test_apply_records_dependencies_adds_the_item_and_sets_the_fields(fake_gh, gh_calls, tmp_path):
-    result = _apply(
-        "--kind", "feat", "--points", "3", "--blocked-by", "240", env=_blocked(_status_reads(tmp_path, "Blocked"))
-    )
+def test_apply_records_dependencies_adds_the_item_and_sets_the_fields(fake_gh, gh_calls):
+    result = _apply("--kind", "feat", "--points", "3", "--blocked-by", "240", env=_blocked())
 
     assert result.returncode == 0, result.stderr
     assert _calls(gh_calls) == [
@@ -405,16 +418,15 @@ def test_apply_records_dependencies_adds_the_item_and_sets_the_fields(fake_gh, g
         "project field-list 2 --owner acme --format json",
         "project view 2 --owner acme --format json",
         "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
-        "--single-select-option-id opt_blocked",
+        "--single-select-option-id opt_backlog",
         "api graphql item-id",
         "api graphql field-values",
     ]
 
 
-def test_apply_sets_blocked_when_a_blocker_is_open(fake_gh, tmp_path):
-    result = _apply(
-        "--kind", "feat", "--points", "3", "--blocked-by", "240", env=_blocked(_status_reads(tmp_path, "Blocked"))
-    )
+def test_apply_boards_backlog_and_records_the_blocker_it_was_given(fake_gh):
+    """Blocked is gone from the board; the dependency is still recorded, and start reads it live."""
+    result = _apply("--kind", "feat", "--points", "3", "--blocked-by", "240", env=_blocked())
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -422,36 +434,26 @@ def test_apply_sets_blocked_when_a_blocker_is_open(fake_gh, tmp_path):
         "Added to the board",
         "Kind=feat",
         "Story Points=3",
-        "Status=Blocked",
+        "Status=Backlog",
         NEXT,
     ]
 
 
-def test_apply_sets_blocked_from_a_dependency_it_was_not_given(fake_gh, tmp_path):
-    result = _apply("--kind", "feat", "--points", "3", env=_blocked(_status_reads(tmp_path, "Blocked")))
+def test_apply_boards_backlog_with_a_dependency_it_was_not_given(fake_gh):
+    result = _apply("--kind", "feat", "--points", "3", env=_blocked())
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Added to the board",
         "Kind=feat",
         "Story Points=3",
-        "Status=Blocked",
+        "Status=Backlog",
         NEXT,
     ]
 
 
-def test_apply_records_a_repeated_blocker_once(fake_gh, gh_calls, tmp_path):
-    result = _apply(
-        "--kind",
-        "feat",
-        "--points",
-        "3",
-        "--blocked-by",
-        "240",
-        "--blocked-by",
-        "240",
-        env=_blocked(_status_reads(tmp_path, "Blocked")),
-    )
+def test_apply_records_a_repeated_blocker_once(fake_gh, gh_calls):
+    result = _apply("--kind", "feat", "--points", "3", "--blocked-by", "240", "--blocked-by", "240", env=_blocked())
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[0] == "Blocked by #240"
@@ -481,13 +483,11 @@ def test_apply_sets_backlog_when_nothing_blocks_the_story(fake_gh):
 
 
 def test_apply_re_sets_status_once_when_the_automation_flipped_it(fake_gh, gh_calls, tmp_path):
-    result = _apply(
-        "--kind", "feat", "--points", "3", "--blocked-by", "240", env=_blocked(_status_reads(tmp_path, "Backlog"))
-    )
+    result = _apply("--kind", "feat", "--points", "3", env=_status_reads(tmp_path, "In Progress"))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-2:] == [
-        "Status re-set to Blocked (the board's own automation had changed it)",
+        "Status re-set to Backlog (the board's own automation had changed it)",
         NEXT,
     ]
     status_writes = [c for c in gh_calls() if "PVTSSF_STATUS" in c]
@@ -495,7 +495,7 @@ def test_apply_re_sets_status_once_when_the_automation_flipped_it(fake_gh, gh_ca
         status_writes
         == [
             "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST "
-            "--field-id PVTSSF_STATUS --single-select-option-id opt_blocked"
+            "--field-id PVTSSF_STATUS --single-select-option-id opt_backlog"
         ]
         * 2
     )

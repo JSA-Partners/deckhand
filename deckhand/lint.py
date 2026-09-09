@@ -33,11 +33,16 @@ _SUB_BULLET_LEADING_WS = re.compile(r"^\s+")
 
 
 def checked(body: str) -> str:
-    """`body`, or a refusal naming every rule it breaks; every step that writes a body goes through it."""
-    problems = lint(body)
+    """`body` as it is written, or a refusal naming every rule it breaks.
+
+    Every step that writes a story body goes through it, and what it lints is the rendered body,
+    so the size the limit answers for is the size GitHub is handed, fold and all.
+    """
+    written = sections.render(*sections.parse(body))
+    problems = lint(written)
     if problems:
         raise Refusal("body: " + "; ".join(problems))
-    return body
+    return written
 
 
 def _heading(lines: list[str], pattern: re.Pattern[str]) -> int | None:

@@ -9,7 +9,7 @@ import pytest
 
 from deckhand import cli
 from deckhand.config import Settings
-from deckhand.step import Refusal, draft_path, indented, read_draft, refuse_git, step
+from deckhand.step import PLUGIN_ROOT, Refusal, branch_for, draft_path, indented, read_draft, refuse_git, step
 
 MODULE = "deckhand_demo_step"
 
@@ -50,7 +50,7 @@ def test_context_prints_one_line_and_returns_0_when_it_raises(demo, capsys):
 
     assert cli.main(["demo", "context", "5"]) == 0
     captured = capsys.readouterr()
-    assert captured.out == "(deckhand demo context failed: boom. Fetch what you need with gh.)\n"
+    assert captured.out == "(deckhand demo context failed: boom. Say what could not be read and stop.)\n"
     assert captured.err == ""
 
 
@@ -319,3 +319,30 @@ def test_refuse_git_turns_a_git_failure_into_a_refusal(repo):
         refuse_git("rev-parse", "--verify", "no-such-ref")
 
     assert "Needed a single revision" in str(raised.value)
+
+
+# --- branch_for --------------------------------------------------------------
+
+
+def test_branch_for_builds_the_story_branch(settings):
+    assert branch_for(settings, "feat", "Guest users see only their granted collections", 248) == (
+        "feat/248-guest-users-see-only"
+    )
+
+
+def test_branch_for_names_the_command_that_gives_a_story_its_kind(settings):
+    with pytest.raises(ValueError, match=r"#248 has no Kind; run /deckhand:next 248"):
+        branch_for(settings, None, "Guest users", 248)
+
+
+def test_branch_for_refuses_a_title_with_no_slug_in_it(settings):
+    with pytest.raises(ValueError, match="yields no usable slug"):
+        branch_for(settings, "feat", "***", 248)
+
+
+# --- PLUGIN_ROOT -------------------------------------------------------------
+
+
+def test_the_plugin_root_holds_the_skills_and_the_package():
+    assert (PLUGIN_ROOT / "skills").is_dir()
+    assert (PLUGIN_ROOT / "deckhand" / "step.py").is_file()

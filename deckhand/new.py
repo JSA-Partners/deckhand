@@ -2,8 +2,8 @@
 
 `context` says where the draft goes, what shape it takes, and which rules the body has to meet, so
 the skill never has to carry the contract in prose. It takes the session's starting point too:
-nothing, a file holding a request, or the number of a stub, whose feature it prints whole so the
-session can judge what belongs in this story rather than in a sibling.
+nothing, a file holding a request, the request itself, or the number of a stub, whose feature it
+prints whole so the session can judge what belongs in this story rather than in a sibling.
 
 `apply` lints the draft and either opens the issue or writes the draft into the stub it stands for;
 the draft is the model's working file, and the issue is the only record that outlives it. Writing a
@@ -17,12 +17,11 @@ records what waits on what, and ends on the line that sends one author agent to 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from dataclasses import replace
 from pathlib import Path
 
-from deckhand import gh, issue, lint, sections, stub
+from deckhand import gh, issue, lint, naming, sections, stub
 from deckhand.config import BODY_LIMIT
 from deckhand.step import (
     Refusal,
@@ -38,7 +37,6 @@ from deckhand.step import (
 
 DRAFT = "new.md"
 SPLIT = "split.md"
-TITLE_LIMIT = 72
 DEPENDS_HEADING = "## Depends on"
 SPLIT_NOTE = "If this is more than one story, write the split file instead."
 
@@ -55,8 +53,18 @@ RULES = [
     "Plan holds at least a '### Task 1' block.",
     "Notes may be empty.",
 ]
+# The one rule the body cannot break, because it is about the title rather than the text: `title`
+# is what enforces it, and the limit is the configured kinds', so the line is written when printed.
+TITLE_RULE = (
+    "The title is the Story's I want clause unless --title says otherwise, and either way at most "
+    "{limit} characters, because the pull request subject is built from it, so keep the clause "
+    "short or pass --title."
+)
 
-_WANT = re.compile(r"\bI want (.+?), so that\b", re.IGNORECASE)
+
+def rules() -> list[str]:
+    """Every rule a context prints: the body's, and then the title's, whose limit is computed."""
+    return [*RULES, TITLE_RULE.format(limit=naming.title_limit())]
 
 
 def skeleton() -> str:
@@ -92,7 +100,7 @@ def _split_block(name: str) -> None:
 def _rules() -> int:
     """The contract the body has to meet; every starting point ends on it."""
     print("Rules:")
-    for rule in RULES:
+    for rule in rules():
         print(f"- {rule}")
     return 0
 
@@ -115,14 +123,19 @@ def _tail(name: str, split: str | None = None) -> int:
     return 0
 
 
-def _file_context(path: Path) -> int:
-    """The request the user handed over, under the heading a stub carries it under."""
+def _request_context(source: str) -> int:
+    """The starting point handed over: the text of a file, or the request typed after the command.
+
+    A source that is not a file is the request itself, because what a person types there is a
+    request far more often than it is a path; either way it goes under the heading a stub uses.
+    """
+    path = Path(source)
     try:
-        text = path.read_text(encoding="utf-8-sig").strip("\n")
+        text = path.read_text(encoding="utf-8-sig").strip("\n") if path.is_file() else source
     except (OSError, UnicodeDecodeError) as error:
         print(f"Requirements: unavailable ({reason(error)})")
     else:
-        if not stub.is_stub(text):  # a file already under the heading keeps the one it has
+        if not stub.is_stub(text):  # a request already under the heading keeps the one it has
             print(stub.STUB_HEADING)
             print()
         print(text)
@@ -178,7 +191,7 @@ def _issue_context(number: int) -> int:
         print()
         return _tail(_draft_name(number))
     if not stub.is_stub(story.body):
-        print(f"#{number} is already a story; use /deckhand:amend {number}")
+        print(f"#{number} is already a story; run /deckhand:next {number}")
         print()
         return _rules()
     requirements, entries = stub.read(story.body)
@@ -202,47 +215,52 @@ def context(args: argparse.Namespace) -> int:
         return _tail(DRAFT, SPLIT)
     if source.isascii() and source.isdigit():
         return _issue_context(int(source))
-    return _file_context(Path(source))
+    return _request_context(source)
 
 
 # --- apply ------------------------------------------------------------------
 
 
 def title(flag: str | None, body: str) -> str:
-    """The issue title: `--title` when it has text, else the Story's I want clause."""
-    if flag and flag.strip():
-        return flag.strip()
-    story = " ".join(sections.get(body, "Story", "").split())
-    found = _WANT.search(story)
-    want = found.group(1).strip() if found else ""
-    if not want:
-        raise Refusal("no title: pass --title, or write the Story as 'As a ..., I want ..., so that ...'")
-    return _trimmed(want[0].upper() + want[1:])
+    """The title `naming` takes from `--title` or the Story, refused here when it cannot make one."""
+    try:
+        return naming.title(flag, body)
+    except ValueError as error:
+        raise Refusal(str(error)) from error
 
 
-def _trimmed(want: str) -> str:
-    """`want` at TITLE_LIMIT, cut at the last word rather than mid-word when there is one."""
-    if len(want) <= TITLE_LIMIT:
-        return want.strip()
-    # One character past the limit, so a word that ends exactly on it survives the partition.
-    head, _, _ = want[: TITLE_LIMIT + 1].rpartition(" ")
-    return (head or want[:TITLE_LIMIT]).strip()
+def fits(subject: str) -> str:
+    """`subject` when the pull request subject can carry it, refused here the way `title` is."""
+    try:
+        return naming.fits(subject)
+    except ValueError as error:
+        raise Refusal(str(error)) from error
+
+
+def next_line(number: int) -> str:
+    """The line a written story ends on: the one command that takes it from here."""
+    return f"Next: /deckhand:next {number}."
+
+
+def split_next_line(numbers: list[int]) -> str:
+    """The lines a split ends on; every story an author wrote is its own command from here."""
+    return "\n".join(next_line(number) for number in sorted(numbers))
 
 
 def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
     """Rewrite the stub as the story it stands for; its number and dependencies are untouched."""
     story = issue.view(repo, number)
     if not stub.is_stub(story.body):
-        raise Refusal(f"#{number} is already a story; use /deckhand:amend {number}")
+        raise Refusal(f"#{number} is already a story; run /deckhand:next {number}")
     if not stub.read(story.body)[1]:
         raise Refusal(f"#{number} is a parked feature; run /deckhand:new {number} to split it")
+    subject = fits((flag or "").strip())
     issue.update_body(repo, number, lint.checked(draft))
     print(f"Written #{number} {story.url}", flush=True)
-    subject = (flag or "").strip()
     if subject:  # the stub's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
         print(f"Title: {subject}")
-    print(f"Next: /deckhand:review {number}")
+    print(next_line(number))
     return 0
 
 
@@ -296,9 +314,11 @@ def _split(repo: str, text: str, parked: int | None) -> int:
         issue.close(repo, parked)
         print(f"Closed #{parked}", flush=True)
     # An agent gets no plugin-root substitution and its shell may not carry one either, so the
-    # launcher it is to run travels in the line, already resolved.
+    # launcher it is to run travels in the line, already resolved. The line is not a `Next:` one:
+    # only the last line of a step is that, and here it is the one about the reviews that follow.
     stubs = " ".join(f"#{number}" for number in numbers)
-    print(f"Next: dispatch deckhand:author for each of {stubs} with {Path(sys.argv[0]).resolve()}")
+    print(f"Dispatch deckhand:author for each of {stubs} with {Path(sys.argv[0]).resolve()}")
+    print(split_next_line(numbers))
     return 0
 
 
@@ -312,7 +332,7 @@ def _park(repo: str, text: str, flag: str | None) -> int:
     if stub.lists_stories(text):
         raise Refusal("a parked feature has no stories yet; use --split")
     first = next(line for line in requirements.splitlines() if line.strip())
-    number, url = issue.create(repo, (flag or "").strip() or _trimmed(first), stub.render(requirements, []))
+    number, url = issue.create(repo, (flag or "").strip() or first.strip(), stub.render(requirements, []))
     print(f"Parked #{number} {url}")
     return 0
 
@@ -321,7 +341,10 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "source",
         nargs="?",
-        help="an all-digit source is an issue number; anything else is a file, so ./57 names a file",
+        help=(
+            "an all-digit source is an issue number; anything else is a file when one exists, else the "
+            "request, so ./57 names a file"
+        ),
     )
 
 
@@ -362,5 +385,5 @@ def apply(args: argparse.Namespace) -> int:
     subject = title(args.title, body)
     number, url = issue.create(gh.repo_slug(), subject, body)
     print(f"Created #{number} {url}")
-    print(f"Next: /deckhand:review {number}")
+    print(next_line(number))
     return 0
