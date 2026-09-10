@@ -1,6 +1,6 @@
 {
   "name": "deckhand",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.",
   "author": {
     "name": "JSA+Partners",
