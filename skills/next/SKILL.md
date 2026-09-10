@@ -64,7 +64,8 @@ and run `amend apply $issue <draft> --new-issue "<title>"`.
 
 From the ready context (above, or run it), tell the story plainly, propose kind and points from
 the done stories that most resemble it, and ask one question: board it, review it again, or not
-yet. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
+yet. Say the kind and the points in the sentence before boarding, even when the answer came
+early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Check and build
@@ -89,7 +90,8 @@ Fix every comment, commit with deckhand:commit, and give them
 `tuicr -r <last reviewed commit>..HEAD`, the HEAD the previous pass read, for the new commits,
 until a pass has no comments. Log the clean pass with `log $issue "Reviewed: <full sha> <one
 line>"`, the full sha first; the pull request opens only from that commit. Then run the
-deckhand:document skill.
+deckhand:document skill; its commit lands past the reviewed one and needs no pass, because
+docs/claude is Claude's alone.
 
 ## Pull request
 

@@ -273,7 +273,7 @@ def test_apply_posts_the_verdict_and_every_finding_with_its_decision(fake_gh, gh
         "\n"
         "- chaos.1, P2, accepted: A retried job writes the grant twice. Scope In names one write.\n"
         "- unknowns.1, P3, declined, rejected by the skeptic: The store method is undefined. Notes names the file. "
-        "Because the skeptic is right.\n"
+        "The skeptic is right.\n"
     )
     assert result.stdout.splitlines() == [COMMENT_URL]
 
@@ -290,7 +290,7 @@ def test_a_changed_decision_carries_its_reason(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     assert (
         "- chaos.1, P2, changed: A retried job writes the grant twice. Scope In names one write. "
-        "Because retry once, not twice.\n"
+        "Retry once, not twice.\n"
     ) in _posted(copy)
 
 
@@ -308,7 +308,7 @@ def test_a_line_adds_no_second_stop_to_a_half_that_has_one(fake_gh, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "- chaos.1, P2, accepted: Does a retry write twice? Scope In names one write. Because once is enough.\n" in (
+    assert "- chaos.1, P2, accepted: Does a retry write twice? Scope In names one write. Once is enough.\n" in (
         _posted(copy)
     )
 

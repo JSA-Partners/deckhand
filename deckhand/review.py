@@ -310,8 +310,8 @@ def _stop(text: str) -> str:
 def _line(finding: Finding, decision: str, why: str) -> str:
     """One finding as the log reads it: id, severity, the decision, the skeptic's verdict, then the text."""
     verdict = ", rejected by the skeptic" if finding.verdict == "REJECTED" else ""
-    because = f" Because {_stop(why)}" if why else ""
-    text = f"{_stop(finding.claim)} {_stop(finding.evidence)}{because}"
+    reason_text = f" {_stop(why[0].upper() + why[1:])}" if why else ""
+    text = f"{_stop(finding.claim)} {_stop(finding.evidence)}{reason_text}"
     return f"- {finding.id}, {finding.severity}, {decision}{verdict}: {text}"
 
 

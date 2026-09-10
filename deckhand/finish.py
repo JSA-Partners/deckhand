@@ -165,10 +165,13 @@ def _branch() -> str:
 
 
 def _reviewed_head(story: issue.Issue, number: int) -> None:
-    """Refuse unless HEAD is the commit the last `Reviewed:` entry names; nothing unread opens a pull request.
+    """Refuse unless HEAD is the commit the last `Reviewed:` entry names, or only docs sit past it.
 
-    Both sides go through rev-parse, and the named side as a commit, because a full sha that names
-    nothing in this clone would otherwise come back as itself.
+    Nothing unread opens a pull request. The one exception is `docs/claude/`, which the document
+    step writes after the person's pass and which is Claude's alone to keep, so commits past the
+    reviewed one that touch nothing else are let through. Both shas go through rev-parse, and the
+    named side as a commit, because a full sha that names nothing in this clone would otherwise
+    come back as itself.
     """
     entry = log.last(story, "Reviewed:")
     if entry is None:
@@ -179,7 +182,15 @@ def _reviewed_head(story: issue.Issue, number: int) -> None:
         wanted = git.run("rev-parse", "--verify", f"{named}^{{commit}}")
     except git.GitError as error:
         raise Refusal(f"the last Reviewed: entry names {named}, which this clone does not have") from error
-    if head != wanted:
+    if head == wanted:
+        return
+    try:
+        git.run("merge-base", "--is-ancestor", wanted, head)
+    except git.GitError as error:
+        raise Refusal(f"HEAD {head} is not the last reviewed commit {wanted}; review the branch again") from error
+    changed = git.run("diff", "--name-only", f"{wanted}..{head}").splitlines()
+    unread = [path for path in changed if not path.startswith(f"{document.DEFAULT_DIR}/")]
+    if unread:
         raise Refusal(f"HEAD {head} is not the last reviewed commit {wanted}; review the branch again")
 
 

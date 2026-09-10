@@ -285,6 +285,37 @@ def test_apply_refuses_a_head_that_is_not_the_reviewed_commit(fake_gh, gh_calls,
     assert BRANCH not in _branches(origin)
 
 
+def test_apply_lets_a_docs_commit_past_the_reviewed_one(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    """The document step writes docs/claude after the person's pass, and that directory is Claude's alone."""
+    reviewed = _sha(repo, "HEAD")
+    (repo / "docs" / "claude").mkdir(parents=True)
+    _commit(repo, "docs/claude/decisions.md", "# Decisions\n", "docs: record the grant decision")
+
+    result = _apply(repo, env=_reviewed_issue(tmp_path, reviewed))
+
+    assert result.returncode == 0, result.stderr
+    assert _sha(origin, BRANCH) == _sha(repo, "HEAD")
+
+
+def test_apply_refuses_a_docs_commit_that_also_touches_code(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    reviewed = _sha(repo, "HEAD")
+    (repo / "docs" / "claude").mkdir(parents=True)
+    (repo / "docs" / "claude" / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
+    (repo / "store.py").write_text("def by_grant():\n    return [1]\n", encoding="utf-8")
+    _git(repo, "add", "docs/claude/decisions.md", "store.py")
+    _git(repo, "commit", "-qm", "docs: record the decision and touch the store")
+    head = _sha(repo, "HEAD")
+
+    result = _apply(repo, env=_reviewed_issue(tmp_path, reviewed))
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        f"deckhand finish apply: HEAD {head} is not the last reviewed commit {reviewed}; review the branch again\n"
+    )
+    assert _writes(gh_calls) == []
+    assert BRANCH not in _branches(origin)
+
+
 def test_apply_refuses_a_story_never_reviewed(fake_gh, gh_calls, repo, origin, branch, tmp_path):
     result = _apply(repo, env=_issue(tmp_path, "unreviewed"))
 

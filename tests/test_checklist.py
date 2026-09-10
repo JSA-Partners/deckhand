@@ -132,9 +132,27 @@ def test_board_view_left_names_what_it_shows(fake_gh, settings, tmp_path, monkey
 
     item = _item(checklist.checklist(settings, REPO, _fields()), "Board view fields")
 
-    assert item.left == (
-        "on the Board view show only Title, Status, Kind, Story Points, Actual, Assignees, Repository "
-        "(currently: Title, Status)"
+    assert item.left == "on the Board view turn on Kind, Story Points, Actual, Assignees, Repository"
+
+
+def test_board_view_is_done_in_any_order(fake_gh, settings, tmp_path, monkeypatch):
+    """The view menu only toggles fields, so the order GitHub reports is never a person's to change."""
+    _views(
+        tmp_path,
+        "shuffled.json",
+        {"Board": ["Repository", "Title", "Actual", "Status", "Assignees", "Kind", "Story Points"]},
+        monkeypatch,
+    )
+
+    assert _item(checklist.checklist(settings, REPO, _fields()), "Board view fields").left is None
+
+
+def test_board_view_left_names_the_extra_field_too(fake_gh, settings, tmp_path, monkeypatch):
+    _views(tmp_path, "extra.json", {"Board": [*checklist.BOARD_FIELDS, "Labels"]}, monkeypatch)
+
+    assert (
+        _item(checklist.checklist(settings, REPO, _fields()), "Board view fields").left
+        == "on the Board view turn off Labels"
     )
 
 

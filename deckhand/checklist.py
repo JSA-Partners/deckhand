@@ -95,10 +95,14 @@ def _board_item(settings: Settings) -> Item:
         return Item("Board view fields", click, f"{UNKNOWN}{reason(error)})")
     if shown is None:
         return Item("Board view fields", click, "no view named Board")
-    if shown == BOARD_FIELDS:
+    # The view menu only toggles a field on or off, so the order it reports is GitHub's, never a person's.
+    if set(shown) == set(BOARD_FIELDS):
         return Item("Board view fields", click, None)
-    wanted, current = ", ".join(BOARD_FIELDS), ", ".join(shown) or "none"
-    return Item("Board view fields", click, f"on the Board view show only {wanted} (currently: {current})")
+    missing = [name for name in BOARD_FIELDS if name not in shown]
+    extra = [name for name in shown if name not in BOARD_FIELDS]
+    parts = [f"turn on {', '.join(missing)}"] if missing else []
+    parts += [f"turn off {', '.join(extra)}"] if extra else []
+    return Item("Board view fields", click, f"on the Board view {' and '.join(parts)}")
 
 
 def _kind_item(fields: list[dict[str, Any]] | None, kinds: list[str], unread: str) -> Item:

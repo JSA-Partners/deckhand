@@ -331,10 +331,9 @@ def test_context_reports_the_board_view_fields_that_are_off(repo, fake_gh, tmp_p
 
     result = run_deckhand("setup", "context", cwd=repo, env=env)
 
-    assert (
-        "  Board view fields: on the Board view show only Title, Status, Kind, Story Points, Actual, Assignees, "
-        "Repository (currently: Title, Status)"
-    ) in _checklist(result)
+    assert "  Board view fields: on the Board view turn on Kind, Story Points, Actual, Assignees, Repository" in (
+        _checklist(result)
+    )
 
 
 def test_context_reports_a_project_with_no_board_view(repo, fake_gh, tmp_path):
@@ -770,8 +769,8 @@ def test_apply_names_the_click_for_the_board_view(repo, fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert (
-        "  1. Board view fields: on the Board view show only Title, Status, Kind, Story Points, Actual, Assignees, "
-        "Repository (currently: Title, Status). Board view > view menu > Fields."
+        "  1. Board view fields: on the Board view turn on Kind, Story Points, Actual, Assignees, Repository. "
+        "Board view > view menu > Fields."
     ) in result.stdout.splitlines()
 
 
