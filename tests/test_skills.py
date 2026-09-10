@@ -19,38 +19,29 @@ AGENTS = sorted((ROOT / "agents").glob("*.md"))
 
 # The one command each skill injects, by skill name.
 INJECTS = {
-    "amend": "amend context",
     "commit": "commit context",
     "document": "document context",
-    "finish": "finish context",
     "new": "new context",
     "next": "next context",
-    "ready": "ready context",
-    "review": "review context",
     "setup": "setup context",
-    "start": "start context",
 }
 
 # The skills a person types and the model never picks: each one writes to GitHub, so its timing
 # belongs to the person.
 TYPED = {"setup", "new", "next"}
 
-# The steps `next` runs. They are off the person's menu because `next` is the one way in, and their
-# instructions are printed by it rather than read from a slash command.
-HIDDEN = {"review", "amend", "ready", "start", "finish"}
+# The steps `next` carries. They were skills once; nothing a person reads may still name one as a
+# command to type.
+STEPS = ("amend", "finish", "ready", "review", "start")
 
-# What every hidden step's description ends with, so the menu it is missing from is not a mystery.
-USED_BY = "Used by /deckhand:next."
-
-# The two skills that close a person's turn, each with the same recipe.
-CLOSING = {"new", "next"}
-
-# Ban clauses the close used to carry; the recipe says what to do instead of what not to.
-BANNED = ("nothing after", "belongs on the issue")
+# The word limit is one per skill file: `next` carries what five skills carried, and `new` runs a
+# whole brainstorm; everything else stays short.
+WORD_LIMITS = {"next": 1100, "new": 300}
+DEFAULT_WORD_LIMIT = 200
 
 GRANT = 'Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *)'
 BARE_GRANT = "Bash(deckhand *)"
-WORD_LIMIT = 200
+RECOMMEND = re.compile(r"\brecommend", re.IGNORECASE)
 
 # Names of the dispatcher, the recipe files, the commands that went with them, and the plan step
 # amend absorbed. Most are distinctive enough to match anywhere; Actions, workflow, dispatch, and
@@ -64,7 +55,6 @@ RETIRED = [
         (r"deckhand[\"']?\s+plan\b", re.IGNORECASE),
         (r"/deckhand:plan\b", re.IGNORECASE),
         ("resume-context", re.IGNORECASE),
-        ("resume", re.IGNORECASE),
         (r"\{\{", 0),
         ("_commands", re.IGNORECASE),
         ("Repository block", re.IGNORECASE),
@@ -81,8 +71,8 @@ RETIRED = [
 ]
 
 # A step is reached through `next` and nowhere else, so nothing a person reads may name one as a
-# command to type; nor may anything name the Approved reply, which the ticked review replaced.
-_STEP_COMMAND = re.compile(rf"/deckhand:({'|'.join(sorted(HIDDEN))})\b")
+# command to type; nor may anything name the Approved reply, which the review conversation replaced.
+_STEP_COMMAND = re.compile(rf"/deckhand:({'|'.join(STEPS)})\b")
 _APPROVED = re.compile(r"\bApproved\b")
 
 _INJECTION = re.compile(r"^!`(.+)`\s*$", re.MULTILINE)
@@ -116,13 +106,9 @@ def test_every_skill_is_named_for_its_directory(skill):
 
 
 def test_every_description_is_one_sentence(skill):
-    """One sentence for what the skill does, and for a hidden step one more saying who runs it."""
-    name, front, _ = skill
+    _, front, _ = skill
     description = front.get("description", "")
     assert description, "no description"
-    if name in HIDDEN:
-        assert description.endswith(USED_BY), description
-        description = description[: -len(USED_BY)].strip()
     assert len(_SENTENCE_END.findall(description)) == 1, description
 
 
@@ -169,39 +155,20 @@ def test_every_command_a_skill_invokes_still_exists(skill):
 
 
 def test_the_typed_commands_are_the_ones_the_model_never_picks(skill):
-    """A command that writes to GitHub is typed; a step is hidden from the menu and nothing else."""
+    """A command that writes to GitHub is typed; every other skill is the model's to pick."""
     name, front, _ = skill
     if name in TYPED:
         assert front.get("disable-model-invocation") == "true", name
         assert "user-invocable" not in front, name
-    elif name in HIDDEN:
-        assert front.get("user-invocable") == "false", name
-        assert "disable-model-invocation" not in front, name
     else:
         assert "user-invocable" not in front and "disable-model-invocation" not in front, name
 
 
-def test_no_hidden_step_writes_a_next_line_of_its_own(skill):
-    """The step's command prints the one line the person acts on; the skill never composes another."""
-    name, _, body = skill
-    if name not in HIDDEN:
-        return
-    assert "Next:" not in body, name
-
-
-def test_the_closing_skills_hand_over_what_the_commands_printed(skill):
-    """The turn ends where a person reads: the printed lines, the link, and the next line, as is."""
-    name, _, body = skill
-    if name not in CLOSING:
-        return
-    for phrase in ("verbatim", "Next:"):
-        assert phrase in body, (name, phrase)
-
-
-def test_no_skill_closes_with_a_ban(skill):
-    """The close is a recipe: what to print, in what order. Nothing is forbidden in its place."""
+def test_no_skill_shows_command_output_to_the_person(skill):
+    """What a command printed is Claude's to read; the person hears it in words."""
     _, _, body = skill
-    assert [phrase for phrase in BANNED if phrase in body] == []
+    for phrase in ("code block", "verbatim", "Next:"):
+        assert phrase not in body, phrase
 
 
 def test_the_document_skill_reads_right_with_no_arguments(skill):
@@ -212,9 +179,48 @@ def test_the_document_skill_reads_right_with_no_arguments(skill):
     assert "``" not in body.replace("$mode", "").replace("$topic", "")
 
 
-def test_every_skill_stays_under_the_word_limit(skill):
-    _, _, body = skill
-    assert len(body.split()) < WORD_LIMIT
+def test_every_skill_stays_under_its_word_limit(skill):
+    name, _, body = skill
+    assert len(body.split()) < WORD_LIMITS.get(name, DEFAULT_WORD_LIMIT), name
+
+
+def test_the_hidden_skills_are_gone():
+    assert sorted(p.name for p in SKILLS) == ["commit", "document", "new", "next", "setup"]
+
+
+def test_the_next_skill_speaks_and_asks_with_a_recommendation():
+    """The conversation guide: one section per step, a recommendation with every question."""
+    _, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+    for heading in (
+        "## Speaking",
+        "## Review",
+        "## Board",
+        "## Check and build",
+        "## Branch review",
+        "## Pull request",
+        "## After the merge",
+    ):
+        assert heading in body, heading
+    assert RECOMMEND.search(body)
+    assert "verdict" in body
+    assert "tuicr -r origin/main..HEAD" in body and "tuicr -r <last reviewed commit>..HEAD" in body
+    assert "--stdout" not in body  # the export is pasted either way, and the flag needs a terminal
+
+
+def test_the_next_skill_asks_for_the_number_it_was_not_given():
+    """The argument is optional in the hint, so the skill has to say what to do without one."""
+    front, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+    assert front.get("argument-hint") == "<issue-number>"
+    assert "If no number was given, ask which story." in body
+    for grant in ("Skill(deckhand:*)", "Skill(superpowers:*)"):
+        assert grant in front.get("allowed-tools", ""), grant
+
+
+def test_the_new_skill_runs_the_brainstorm_aimed_at_a_story():
+    _, body = _split((ROOT / "skills" / "new" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "superpowers:brainstorming" in body
+    assert "superpowers:writing-plans" in body
+    assert "Draft" in body
 
 
 # --- agents ------------------------------------------------------------------
@@ -256,7 +262,7 @@ def test_no_agent_names_a_step_command_or_the_approved_reply(agent):
 
 def test_every_agent_stays_under_the_word_limit(agent):
     _, _, body = agent
-    assert len(body.split()) < WORD_LIMIT
+    assert len(body.split()) < DEFAULT_WORD_LIMIT
 
 
 def test_the_author_runs_the_deckhand_its_message_hands_it():
@@ -266,31 +272,3 @@ def test_the_author_runs_the_deckhand_its_message_hands_it():
     assert "new apply --stub" in body
     assert BARE_GRANT not in front.get("tools", "")
     assert [name for name in _INVOCATION.findall(body) if name in _surface()] == []
-
-
-def test_the_finish_skill_names_both_rounds_of_the_branch_review():
-    """The review is finish's first act, and a loop: the first pass reads the branch, the rest the new commits."""
-    _, body = _split((ROOT / "skills" / "finish" / "SKILL.md").read_text(encoding="utf-8"))
-    assert "tuicr -r origin/main..HEAD --stdout" in body
-    assert "tuicr -r <clean sha>..HEAD --stdout" in body
-
-
-def test_the_start_skill_ends_at_the_implementation():
-    """The branch review moved to finish, so nothing in start asks for an export."""
-    _, body = _split((ROOT / "skills" / "start" / "SKILL.md").read_text(encoding="utf-8"))
-    assert "tuicr" not in body
-
-
-def test_the_next_skill_asks_for_the_number_it_was_not_given():
-    """The argument is optional in the hint, so the skill has to say what to do without one."""
-    front, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
-    assert front.get("argument-hint") == "<issue-number>"
-    assert "If no number was given, ask which story." in body
-    for grant in ("Skill(deckhand:*)", "Skill(superpowers:*)"):
-        assert grant in front.get("allowed-tools", ""), grant
-
-
-def test_the_reviewer_names_the_cap():
-    """The command posts seven, so the brief has to ask for seven rather than leave the count open."""
-    _, body = _split((ROOT / "agents" / "reviewer.md").read_text(encoding="utf-8"))
-    assert "seven" in body

@@ -9,7 +9,18 @@ import pytest
 
 from deckhand import cli
 from deckhand.config import Settings
-from deckhand.step import PLUGIN_ROOT, Refusal, branch_for, draft_path, indented, read_draft, refuse_git, step
+from deckhand.step import (
+    PLUGIN_ROOT,
+    Refusal,
+    branch_for,
+    draft_path,
+    indented,
+    local_branch,
+    read_draft,
+    refuse_git,
+    step,
+)
+from tests.conftest import run_git
 
 MODULE = "deckhand_demo_step"
 
@@ -338,6 +349,24 @@ def test_branch_for_names_the_command_that_gives_a_story_its_kind(settings):
 def test_branch_for_refuses_a_title_with_no_slug_in_it(settings):
     with pytest.raises(ValueError, match="yields no usable slug"):
         branch_for(settings, "feat", "***", 248)
+
+
+# --- local_branch ------------------------------------------------------------
+
+
+def test_local_branch_finds_the_story_branch_by_number(repo):
+    run_git(repo, "branch", "feat/248-old-name")
+
+    assert local_branch(248) == "feat/248-old-name"
+    assert local_branch(7) is None
+
+
+def test_local_branch_refuses_two_branches_for_one_number(repo):
+    run_git(repo, "branch", "feat/248-a")
+    run_git(repo, "branch", "fix/248-b")
+
+    with pytest.raises(ValueError, match="2 branches for #248: feat/248-a, fix/248-b"):
+        local_branch(248)
 
 
 # --- PLUGIN_ROOT -------------------------------------------------------------

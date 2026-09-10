@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from deckhand import gh, issue
-from tests.conftest import FIXTURES
 
 REPO = "acme/widgets"
 # A backtick, a shell variable, a quote, and a newline: everything a command line would mangle.
@@ -19,15 +17,6 @@ def body_copy(fake_gh, tmp_path, monkeypatch) -> Path:
     path = tmp_path / "bodies"
     monkeypatch.setenv("GH_BODY_FILE_COPY", str(path))
     return path
-
-
-def _issue_file(tmp_path: Path, monkeypatch, name: str, extra: list[dict]) -> None:
-    """Point the fake at `name` with `extra` comments appended, for a case no fixture covers."""
-    data = json.loads((FIXTURES / name).read_text())
-    data["comments"] = [*data["comments"], *extra]
-    path = tmp_path / "issue-variant.json"
-    path.write_text(json.dumps(data))
-    monkeypatch.setenv("GH_ISSUE_FILE", str(path))
 
 
 def _body_file_path(call: str) -> Path:
@@ -49,7 +38,6 @@ def test_view_parses_comments(fake_gh, gh_calls):
         ("arjan", "2026-09-01T12:00:00Z"),
     ]
     assert result.comments[1].body == "Approved."
-    assert result.comments[1].url is None
     assert gh_calls() == ["issue view 248 --repo acme/widgets --json number,title,body,url,state,comments"]
 
 
@@ -230,32 +218,6 @@ def test_blocking_accepts_repo(fake_gh, gh_calls, monkeypatch):
     assert gh_calls() == ["api repos/acme/gadgets/issues/248/dependencies/blocking --paginate --slurp"]
 
 
-# --- review_comment ---------------------------------------------------------
-
-
-def test_review_comment_is_the_latest_review(fake_gh, tmp_path, monkeypatch):
-    later = {
-        "author": {"login": "lens-two"},
-        "createdAt": "2026-09-03T09:00:00Z",
-        "body": "## Review\n\nTick a finding to accept it.\n\n- [ ] **chaos.2, P3** Cache the grant lookup. Plan\n",
-    }
-    _issue_file(tmp_path, monkeypatch, "issue-reviewed.json", [later])
-    found = issue.review_comment(issue.view(REPO, 248))
-    assert found is not None
-    assert found.author == "lens-two"
-    assert "chaos.2" in found.body
-
-
-def test_review_comment_is_none_without_one(fake_gh):
-    # issue.json's first comment opens with "## Review pass: spec": a heading that is not the heading.
-    assert issue.review_comment(issue.view(REPO, 248)) is None
-
-
-def test_the_module_no_longer_reads_approvals():
-    """The review comment is the whole gate; nothing looks for a reply whose first word approves."""
-    assert not hasattr(issue, "approved_after")
-
-
 # --- pull_request -----------------------------------------------------------
 
 
@@ -283,99 +245,32 @@ def test_pull_request_rejects_a_malformed_repo(fake_gh, gh_calls):
     assert gh_calls() == []
 
 
-# --- the REST comments ------------------------------------------------------
+# --- pull_request_state ----------------------------------------------------
 
 
-def _comments(tmp_path: Path, monkeypatch, *raw: dict) -> None:
-    """Point the fake's REST comments endpoint at `raw`, the shape the API returns."""
-    path = tmp_path / "comments.json"
-    path.write_text(json.dumps(list(raw)), encoding="utf-8")
-    monkeypatch.setenv("GH_COMMENTS_FILE", str(path))
+PR_URL = "https://github.com/acme/widgets/pull/1000"
 
 
-def _raw(body: str, created: str, updated: str | None = None, login: str = "arjan") -> dict:
-    return {
-        "body": body,
-        "created_at": created,
-        "updated_at": updated or created,
-        "user": {"login": login},
-        "html_url": f"https://github.com/acme/widgets/issues/248#issuecomment-{created}",
-    }
+def test_pull_request_state_returns_the_url_while_it_is_open(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+
+    assert issue.pull_request_state(REPO, PR_URL) == PR_URL
+    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json state,url"]
 
 
-def test_feedback_state_reads_the_edit_the_amend_and_the_replies_in_one_call(fake_gh, gh_calls, tmp_path, monkeypatch):
-    _comments(
-        tmp_path,
-        monkeypatch,
-        _raw("## Review\n\n- [ ] spec.1", "2026-09-01T09:00:00Z"),
-        _raw("Before the amend.", "2026-09-02T09:00:00Z"),
-        _raw("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
-        _raw("Split: #250 Grant store, blocked by this story.", "2026-09-04T09:00:00Z"),
-        _raw("Deviation: the retry path moved", "2026-09-05T09:00:00Z"),
-        _raw("Also cover the empty case.", "2026-09-06T09:00:00Z", login="mattjmoran"),
-    )
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
+def test_pull_request_state_is_none_once_it_is_not_open(fake_gh, monkeypatch, state):
+    monkeypatch.setenv("GH_PR_STATE", state)
 
-    edited, reviewed_at, amended, since = issue.feedback_state(REPO, 248)
-
-    assert edited == "2026-09-01T09:00:00Z"
-    assert reviewed_at == "2026-09-01T09:00:00Z"
-    assert amended == "2026-09-03T09:00:00Z"
-    assert [(c.author, c.body) for c in since] == [("mattjmoran", "Also cover the empty case.")]
-    assert since[0].created_at == "2026-09-06T09:00:00Z"
-    assert since[0].url == "https://github.com/acme/widgets/issues/248#issuecomment-2026-09-06T09:00:00Z"
-    assert len(gh_calls()) == 1
+    assert issue.pull_request_state(REPO, PR_URL) is None
 
 
-def test_feedback_state_takes_the_edit_stamp_off_the_latest_review(fake_gh, tmp_path, monkeypatch):
-    _comments(
-        tmp_path,
-        monkeypatch,
-        _raw("## Review\n\n- [ ] spec.1", "2026-09-01T09:00:00Z"),
-        _raw("## Review\n\n- [x] spec.1", "2026-09-02T09:00:00Z", "2026-09-04T11:00:00Z"),
-    )
-
-    assert issue.feedback_state(REPO, 248)[:2] == ("2026-09-04T11:00:00Z", "2026-09-02T09:00:00Z")
+def test_pull_request_state_fails_when_the_pull_request_cannot_be_read(fake_gh):
+    with pytest.raises(gh.GhError):
+        issue.pull_request_state(REPO, PR_URL)
 
 
-def test_feedback_state_is_empty_when_nothing_has_been_said(fake_gh):
-    assert issue.feedback_state(REPO, 248) == (None, "", "", [])
-
-
-def test_a_review_pass_comment_is_not_a_review(fake_gh, tmp_path, monkeypatch):
-    """The old process headed its comments `## Review pass:`; only `## Review` is one now."""
-    _comments(
-        tmp_path,
-        monkeypatch,
-        _raw("## Review pass: spec\n\nFindings...", "2026-09-01T09:00:00Z"),
-        _raw("Drop the second criterion.", "2026-09-02T09:00:00Z"),
-    )
-
-    edited, _, _, since = issue.feedback_state(REPO, 248)
-
-    assert edited is None
-    assert [c.body for c in since] == ["Drop the second criterion."]
-
-
-def test_feedback_since_reads_what_a_person_wrote_after_the_last_amend(fake_gh, tmp_path, monkeypatch):
-    _comments(
-        tmp_path,
-        monkeypatch,
-        _raw("## Review\n\n- [ ] spec.1", "2026-09-01T09:00:00Z"),
-        _raw("Before the amend.", "2026-09-02T09:00:00Z"),
-        _raw("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
-        _raw("Also cover the empty case.", "2026-09-06T09:00:00Z", login="mattjmoran"),
-    )
-
-    assert [c.body for c in issue.feedback_since(REPO, 248)] == ["Also cover the empty case."]
-
-
-def test_feedback_since_reads_everything_after_the_review_when_nothing_was_amended(fake_gh, tmp_path, monkeypatch):
-    _comments(
-        tmp_path,
-        monkeypatch,
-        _raw("Before the review.", "2026-09-01T09:00:00Z"),
-        _raw("## Review\n\n- [ ] spec.1", "2026-09-02T09:00:00Z"),
-        _raw("Drop the second criterion.", "2026-09-03T09:00:00Z"),
-    )
-
-    assert [c.body for c in issue.feedback_since(REPO, 248)] == ["Drop the second criterion."]
+def test_pull_request_state_rejects_a_malformed_repo(fake_gh, gh_calls):
+    with pytest.raises(gh.GhError):
+        issue.pull_request_state("widgets", PR_URL)
+    assert gh_calls() == []

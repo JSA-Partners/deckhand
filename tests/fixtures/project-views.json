@@ -1,0 +1,6 @@
+{"data": {"organization": {"projectV2": {"views": {"nodes": [
+  {"name": "Board", "fields": {"nodes": [
+    {"name": "Title"}, {"name": "Status"}, {"name": "Kind"}, {"name": "Story Points"}, {"name": "Actual"}, {"name": "Assignees"}, {"name": "Repository"}]}},
+  {"name": "Table", "fields": {"nodes": [
+    {"name": "Title"}, {"name": "Assignees"}, {"name": "Status"}, {"name": "Labels"}]}}
+]}}}}}

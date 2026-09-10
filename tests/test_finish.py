@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import naming
 from tests.conftest import FIXTURES, run_deckhand
 
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
@@ -14,8 +15,8 @@ BRANCH = "feat/248-guest-users-see-only"
 TITLE = "Guest users see only their granted collections"
 LONG_TITLE = "Guest users see only the collections their organization granted them today"
 STORY = (
-    "As a guest user, I want to see only the collections I was granted, so"
-    "\nthat I am not exposed to other organizations' data."
+    "As a guest user, I want to see only the collections I was granted, "
+    "so that I am not exposed to other organizations' data."
 )
 BODY = f"{STORY}\n\nCloses #248\n"
 PR_LIST = f"pr list --repo acme/widgets --head {BRANCH} --state open --json url"
@@ -25,7 +26,6 @@ PENDING = (
     "--single-select-option-id opt_pending"
 )
 ACTUAL = "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTF_ACTUAL --number 3"
-NEXT = "Next: merge it."
 BLOCKING = json.dumps(
     [
         {"number": 4, "state": "open"},
@@ -52,8 +52,12 @@ def _commit(repo: Path, name: str, text: str, message: str) -> None:
     _git(repo, "commit", "-qm", message)
 
 
+def _branches(path: Path) -> list[str]:
+    return _git(path, "branch", "--format=%(refname:short)").split()
+
+
 def _writes(gh_calls) -> list[str]:
-    return [call for call in gh_calls() if "item-edit" in call or call.startswith("pr create")]
+    return [call for call in gh_calls() if "item-edit" in call or call.startswith(("pr create", "issue comment"))]
 
 
 def _fieldvalues(tmp_path: Path, kind: str | None) -> dict[str, str]:
@@ -83,6 +87,18 @@ def _issue(tmp_path: Path, name: str, **changes: str) -> dict[str, str]:
     return {"GH_ISSUE_FILE": str(path)}
 
 
+def _reviewed_issue(tmp_path: Path, sha: str, **changes: str) -> dict[str, str]:
+    """The approved story with a `Reviewed: <sha>` entry as its last comment."""
+    data = json.loads((FIXTURES / "issue-approved.json").read_text(encoding="utf-8"))
+    data["comments"].append(
+        {"author": {"login": "claude"}, "createdAt": "2026-09-03T10:00:00Z", "body": f"Reviewed: {sha} clean pass"}
+    )
+    data.update(changes)
+    path = tmp_path / f"issue-reviewed-{sha[:7]}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return {"GH_ISSUE_FILE": str(path)}
+
+
 @pytest.fixture
 def origin(repo: Path, tmp_path: Path) -> Path:
     """A bare origin holding main, so the story branch has somewhere to be pushed."""
@@ -95,40 +111,41 @@ def origin(repo: Path, tmp_path: Path) -> Path:
 
 @pytest.fixture
 def branch(repo: Path, origin: Path) -> str:
-    """The story branch: two conventional commits, of which origin has only the first.
+    """The story branch: two conventional commits, local only, as start and the build leave it.
 
-    Origin deliberately trails HEAD, so every refusal can assert that origin's tip never moved.
+    Origin never hears of the branch before finish pushes it, so every refusal can assert that it
+    is still not there.
     """
     _git(repo, "checkout", "-q", "-b", BRANCH)
     _commit(repo, "store.py", "def by_grant():\n    return []\n", FIRST)
-    _git(repo, "push", "-q", "-u", "origin", BRANCH)
     _commit(repo, "store_test.py", "def test_by_grant():\n    pass\n", SECOND)
     return BRANCH
 
 
-def _clone(origin: Path, path: Path, ref: str) -> Path:
-    """A clone checked out on `ref`, which for a branch other than main leaves no local main."""
-    subprocess.run(["git", "clone", "-q", "--branch", ref, str(origin), str(path)], check=True)
+@pytest.fixture
+def clone(repo: Path, origin: Path, branch: str, tmp_path: Path) -> Path:
+    """The story branch in a checkout with no local main anywhere, and origin still without it."""
+    path = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(origin), str(path)], check=True)
     _git(path, "config", "user.email", "t@t")
     _git(path, "config", "user.name", "t")
+    _git(path, "fetch", "-q", str(repo), f"{BRANCH}:{BRANCH}")
+    _git(path, "checkout", "-q", BRANCH)
+    _git(path, "branch", "-q", "-D", "main")
     return path
-
-
-@pytest.fixture
-def clone(origin: Path, branch: str, tmp_path: Path) -> Path:
-    """The story branch as a colleague would have it: cloned, with no local main anywhere."""
-    return _clone(origin, tmp_path / "clone", BRANCH)
 
 
 def _finish(verb: str, repo: Path, *args: str, env: dict[str, str] | None = None):
     return run_deckhand("finish", verb, "248", *args, cwd=repo, env={**APPROVED, **(env or {})})
 
 
-def _apply(repo: Path, *extra: str, approved: str | None = None, env: dict[str, str] | None = None):
-    args = ["--actual", "3", "--approved", approved if approved is not None else _sha(repo, "HEAD"), *extra]
+def _apply(repo: Path, *extra: str, env: dict[str, str] | None = None):
+    """Apply with HEAD reviewed unless an issue in `env` says otherwise."""
+    args = ["--actual", "3", *extra]
     if "--check" not in args:
         args += ["--check", "true"]
-    return _finish("apply", repo, *args, env=env)
+    reviewed = _reviewed_issue(repo.parent, _sha(repo, "HEAD"))
+    return _finish("apply", repo, *args, env={**reviewed, **(env or {})})
 
 
 # --- context ----------------------------------------------------------------
@@ -237,53 +254,59 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
 
 
 def test_apply_refuses_without_a_check(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
-
-    result = _finish("apply", repo, "--actual", "3", "--approved", _sha(repo, "HEAD"))
+    result = _finish("apply", repo, "--actual", "3")
 
     assert result.returncode != 0
     assert "--check" in result.stderr
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_bad_actual(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
-
     result = _apply(repo, "--actual", "three")
 
     assert result.returncode == 1
     assert result.stderr == "deckhand finish apply: actual must be a non-negative integer, got 'three'\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
-def test_apply_refuses_when_head_moved(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
+def test_apply_refuses_a_head_that_is_not_the_reviewed_commit(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    head = _sha(repo, "HEAD")
+    earlier = _sha(repo, "HEAD~1")
 
-    result = _apply(repo, approved=_sha(repo, "HEAD~1"))
+    result = _apply(repo, env=_reviewed_issue(tmp_path, earlier))
 
     assert result.returncode == 1
     assert result.stderr == (
-        f"deckhand finish apply: HEAD moved since approval: expected {_sha(repo, 'HEAD~1')}, got {_sha(repo, 'HEAD')}\n"
+        f"deckhand finish apply: HEAD {head} is not the last reviewed commit {earlier}; review the branch again\n"
     )
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
-def test_apply_refuses_an_approved_it_cannot_resolve(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
-
-    result = _apply(repo, approved="the-one-i-showed-you")
+def test_apply_refuses_a_story_never_reviewed(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    result = _apply(repo, env=_issue(tmp_path, "unreviewed"))
 
     assert result.returncode == 1
-    assert result.stderr.startswith("deckhand finish apply: cannot resolve --approved the-one-i-showed-you: ")
+    assert result.stderr == "deckhand finish apply: no Reviewed: entry on #248; review the branch first\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
+
+
+def test_apply_refuses_a_reviewed_commit_this_clone_does_not_have(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    result = _apply(repo, env=_reviewed_issue(tmp_path, "0123456789abcdef0123456789abcdef01234567"))
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand finish apply: the last Reviewed: entry names 0123456789abcdef0123456789abcdef01234567, "
+        "which this clone does not have\n"
+    )
+    assert _writes(gh_calls) == []
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_dirty_tree(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     (repo / "store.py").write_text("def by_grant():\n    return [1]\n")
 
     result = _apply(repo)
@@ -294,11 +317,10 @@ def test_apply_refuses_a_dirty_tree(fake_gh, gh_calls, repo, origin, branch):
         "   M store.py",
     ]
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_branch_behind_main(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     _git(repo, "checkout", "-q", "main")
     _commit(repo, "other.py", "x = 1\n", "chore: unrelated change")
     _git(repo, "push", "-q", "origin", "main")
@@ -309,11 +331,10 @@ def test_apply_refuses_a_branch_behind_main(fake_gh, gh_calls, repo, origin, bra
     assert result.returncode == 1
     assert result.stderr == "deckhand finish apply: branch does not contain main; rebase first\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_an_unconventional_commit(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     _commit(repo, "notes.py", "# notes\n", "made the thing work")
     short = _sha(repo, "HEAD")[:7]
 
@@ -324,11 +345,10 @@ def test_apply_refuses_an_unconventional_commit(fake_gh, gh_calls, repo, origin,
         f"deckhand finish apply: commit {short}: not a conventional commit subject: made the thing work\n"
     )
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_story_number_in_a_subject(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     _commit(repo, "notes.py", "# notes\n", "fix(store): close #248")
     short = _sha(repo, "HEAD")[:7]
 
@@ -339,11 +359,10 @@ def test_apply_refuses_a_story_number_in_a_subject(fake_gh, gh_calls, repo, orig
         f"deckhand finish apply: commit {short}: a story number in the subject: fix(store): close #248\n"
     )
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_commit_with_an_attribution_trailer(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     trailer = "Co-Authored-By: Claude <noreply@anthropic.com>"
     _commit(repo, "notes.py", "# notes\n", f"fix(store): tidy the filter\n\n{trailer}\n")
     short = _sha(repo, "HEAD")[:7]
@@ -353,11 +372,10 @@ def test_apply_refuses_a_commit_with_an_attribution_trailer(fake_gh, gh_calls, r
     assert result.returncode == 1
     assert result.stderr == f"deckhand finish apply: commit {short}: attribution trailer: {trailer}\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_commit_that_says_it_was_generated_with(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     line = "Generated with Claude Code"
     _commit(repo, "notes.py", "# notes\n", f"fix(store): tidy the filter\n\n{line}\n")
     short = _sha(repo, "HEAD")[:7]
@@ -367,7 +385,7 @@ def test_apply_refuses_a_commit_that_says_it_was_generated_with(fake_gh, gh_call
     assert result.returncode == 1
     assert result.stderr == f"deckhand finish apply: commit {short}: attribution trailer: {line}\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_allows_a_body_that_only_talks_about_authorship(fake_gh, gh_calls, repo, origin, branch):
@@ -401,8 +419,6 @@ def test_apply_ignores_what_main_gained_after_the_branch_started(fake_gh, gh_cal
 
 
 def test_apply_refuses_a_failing_check(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
-
     result = _apply(repo, "--check", "true", "--check", "echo out; echo err >&2; exit 1")
 
     assert result.returncode == 1
@@ -413,11 +429,10 @@ def test_apply_refuses_a_failing_check(fake_gh, gh_calls, repo, origin, branch):
         "  err",
     ]
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_stale_docs_audit_before_it_runs_a_check(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
     (repo / "docs" / "claude").mkdir(parents=True)
     (repo / "docs" / "claude" / "grants.md").write_text("# Grants\n\nThe filter lives in `store/gone.py`.\n")
     _git(repo, "add", "docs")
@@ -431,33 +446,32 @@ def test_apply_refuses_a_stale_docs_audit_before_it_runs_a_check(fake_gh, gh_cal
     assert any("broken reference: `store/gone.py`" in line for line in lines[1:])
     assert result.stdout == ""  # the checks are the slow gate, so they run last
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_without_a_kind(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    tip = _sha(origin, BRANCH)
-
     result = _apply(repo, env=_fieldvalues(tmp_path, None))
 
     assert result.returncode == 1
     assert result.stderr == "deckhand finish apply: #248 has no Kind; run /deckhand:next 248\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_title_over_72(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    tip = _sha(origin, BRANCH)
-
     result = _apply(repo, env=_issue(tmp_path, "long-title", title=LONG_TITLE))
 
     assert result.returncode == 1
-    assert result.stderr == ("deckhand finish apply: title too long for a commit subject; shorten the issue title\n")
+    assert result.stderr == (
+        f"deckhand finish apply: title is {len(LONG_TITLE)} characters; "
+        f"the pull request subject allows {naming.SUBJECT - len('feat!: ')}; "
+        "give the issue a shorter title with --title\n"
+    )
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_story_without_a_story_section(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    tip = _sha(origin, BRANCH)
     body = "### Scope\n\n#### In\n\n- The grant filter\n\n### Notes\n\nNone\n"
 
     result = _apply(repo, env=_issue(tmp_path, "no-story", body=body))
@@ -465,36 +479,50 @@ def test_apply_refuses_a_story_without_a_story_section(fake_gh, gh_calls, repo, 
     assert result.returncode == 1
     assert result.stderr == "deckhand finish apply: #248 has no Story section; run /deckhand:next 248\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_breaking_with_no_text(fake_gh, gh_calls, repo, origin, branch):
-    tip = _sha(origin, BRANCH)
-
     result = _apply(repo, "--breaking", "   ")
 
     assert result.returncode == 1
     assert result.stderr == "deckhand finish apply: --breaking needs the text a client must react to\n"
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 @pytest.mark.parametrize("flag", ["--lockstep", "--migration"])
 def test_apply_rejects_lockstep_and_migration(fake_gh, gh_calls, repo, origin, branch, flag):
-    tip = _sha(origin, BRANCH)
-
     result = _apply(repo, flag, "acme/api#7")
 
     assert result.returncode == 2
     assert flag in result.stderr
     assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == tip
+    assert BRANCH not in _branches(origin)
 
 
 # --- the writes -------------------------------------------------------------
 
 
-def test_apply_pushes_opens_the_pr_and_sets_the_fields(fake_gh, gh_calls, repo, origin, branch):
+def test_apply_pushes_then_opens_the_pull_request_and_logs_it(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    head = _sha(repo, "HEAD")
+    copy = tmp_path / "comment.md"
+
+    result = _apply(repo, env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-5:] == [
+        "Pushed",
+        f"Opened {PR_URL}",
+        "Logged Pull request",
+        "Status=Pending Review",
+        "Actual=3",
+    ]
+    assert _sha(origin, BRANCH) == head
+    assert copy.read_text(encoding="utf-8").endswith(f"--- issue comment\nPull request: {PR_URL}")
+
+
+def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo, origin, branch):
     result = _apply(repo)
 
     assert result.returncode == 0, result.stderr
@@ -502,30 +530,31 @@ def test_apply_pushes_opens_the_pr_and_sets_the_fields(fake_gh, gh_calls, repo, 
         RAN,
         "Pushed",
         f"Opened {PR_URL}",
+        "Logged Pull request",
         "Status=Pending Review",
         "Actual=3",
-        NEXT,
     ]
-    assert _sha(origin, BRANCH) == _sha(repo, "HEAD")
-    calls = [call for call in gh_calls() if "item-edit" in call or call.startswith(("issue view", "pr "))]
+    calls = [call for call in gh_calls() if "item-edit" in call or call.startswith(("issue", "pr "))]
     assert [" ".join(call.split()[:2]) for call in calls] == [
         "issue view",
         "pr list",
         "pr create",
+        "issue comment",
         "project item-edit",
         "project item-edit",
     ]
     assert calls[1] == PR_LIST
     assert calls[2].startswith("pr create ")
-    assert calls[3:] == [PENDING, ACTUAL]
+    assert calls[4:] == [PENDING, ACTUAL]
 
 
-def test_apply_ends_on_the_merge_line_and_reads_nothing_more(fake_gh, gh_calls, repo, origin, branch):
+def test_apply_ends_on_the_fields_and_reads_nothing_more(fake_gh, gh_calls, repo, origin, branch):
     """What the merge unblocks belongs to the next command, which reads it from the closed issue."""
     result = _apply(repo, env={"GH_BLOCKING": BLOCKING})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
+    assert result.stdout.splitlines()[-1] == "Actual=3"
+    assert "Next:" not in result.stdout
     assert [call for call in gh_calls() if "/dependencies/blocking" in call] == []
 
 
@@ -558,6 +587,9 @@ def test_apply_adds_the_bang_and_the_footer_when_breaking(fake_gh, gh_calls, rep
 
 
 def test_apply_reuses_a_pull_request_the_branch_already_has(fake_gh, gh_calls, repo, origin, branch):
+    """A pull request means an earlier run pushed, so origin holds the branch and the push is a no-op."""
+    _git(repo, "push", "-q", "-u", "origin", BRANCH)
+
     result = _apply(repo, env={"GH_PR_EXISTS": "1"})
 
     assert result.returncode == 0, result.stderr
@@ -566,9 +598,9 @@ def test_apply_reuses_a_pull_request_the_branch_already_has(fake_gh, gh_calls, r
         "Pushed",
         f"Reusing {PR_URL}",
         "Assigned @me",
+        "Logged Pull request",
         "Status=Pending Review",
         "Actual=3",
-        NEXT,
     ]
     assert [call for call in gh_calls() if call.startswith("pr create")] == []
     assert [call for call in gh_calls() if "item-edit" in call] == [PENDING, ACTUAL]
@@ -576,6 +608,8 @@ def test_apply_reuses_a_pull_request_the_branch_already_has(fake_gh, gh_calls, r
 
 def test_apply_assigns_the_pull_request_it_reuses(fake_gh, gh_calls, repo, origin, branch):
     """The run that opened it may have failed before it was assigned, so the reuse assigns it too."""
+    _git(repo, "push", "-q", "-u", "origin", BRANCH)
+
     result = _apply(repo, env={"GH_PR_EXISTS": "1"})
 
     assert result.returncode == 0, result.stderr
@@ -584,38 +618,9 @@ def test_apply_assigns_the_pull_request_it_reuses(fake_gh, gh_calls, repo, origi
     ]
 
 
-def test_apply_pushes_a_branch_that_tracks_nothing(fake_gh, repo, origin):
-    _git(repo, "checkout", "-q", "-b", BRANCH)
-    _commit(repo, "store.py", "def by_grant():\n    return []\n", FIRST)
-    _git(repo, "push", "-q", "origin", BRANCH)  # no -u, so the branch tracks nothing
-    _commit(repo, "store_test.py", "def test_by_grant():\n    pass\n", SECOND)
-
-    result = _apply(repo)
-
-    assert result.returncode == 0, result.stderr
-    assert f"Opened {PR_URL}" in result.stdout
-    assert _sha(origin, BRANCH) == _sha(repo, "HEAD")
-
-
 def test_apply_works_in_a_clone_that_has_no_local_main(fake_gh, gh_calls, repo, origin, branch, clone):
     result = _apply(clone)
 
     assert result.returncode == 0, result.stderr
     assert f"Opened {PR_URL}" in result.stdout
     assert [call for call in gh_calls() if "item-edit" in call] == [PENDING, ACTUAL]
-
-
-def test_apply_stops_at_the_push_when_origin_moved_ahead(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    colleague = _clone(origin, tmp_path / "colleague", BRANCH)
-    _commit(colleague, "theirs.py", "y = 2\n", "fix(store): a colleague's fix")
-    _git(colleague, "push", "-q", "origin", BRANCH)
-    theirs = _sha(origin, BRANCH)
-    _git(repo, "fetch", "-q", "origin")  # an ambient fetch: the lease alone would no longer protect them
-
-    result = _apply(repo)
-
-    assert result.returncode == 1
-    assert result.stdout.splitlines() == [RAN]
-    assert result.stderr.startswith("deckhand finish: ") and "rejected" in result.stderr
-    assert _writes(gh_calls) == []
-    assert _sha(origin, BRANCH) == theirs

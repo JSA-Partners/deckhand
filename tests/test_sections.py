@@ -151,5 +151,16 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(sections.parse(bare), sections.parse(body))
 
 
+def test_after_merge_lists_the_bullets_of_the_plans_closing_block():
+    body = (
+        "### Plan\n\n### Task 1: A\n\n- [ ] **Step 1**\n\n### After the merge\n\n"
+        "- Prove the script on main\n- [ ] Revoke the token\n- [x] Tell the team\n\n### Notes\n"
+    )
+
+    assert sections.after_merge(body) == ["Prove the script on main", "Revoke the token", "Tell the team"]
+    assert sections.after_merge("### Plan\n\n### Task 1: A\n") == []
+    assert sections.after_merge("### Story\n\nx\n") == []
+
+
 if __name__ == "__main__":
     unittest.main()

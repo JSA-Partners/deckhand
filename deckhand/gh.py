@@ -16,7 +16,8 @@ OWNER_FIELDS = {"Organization": "organization", "User": "user"}
 
 FIELDS_QUERY = (
     "query($owner:String!,$number:Int!){ OWNER_ROOT(login:$owner){ projectV2(number:$number){ "
-    "fields(first:50){ nodes{ ... on ProjectV2FieldCommon{ id name dataType } } } } } }"
+    "fields(first:50){ nodes{ ... on ProjectV2FieldCommon{ id name dataType } "
+    "... on ProjectV2SingleSelectField{ options{ id name color } } } } } } }"
 )
 
 LINKED_QUERY = (
@@ -73,6 +74,12 @@ def graphql(query: str, variables: dict[str, Any] | None = None, paginate: bool 
     return [_parse_json(run(*args))]
 
 
+def graphql_json(query: str, variables: dict[str, Any]) -> Any:
+    """A GraphQL call whose variables are not all scalars, sent as one JSON document on stdin."""
+    payload = json.dumps({"query": query, "variables": variables})
+    return _parse_json(run("api", "graphql", "--input", "-", stdin=payload))
+
+
 def paginated(*args: str) -> list[Any]:
     """Run `gh api <args> --paginate --slurp` against a REST list endpoint; return the flattened items."""
     pages = _parse_json(run("api", *args, "--paginate", "--slurp"))
@@ -92,9 +99,22 @@ def split_repo(repo: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+NO_REPOSITORY = "not inside a git repository; run deckhand from the story's repository"
+
+
 @functools.lru_cache(maxsize=1)
 def repo_slug() -> str:
-    return json_out("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
+    """`owner/name` of the repository the working directory is in; the one place every command starts.
+
+    gh answers from the checkout, so outside one it fails with git's own words; those are turned into
+    the one rule a person can act on, because every command that follows would fail the same way.
+    """
+    try:
+        return json_out("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
+    except GhError as error:
+        if "not a git repository" in str(error):
+            raise GhError(NO_REPOSITORY) from error
+        raise
 
 
 class LinkedProject(NamedTuple):
@@ -178,20 +198,55 @@ def field_list(settings: Settings) -> list[dict[str, Any]]:
 
 
 def project_fields(settings: Settings) -> list[dict[str, Any]]:
-    """Every field on the configured project as `{id, name, dataType}`, first page of 50.
+    """Every field on the configured project as `{id, name, dataType, options}`, first page of 50.
 
     `field-list` reports a field's GraphQL class, and only the `dataType` the API itself uses says
-    which fields a person made and which GitHub built in, so this reads them through GraphQL.
+    which fields a person made and which GitHub built in, so this reads them through GraphQL; the
+    options of a single select carry their colors here, which `field-list` does not report.
     """
     query = owner_query(FIELDS_QUERY, settings.owner_type)
     data = graphql(query, {"owner": settings.owner, "number": settings.project})[0]
     root = (data.get("data") or {}).get(owner_field(settings.owner_type)) or {}
     nodes = ((root.get("projectV2") or {}).get("fields") or {}).get("nodes") or []
     return [
-        {"id": node.get("id"), "name": node.get("name") or "", "dataType": node.get("dataType") or ""}
+        {
+            "id": node.get("id"),
+            "name": node.get("name") or "",
+            "dataType": node.get("dataType") or "",
+            "options": node.get("options") or [],
+        }
         for node in nodes
         if node and node.get("id")
     ]
+
+
+def create_single_select(settings: Settings, name: str, options: list[dict[str, str]]) -> None:
+    """Create a single-select field with named and colored options; colors need GraphQL."""
+    mutation = (
+        "mutation($project:ID!,$name:String!,$options:[ProjectV2SingleSelectFieldOptionInput!]!){ "
+        "createProjectV2Field(input:{projectId:$project,dataType:SINGLE_SELECT,name:$name,"
+        "singleSelectOptions:$options}){ projectV2Field{ ... on ProjectV2SingleSelectField{ id } } } }"
+    )
+    graphql_json(mutation, {"project": project_id(settings), "name": name, "options": options})
+
+
+def update_single_select(settings: Settings, field_id: str, options: list[dict[str, str]]) -> None:
+    """Replace a single-select field's options; an option keeps its values only when sent with its id."""
+    mutation = (
+        "mutation($field:ID!,$options:[ProjectV2SingleSelectFieldOptionInput!]!){ "
+        "updateProjectV2Field(input:{fieldId:$field,singleSelectOptions:$options}){ "
+        "projectV2Field{ ... on ProjectV2SingleSelectField{ id } } } }"
+    )
+    graphql_json(mutation, {"field": field_id, "options": options})
+
+
+def merge_settings(repo: str) -> dict[str, Any]:
+    """The repository object of the REST API, which is where the merge settings are reported."""
+    o, r = split_repo(repo)
+    data = json_out("api", f"repos/{o}/{r}")
+    if not isinstance(data, dict):
+        raise GhError(f"expected a repository object from gh api repos/{o}/{r}")
+    return data
 
 
 def field(settings: Settings, name: str) -> dict[str, Any]:

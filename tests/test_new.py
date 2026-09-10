@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import lint, naming, new, sections, stub
+from deckhand import lint, log, naming, new, sections, step, stub
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
 from tests.conftest import FIXTURES, ROOT, run_deckhand
@@ -16,12 +16,27 @@ VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
 STORY_TITLE = "See only the collections I was granted"
 WANT = "to see only the collections I was granted"
-SPLIT_NEXT = ["Next: /deckhand:next 57.", "Next: /deckhand:next 58.", "Next: /deckhand:next 59."]
+# The fake answers the item lookup with PVTI_TEST_248 for any issue number, so the edit names it.
+STATUS_DRAFT = (
+    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
+    "--single-select-option-id opt_draft"
+)
+NO_PROJECT = "deckhand new apply: no project is linked to acme/widgets; run /deckhand:setup"
+UNLINKED = {"GH_LINKED_PROJECTS": str(FIXTURES / "linked-none.json")}
 
 
-def _next(number: int) -> str:
-    """The line every one-story path ends on: the review to run, and what the review does."""
-    return f"Next: /deckhand:next {number}."
+def _draft_writes(number: int) -> list[str]:
+    """The writes that put a written story on the board as Draft and open its log."""
+    return [
+        f"project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/{number} --format json",
+        STATUS_DRAFT,
+        f"issue comment {number} --repo acme/widgets",
+    ]
+
+
+def _calls(calls: list[str]) -> list[str]:
+    """The recorded calls with the body file path dropped, since it is a temp file's name."""
+    return [call.split(" --body-file")[0] for call in calls]
 
 
 def _valid() -> str:
@@ -130,19 +145,46 @@ def test_apply_refuses_a_bad_body_and_writes_nothing(fake_gh, gh_calls):
     assert gh_calls() == []
 
 
-def test_apply_creates_the_issue_and_names_the_next_step(fake_gh, gh_calls, tmp_path):
+def test_apply_creates_the_issue_with_the_written_body(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "body-copy.md"
+
+    result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    (call,) = [c for c in gh_calls() if c.startswith("issue create")]
+    assert call.startswith(f"issue create --repo acme/widgets --title {STORY_TITLE} --body-file ")
+    assert copy.read_text(encoding="utf-8") == "--- issue create\n" + _written() + "--- issue comment\n" + new.DRAFTED
+
+
+def test_apply_boards_the_new_story_as_draft_and_logs_it(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "comment.md"
 
     result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Created #999 https://github.com/acme/widgets/issues/999",
-        _next(999),
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
     ]
-    (call,) = [c for c in gh_calls() if c.startswith("issue create")]
-    assert call.startswith(f"issue create --repo acme/widgets --title {STORY_TITLE} --body-file ")
-    assert copy.read_text(encoding="utf-8") == "--- issue create\n" + _written()
+    assert _calls([c for c in gh_calls() if c.startswith(("project item", "issue comment"))]) == _draft_writes(999)
+    assert copy.read_text(encoding="utf-8").endswith("--- issue comment\n" + new.DRAFTED)
+
+
+def test_the_drafted_lines_are_entries_the_log_reads_back():
+    """Each note opens with a prefix and says what happened, so the log never skips it."""
+    assert log.checked(new.DRAFTED) == new.DRAFTED
+    assert log.checked(new.STUB_DRAFTED) == new.STUB_DRAFTED
+
+
+def test_apply_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls):
+    result = run_deckhand("new", "apply", str(VALID), env=UNLINKED)
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == NO_PROJECT
+    assert result.stdout == ""
+    assert _writes(gh_calls()) == []
 
 
 def test_apply_folds_the_plan_in_the_issue_body(fake_gh, gh_calls, tmp_path):
@@ -174,7 +216,7 @@ def test_apply_refuses_a_derived_title_the_subject_cannot_carry(fake_gh, gh_call
     assert result.returncode == 1
     assert result.stderr.strip() == (
         f"deckhand new apply: title is {len(clause)} characters; "
-        f"the pull request subject allows {naming.title_limit()}. Pass --title with a shorter one"
+        f"the pull request subject allows {naming.title_limit()}; give the issue a shorter title with --title"
     )
     assert result.stdout == ""
     assert _writes(gh_calls()) == []
@@ -188,7 +230,7 @@ def test_apply_refuses_a_title_flag_the_subject_cannot_carry(fake_gh, gh_calls):
     assert result.returncode == 1
     assert result.stderr.strip() == (
         f"deckhand new apply: title is {len(over)} characters; "
-        f"the pull request subject allows {naming.title_limit()}. Pass --title with a shorter one"
+        f"the pull request subject allows {naming.title_limit()}; give the issue a shorter title with --title"
     )
     assert result.stdout == ""
     assert _writes(gh_calls()) == []
@@ -217,7 +259,7 @@ def test_a_title_naming_rejects_is_refused_here(fake_gh, gh_calls):
     with pytest.raises(Refusal, match="no title"):
         new.title(None, "### Story\n\nGuests should see fewer collections.\n")
     with pytest.raises(Refusal, match="pull request subject"):
-        new.fits("x" * (naming.title_limit() + 1))
+        step.fits_title("x" * (naming.title_limit() + 1))
 
     assert gh_calls() == []
 
@@ -392,7 +434,7 @@ def test_context_on_a_parked_feature_says_to_split_it(fake_gh, tmp_path):
 # --- apply --stub ------------------------------------------------------------
 
 
-CHANGES = ("issue create", "issue edit", "issue close", "issue comment")
+CHANGES = ("issue create", "issue edit", "issue close", "issue comment", "project item-add", "project item-edit")
 
 
 def _writes(calls: list[str]) -> list[str]:
@@ -408,11 +450,23 @@ def test_apply_stub_writes_the_drafted_story_into_the_stub(fake_gh, gh_calls, tm
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
-        _next(57),
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
     ]
-    (call,) = _writes(gh_calls())
-    assert call.startswith("issue edit 57 --repo acme/widgets --body-file ")
-    assert copy.read_text(encoding="utf-8") == "--- issue edit\n" + _written()
+    assert _calls(_writes(gh_calls())) == ["issue edit 57 --repo acme/widgets", *_draft_writes(57)]
+    assert copy.read_text(encoding="utf-8") == (
+        "--- issue edit\n" + _written() + "--- issue comment\n" + new.STUB_DRAFTED
+    )
+
+
+def test_apply_stub_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls):
+    result = run_deckhand("new", "apply", "--stub", "57", str(VALID), env={**STUB, **UNLINKED})
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == NO_PROJECT
+    assert result.stdout == ""
+    assert _writes(gh_calls()) == []
 
 
 def test_apply_stub_refuses_a_story_and_writes_nothing(fake_gh, gh_calls):
@@ -449,9 +503,12 @@ def test_apply_stub_sets_the_title_after_the_body(fake_gh, gh_calls):
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
         "Title: Grant store",
-        _next(57),
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
     ]
-    body_edit, title_edit = _writes(gh_calls())
+    body_edit, title_edit, *boarding = _writes(gh_calls())
+    assert _calls(boarding) == _draft_writes(57)
     assert body_edit.startswith("issue edit 57 --repo acme/widgets --body-file ")
     assert title_edit == "issue edit 57 --repo acme/widgets --title Grant store"
 
@@ -561,9 +618,11 @@ def test_apply_stub_keeps_the_stubs_title_when_the_flag_is_blank(fake_gh, gh_cal
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
-        _next(57),
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
     ]
-    (call,) = _writes(gh_calls())
+    call, *_ = _writes(gh_calls())
     assert call.startswith("issue edit 57 --repo acme/widgets --body-file ")
 
 
@@ -576,9 +635,8 @@ DISPATCH = "Dispatch deckhand:author for each of #57 #58 #59 with "
 
 
 def _dispatch(line: str) -> None:
-    """The stubs to write and the deckhand the authors are to run; it is not the step's `Next:` line."""
+    """The stubs to write and the deckhand the authors are to run: the line a split ends on."""
     assert line.startswith(DISPATCH), line
-    assert not line.startswith("Next:")
     assert Path(line.rsplit(" with ", 1)[1]) == (ROOT / "bin" / "deckhand").resolve()
 
 
@@ -599,7 +657,7 @@ def _bodies(copy) -> list[tuple[str, str]]:
 
 def _api(calls: list[str]) -> list[str]:
     """Every REST call; for a split that is each dependency lookup and the POST that follows it."""
-    return [call for call in calls if call.startswith("api ")]
+    return [call for call in calls if call.startswith("api ") and not call.startswith("api graphql")]
 
 
 def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_gh, gh_calls):
@@ -607,26 +665,37 @@ def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:-4] == [
+    assert lines[:-1] == [
         "Created #57 Grant store",
         "Created #58 Handler filter",
         "Created #59 Admin view",
         "Numbered #57",
+        "Added to the board",
+        "Status=Draft",
         "Numbered #58",
+        "Added to the board",
+        "Status=Draft",
         "Numbered #59",
+        "Added to the board",
+        "Status=Draft",
         "#58 blocked by #57",
         "#59 blocked by #57",
         "#59 blocked by #58",
     ]
-    _dispatch(lines[-4])
-    assert lines[-3:] == SPLIT_NEXT
-    assert [line for line in lines if line.startswith("Next:")] == SPLIT_NEXT
+    _dispatch(lines[-1])
     calls = gh_calls()
-    creates = [call for call in calls if call.startswith("issue create")]
-    assert [call.split(" --title ")[1].split(" --body-file ")[0] for call in creates] == STORIES
-    edits = [call for call in calls if call.startswith("issue edit")]
-    assert [call.split()[2] for call in edits] == ["57", "58", "59"]
-    assert calls.index(creates[-1]) < calls.index(edits[0])
+    # Every stub is boarded as Draft with no log line: the author who writes it is the one who drafts it.
+    assert _calls(_writes(calls)) == [
+        *[f"issue create --repo acme/widgets --title {story}" for story in STORIES],
+        *[
+            write
+            for number in (57, 58, 59)
+            for write in (f"issue edit {number} --repo acme/widgets", *_draft_writes(number)[:2])
+        ],
+        "api -X POST repos/acme/widgets/issues/58/dependencies/blocked_by -F issue_id=5099965156",
+        "api -X POST repos/acme/widgets/issues/59/dependencies/blocked_by -F issue_id=5099965156",
+        "api -X POST repos/acme/widgets/issues/59/dependencies/blocked_by -F issue_id=5099965156",
+    ]
     assert _api(calls) == [
         "api repos/acme/widgets/issues/57",
         "api -X POST repos/acme/widgets/issues/58/dependencies/blocked_by -F issue_id=5099965156",
@@ -659,9 +728,8 @@ def test_apply_split_from_a_parked_feature_comments_and_closes_it_last(fake_gh, 
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[-5] == "Closed #60"
-    _dispatch(lines[-4])
-    assert lines[-3:] == SPLIT_NEXT
+    assert lines[-2] == "Closed #60"
+    _dispatch(lines[-1])
     calls = gh_calls()
     comment = next(call for call in calls if call.startswith("issue comment"))
     close = next(call for call in calls if call.startswith("issue close"))
@@ -710,6 +778,15 @@ def test_apply_split_refuses_a_from_that_is_a_story(fake_gh, gh_calls):
     assert _writes(gh_calls()) == []
 
 
+def test_apply_split_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls):
+    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), env={**NUMBERS, **UNLINKED})
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == NO_PROJECT
+    assert result.stdout == ""
+    assert _writes(gh_calls()) == []
+
+
 def test_apply_split_refuses_a_malformed_file_and_names_its_line(fake_gh, gh_calls, tmp_path):
     bad = tmp_path / "split.md"
     bad.write_text("## Requirements\n\nGuests share.\n\n## Stories\n\n- no pipe here\n", encoding="utf-8")
@@ -742,7 +819,7 @@ def test_apply_split_names_the_dependency_it_could_not_record(fake_gh, gh_calls)
     assert result.stderr.strip() == (
         "deckhand new apply: #58 blocked by #57 failed: could not add dependency; add it by hand"
     )
-    assert result.stdout.splitlines()[-1] == "Numbered #59"
+    assert result.stdout.splitlines()[-3:] == ["Numbered #59", "Added to the board", "Status=Draft"]
     assert len([call for call in gh_calls() if "-X POST" in call]) == 1
 
 

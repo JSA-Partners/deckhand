@@ -5,9 +5,9 @@ the skill never has to carry the contract in prose. It takes the session's start
 nothing, a file holding a request, the request itself, or the number of a stub, whose feature it
 prints whole so the session can judge what belongs in this story rather than in a sibling.
 
-`apply` lints the draft and either opens the issue or writes the draft into the stub it stands for;
-the draft is the model's working file, and the issue is the only record that outlives it. Writing a
-stub keeps its number, so every dependency recorded at split time is the story's from the start.
+`apply` lints the draft, opens the issue or writes the draft into the stub it stands for, boards it
+as Draft, and logs `Drafted:`; the draft is the model's working file and the issue the only record
+that outlives it. A written stub keeps its number, so its split-time dependencies are its own.
 
 A request bigger than one story takes the other two forms: `--split` opens one stub per story and
 records what waits on what, and ends on the line that sends one author agent to each of them; and
@@ -21,16 +21,18 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from deckhand import gh, issue, lint, naming, sections, stub
-from deckhand.config import BODY_LIMIT
+from deckhand import board, fields, gh, issue, lint, log, naming, sections, stub
+from deckhand.config import BODY_LIMIT, Settings
 from deckhand.step import (
     Refusal,
     block,
     blockers_block,
     draft_line,
+    fits_title,
     issue_number,
     read_draft,
     reason,
+    resolved_settings,
     step,
     usable,
 )
@@ -39,6 +41,8 @@ DRAFT = "new.md"
 SPLIT = "split.md"
 DEPENDS_HEADING = "## Depends on"
 SPLIT_NOTE = "If this is more than one story, write the split file instead."
+DRAFTED = "Drafted: the story and its plan, from the request."
+STUB_DRAFTED = "Drafted: the story and its plan, from the stub."
 
 # One line per rule `lint.lint` enforces, in plain words. A line that says something may be empty is
 # a permission; every other line is a rule a body can break, and `tests/test_new.py` pins that.
@@ -229,22 +233,18 @@ def title(flag: str | None, body: str) -> str:
         raise Refusal(str(error)) from error
 
 
-def fits(subject: str) -> str:
-    """`subject` when the pull request subject can carry it, refused here the way `title` is."""
-    try:
-        return naming.fits(subject)
-    except ValueError as error:
-        raise Refusal(str(error)) from error
+def board_draft(settings: Settings, repo: str, number: int, url: str, note: str | None) -> None:
+    """Put the issue on the board as Draft, then log that it was written when `note` is given.
 
-
-def next_line(number: int) -> str:
-    """The line a written story ends on: the one command that takes it from here."""
-    return f"Next: /deckhand:next {number}."
-
-
-def split_next_line(numbers: list[int]) -> str:
-    """The lines a split ends on; every story an author wrote is its own command from here."""
-    return "\n".join(next_line(number) for number in sorted(numbers))
+    Shared with the amend step, which boards the story it splits off the same way; every write prints
+    as it lands, so the printed lines are the record of how far the story got.
+    """
+    board.add(settings, url)
+    print("Added to the board", flush=True)
+    print(fields.set_field(settings, repo, number, "Status", "Draft"), flush=True)
+    if note is not None:
+        issue.comment(repo, number, log.checked(note))
+        print(f"Logged {note.split(':', 1)[0]}", flush=True)
 
 
 def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
@@ -254,13 +254,15 @@ def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
         raise Refusal(f"#{number} is already a story; run /deckhand:next {number}")
     if not stub.read(story.body)[1]:
         raise Refusal(f"#{number} is a parked feature; run /deckhand:new {number} to split it")
-    subject = fits((flag or "").strip())
-    issue.update_body(repo, number, lint.checked(draft))
+    subject = fits_title((flag or "").strip())
+    body = lint.checked(draft)
+    settings = resolved_settings()
+    issue.update_body(repo, number, body)
     print(f"Written #{number} {story.url}", flush=True)
     if subject:  # the stub's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
-        print(f"Title: {subject}")
-    print(next_line(number))
+        print(f"Title: {subject}", flush=True)
+    board_draft(settings, repo, number, story.url, STUB_DRAFTED)
     return 0
 
 
@@ -289,18 +291,22 @@ def _split(repo: str, text: str, parked: int | None) -> int:
         raise Refusal(f"split file {error}") from error
     if parked is not None:
         _parked(repo, parked)
+    settings = resolved_settings()
     # Every stub carries the whole feature, so the first pass writes it unnumbered: no story can
     # name its siblings' numbers until every issue exists.
     provisional = stub.render(requirements, entries)
     numbers: list[int] = []
+    urls: list[str] = []
     for entry in entries:
-        number, _url = issue.create(repo, entry.title, provisional)
+        number, url = issue.create(repo, entry.title, provisional)
         print(f"Created #{number} {entry.title}", flush=True)
         numbers.append(number)
+        urls.append(url)
     body = stub.render(requirements, [replace(e, number=n) for e, n in zip(entries, numbers, strict=True)])
-    for number in numbers:
+    for number, url in zip(numbers, urls, strict=True):
         issue.update_body(repo, number, body)
         print(f"Numbered #{number}", flush=True)
+        board_draft(settings, repo, number, url, None)  # a stub is not drafted yet; its author logs that
     for entry, number in zip(entries, numbers, strict=True):
         for position in entry.after:
             blocker = numbers[position - 1]
@@ -313,12 +319,9 @@ def _split(repo: str, text: str, parked: int | None) -> int:
         issue.comment(repo, parked, f"Split into {', '.join(f'#{number}' for number in numbers)}.")
         issue.close(repo, parked)
         print(f"Closed #{parked}", flush=True)
-    # An agent gets no plugin-root substitution and its shell may not carry one either, so the
-    # launcher it is to run travels in the line, already resolved. The line is not a `Next:` one:
-    # only the last line of a step is that, and here it is the one about the reviews that follow.
+    # An agent gets no plugin-root substitution, so the launcher it is to run travels in the line.
     stubs = " ".join(f"#{number}" for number in numbers)
     print(f"Dispatch deckhand:author for each of {stubs} with {Path(sys.argv[0]).resolve()}")
-    print(split_next_line(numbers))
     return 0
 
 
@@ -341,10 +344,7 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "source",
         nargs="?",
-        help=(
-            "an all-digit source is an issue number; anything else is a file when one exists, else the "
-            "request, so ./57 names a file"
-        ),
+        help="an issue number when all digits; else a file when one exists, else the request (./57 names a file)",
     )
 
 
@@ -383,7 +383,9 @@ def apply(args: argparse.Namespace) -> int:
         return _park(gh.repo_slug(), draft, args.title)
     body = lint.checked(draft)
     subject = title(args.title, body)
-    number, url = issue.create(gh.repo_slug(), subject, body)
-    print(f"Created #{number} {url}")
-    print(next_line(number))
+    settings = resolved_settings()
+    repo = gh.repo_slug()
+    number, url = issue.create(repo, subject, body)
+    print(f"Created #{number} {url}", flush=True)
+    board_draft(settings, repo, number, url, DRAFTED)
     return 0

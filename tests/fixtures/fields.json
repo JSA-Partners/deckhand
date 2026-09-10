@@ -1,7 +1,7 @@
 {
   "fields": [
     {"id": "PVTSSF_STATUS", "name": "Status", "type": "ProjectV2SingleSelectField",
-     "options": [{"id": "opt_backlog", "name": "Backlog"}, {"id": "opt_blocked", "name": "Blocked"},
+     "options": [{"id": "opt_draft", "name": "Draft"}, {"id": "opt_backlog", "name": "Backlog"},
                  {"id": "opt_inprogress", "name": "In Progress"}, {"id": "opt_pending", "name": "Pending Review"},
                  {"id": "opt_done", "name": "Done"}]},
     {"id": "PVTSSF_KIND", "name": "Kind", "type": "ProjectV2SingleSelectField",

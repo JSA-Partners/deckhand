@@ -12,20 +12,6 @@ from tests.conftest import FIXTURES, ROOT, run_deckhand
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 ISSUE = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
 COMMENT_URL = "https://github.com/acme/widgets/issues/248#issuecomment-77"
-GUIDANCE = (
-    "Tick a finding to accept it; leave it unticked to decline. A finding marked rejected by the "
-    "skeptic is shown for the record; tick it only to overrule them. Replies here are read the "
-    "next time the story is amended. Then run `/deckhand:next 248`: it applies what you ticked and "
-    "replied, or boards the story when you accepted nothing."
-)
-CLEAN_LINE = "Reply here with anything still wrong, then run `/deckhand:next 248`."
-NEXT = "Next: /deckhand:next 248 when you have ticked and replied."
-
-
-def _withheld(n: int) -> str:
-    """The closing count the comment ends on when the cap left `n` confirmed findings off."""
-    word = "finding" if n == 1 else "findings"
-    return f"{n} further {word} withheld; after amending, choose Review it again when /deckhand:next 248 offers it."
 
 
 @pytest.fixture
@@ -79,12 +65,6 @@ def _writes(gh_calls) -> list[str]:
     return [call.split(" --body-file")[0] for call in gh_calls() if call.startswith(starts)]
 
 
-def _findings(tmp_path: Path, text: str) -> str:
-    path = tmp_path / "248-findings.md"
-    path.write_text(text, encoding="utf-8")
-    return str(path)
-
-
 def _posted(copy: Path) -> str:
     """The comment body `gh issue comment` was handed, without the fake's marker line."""
     text = copy.read_text(encoding="utf-8")
@@ -98,7 +78,7 @@ def _posted(copy: Path) -> str:
 
 def test_every_real_lens_has_valid_frontmatter():
     """A lens declares only what selection reads; anything else would be a rule nothing enforces."""
-    lens_files = sorted((ROOT / "skills" / "review" / "lenses").glob("*.md"))
+    lens_files = sorted((ROOT / "skills" / "next" / "lenses").glob("*.md"))
     assert len(lens_files) == 7
     for path in lens_files:
         text = path.read_text()
@@ -181,7 +161,7 @@ def test_context_selects_always_and_signal_lenses(fake_gh):
 
 
 def _lens_files():
-    return sorted((ROOT / "skills" / "review" / "lenses").glob("*.md"))
+    return sorted((ROOT / "skills" / "next" / "lenses").glob("*.md"))
 
 
 def test_context_adds_a_lens_named_in_notes(fake_gh, tmp_path):
@@ -194,17 +174,27 @@ def test_context_adds_a_lens_named_in_notes(fake_gh, tmp_path):
     assert "State the steady state the story assumes" in result.stdout
 
 
-def test_context_prints_the_finding_format_and_the_findings_path(fake_gh, tmp_path):
+def test_context_prints_the_three_formats_and_their_paths(fake_gh, tmp_path):
     result = run_deckhand("review", "context", "248")
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[-2] == (
+    assert lines[-6] == (
         "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
         "<evidence, citing the section>; or exactly `Nothing found.`"
     )
-    assert lines[-2] == review.FINDING_FORMAT
-    assert lines[-1] == f"Findings: {tmp_path / 'cache' / 'widgets' / '248-findings.md'}"
+    assert lines[-6] == review.FINDING_FORMAT
+    assert lines[-5] == f"Findings: {tmp_path / 'cache' / 'widgets' / '248-findings.md'}"
+    assert lines[-4] == (
+        "Report verdicts as lines, one per finding in the reviewer's order: <lens>.<n> | CONFIRMED, "
+        "or <lens>.<n> | REJECTED | <reason>"
+    )
+    assert lines[-3] == f"Verdicts: {tmp_path / 'cache' / 'widgets' / '248-verdicts.md'}"
+    assert lines[-2] == (
+        "Report decisions as lines, one per finding: <lens>.<n> | accepted|declined|changed [| <reason>]"
+    )
+    assert lines[-2] == review.DECISION_FORMAT
+    assert lines[-1] == f"Decisions: {tmp_path / 'cache' / 'widgets' / '248-decisions.md'}"
     assert not (tmp_path / "cache" / "widgets" / "248-findings.md").exists()
 
 
@@ -219,7 +209,9 @@ def test_context_still_prints_when_the_issue_cannot_be_read(fake_gh, tmp_path):
         "### principles",
         "### unknowns",
     ]
-    assert lines[-2] == review.FINDING_FORMAT
+    assert lines[-6] == review.FINDING_FORMAT
+    assert lines[-4] == review.VERDICT_FORMAT
+    assert lines[-2] == review.DECISION_FORMAT
 
 
 def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
@@ -239,48 +231,197 @@ def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
 # --- apply ------------------------------------------------------------------
 
 
+FINDINGS = (
+    "chaos.1 | P2 | PENDING | A retried job writes the grant twice | Scope In names one write\n"
+    "unknowns.1 | P3 | PENDING | The store method is undefined | Notes names the file\n"
+)
+VERDICTS = "chaos.1 | CONFIRMED\nunknowns.1 | REJECTED | Notes names internal/store/grant.go, which defines it\n"
+DECISIONS = "chaos.1 | accepted\nunknowns.1 | declined | the skeptic is right\n"
+ONE = "chaos.1 | P2 | PENDING | A retry writes twice | Scope In\n"
+
+
+def _files(tmp_path: Path, findings: str = FINDINGS, verdicts: str = VERDICTS, decisions: str = DECISIONS) -> list[str]:
+    paths = []
+    for name, text in (("findings", findings), ("verdicts", verdicts), ("decisions", decisions)):
+        path = tmp_path / f"248-{name}.md"
+        path.write_text(text, encoding="utf-8")
+        paths.append(str(path))
+    return paths
+
+
+def _apply(
+    tmp_path: Path,
+    *,
+    verdict: str = "Sound; two things to tighten.",
+    env: dict[str, str] | None = None,
+    **files: str,
+):
+    findings, verdicts, decisions = _files(tmp_path, **files)
+    return run_deckhand("review", "apply", "248", findings, verdicts, decisions, "--verdict", verdict, env=env or {})
+
+
+def test_apply_posts_the_verdict_and_every_finding_with_its_decision(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "comment.md"
+
+    result = _apply(tmp_path, env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    (call,) = [c for c in gh_calls() if c.startswith("issue comment")]
+    assert call.startswith("issue comment 248 --repo acme/widgets --body-file ")
+    assert _posted(copy) == (
+        "Review: Sound; two things to tighten.\n"
+        "\n"
+        "- chaos.1, P2, accepted: A retried job writes the grant twice. Scope In names one write.\n"
+        "- unknowns.1, P3, declined, rejected by the skeptic: The store method is undefined. Notes names the file. "
+        "Because the skeptic is right.\n"
+    )
+    assert result.stdout.splitlines() == [COMMENT_URL]
+
+
+def test_a_changed_decision_carries_its_reason(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+
+    result = _apply(
+        tmp_path,
+        decisions="chaos.1 | changed | retry once, not twice\nunknowns.1 | declined\n",
+        env={"GH_BODY_FILE_COPY": str(copy)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        "- chaos.1, P2, changed: A retried job writes the grant twice. Scope In names one write. "
+        "Because retry once, not twice.\n"
+    ) in _posted(copy)
+
+
+def test_a_line_adds_no_second_stop_to_a_half_that_has_one(fake_gh, tmp_path):
+    """A finding is two sentences on one line, so neither half may run into what follows it."""
+    copy = tmp_path / "comment.md"
+    text = "chaos.1 | P2 | PENDING | Does a retry write twice? | Scope In names one write.\n"
+
+    result = _apply(
+        tmp_path,
+        findings=text,
+        verdicts="chaos.1 | CONFIRMED\n",
+        decisions="chaos.1 | accepted | once is enough.\n",
+        env={"GH_BODY_FILE_COPY": str(copy)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "- chaos.1, P2, accepted: Does a retry write twice? Scope In names one write. Because once is enough.\n" in (
+        _posted(copy)
+    )
+
+
+def test_apply_refuses_a_decision_for_no_finding(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, decisions=DECISIONS + "chaos.9 | accepted\n")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: line 3: chaos.9 is not a finding\n"
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_finding_without_a_decision(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, decisions="chaos.1 | accepted\n")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: no decision for unknowns.1\n"
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_two_decisions_for_one_finding(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, decisions=DECISIONS + "chaos.1 | declined\n")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: line 3: chaos.1 already has a decision\n"
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_decision_that_is_not_one(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, decisions="chaos.1 | maybe\nunknowns.1 | declined\n")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand review apply: line 1: expected <lens>.<n> | accepted|declined|changed [| <reason>]\n"
+    )
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_decision_with_a_pipe_in_its_reason(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, decisions="chaos.1 | accepted | a | b\nunknowns.1 | declined\n")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand review apply: line 1: expected <lens>.<n> | accepted|declined|changed [| <reason>]\n"
+    )
+    assert _writes(gh_calls) == []
+
+
+def test_an_accepted_decision_on_a_rejected_finding_shows_both(fake_gh, tmp_path):
+    """The person may overrule the skeptic; the line then carries the decision and the verdict it overruled."""
+    copy = tmp_path / "comment.md"
+
+    result = _apply(
+        tmp_path, decisions="chaos.1 | accepted\nunknowns.1 | accepted\n", env={"GH_BODY_FILE_COPY": str(copy)}
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "- unknowns.1, P3, accepted, rejected by the skeptic: The store method is undefined." in _posted(copy)
+
+
+def test_a_wrapped_verdict_is_posted_on_one_line(fake_gh, tmp_path):
+    """The verdict is the entry's first line, so a newline a shell wrapped in must not reach the log."""
+    copy = tmp_path / "comment.md"
+
+    result = _apply(tmp_path, verdict="a\n  b", env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert _posted(copy).startswith("Review: a b\n\n- chaos.1")
+
+
+def test_apply_refuses_a_blank_verdict(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, verdict="  ")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: --verdict needs a sentence on the story as a whole\n"
+    assert _writes(gh_calls) == []
+
+
+def test_a_clean_pass_needs_neither_verdicts_nor_decisions(fake_gh, tmp_path):
+    copy = tmp_path / "comment.md"
+    path = tmp_path / "248-findings.md"
+    path.write_text("Nothing found.\n", encoding="utf-8")
+
+    result = run_deckhand(
+        "review", "apply", "248", str(path), "--verdict", "Sound.", env={"GH_BODY_FILE_COPY": str(copy)}
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _posted(copy) == "Review: Sound.\n\nNothing found.\n"
+    assert result.stdout.splitlines() == [COMMENT_URL]
+
+
+def test_apply_refuses_findings_without_verdicts_or_decisions(fake_gh, gh_calls, tmp_path):
+    findings, _, _ = _files(tmp_path)
+
+    result = run_deckhand("review", "apply", "248", findings, "--verdict", "Sound.")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand review apply: the findings need the skeptic's verdicts and the person's decisions; pass both files\n"
+    )
+    assert _writes(gh_calls) == []
+
+
 def test_apply_refuses_a_stub(fake_gh, gh_calls, tmp_path):
-    result = run_deckhand("review", "apply", "57", _findings(tmp_path, "Nothing found.\n"), env=STUB)
+    path = tmp_path / "57-findings.md"
+    path.write_text("Nothing found.\n", encoding="utf-8")
+
+    result = run_deckhand("review", "apply", "57", str(path), "--verdict", "Sound.", env=STUB)
 
     assert result.returncode == 1
     assert result.stderr == "deckhand review apply: #57 is a stub; run /deckhand:new 57 first\n"
     assert result.stdout == ""
-    assert _writes(gh_calls) == []
-
-
-def test_apply_refuses_a_malformed_line_and_writes_nothing(fake_gh, gh_calls, tmp_path):
-    text = "red-team.1 | P1 | CONFIRMED | A guest reads another collection | Scope In\nnot a finding\n"
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text))
-
-    assert result.returncode == 1
-    assert result.stderr == (
-        "deckhand review apply: line 2: expected <lens>.<n> | P1|P2|P3 | CONFIRMED|REJECTED | <claim> | <evidence>\n"
-    )
-    assert result.stdout == ""
-    assert _writes(gh_calls) == []
-
-
-def test_apply_refuses_a_pipe_inside_a_claim(fake_gh, gh_calls, tmp_path):
-    text = "chaos.1 | P1 | CONFIRMED | foo(a | b) is never bounded | Scope In\n"
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text))
-
-    assert result.returncode == 1
-    assert result.stderr.startswith("deckhand review apply: line 1: expected ")
-    assert _writes(gh_calls) == []
-
-
-def test_apply_refuses_a_duplicate_finding_id(fake_gh, gh_calls, tmp_path):
-    text = (
-        "chaos.1 | P1 | CONFIRMED | A retry writes twice | Scope In\n"
-        "chaos.1 | P2 | REJECTED | The cache outlives the row | Notes\n"
-    )
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text))
-
-    assert result.returncode == 1
-    assert result.stderr == "deckhand review apply: line 2: chaos.1 is already the id of an earlier finding\n"
     assert _writes(gh_calls) == []
 
 
@@ -289,248 +430,129 @@ def test_apply_reads_past_a_byte_order_mark(fake_gh, tmp_path):
     path = tmp_path / "248-findings.md"
     path.write_bytes("\ufeffNothing found.\n".encode("utf-8"))
 
-    result = run_deckhand("review", "apply", "248", str(path), env={"GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand(
+        "review", "apply", "248", str(path), "--verdict", "Sound.", env={"GH_BODY_FILE_COPY": str(copy)}
+    )
 
     assert result.returncode == 0, result.stderr
-    assert _posted(copy) == f"## Review\n\nNothing found.\n\n{CLEAN_LINE}\n"
+    assert _posted(copy) == "Review: Sound.\n\nNothing found.\n"
+
+
+# --- the findings -------------------------------------------------------------
+
+
+def test_apply_refuses_a_malformed_line_and_writes_nothing(fake_gh, gh_calls, tmp_path):
+    text = "red-team.1 | P1 | PENDING | A guest reads another collection | Scope In\nnot a finding\n"
+
+    result = _apply(tmp_path, findings=text)
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand review apply: line 2: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>\n"
+    )
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_pipe_inside_a_claim(fake_gh, gh_calls, tmp_path):
+    text = "chaos.1 | P1 | PENDING | foo(a | b) is never bounded | Scope In\n"
+
+    result = _apply(tmp_path, findings=text)
+
+    assert result.returncode == 1
+    assert result.stderr.startswith("deckhand review apply: line 1: expected ")
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_duplicate_finding_id(fake_gh, gh_calls, tmp_path):
+    text = (
+        "chaos.1 | P1 | PENDING | A retry writes twice | Scope In\n"
+        "chaos.1 | P2 | PENDING | The cache outlives the row | Notes\n"
+    )
+
+    result = _apply(tmp_path, findings=text)
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: line 2: chaos.1 is already the id of an earlier finding\n"
+    assert _writes(gh_calls) == []
 
 
 def test_apply_refuses_an_unknown_lens(fake_gh, gh_calls, tmp_path):
-    text = "vibes.1 | P1 | CONFIRMED | It feels wrong | Story\n"
+    text = "vibes.1 | P1 | PENDING | It feels wrong | Story\n"
 
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text))
+    result = _apply(tmp_path, findings=text)
 
     assert result.returncode == 1
     assert result.stderr == "deckhand review apply: line 1: no lens named 'vibes'\n"
     assert _writes(gh_calls) == []
 
 
-def test_apply_posts_every_finding_as_a_box(fake_gh, gh_calls, tmp_path):
-    copy = tmp_path / "comment.md"
-
-    result = run_deckhand(
-        "review",
-        "apply",
-        "248",
-        str(FIXTURES / "findings.md"),
-        env={"GH_BODY_FILE_COPY": str(copy)},
-    )
-
-    assert result.returncode == 0, result.stderr
-    (call,) = [c for c in gh_calls() if c.startswith("issue comment")]
-    assert call.startswith("issue comment 248 --repo acme/widgets --body-file ")
-    assert _posted(copy) == (
-        "## Review\n"
-        "\n"
-        f"{GUIDANCE}\n"
-        "\n"
-        "- [ ] **red-team.1, P1** A guest reads another organization's collection by id. "
-        "Scope In names filtering but no ownership check.\n"
-        "- [ ] **chaos.1, P2** A retried job writes the grant twice. "
-        "Acceptance Criteria says nothing about a repeated list.\n"
-        "- [ ] **unknowns.1, P3, rejected by the skeptic** The existing store method is undefined. "
-        "Notes points at internal/store/grant.go.\n"
-    )
-    assert result.stdout.splitlines() == [COMMENT_URL, NEXT]
-
-
-def test_a_box_ends_the_claim_and_the_evidence_with_a_stop(fake_gh, tmp_path):
-    """A finding is two sentences on one line, so neither half may run into what follows it."""
-    copy = tmp_path / "comment.md"
-    text = "chaos.1 | P2 | CONFIRMED | A retry writes twice | Scope In names one write\n"
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
-
-    assert result.returncode == 0, result.stderr
-    assert "**chaos.1, P2** A retry writes twice. Scope In names one write.\n" in _posted(copy)
-
-
-def test_a_box_adds_no_second_stop_to_a_half_that_has_one(fake_gh, tmp_path):
-    copy = tmp_path / "comment.md"
-    text = "chaos.1 | P2 | CONFIRMED | Does a retry write twice? | Scope In names one write.\n"
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
-
-    assert result.returncode == 0, result.stderr
-    assert "**chaos.1, P2** Does a retry write twice? Scope In names one write.\n" in _posted(copy)
-
-
-def test_apply_posts_nothing_found(fake_gh, tmp_path):
-    copy = tmp_path / "comment.md"
-
-    result = run_deckhand(
-        "review",
-        "apply",
-        "248",
-        str(FIXTURES / "findings-clean.md"),
-        env={"GH_BODY_FILE_COPY": str(copy)},
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert _posted(copy) == f"## Review\n\nNothing found.\n\n{CLEAN_LINE}\n"
-    assert result.stdout.splitlines() == [COMMENT_URL, NEXT]
-
-
-def test_apply_boxes_a_rejected_finding_too(fake_gh, tmp_path):
-    """A rejection is the skeptic's, not the reader's, so it is still a box the reader can tick."""
-    copy = tmp_path / "comment.md"
-    only_rejected = "unknowns.1 | P2 | REJECTED | The store method is undefined | Notes names the file\n"
-
-    result = run_deckhand(
-        "review",
-        "apply",
-        "248",
-        _findings(tmp_path, only_rejected),
-        env={"GH_BODY_FILE_COPY": str(copy)},
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert _posted(copy) == (
-        "## Review\n"
-        "\n"
-        f"{GUIDANCE}\n"
-        "\n"
-        "- [ ] **unknowns.1, P2, rejected by the skeptic** The store method is undefined. "
-        "Notes names the file.\n"
-    )
-    assert result.stdout.splitlines() == [COMMENT_URL, NEXT]
-
-
-def test_the_guidance_names_both_ends_of_the_next_step():
-    """Ticking nothing is an answer, so the guidance says what the one command does either way."""
-    assert "or boards the story when you accepted nothing." in review.guidance(248)
-
-
-def test_the_withheld_line_names_the_choice_that_asks_for_a_second_pass():
-    """The rest are had by choosing Review it again at the board question, not by rerunning next."""
-    assert "choose Review it again" in review.comment_body(248, [], [], withheld=2)
-
-
-def test_the_guidance_says_a_reply_is_read_at_the_next_amend():
-    """A reply is not lost and not free: the amend step reads it, so the guidance says when."""
-    assert "Replies here are read the next time the story is amended." in review.guidance(248)
-
-
-def test_the_guidance_names_the_issue_the_comment_is_posted_on():
-    """The comment stands alone, so the commands in it have to carry the number, not a placeholder."""
-    assert review.comment_body(931, [], []) == (
-        "## Review\n\nNothing found.\n\nReply here with anything still wrong, then run `/deckhand:next 931`.\n"
-    )
-    assert "/deckhand:next 931" in review.guidance(931)
-
-
 def test_apply_refuses_an_empty_findings_file(fake_gh, gh_calls, tmp_path):
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, "\n\n"))
+    result = _apply(tmp_path, findings="\n\n")
 
     assert result.returncode == 1
     assert "the findings file is empty" in result.stderr
     assert _writes(gh_calls) == []
 
 
-def test_apply_heading_is_the_one_amend_looks_for():
-    from deckhand import issue as issue_module
-
-    assert review.comment_body(248, [], []).splitlines()[0] == issue_module.REVIEW_HEADING
+# --- the verdicts -------------------------------------------------------------
 
 
-# --- the cap ----------------------------------------------------------------
+def test_apply_refuses_a_verdict_that_is_not_one(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, findings=ONE, verdicts="chaos.1 | MAYBE\n")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand review apply: line 1: expected <lens>.<n> | CONFIRMED, or <lens>.<n> | REJECTED | <reason>\n"
+    )
+    assert _writes(gh_calls) == []
 
 
-def _confirmed(*specs: tuple[str, int, str]) -> str:
-    """A findings file from `(lens, ordinal, severity)` triples, every line confirmed."""
-    return "".join(f"{lens}.{n} | {sev} | CONFIRMED | Claim {lens}{n} | Section {lens}\n" for lens, n, sev in specs)
+def test_apply_refuses_a_rejection_without_a_reason(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, findings=ONE, verdicts="chaos.1 | REJECTED\n")
+
+    assert result.returncode == 1
+    assert result.stderr.startswith("deckhand review apply: line 1: expected ")
+    assert _writes(gh_calls) == []
 
 
-def _ids(body: str) -> list[str]:
-    """The finding ids the comment boxed, in the order they appear."""
-    return [line.split("**")[1].split(",")[0] for line in body.splitlines() if line.startswith("- [ ] **")]
+def test_apply_refuses_a_verdict_for_no_finding(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, findings=ONE, verdicts="chaos.1 | CONFIRMED\nchaos.2 | CONFIRMED\n")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: line 2: chaos.2 is not a finding\n"
+    assert _writes(gh_calls) == []
 
 
-def test_apply_posts_at_most_seven_confirmed_findings_and_counts_the_rest(fake_gh, tmp_path):
+def test_apply_refuses_two_verdicts_for_one_finding(fake_gh, gh_calls, tmp_path):
+    result = _apply(tmp_path, findings=ONE, verdicts="chaos.1 | CONFIRMED\nchaos.1 | REJECTED | no\n")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: line 2: chaos.1 already has a verdict\n"
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_finding_left_without_a_verdict(fake_gh, gh_calls, tmp_path):
+    text = ONE + "chaos.2 | P3 | PENDING | Claim | Notes\n"
+
+    result = _apply(tmp_path, findings=text, verdicts="chaos.2 | CONFIRMED\n")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand review apply: no verdict for chaos.1\n"
+    assert _writes(gh_calls) == []
+
+
+def test_a_confirmed_verdict_may_carry_a_reason_that_is_not_posted(fake_gh, tmp_path):
     copy = tmp_path / "comment.md"
-    text = _confirmed(
-        *[("coverage", n, "P1") for n in (1, 2, 3)],
-        *[("chaos", n, "P2") for n in (1, 2, 3, 4)],
-        *[("unknowns", n, "P3") for n in (1, 2, 3)],
+
+    result = _apply(
+        tmp_path,
+        findings=ONE,
+        verdicts="chaos.1 | CONFIRMED | the retry is real\n",
+        decisions="chaos.1 | accepted\n",
+        env={"GH_BODY_FILE_COPY": str(copy)},
     )
 
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
-
     assert result.returncode == 0, result.stderr
-    body = _posted(copy)
-    assert body.count("- [ ] **") == 7
-    assert body.rstrip().endswith(_withheld(3))
-
-
-def test_the_seven_are_the_most_severe_in_lens_order(fake_gh, tmp_path):
-    copy = tmp_path / "comment.md"
-    text = _confirmed(
-        ("red-team", 1, "P1"),
-        ("chaos", 1, "P1"),
-        ("unknowns", 1, "P3"),
-        *[("coverage", n, "P2") for n in (1, 2, 3)],
-        ("pen-test", 1, "P2"),
-        ("principles", 1, "P2"),
-    )
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
-
-    assert result.returncode == 0, result.stderr
-    body = _posted(copy)
-    assert _ids(body) == [
-        "chaos.1",
-        "red-team.1",
-        "coverage.1",
-        "coverage.2",
-        "coverage.3",
-        "pen-test.1",
-        "principles.1",
-    ]
-    assert "unknowns.1" not in body
-    assert body.rstrip().endswith(_withheld(1))
-
-
-def test_every_rejected_finding_is_shown_and_none_counts_against_the_cap(fake_gh, tmp_path):
-    copy = tmp_path / "comment.md"
-    text = _confirmed(
-        *[("coverage", n, "P1") for n in (1, 2, 3, 4)],
-        *[("chaos", n, "P2") for n in (1, 2, 3)],
-    ) + "".join(f"unknowns.{n} | P2 | REJECTED | Claim u{n} | Notes\n" for n in (1, 2, 3))
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
-
-    assert result.returncode == 0, result.stderr
-    body = _posted(copy)
-    assert body.count("- [ ] **") == 10
-    boxes = [line for line in body.splitlines() if line.startswith("- [ ] **")]
-    assert len([line for line in boxes if "rejected by the skeptic" in line]) == 3
-    assert "withheld" not in body
-
-
-def test_the_withheld_line_is_absent_when_seven_or_fewer_are_confirmed(fake_gh, tmp_path):
-    copy = tmp_path / "comment.md"
-    text = _confirmed(*[("coverage", n, "P2") for n in (1, 2, 3, 4, 5, 6, 7)])
-
-    result = run_deckhand("review", "apply", "248", _findings(tmp_path, text), env={"GH_BODY_FILE_COPY": str(copy)})
-
-    assert result.returncode == 0, result.stderr
-    body = _posted(copy)
-    assert body.count("- [ ] **") == 7
-    assert "withheld" not in body
-
-
-def test_comment_body_reports_a_count_it_was_given_with_no_findings():
-    """The count is the caller's, so it is never swallowed by the clean line."""
-    body = review.comment_body(248, [], [], withheld=2)
-
-    assert review.CLEAN not in body
-    assert body.rstrip().endswith(_withheld(2))
-
-
-def test_comment_body_counts_only_what_it_was_told_was_withheld():
-    """The count is the caller's, so the comment never has to know what it was not given."""
-    one = review.Finding("chaos", 1, "P1", "CONFIRMED", "A retry writes twice", "Scope In")
-
-    assert "withheld" not in review.comment_body(248, [one], [])
-    assert review.comment_body(248, [one], [], withheld=1).rstrip().endswith(_withheld(1))
-    assert review.comment_body(248, [one], [], withheld=2).rstrip().endswith(_withheld(2))
+    assert "the retry is real" not in _posted(copy)
+    assert "rejected" not in _posted(copy)

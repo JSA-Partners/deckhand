@@ -1,103 +1,85 @@
-"""The next step: read where a story is and run the one step that is due.
+"""The next step: read where a story is and say what is due, with the context that step needs.
 
-`deckhand next context N` reads the facts GitHub and the clone already hold, picks the step by a
-fixed table, and prints the step, why, that step's own instructions from its skill file, and the
-step's context. It has no `apply`: every write belongs to the step it dispatches, so nothing here
-can be half done.
+`deckhand next context N` reads the facts GitHub and the clone hold: the issue, its column, its log,
+the branch this clone has for it, and any open pull request. A fixed table picks the step, and the
+command prints a briefing: the step, why, the story's title, the last lines of the log, and the
+step's own context. The skill that injects it carries the guidance for every step and carries the
+story on from one to the next; this command has no `apply`, so nothing here can be half done.
 
-A fact that could not be read is never guessed at. Each one is read on its own and named when it
-fails, and a story missing any of them stops with what could not be read rather than being sent to
-a step chosen from half the answer; the command itself still exits 0 with one line per failure.
+A fact that could not be read is never guessed at: a story missing one stops with what could not
+be read rather than being sent to a step chosen from half the answer.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
-import re
-import sys
 from collections.abc import Callable
-from pathlib import Path
-from types import ModuleType
 from typing import NamedTuple
 
-from deckhand import config, fields, gh, git, issue, stub
-from deckhand.step import ORIGIN_MAIN, PLUGIN_ROOT, branch_for, reason, step
+from deckhand import board, config, fields, gh, git, issue, log, sections, stub
+from deckhand.step import MAIN, branch_for, local_branch, reason, step, trunk
 
-SKILLS = PLUGIN_ROOT / "skills"
-# The step whose instructions and context are another step's: a stub is written by `new`.
-SKILL_OF = {"write": "new"}
-MENU = (
-    "Ask one question: Keep building, or Review and finish. "
-    "Keep building runs the start step; Review and finish runs the finish step."
-)
-# The placeholder Claude Code fills in a skill file, which no shell run from here would resolve.
-LAUNCHER = "${CLAUDE_PLUGIN_ROOT}/bin/deckhand"
-_FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
-_INJECTION = re.compile(r"^!`.*`\s*$\n?", re.MULTILINE)
+# The module whose context a step prints; the steps `next` answers itself are absent.
+CONTEXT_OF = {
+    "write": "new",
+    "review": "review",
+    "reconsider": "amend",
+    "board": "ready",
+    "check": "start",
+    "build": "start",
+    "resume": "start",
+}
+LAST_LINES = 3
 
 
 class Facts(NamedTuple):
     """Everything the table reads: what GitHub says about the story, and what the clone says."""
 
     closed: bool
-    stub: bool
-    status: str | None  # None when off the board
-    branch: str | None  # None when the story has no Kind to make one from
-    branch_commits: int | None  # None when origin has no branch
-    pull_request: str | None
-    reviewed: bool
-    feedback: bool
+    status: str | None  # None when off the board, which reads as Draft
+    drafted: bool  # a body that is not a stub: a `Drafted:` entry with no story behind it is not one
+    reviewed: bool  # a `Review:` entry
+    amended_since_review: bool  # an `Amended:` entry after the latest `Review:`, so a second review clears it
+    branch: str | None  # the clone's branch, or the name start would cut; None without a Kind
+    commits: int | None  # past what has landed on main; None when this clone has no branch for the story
+    pull_request: str | None  # the URL of the open pull request
+    pull_requested: bool  # a `Pull request:` entry, so a closed story is a merged one
+    after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
 
 
 def decide(number: int, f: Facts) -> tuple[str, str]:
     """`(step, reason)` by the first row that matches; the order is the design's table."""
+    if f.closed and f.pull_requested and f.after_merge_left:
+        items = "item is" if f.after_merge_left == 1 else "items are"
+        return "after", f"#{number} is merged; {f.after_merge_left} after-the-merge {items} left."
     if f.closed:
         return "done", f"#{number} is closed."
     if f.unavailable:
         return "stop", f"Cannot read {', '.join(f.unavailable)}; nothing decided."
     if f.pull_request:
         return "merge", f"Pull request open: {f.pull_request}"
-    if f.status == "In Progress" and f.branch_commits:
-        return "choose", f"Branch {f.branch} has {f.branch_commits} commits."
+    if f.status == "In Progress" and f.commits:
+        return "resume", f"Branch {f.branch} has {f.commits} commits."
+    if f.status == "In Progress" and f.commits is None:
+        where = f"Branch {f.branch} is not in this clone." if f.branch else "No branch in this clone."
+        return "build", where
     if f.status == "In Progress":
-        return "start", "Started, nothing built yet."
-    if f.status == "Backlog" and f.feedback:
-        return "amend", "Feedback waiting on the issue."
+        return "build", "Started, nothing built yet."
     if f.status == "Backlog":
-        return "start", "On the board."
+        return "check", "On the board; check the plan against the code, then build."
     # Pending Review and Done are the board's own columns, and nothing here reboards a story out of
     # one: the pull request row above is the only way back in.
-    if f.status is not None:
+    if f.status not in (None, "Draft"):
         return "stop", f"#{number} is {f.status} with no open pull request; nothing decided."
-    if f.stub:
+    if not f.drafted:
         return "write", f"#{number} is a stub."
     if not f.reviewed:
         return "review", "Not reviewed."
-    if f.feedback:
-        return "amend", "Feedback waiting on the issue."
-    return "ready", "Reviewed, nothing waiting."
-
-
-def launcher() -> str:
-    """The deckhand this process was run as, resolved, so a command printed here can be run as it is."""
-    return str(Path(sys.argv[0]).resolve())
-
-
-def instructions(name: str, number: int) -> str:
-    """The step skill's body with its frontmatter and injection line removed and `$issue` filled in.
-
-    The skill file is the one place a step's instructions are written; printing it here is what
-    lets the steps stay out of the person's menu without their words being duplicated. The launcher
-    a skill names is a placeholder Claude Code fills, so it is filled in here too: what is printed
-    is read as a command to run, and an unexpanded variable would run nothing.
-    """
-    text = (SKILLS / SKILL_OF.get(name, name) / "SKILL.md").read_text(encoding="utf-8")
-    text = _FRONTMATTER.sub("", text, count=1)
-    text = _INJECTION.sub("", text)
-    text = text.replace(LAUNCHER, launcher())
-    return text.replace("$issue", str(number)).replace("$source", str(number)).strip("\n")
+    if f.amended_since_review:
+        return "reconsider", "Amended since the review."
+    return "board", "Reviewed, nothing waiting."
 
 
 # --- the facts ---------------------------------------------------------------
@@ -124,134 +106,125 @@ class Reader:
             return None
 
 
-def _board(repo: str, number: int) -> dict[str, str | None]:
-    """The Status the table reads and the Kind the branch name is made from, in one query."""
-    return fields.get_fields(config.load(), repo, number, ("Status", "Kind"))
+def _branch(kind: str | None, title: str, number: int) -> tuple[str | None, int | None]:
+    """`(branch, commits past main)`; None commits when this clone has no branch for the story.
 
+    The branch is found by the story's number, so a retitle after start changes nothing here. With
+    none in the clone, the name is the one `start` would cut, derived only to say it and to refuse a
+    title with no slug now rather than then; with no Kind yet there is no name, which is an answer.
 
-def _branch(kind: str, title: str, number: int) -> tuple[str, int | None]:
-    """`(branch, commits past origin/main)`; the count is None when origin has no such branch.
-
-    A fetch that fails is swallowed: the tracking refs a clone already has still answer the
-    question, and a network that is down must not decide that a started story never started.
+    The count is past what has landed on main, so main is fetched first, and only main: a stale
+    origin/main would count work merged since the branch was cut as the story's own. The fetch that
+    fails is swallowed, since the tracking ref the clone already has still answers, and the range is
+    the same one `start` prints as the branch's commits.
     """
-    name = branch_for(config.load(), kind, title, number)
+    name = local_branch(number)
+    if name is None:
+        return (branch_for(config.load(), kind, title, number) if kind else None), None
     try:
-        git.run("fetch", "origin")
+        git.run("fetch", "origin", MAIN)
     except git.GitError:
         pass
-    ref = f"origin/{name}"
-    try:
-        git.run("rev-parse", "--verify", "--quiet", ref)
-    except git.GitError:
-        return name, None
-    return name, int(git.run("rev-list", "--count", f"{ORIGIN_MAIN}..{ref}"))
+    return name, int(git.run("rev-list", "--count", f"{trunk()}..{name}"))
 
 
-def _feedback(repo: str, number: int) -> bool:
-    """Whether a person has ticked or written since the review the last amend answered.
+def _after_merge_left(story: issue.Issue) -> list[str]:
+    """The After the merge items no `After the merge:` entry has answered yet, in the plan's order."""
+    items = sections.after_merge(story.body)
+    done = sum(1 for entry in log.entries(story) if entry.prefix == "After the merge:")
+    return items[done:]
 
-    Ticking a finding edits the review comment, so a tick counts once: an amend posts its own
-    comment, and an edit older than that comment has already been applied. A review nobody has
-    touched carries the stamp it was posted with, which is not later than itself, so posting a
-    review is never read as an answer to it.
+
+def _pull_request(repo: str, story: issue.Issue, branch: str | None) -> str | None:
+    """The URL of the story's open pull request, or None.
+
+    The log names the pull request `finish` opened, and its URL finds it whatever branch it was
+    pushed from; the head lookup is for a story whose log has no entry, from before the log or from
+    a pull request opened by hand.
     """
-    edited, reviewed_at, amended, replies = issue.feedback_state(repo, number)
-    return (edited or "") > max(amended, reviewed_at) or bool(replies)
+    entry = log.last(story, "Pull request:")
+    if entry is not None:
+        return issue.pull_request_state(repo, entry.text.split()[0])
+    return issue.pull_request(repo, branch) if branch else None
 
 
 def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Reader) -> Facts:
     """Read the table's facts; each one is read only when everything it is derived from was."""
-    values = reader.read("board", lambda: _board(repo, number)) if repo and story else None
+    values = (
+        reader.read("board", lambda: fields.get_fields(config.load(), repo, number, ("Status", "Kind")))
+        if repo and story
+        else None
+    )
     kind = values["Kind"] if values else None
-    # No Kind means no branch, which is an answer rather than a failure: nothing has branched yet.
-    found = reader.read("branch", lambda: _branch(kind, story.title, number)) if kind and story else None
+    found = reader.read("branch", lambda: _branch(kind, story.title, number)) if repo and story else None
     branch, commits = found if found else (None, None)
-    # Only a branch origin has can be the head of a pull request.
-    pull = reader.read("pull request", lambda: issue.pull_request(repo, branch)) if commits is not None else None
-    reviewed = story is not None and issue.review_comment(story) is not None
-    feedback = bool(reader.read("comments", lambda: _feedback(repo, number))) if reviewed else False
+    closed = story is not None and story.state.upper() == "CLOSED"
+    pull = (
+        reader.read("pull request", lambda: _pull_request(repo, story, branch))
+        if repo and story and not closed
+        else None
+    )
+    reviewed = story is not None and log.last(story, "Review:") is not None
     return Facts(
-        closed=story is not None and story.state.upper() == "CLOSED",
-        stub=story is not None and stub.is_stub(story.body),
+        closed=closed,
         status=values["Status"] if values else None,
-        branch=branch,
-        branch_commits=commits,
-        pull_request=pull,
+        drafted=story is not None and not stub.is_stub(story.body),
         reviewed=reviewed,
-        feedback=feedback,
+        amended_since_review=reviewed and any(e.prefix == "Amended:" for e in log.since(story, "Review:")),
+        branch=branch,
+        commits=commits,
+        pull_request=pull,
+        pull_requested=story is not None and log.last(story, "Pull request:") is not None,
+        after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
     )
 
 
-# --- context -----------------------------------------------------------------
+# --- the briefing ------------------------------------------------------------
 
 
-def _module(name: str) -> ModuleType:
-    """The step module whose `context` this step runs."""
-    return importlib.import_module(f"deckhand.{SKILL_OF.get(name, name)}")
+def _log_block(story: issue.Issue | None) -> None:
+    """The last entries of the log, one line each, so the session sees what was decided before."""
+    print("Log:")
+    entries = log.entries(story)[-LAST_LINES:] if story else []
+    for entry in entries:
+        print(f"  {entry.created_at[:10] or 'undated'} {entry.prefix} {entry.text}")
+    if not entries:
+        print("  none")
 
 
-def _instructions_block(name: str, number: int) -> str:
-    """The step's instructions, or one line when its skill file cannot be read."""
-    try:
-        return instructions(name, number)
-    except Exception as error:
-        return f"  unavailable ({reason(error)})"
-
-
-def _dispatch(name: str, number: int) -> None:
-    """The step's own instructions and the context its command prints, under one heading each."""
-    print()
-    print("## Instructions")
-    print(_instructions_block(name, number))
+def _context(name: str, number: int) -> None:
+    """The context of the step's own command, under one heading; a failure inside is one line."""
     print()
     print("## Context")
+    module = importlib.import_module(f"deckhand.{CONTEXT_OF[name]}")
     # The step's own guard is on its command, not its function, so the call gets one here.
     try:
-        _module(name).context(argparse.Namespace(issue=number, source=str(number)))
+        module.context(argparse.Namespace(issue=number, source=str(number)))
     except Exception as error:
         print(f"  unavailable ({reason(error)})")
 
 
-def _choose(number: int) -> None:
-    """The one question a person answers on a branch that has commits, and both answers' steps.
-
-    Each answer leads with the command that prints that step's own context: neither step's context
-    is above, because the story was not sent to a step, and instructions read against the wrong
-    context are worse than none.
-    """
-    print(MENU)
-    answers = (
-        ("## If keep building", "start", f'Run "{launcher()}" start context {number} first, then:'),
-        ("## If finish", "finish", f'Check out the branch, then run "{launcher()}" finish context {number}, then:'),
-    )
-    for heading, name, lead in answers:
-        print()
-        print(heading)
-        print()
-        print(lead)
-        print()
-        print(_instructions_block(name, number))
+def _after(story: issue.Issue) -> None:
+    """The After the merge items still to do, each one a line."""
+    print("Left:")
+    for item in _after_merge_left(story):
+        print(f"  - {item}")
 
 
-def _done(repo: str, number: int, story: issue.Issue) -> None:
-    """The closed story to look at, and the stories it unblocks, each its own next command."""
-    print(f"Issue: {story.url}")
+def _next_story(repo: str, number: int) -> None:
+    """The oldest open story of the repository on the board, which is the one to take up next."""
     try:
-        waiting = issue.blocking(repo, number)
+        found = board.oldest_open(config.load(), repo, exclude=number)
     except Exception as error:
-        print(f"Blocked issues: unavailable ({reason(error)})")
+        print(f"Next story: unavailable ({reason(error)})")
         return
-    for blocked in waiting:
-        print(f"Next: /deckhand:next {blocked}")
-    if not waiting:
-        print("Next: nothing.")
+    print(f"Next story: #{found[0]} {found[1]}" if found else "Next story: none")
 
 
 @step("next")
 def context(args: argparse.Namespace) -> int:
-    """Print the step the story is due, why, and the instructions and context that step needs."""
+    """Print the step the story is due, why, its title, the log's tail, and the context that step needs."""
     number = args.issue
     reader = Reader()
     repo = reader.read("repository", gh.repo_slug)
@@ -262,17 +235,14 @@ def context(args: argparse.Namespace) -> int:
     name, why = decide(number, facts)
     print(f"Step: {name}")
     print(why)
-    if name == "choose":
-        _choose(number)
-    elif name == "merge":
-        print("Merge the pull request on GitHub.")
-        print(f"Next: /deckhand:next {number} after it merges.")
-    elif name == "stop":
-        # A fact that could not be read is worth another try; a column this command cannot act on
-        # is the board's own business, and there is nothing to come back to.
-        print(f"Next: /deckhand:next {number} when it can be read." if facts.unavailable else "Next: nothing.")
-    elif name == "done" and repo and story:
-        _done(repo, number, story)
-    elif name != "done":
-        _dispatch(name, number)
+    if story:
+        print(f"Title: {story.title}")
+        print(f"Issue: {story.url}")
+    _log_block(story)
+    if name in CONTEXT_OF:
+        _context(name, number)
+    elif name == "after" and story:
+        _after(story)
+    elif name == "done" and repo:
+        _next_story(repo, number)
     return 0

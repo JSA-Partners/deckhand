@@ -1,4 +1,4 @@
-"""The ready step: a reviewed story goes on the board with its kind, its points, and its blockers.
+"""The ready step: a reviewed story moves to Backlog with its kind, its points, and its blockers.
 
 `context` prints the kinds the project defines, the story itself, the open blockers, the fields as
 the board has them, and the analogy table the estimate comes from. The kinds and the story are what
@@ -7,12 +7,13 @@ block degrades to one line of its own, so a lookup that fails never costs the mo
 prompt.
 
 `apply` validates the kind, the points, the review, and every blocker before it writes anything,
-then records the dependencies, adds the item, and sets the fields, printing one line per write. A
-review comment is the whole gate: nobody has to reply, and Status is always Backlog, because the
-board has no Blocked column and `start` reads the blockers live. The board's own automation sets
-Status after an item is added, asynchronously, so `apply` waits, reads Status back, and puts it
-right once if the automation moved it. `DECKHAND_SETTLE` is that wait in seconds; the tests set it
-to 0.
+then records the dependencies and sets the fields, printing one line per write. A story is already
+on the board as Draft from the moment it was written, so the item is added only for a story from
+before that, one not on the board yet. The latest `Review:` entry is the whole gate: nobody has to
+reply, and Status is always Backlog, because the board has no Blocked column and `start` reads the
+blockers live. The board's own automation sets Status after an item is added, asynchronously, so
+when `apply` has added one it waits, reads Status back, and puts it right once if the automation
+moved it. `DECKHAND_SETTLE` is that wait in seconds; the tests set it to 0.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import re
 import time
 from typing import Any
 
-from deckhand import config, fields, gh, issue, sections
+from deckhand import board, config, fields, gh, issue, log, sections
 from deckhand.config import Settings
 from deckhand.fields import format_number
 from deckhand.step import (
@@ -43,18 +44,6 @@ LIMIT = 20
 SETTLE = 2.0
 TABLE_HEADER = "| # | Repo | Title | Estimate | Actual | Tasks | Note |"
 TABLE_RULE = "| --- | --- | --- | --- | --- | --- | --- |"
-
-# gh --paginate advances the cursor only when the variable is named endCursor.
-ITEMS_QUERY = (
-    "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
-    "projectV2(number:$number){ items(first:100, after:$endCursor){ "
-    "pageInfo{ hasNextPage endCursor } nodes{ "
-    "content{ ... on Issue{ number closedAt title body repository{ nameWithOwner } } } "
-    "fieldValues(first:30){ nodes{ "
-    "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
-    "... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } } "
-    "} } } } } } }"
-)
 
 _TASK_HEADING = re.compile(r"^### Task [0-9]+", re.MULTILINE)
 # What gh says when the issue is not there, as opposed to a network, auth, or rate limit failure.
@@ -82,33 +71,15 @@ def _fmt(value: Any) -> str:
     return "-" if value is None else format_number(value)
 
 
-def _field_value(node: dict[str, Any], name: str, key: str) -> Any:
-    for value in (node.get("fieldValues") or {}).get("nodes") or []:
-        if (value.get("field") or {}).get("name") == name:
-            return value.get(key)
-    return None
-
-
-def _items(pages: list[Any], root: str) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for page in pages:
-        project = ((page.get("data") or {}).get(root) or {}).get("projectV2") or {}
-        items.extend((project.get("items") or {}).get("nodes") or [])
-    return items
-
-
-def analogy_rows(pages: list[Any], limit: int, root: str = "organization") -> list[str]:
-    """Table rows for the most recently closed Done stories across `pages` of the items query.
-
-    `root` is the query's owner root field, `organization` or `user`.
-    """
+def analogy_rows(nodes: list[dict[str, Any]], limit: int) -> list[str]:
+    """Table rows for the most recently closed Done stories among the board's item `nodes`."""
     done = []
-    for node in _items(pages, root):
+    for node in nodes:
         content = node.get("content")
-        if not content or _field_value(node, "Status", "name") != "Done":
+        if not content or board.field_value(node, "Status", "name") != "Done":
             continue
-        points = _field_value(node, "Story Points", "number")
-        actual = _field_value(node, "Actual", "number")
+        points = board.field_value(node, "Story Points", "number")
+        actual = board.field_value(node, "Actual", "number")
         done.append((content, points, actual))
     done.sort(key=lambda item: item[0].get("closedAt") or "", reverse=True)
     rows = []
@@ -145,11 +116,7 @@ def _fields_block(settings: Settings | Exception, number: int) -> list[str]:
 
 
 def _table_block(settings: Settings | Exception) -> list[str]:
-    resolved = usable(settings)
-    query = gh.owner_query(ITEMS_QUERY, resolved.owner_type)
-    variables = {"owner": resolved.owner, "number": resolved.project}
-    pages = gh.graphql(query, variables, paginate=True)
-    rows = analogy_rows(pages, LIMIT, gh.owner_field(resolved.owner_type))
+    rows = analogy_rows(board.items(usable(settings)), LIMIT)
     return [TABLE_HEADER, TABLE_RULE, *rows] if rows else ["  none"]
 
 
@@ -175,9 +142,9 @@ def _points(value: str) -> int:
 
 
 def _reviewed(story: issue.Issue, number: int) -> None:
-    """Refuse unless the story carries a review comment, which is the only gate this step holds."""
-    if issue.review_comment(story) is None:
-        raise Refusal(f"no review comment on #{number}; run /deckhand:next {number}")
+    """Refuse unless the story carries a `Review:` entry, which is the only gate this step holds."""
+    if log.last(story, "Review:") is None:
+        raise Refusal(f"no review on #{number}; run /deckhand:next {number}")
 
 
 def _open_issue(repo: str, number: int) -> None:
@@ -229,7 +196,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 @step("ready", _configure)
 def apply(args: argparse.Namespace) -> int:
-    """Put a reviewed story on the board with its kind, its points, and its blockers."""
+    """Move a reviewed story to Backlog with its kind, its points, and its blockers."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
     refuse_stub(args.issue, story.body)
@@ -249,13 +216,13 @@ def apply(args: argparse.Namespace) -> int:
     # Every story boards in the same column: a blocker is a dependency GitHub holds and `start`
     # reads live, not a column that would need clearing when the last blocker closed.
     status = "Backlog"
-    gh.run(
-        "project", "item-add", str(settings.project), "--owner", settings.owner, "--url", story.url, "--format", "json"
-    )
-    print("Added to the board")
+    added = gh.item_id(settings, repo, args.issue) is None  # a story from before every story was boarded at birth
+    if added:
+        board.add(settings, story.url)
+        print("Added to the board")
     print(fields.set_field(settings, repo, args.issue, "Kind", args.kind))
     print(fields.set_field(settings, repo, args.issue, "Story Points", str(points)))
     print(fields.set_field(settings, repo, args.issue, "Status", status))
-    _hold_status(settings, repo, args.issue, status)
-    print(f"Next: /deckhand:next {args.issue} when you want to build.")
+    if added:
+        _hold_status(settings, repo, args.issue, status)
     return 0

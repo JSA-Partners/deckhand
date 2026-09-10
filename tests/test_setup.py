@@ -36,18 +36,51 @@ REPO_EDIT = (
 SLUG = "repo view --json nameWithOwner"
 LINKED = "api graphql linked-projects"
 FIELDS_QUERY = "api graphql project-fields"
+VIEWS_QUERY = "api graphql project-views"
+KIND_CREATE = "api graphql create-kind"
+KIND_UPDATE = "api graphql update-kind"
+MERGES = "api repos/acme/widgets"
+
+# Every checklist item is done with the default fixtures; these Status options are the ones a
+# fresh project has, so a test that wants something left to do reads them instead.
+OLD_STATUS = [
+    {"id": f"o{i}", "name": name, "color": "GRAY"}
+    for i, name in enumerate(["Backlog", "Blocked", "In Progress", "Pending Review", "Done"], start=1)
+]
+KIND_COLORS = [
+    ("feat", "GREEN"),
+    ("fix", "RED"),
+    ("chore", "GRAY"),
+    ("refactor", "BLUE"),
+    ("docs", "PURPLE"),
+    ("perf", "ORANGE"),
+]
+KIND_OPTIONS = [{"name": name, "color": color, "description": ""} for name, color in KIND_COLORS]
 
 
 def _short(call: str) -> str:
-    """One recorded call, with either project query shortened to the name the assertions use."""
+    """One recorded call, with each project query shortened to the name the assertions use."""
     if not call.startswith("api graphql"):
         return call
+    if "createProjectV2Field" in call:
+        return KIND_CREATE
+    if "updateProjectV2Field" in call:
+        return KIND_UPDATE
+    if "views(" in call:
+        return VIEWS_QUERY
     return FIELDS_QUERY if "fields(first" in call else LINKED
 
 
 def _calls(gh_calls) -> list[str]:
-    """The recorded gh calls, with the two project queries shortened to their names."""
+    """The recorded gh calls, with the project queries shortened to their names."""
     return [_short(call) for call in gh_calls()]
+
+
+def _fields_without(tmp_path, name) -> dict[str, str]:
+    """The `fields.json` fixture with the field `name` dropped, as the env that points setup at it."""
+    data = json.loads((FIXTURES / "fields.json").read_text(encoding="utf-8"))
+    fields = [f for f in data["fields"] if f["name"] != name]
+    return {"GH_FIELDS_FILE": _fields_file(tmp_path, f"without-{name.lower()}.json", fields)}
 
 
 def _deletes(gh_calls) -> list[str]:
@@ -58,6 +91,42 @@ def _project_fields_file(tmp_path, name, nodes):
     path = tmp_path / name
     path.write_text(json.dumps({"data": {"organization": {"projectV2": {"fields": {"nodes": nodes}}}}}))
     return str(path)
+
+
+def _project_fields(tmp_path, name, status=None, kind=None, drop=()) -> dict[str, str]:
+    """The project-fields fixture with Status or Kind options replaced or a field dropped, as env."""
+    data = json.loads((FIXTURES / "project-fields.json").read_text(encoding="utf-8"))
+    nodes = []
+    for node in data["data"]["organization"]["projectV2"]["fields"]["nodes"]:
+        if node["name"] in drop:
+            continue
+        if node["name"] == "Status" and status is not None:
+            node = {**node, "options": status}
+        if node["name"] == "Kind" and kind is not None:
+            node = {**node, "options": kind}
+        nodes.append(node)
+    return {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, name, nodes)}
+
+
+def _views(tmp_path, name, views: dict[str, list[str]]) -> dict[str, str]:
+    """A views answer showing `views` by name, as the env that points setup at it."""
+    nodes = [{"name": view, "fields": {"nodes": [{"name": f} for f in shown]}} for view, shown in views.items()]
+    path = tmp_path / name
+    path.write_text(json.dumps({"data": {"organization": {"projectV2": {"views": {"nodes": nodes}}}}}))
+    return {"GH_PROJECT_VIEWS_FILE": str(path)}
+
+
+def _merges(tmp_path, name, **changes) -> dict[str, str]:
+    """The repository settings fixture with `changes`, as the env that points setup at it."""
+    data = json.loads((FIXTURES / "repo-settings.json").read_text(encoding="utf-8"))
+    path = tmp_path / name
+    path.write_text(json.dumps({**data, **changes}))
+    return {"GH_REPO_SETTINGS_FILE": str(path)}
+
+
+def _payload(call: str) -> dict:
+    """The JSON document a recorded `api graphql --input -` call sent on stdin."""
+    return json.loads(call.split(" ", 4)[4])
 
 
 # --- the command surface ------------------------------------------------
@@ -200,6 +269,108 @@ def _plugins_file(tmp_path, name, data) -> dict[str, str]:
 INSTALLED = {"version": 2, "plugins": {"superpowers@superpowers-marketplace": [{"scope": "user"}]}}
 
 
+def _checklist(result) -> list[str]:
+    """The lines under `Checklist:`, up to the superpowers line."""
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    start = lines.index("Checklist:")
+    return lines[start + 1 : -1]
+
+
+def test_context_reports_each_checklist_item(repo, fake_gh, tmp_path):
+    env = {
+        **_project_fields(tmp_path, "old-status.json", status=OLD_STATUS),
+        **_plugins_file(tmp_path, "installed.json", INSTALLED),
+    }
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert _checklist(result) == [
+        "  Status options: set to Draft, Backlog, In Progress, Pending Review, Done "
+        "(currently: Backlog, Blocked, In Progress, Pending Review, Done)",
+        "  Board view fields: done",
+        "  Kind colors: done",
+        "  Merge settings: done",
+    ]
+    assert result.stdout.splitlines()[-1] == "superpowers: installed"
+
+
+def test_context_reports_every_checklist_item_as_done_with_a_finished_project(repo, fake_gh):
+    result = run_deckhand("setup", "context", cwd=repo)
+
+    assert _checklist(result) == [
+        "  Status options: done",
+        "  Board view fields: done",
+        "  Kind colors: done",
+        "  Merge settings: done",
+    ]
+
+
+def test_context_reports_the_kind_colors_that_are_off(repo, fake_gh, tmp_path):
+    kind = [{"id": "opt_feat", "name": "feat", "color": "GREEN"}, {"id": "opt_fix", "name": "fix", "color": "BLUE"}]
+    env = _project_fields(tmp_path, "kind-off.json", kind=kind)
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert (
+        "  Kind colors: set fix red, add chore gray, add refactor blue, add docs purple, add perf orange"
+        in _checklist(result)
+    )
+
+
+def test_context_reports_a_missing_kind_as_apply_work(repo, fake_gh, tmp_path):
+    env = _project_fields(tmp_path, "no-kind.json", drop=("Kind",))
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert "  Kind colors: Kind is missing; apply creates it" in _checklist(result)
+
+
+def test_context_reports_the_board_view_fields_that_are_off(repo, fake_gh, tmp_path):
+    env = _views(tmp_path, "narrow.json", {"Board": ["Title", "Status"], "Table": ["Title"]})
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert (
+        "  Board view fields: on the Board view show only Title, Status, Kind, Story Points, Actual, Assignees, "
+        "Repository (currently: Title, Status)"
+    ) in _checklist(result)
+
+
+def test_context_reports_a_project_with_no_board_view(repo, fake_gh, tmp_path):
+    env = _views(tmp_path, "table-only.json", {"Table": ["Title"]})
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert "  Board view fields: no view named Board" in _checklist(result)
+
+
+def test_context_reports_the_merge_settings_that_are_off(repo, fake_gh, tmp_path):
+    env = _merges(tmp_path, "merges-off.json", allow_merge_commit=True, squash_merge_commit_message="COMMIT_MESSAGES")
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert (
+        "  Merge settings: make squash the only merge, with the pull request body as its message, and delete the "
+        "branch on merge (currently: allow_merge_commit true, squash_merge_commit_message commit_messages)"
+    ) in _checklist(result)
+
+
+def test_context_reports_each_item_it_cannot_read(repo, fake_gh, tmp_path):
+    env = {
+        "GH_PROJECT_FIELDS_FILE": str(tmp_path / "gone-fields.json"),
+        "GH_PROJECT_VIEWS_FILE": str(tmp_path / "gone-views.json"),
+        "GH_REPO_SETTINGS_FILE": str(tmp_path / "gone-merges.json"),
+    }
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    lines = _checklist(result)
+    assert len(lines) == 4
+    for name, line in zip(["Status options", "Board view fields", "Kind colors", "Merge settings"], lines, strict=True):
+        assert line.startswith(f"  {name}: unknown ("), line
+
+
 def test_context_reports_superpowers_installed(repo, fake_gh, tmp_path):
     env = _plugins_file(tmp_path, "installed.json", INSTALLED)
 
@@ -325,6 +496,8 @@ def test_apply_links_when_given_a_project(repo, fake_gh, gh_calls, tmp_path, mon
         "project field-create 5 --owner acme --name Story Points --data-type NUMBER",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
+        VIEWS_QUERY,
+        MERGES,
     ]
     assert "linked acme #5 to acme/widgets" in result.stdout
     assert "merge: squash only, message from the pull request" in result.stdout
@@ -351,8 +524,12 @@ def test_apply_accepts_an_explicit_owner(repo, fake_gh, gh_calls):
         "project field-list 4 --owner mjm --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
+        KIND_UPDATE,
+        VIEWS_QUERY,
+        MERGES,
     ]
     assert "linked @me #4 to acme/widgets" in result.stdout
+    assert "Kind: recolored" in result.stdout
 
 
 def test_apply_targets_the_named_project_when_another_is_linked(repo, fake_gh, gh_calls):
@@ -372,6 +549,8 @@ def test_apply_targets_the_named_project_when_another_is_linked(repo, fake_gh, g
         "project field-list 9 --owner acme --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
+        VIEWS_QUERY,
+        MERGES,
     ]
 
 
@@ -388,6 +567,8 @@ def test_apply_skips_the_link_when_the_named_project_is_already_linked(repo, fak
         "project field-list 7 --owner acme --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
+        VIEWS_QUERY,
+        MERGES,
     ]
     assert "linked" not in result.stdout
 
@@ -403,6 +584,8 @@ def test_apply_without_a_project_uses_the_linked_one(repo, fake_gh, gh_calls):
         "project field-list 2 --owner acme --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
+        VIEWS_QUERY,
+        MERGES,
     ]
     assert "linked" not in result.stdout
 
@@ -488,7 +671,9 @@ def test_apply_fails_loudly_without_gh(repo):
 def test_apply_creates_only_missing_fields_and_prints_the_checklist(repo, fake_gh, gh_calls, tmp_path, monkeypatch):
     monkeypatch.setenv("GH_FIELDS_FILE", _fields_file(tmp_path, "partial.json", [STATUS, KIND, ACTUAL]))
 
-    result = run_deckhand("setup", "apply", cwd=repo)
+    result = run_deckhand(
+        "setup", "apply", cwd=repo, env=_project_fields(tmp_path, "old-status.json", status=OLD_STATUS)
+    )
 
     assert result.returncode == 0, result.stderr
     created = [c for c in gh_calls() if c.startswith("project field-create")]
@@ -496,20 +681,137 @@ def test_apply_creates_only_missing_fields_and_prints_the_checklist(repo, fake_g
     assert "--name Story Points" in created[0]
     assert "Kind: already present" in result.stdout
     assert "Actual: already present" in result.stdout
-    assert "1. Set the Status options to:" in result.stdout
+    assert "1. Status options:" in result.stdout
 
 
-def test_apply_creates_kind_as_single_select_with_configured_kinds(repo, fake_gh, gh_calls, tmp_path, monkeypatch):
-    monkeypatch.setenv("GH_FIELDS_FILE", _fields_file(tmp_path, "no-kind.json", [STATUS, POINTS, ACTUAL]))
+def test_apply_creates_kind_with_colored_options(repo, fake_gh, gh_calls, tmp_path):
+    env = _fields_without(tmp_path, "Kind")
 
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    (call,) = [c for c in gh_calls() if "createProjectV2Field" in c]
+    assert call.startswith("api graphql --input -")
+    payload = _payload(call)
+    assert "createProjectV2Field(input:{projectId:$project,dataType:SINGLE_SELECT,name:$name," in payload["query"]
+    assert payload["variables"] == {"project": "PVT_TEST", "name": "Kind", "options": KIND_OPTIONS}
+    assert not any(c.startswith("project field-create") for c in gh_calls())
+    assert "Kind: created" in result.stdout
+
+
+def test_apply_recolors_a_kind_whose_options_are_off(repo, fake_gh, gh_calls, tmp_path):
+    kind = [
+        {"id": "opt_feat", "name": "feat", "color": "GREEN"},
+        {"id": "opt_fix", "name": "fix", "color": "BLUE"},
+        {"id": "opt_spike", "name": "spike", "color": "PINK"},
+    ]
+    env = _project_fields(tmp_path, "kind-off.json", kind=kind)
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    (call,) = [c for c in gh_calls() if "updateProjectV2Field" in c]
+    payload = _payload(call)
+    assert "updateProjectV2Field(input:{fieldId:$field,singleSelectOptions:$options})" in payload["query"]
+    assert payload["variables"] == {
+        "field": "PVTSSF_KIND",
+        "options": [
+            {"id": "opt_feat", "name": "feat", "color": "GREEN", "description": ""},
+            {"id": "opt_fix", "name": "fix", "color": "RED", "description": ""},
+            {"name": "chore", "color": "GRAY", "description": ""},
+            {"name": "refactor", "color": "BLUE", "description": ""},
+            {"name": "docs", "color": "PURPLE", "description": ""},
+            {"name": "perf", "color": "ORANGE", "description": ""},
+            {"id": "opt_spike", "name": "spike", "color": "PINK", "description": ""},
+        ],
+    }
+    lines = result.stdout.splitlines()
+    assert "Kind: recolored" in lines
+    assert lines[-1] == "Setup complete."
+
+
+def test_apply_leaves_a_kind_whose_options_are_right_alone(repo, fake_gh, gh_calls):
     result = run_deckhand("setup", "apply", cwd=repo)
 
     assert result.returncode == 0, result.stderr
-    created = [c for c in gh_calls() if c.startswith("project field-create")]
-    assert len(created) == 1
-    assert "--name Kind" in created[0]
-    assert "--data-type SINGLE_SELECT" in created[0]
-    assert "--single-select-options feat,fix,chore,refactor,docs,perf" in created[0]
+    assert not any("updateProjectV2Field" in c for c in gh_calls())
+    assert "recolored" not in result.stdout
+
+
+def test_apply_ends_with_setup_complete_when_nothing_is_left(repo, fake_gh):
+    result = run_deckhand("setup", "apply", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == "Setup complete."
+
+
+def test_apply_names_what_is_left_with_the_page_and_the_click(repo, fake_gh, tmp_path):
+    env = _project_fields(tmp_path, "old-status.json", status=OLD_STATUS)
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    start = lines.index("Finish by hand (the API cannot do this):")
+    assert lines[start - 1] == ""
+    assert lines[start + 1 :] == [
+        "  1. Status options: set to Draft, Backlog, In Progress, Pending Review, Done "
+        "(currently: Backlog, Blocked, In Progress, Pending Review, Done). Project > Settings > Status. "
+        "Deleting an option is permanent.",
+        "Run setup again when done; it says what is still left.",
+    ]
+    assert not any("Issue Types" in line or "issue-types" in line for line in lines)
+
+
+def test_apply_names_the_click_for_the_board_view(repo, fake_gh, tmp_path):
+    env = _views(tmp_path, "narrow.json", {"Board": ["Title", "Status"]})
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        "  1. Board view fields: on the Board view show only Title, Status, Kind, Story Points, Actual, Assignees, "
+        "Repository (currently: Title, Status). Board view > view menu > Fields."
+    ) in result.stdout.splitlines()
+
+
+def test_apply_names_a_missing_board_view(repo, fake_gh, tmp_path):
+    env = _views(tmp_path, "table-only.json", {"Table": ["Title"]})
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "  1. Board view fields: no view named Board. Board view > view menu > Fields." in result.stdout.splitlines()
+
+
+def test_apply_lists_what_it_could_not_read_apart_from_the_work(repo, fake_gh, tmp_path):
+    env = {
+        **_project_fields(tmp_path, "old-status.json", status=OLD_STATUS),
+        "GH_PROJECT_VIEWS_FILE": str(tmp_path / "gone-views.json"),
+    }
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[lines.index("Finish by hand (the API cannot do this):") + 1].startswith("  1. Status options:")
+    start = lines.index("Could not read:")
+    assert lines[start + 1].startswith("  Board view fields: unknown (")
+    assert lines[start + 2] == "Run setup again when done; it says what is still left."
+    assert not any(line.startswith("  2.") for line in lines)
+
+
+def test_apply_lists_only_what_it_could_not_read_when_nothing_else_is_left(repo, fake_gh, tmp_path):
+    env = {"GH_REPO_SETTINGS_FILE": str(tmp_path / "gone-merges.json")}
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "Finish by hand (the API cannot do this):" not in lines
+    assert "Setup complete." not in lines
+    assert lines[lines.index("Could not read:") + 1].startswith("  Merge settings: unknown (")
+    assert lines[-1] == "Run setup again when done; it says what is still left."
 
 
 def test_apply_creates_story_points_as_a_number_field(repo, fake_gh, gh_calls, tmp_path, monkeypatch):
@@ -529,7 +831,7 @@ def test_apply_creates_no_date_fields(repo, fake_gh, gh_calls, tmp_path, monkeyp
     result = run_deckhand("setup", "apply", cwd=repo)
 
     assert result.returncode == 0, result.stderr
-    created = [c for c in gh_calls() if c.startswith("project field-create")]
+    created = [c for c in gh_calls() if c.startswith("project field-create") or "createProjectV2Field" in c]
     assert len(created) == 3
     for gone in ("Started", "Finished", "Active Days"):
         assert not any(gone in c for c in created), gone
@@ -551,28 +853,7 @@ def test_apply_reports_a_field_of_the_wrong_type_and_leaves_it_alone(repo, fake_
     assert "Kind: present but is ProjectV2Field, expected SINGLE_SELECT (fix by hand)" in result.stdout
     assert "Kind: already present" not in result.stdout
     assert not [c for c in gh_calls() if c.startswith("project field-create")]
-    assert "(currently: unknown)" in result.stdout
-
-
-def test_apply_prints_the_three_step_checklist(repo, fake_gh):
-    result = run_deckhand("setup", "apply", cwd=repo)
-
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    start = lines.index("Finish the project setup by hand (the API cannot do this):")
-    assert lines[start:] == [
-        "Finish the project setup by hand (the API cannot do this):",
-        "  1. Set the Status options to: Backlog, In Progress, Pending Review, Done.",
-        "     (currently: Backlog, Blocked, In Progress, Pending Review, Done)",
-        "  2. On the board view, show only Title, Status, Kind, Story Points, Actual, Assignees, and",
-        "     Repository; hide every other field.",
-        "  3. In the repository or organization issue settings, turn off issue Types and any issue",
-        "     Fields you do not use.",
-        "",
-        "Next: /deckhand:new to open the first story.",
-    ]
-    assert "4." not in result.stdout
-    assert "DECKHAND_TOKEN" not in result.stdout
+    assert not [c for c in gh_calls() if "createProjectV2Field" in c]
 
 
 def test_apply_names_the_project_it_resolved_before_it_writes(repo, fake_gh):
@@ -583,22 +864,6 @@ def test_apply_names_the_project_it_resolved_before_it_writes(repo, fake_gh):
     lines = result.stdout.splitlines()
     assert "Project: acme #2" in lines
     assert lines.index("Project: acme #2") < lines.index("merge: squash only, message from the pull request")
-
-
-def test_apply_separates_the_next_line_from_the_checklist(repo, fake_gh):
-    """The checklist is a list of chores and the Next line is not one of them."""
-    result = run_deckhand("setup", "apply", cwd=repo)
-
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines[lines.index("Next: /deckhand:new to open the first story.") - 1] == ""
-
-
-def test_apply_reports_the_current_status_options(repo, fake_gh):
-    result = run_deckhand("setup", "apply", cwd=repo)
-
-    assert result.returncode == 0, result.stderr
-    assert "(currently: Backlog, Blocked, In Progress, Pending Review, Done)" in result.stdout
 
 
 # --- apply: the fields the process did not make -------------------------
@@ -612,8 +877,7 @@ def test_apply_deletes_a_template_field_after_the_creates_and_before_the_checkli
     lines = result.stdout.splitlines()
     assert "deleted field Priority" in lines
     assert lines.index("Kind: already present") < lines.index("deleted field Priority")
-    checklist = lines.index("Finish the project setup by hand (the API cannot do this):")
-    assert lines.index("deleted field Priority") < checklist
+    assert lines.index("deleted field Priority") < lines.index("Setup complete.")
 
 
 def test_apply_deletes_nothing_when_the_project_has_only_the_fields_the_process_uses(repo, fake_gh, gh_calls, tmp_path):
@@ -672,12 +936,11 @@ def test_apply_never_deletes_status_even_beside_other_single_selects(repo, fake_
     assert "PVTSSF_STATUS" not in result.stdout
 
 
-def test_context_reads_no_fields_query_and_deletes_nothing(repo, fake_gh, gh_calls):
+def test_context_deletes_nothing(repo, fake_gh, gh_calls):
     result = run_deckhand("setup", "context", cwd=repo)
 
     assert result.returncode == 0
     assert _deletes(gh_calls) == []
-    assert FIELDS_QUERY not in _calls(gh_calls)
 
 
 @pytest.mark.parametrize("verb", ["context", "apply"])

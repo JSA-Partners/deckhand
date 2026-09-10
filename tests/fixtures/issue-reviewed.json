@@ -24,7 +24,7 @@
         "login": "reviewer-bot"
       },
       "createdAt": "2026-09-02T09:00:00Z",
-      "body": "## Review\n\nTick a finding to accept it; leave it unticked to decline. A finding marked rejected by the skeptic is shown for the record; tick it only to overrule them. Replies below are welcome and change nothing by themselves. Then run `/deckhand:amend 248` to apply the accepted findings to the story and rewrite the plan where they touch it. When the story reads right, reply with a comment whose first word is `Approved` and run `/deckhand:ready 248`.\n\n- [x] **chaos.1, P2** Retry the grant lookup once when the store times out. Acceptance Criteria says nothing about a repeated list.\n- [ ] **unknowns.1, P2** Confirm the grant table is indexed on principal. Notes points at internal/store/grant.go.\n"
+      "body": "Review: sound\n\n- chaos.1, P2, accepted: A retried job writes the grant twice. Scope In.\n"
     }
   ]
 }

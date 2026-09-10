@@ -2,7 +2,7 @@
 
 Nothing here writes into a repository's files. The project comes from the GitHub project link, the
 merge settings come from `gh repo edit`, the board's three fields come from the API, and everything
-the API cannot do is printed as a checklist for a person to finish by hand.
+the API cannot do is read back through `checklist` and printed for a person to finish by hand.
 
 A project keeps exactly the three fields this module creates and GitHub's own Status. Whatever else
 a person or a template added is deleted, because a field the process does not set is a column nobody
@@ -17,7 +17,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from deckhand import config, gh
+from deckhand import checklist, config, gh
+from deckhand.checklist import Item
 from deckhand.config import SETTINGS_FILE, Settings
 from deckhand.step import Refusal, reason, step
 
@@ -29,10 +30,6 @@ PROJECT_FIELDS: list[tuple[str, str]] = [
 
 # What `gh project field-list` reports as `type` for each `field-create --data-type`.
 FIELD_TYPES = {"SINGLE_SELECT": "ProjectV2SingleSelectField", "NUMBER": "ProjectV2Field"}
-
-STATUS_OPTIONS = "Backlog, In Progress, Pending Review, Done"
-
-NEXT = "Next: /deckhand:new to open the first story."
 
 # Where Claude Code records the plugins it installed. deckhand does not declare superpowers as a
 # dependency, so the one thing setup can do about it is say whether it is there.
@@ -116,7 +113,7 @@ def _configure_apply(parser: argparse.ArgumentParser) -> None:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the repository, its linked and open projects, the override, the fields, and superpowers."""
+    """Print the repository, its projects, the override, the fields, the checklist, and superpowers."""
     settings = config.load(Path.cwd())  # a malformed .claude/settings.json is worth reporting
     try:
         repo = gh.repo_slug()
@@ -140,6 +137,13 @@ def context(args: argparse.Namespace) -> int:
             settings.resolved = project
 
     _print_fields(settings)
+    try:
+        fields, unread = gh.project_fields(settings), None
+    except Exception as error:
+        fields, unread = None, reason(error)
+    print("Checklist:")
+    for item in checklist.checklist(settings, repo, fields, unread):
+        print(f"  {item.name}: {item.left or 'done'}")
     print(superpowers_line())
     return 0
 
@@ -215,10 +219,30 @@ def apply(args: argparse.Namespace) -> int:
     _resolve(settings, repo)
     print(f"Project: {settings.owner} #{settings.project}")
     _set_merges()
-    fields = _create_fields(settings)
-    _delete_extra_fields(settings)
-    _checklist(fields)
+    _create_fields(settings)
+    kept = _recolor_kind(settings, _delete_extra_fields(settings))
+    _print_left(checklist.checklist(settings, repo, kept))
     return 0
+
+
+def _print_left(items: list[Item]) -> None:
+    """Print what a person still has to do, with the click for each, apart from what could not be read."""
+    todo = [item for item in items if item.left and not item.unknown]
+    unread = [item for item in items if item.unknown]
+    if not todo and not unread:
+        print("Setup complete.")
+        return
+    print()
+    if todo:
+        print("Finish by hand (the API cannot do this):")
+        for index, item in enumerate(todo, start=1):
+            note = checklist.NOTES.get(item.name)
+            print(f"  {index}. {item.name}: {item.left}. {item.click}." + (f" {note}" if note else ""))
+    if unread:
+        print("Could not read:")
+        for item in unread:
+            print(f"  {item.name}: {item.left}")
+    print("Run setup again when done; it says what is still left.")
 
 
 def _target(settings: Settings, repo: str, project: str, owner: str | None) -> None:
@@ -264,10 +288,9 @@ def _set_merges() -> None:
     print("merge: squash only, message from the pull request")
 
 
-def _create_fields(settings: Settings) -> list[dict[str, Any]]:
-    """Create the project fields that are missing; returns the field list it read to decide."""
-    fields = gh.field_list(settings)
-    existing = {f["name"]: f.get("type", "") for f in fields}
+def _create_fields(settings: Settings) -> None:
+    """Create the project fields that are missing."""
+    existing = {f["name"]: f.get("type", "") for f in gh.field_list(settings)}
 
     for name, data_type in PROJECT_FIELDS:
         if name in existing:
@@ -277,51 +300,41 @@ def _create_fields(settings: Settings) -> list[dict[str, Any]]:
             else:
                 print(f"{name}: present but is {existing[name]}, expected {data_type} (fix by hand)")
             continue
-        cmd = [
-            "project",
-            "field-create",
-            str(settings.project),
-            "--owner",
-            settings.owner,
-            "--name",
-            name,
-            "--data-type",
-            data_type,
-        ]
         if data_type == "SINGLE_SELECT":
-            cmd += ["--single-select-options", ",".join(settings.kinds)]
-        gh.run(*cmd)
+            gh.create_single_select(settings, name, checklist.kind_options(settings.kinds))
+        else:
+            project, owner = str(settings.project), settings.owner
+            gh.run("project", "field-create", project, "--owner", owner, "--name", name, "--data-type", data_type)
         print(f"{name}: created")
-    return fields
 
 
-def _delete_extra_fields(settings: Settings) -> None:
-    """Delete every field a person added that the process does not read.
+def _delete_extra_fields(settings: Settings) -> list[dict[str, Any]]:
+    """Delete every field a person added that the process does not read; returns the fields kept.
 
     A field's data type says who made it: only the five `field-create` offers can be deleted, and
     GitHub's own columns report a type of their own, so nothing here can reach them by accident.
     """
+    kept = []
     for field in gh.project_fields(settings):
         name = str(field.get("name") or "")
         if field.get("dataType") not in DELETABLE_TYPES or name in KEPT_FIELDS:
+            kept.append(field)
             continue
         gh.run("project", "field-delete", "--id", str(field.get("id")))
         print(f"deleted field {name}")
+    return kept
 
 
-def _checklist(fields: list[dict[str, Any]]) -> None:
-    """Print what the API cannot do, with the Status options the board has now beside the ones it wants."""
-    status = next((f for f in fields if f["name"] == "Status"), None)
-    options = (status.get("options") or []) if status else []
-    current = ", ".join(option["name"] for option in options) or "unknown"
+def _recolor_kind(settings: Settings, kept: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rewrite Kind's options when a configured kind is missing or the wrong color.
 
-    print()
-    print("Finish the project setup by hand (the API cannot do this):")
-    print(f"  1. Set the Status options to: {STATUS_OPTIONS}.")
-    print(f"     (currently: {current})")
-    print("  2. On the board view, show only Title, Status, Kind, Story Points, Actual, Assignees, and")
-    print("     Repository; hide every other field.")
-    print("  3. In the repository or organization issue settings, turn off issue Types and any issue")
-    print("     Fields you do not use.")
-    print()
-    print(NEXT)
+    Returns `kept` with the options as written, so the checklist reads what the board has now
+    without a second query.
+    """
+    kind = next((f for f in kept if f["name"] == "Kind" and f.get("dataType") == "SINGLE_SELECT"), None)
+    options = checklist.kind_update(kind, settings.kinds) if kind else None
+    if kind is None or options is None:
+        return kept
+    gh.update_single_select(settings, str(kind["id"]), options)
+    print("Kind: recolored")
+    return [{**field, "options": options} if field is kind else field for field in kept]

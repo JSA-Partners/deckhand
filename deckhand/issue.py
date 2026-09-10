@@ -14,22 +14,18 @@ from typing import Any
 
 from deckhand import gh
 
-REVIEW_HEADING = "## Review"
 VIEW_FIELDS = "number,title,body,url,state,comments"
-# The comments the process writes itself; everything else on an issue was written by a person.
-PROCESS_PREFIXES = ("Amended:", "Deviation:", "Split:", REVIEW_HEADING)
 
 _ISSUE_URL = re.compile(r"https://\S+/issues/([0-9]+)(?:#\S+)?")
 
 
 @dataclass(frozen=True)
 class Comment:
-    """One issue comment. `url` is None when it came from `gh issue view`, which omits it."""
+    """One issue comment."""
 
     author: str
     body: str
     created_at: str
-    url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +65,6 @@ def _comment(raw: dict[str, Any]) -> Comment:
         author=(raw.get("author") or {}).get("login") or "",
         body=raw.get("body") or "",
         created_at=raw.get("createdAt") or "",
-        url=raw.get("url"),
     )
 
 
@@ -172,31 +167,6 @@ def blocking(repo: str, number: int) -> list[int]:
     return sorted(item["number"] for item in items if item.get("state") == "open")
 
 
-def _heading(body: str) -> str:
-    """The comment's first non-blank line, stripped."""
-    for line in body.splitlines():
-        if line.strip():
-            return line.strip()
-    return ""
-
-
-def _is_review(body: str) -> bool:
-    """Whether a comment is a review the process posted.
-
-    The heading has to be the whole line: the old process headed its passes `## Review pass: spec`,
-    and one of those on an issue is not a review this process can read ticks off.
-    """
-    return _heading(body) == REVIEW_HEADING
-
-
-def review_comment(issue: Issue) -> Comment | None:
-    """The issue's last review comment in list order, or None when no review has been posted."""
-    for candidate in reversed(issue.comments):
-        if _is_review(candidate.body):
-            return candidate
-    return None
-
-
 def pull_request(repo: str, branch: str) -> str | None:
     """The URL of the open pull request whose head is `branch`, or None when it has none."""
     gh.split_repo(repo)
@@ -204,55 +174,12 @@ def pull_request(repo: str, branch: str) -> str | None:
     return data[0].get("url") if isinstance(data, list) and data else None
 
 
-def _rest_comments(repo: str, number: int) -> list[dict[str, Any]]:
-    """Every comment as the REST API reports it, oldest first.
+def pull_request_state(repo: str, url: str) -> str | None:
+    """`url` while the pull request there is open, else None; a URL gh cannot read is an error.
 
-    `gh issue view` gives no edit stamp and no id, and an edit is how a person ticks a finding, so
-    the process reads the comments a second way when it needs to know that one was touched.
+    For the pull request the log names: its head may be a branch this clone has never seen, so the
+    URL is the one handle that finds it wherever it was pushed from.
     """
     gh.split_repo(repo)
-    return [raw for raw in gh.paginated(f"repos/{repo}/issues/{number}/comments") if isinstance(raw, dict)]
-
-
-def _amended(body: str) -> bool:
-    """Whether a comment is the record an amend posts."""
-    return _heading(body).startswith("Amended:")
-
-
-def feedback_state(repo: str, number: int) -> tuple[str | None, str, str, list[Comment]]:
-    """`(review edited at, review posted at, last amended at, the comments since)`, from one read.
-
-    The four answer one question between them, and asking it four times would be four round trips
-    for the same list: has anyone said something the last amend has not already answered. Ticking a
-    finding edits the review comment rather than adding one, so the edit stamp is the only trace a
-    tick leaves, and the stamp the review was posted with is what tells an edit from a review that
-    nobody has touched.
-    """
-    raws = _rest_comments(repo, number)
-    edited: str | None = None
-    reviewed_at = ""
-    amended = ""
-    for raw in raws:
-        body = raw.get("body") or ""
-        created = raw.get("created_at") or ""
-        if _is_review(body) and created >= reviewed_at:
-            reviewed_at, edited = created, raw.get("updated_at")
-        elif _amended(body):
-            amended = max(amended, created)
-    cutoff = max(reviewed_at, amended)
-    since = [
-        Comment(
-            author=(raw.get("user") or {}).get("login") or "",
-            body=raw.get("body") or "",
-            created_at=raw.get("created_at") or "",
-            url=raw.get("html_url"),
-        )
-        for raw in raws
-        if (raw.get("created_at") or "") > cutoff and not _heading(raw.get("body") or "").startswith(PROCESS_PREFIXES)
-    ]
-    return edited, reviewed_at, amended, since
-
-
-def feedback_since(repo: str, number: int) -> list[Comment]:
-    """Comments a person wrote after the later of the review and the last `Amended:` comment."""
-    return feedback_state(repo, number)[3]
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", "state,url")
+    return data.get("url") if isinstance(data, dict) and data.get("state") == "OPEN" else None

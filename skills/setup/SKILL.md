@@ -16,5 +16,5 @@ Settle which project this repository works against, then apply.
 
 When several projects stay linked afterwards, tell the user to pin the number they chose in the `env` block of `.claude/settings.json` as `DECKHAND_PROJECT`, so every later command resolves the same project.
 
-Close with three parts: the lines it printed, the checklist included; the Project line it printed;
-and its `Next:` line, verbatim.
+Tell the person what setup did and what the checklist says is left, each with its page and click,
+in plain words, and which of those actions is permanent. Say "setup complete" when nothing is left.

@@ -6,14 +6,29 @@
           "nodes": [
             { "id": "PVTF_TITLE", "name": "Title", "dataType": "TITLE" },
             { "id": "PVTF_ASSIGNEES", "name": "Assignees", "dataType": "ASSIGNEES" },
-            { "id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT" },
+            { "id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT",
+              "options": [
+                { "id": "opt_draft", "name": "Draft", "color": "GRAY" },
+                { "id": "opt_backlog", "name": "Backlog", "color": "GRAY" },
+                { "id": "opt_inprogress", "name": "In Progress", "color": "BLUE" },
+                { "id": "opt_pending", "name": "Pending Review", "color": "YELLOW" },
+                { "id": "opt_done", "name": "Done", "color": "GREEN" }
+              ] },
             { "id": "PVTF_LABELS", "name": "Labels", "dataType": "LABELS" },
             { "id": "PVTF_PRS", "name": "Linked pull requests", "dataType": "LINKED_PULL_REQUESTS" },
             { "id": "PVTF_MILESTONE", "name": "Milestone", "dataType": "MILESTONE" },
             { "id": "PVTF_REPOSITORY", "name": "Repository", "dataType": "REPOSITORY" },
             { "id": "PVTF_REVIEWERS", "name": "Reviewers", "dataType": "REVIEWERS" },
             { "id": "PVTF_PARENT", "name": "Parent issue", "dataType": "PARENT_ISSUE" },
-            { "id": "PVTSSF_KIND", "name": "Kind", "dataType": "SINGLE_SELECT" },
+            { "id": "PVTSSF_KIND", "name": "Kind", "dataType": "SINGLE_SELECT",
+              "options": [
+                { "id": "opt_feat", "name": "feat", "color": "GREEN" },
+                { "id": "opt_fix", "name": "fix", "color": "RED" },
+                { "id": "opt_chore", "name": "chore", "color": "GRAY" },
+                { "id": "opt_refactor", "name": "refactor", "color": "BLUE" },
+                { "id": "opt_docs", "name": "docs", "color": "PURPLE" },
+                { "id": "opt_perf", "name": "perf", "color": "ORANGE" }
+              ] },
             { "id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER" },
             { "id": "PVTF_ACTUAL", "name": "Actual", "dataType": "NUMBER" },
             { "id": "PVTSSF_PRIORITY", "name": "Priority", "dataType": "SINGLE_SELECT" }

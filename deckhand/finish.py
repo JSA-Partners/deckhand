@@ -1,19 +1,20 @@
 """The finish step: the branch a human approved becomes a pull request, or nothing happens.
 
 Reading the branch line by line is this step's first act, before anything here runs: the loop of
-exports and fixes is what earns the sha `apply` is given, so no code reaches a pull request unread.
-`context` prints what the branch changed, the pull request message it would open, and the check
-commands the project's own files say it runs. The message is what the human approves: the repository
-squashes, so the pull request title and body are the commit that lands on main and the branch's own
-commits never do. The commits themselves are read by the gate that checks their subjects rather
-than printed, because the review above has already put them in front of a person.
+exports and fixes is what earns the sha the `Reviewed:` entry names, so no code reaches a pull
+request unread. `context` prints what the branch changed, the pull request message it would open,
+and the check commands the project's own files say it runs. The message is what the human approves:
+the repository squashes, so the pull request title and body are the commit that lands on main and
+the branch's own commits never do. The commits themselves are read by the gate that checks their
+subjects rather than printed, because the review above has already put them in front of a person.
 
 `apply` is the one gate of the loop, and every part of it is a refusal before a single write. The
-pull request opens only when HEAD is still the commit the human approved, the tree is clean, the
-branch contains main, every subject is a conventional commit that names no story number, the docs
-audit is clean, and every check the caller named exits 0. Only then does it push, open the pull
-request assigned to whoever ran the step, and record Pending Review and Actual, so what merges is
-what was approved.
+pull request opens only when HEAD is the commit the last `Reviewed:` entry names, the tree is
+clean, the branch contains main, every subject is a conventional commit that names no story
+number, the docs audit is clean, and every check the caller named exits 0. Only then does it push
+the branch, which reaches origin here and nowhere earlier, open the pull request assigned to
+whoever ran the step, log `Pull request:` on the issue, and record Pending Review and Actual, so
+what merges is what was reviewed.
 
 Both verbs work against `origin/main`, never the local branch of that name: a story branches from
 origin/main and local main is routinely behind it, so a range against local main would hand the
@@ -31,7 +32,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from deckhand import config, document, fields, gh, git, issue, naming, sections
+from deckhand import config, document, fields, gh, git, issue, log, naming, sections
 from deckhand.config import Settings
 from deckhand.step import MAIN, ORIGIN_MAIN, Refusal, block, indented, refuse_git, step, trunk
 
@@ -43,7 +44,6 @@ MAKE_TEST = re.compile(r"^test[ \t]*:", re.MULTILINE)
 PYTEST_TABLE = "[tool.pytest"
 TAIL = 10  # lines of a failed check's output, enough to name the failure without a wall of text
 DIRTY = 5  # lines of a dirty tree, enough to recognise what is uncommitted
-NEXT = "Next: merge it."
 
 
 def _text(path: Path) -> str:
@@ -108,7 +108,7 @@ def _breaking(value: str | None) -> str | None:
     return value
 
 
-def _message(settings: Settings, repo: str, number: int, breaking: str | None) -> tuple[str, str]:
+def _message(settings: Settings, repo: str, number: int, breaking: str | None, story: issue.Issue) -> tuple[str, str]:
     """The title and body the pull request opens with, which the squash makes the commit message.
 
     `apply` computes it before any gate runs: a check suite can run for minutes, and a story off the
@@ -117,7 +117,6 @@ def _message(settings: Settings, repo: str, number: int, breaking: str | None) -
     kind = fields.get_fields(settings, repo, number, ("Kind",))["Kind"]
     if kind is None:
         raise Refusal(f"#{number} has no Kind; run /deckhand:next {number}")
-    story = issue.view(repo, number)
     return _title(settings, kind, story.title, bool(breaking)), _body(number, story, breaking)
 
 
@@ -130,7 +129,8 @@ def _stat_block(base: str) -> list[str]:
 
 def _pr_block(number: int) -> list[str]:
     """The message apply would open with, blank line and all, because that is what a human approves."""
-    title, body = _message(config.load(), gh.repo_slug(), number, None)
+    repo = gh.repo_slug()
+    title, body = _message(config.load(), repo, number, None, issue.view(repo, number))
     return [f"  Title: {title}", *[f"  {line}".rstrip() for line in body.splitlines()]]
 
 
@@ -164,15 +164,23 @@ def _branch() -> str:
     return name
 
 
-def _approved_head(approved: str) -> None:
-    """Refuse unless HEAD is still the commit the human approved; both sides go through rev-parse."""
+def _reviewed_head(story: issue.Issue, number: int) -> None:
+    """Refuse unless HEAD is the commit the last `Reviewed:` entry names; nothing unread opens a pull request.
+
+    Both sides go through rev-parse, and the named side as a commit, because a full sha that names
+    nothing in this clone would otherwise come back as itself.
+    """
+    entry = log.last(story, "Reviewed:")
+    if entry is None:
+        raise Refusal(f"no Reviewed: entry on #{number}; review the branch first")
+    named = entry.text.split()[0]
     head = refuse_git("rev-parse", "--verify", "HEAD")
     try:
-        wanted = git.run("rev-parse", "--verify", approved)
+        wanted = git.run("rev-parse", "--verify", f"{named}^{{commit}}")
     except git.GitError as error:
-        raise Refusal(f"cannot resolve --approved {approved}: {error}") from error
+        raise Refusal(f"the last Reviewed: entry names {named}, which this clone does not have") from error
     if head != wanted:
-        raise Refusal(f"HEAD moved since approval: expected {wanted}, got {head}")
+        raise Refusal(f"HEAD {head} is not the last reviewed commit {wanted}; review the branch again")
 
 
 def _clean_tree() -> None:
@@ -275,7 +283,6 @@ def _check(command: str) -> None:
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--actual", required=True, help="the points the story actually took")
-    parser.add_argument("--approved", required=True, metavar="SHA", help="the HEAD the user approved")
     parser.add_argument(
         "--check",
         required=True,
@@ -288,14 +295,15 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 @step("finish", _configure)
 def apply(args: argparse.Namespace) -> int:
-    """Gate a story branch, then push it and open its pull request."""
+    """Gate a story branch, then push it, open its pull request, and log the pull request."""
     actual = _actual(args.actual)
     breaking = _breaking(args.breaking)
     settings = config.load()
     repo = gh.repo_slug()
-    title, body = _message(settings, repo, args.issue, breaking)
+    story = issue.view(repo, args.issue)
+    title, body = _message(settings, repo, args.issue, breaking, story)
     branch = _branch()
-    _approved_head(args.approved)
+    _reviewed_head(story, args.issue)
     _clean_tree()
     _contains_main()
     _conventional_commits()
@@ -303,10 +311,9 @@ def apply(args: argparse.Namespace) -> int:
     for command in args.check:
         _check(command)
 
-    # Named remote and refspec, so a branch that tracks nothing still goes where it belongs, and the
-    # lease refuses a colleague's commit even when an ambient fetch has already moved the tracking
-    # ref. Past the refusal point: a failure here reaches cli.main.
-    git.run("push", "--force-with-lease", "--force-if-includes", "origin", branch)
+    # A plain push, with -u for the first time; git's own non-fast-forward refusal stands where the
+    # lease once did. Past the refusal point: a failure here reaches cli.main.
+    git.run("push", "-u", "origin", branch)
     print("Pushed")
     url = issue.pull_request(repo, branch)
     if url:
@@ -335,8 +342,8 @@ def apply(args: argparse.Namespace) -> int:
             "@me",
         ).strip()
         print(f"Opened {url}")
+    issue.comment(repo, args.issue, log.checked(f"Pull request: {url}"))
+    print("Logged Pull request")
     print(fields.set_field(settings, repo, args.issue, "Status", "Pending Review"))
     print(fields.set_field(settings, repo, args.issue, "Actual", str(actual)))
-    # What the merge unblocks is the next command's to say: it reads the closed issue's own edges.
-    print(NEXT)
     return 0

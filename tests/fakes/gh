@@ -8,10 +8,15 @@ import subprocess
 import sys
 
 argv = sys.argv[1:]
+joined = " ".join(argv)
+stdin_text = ""
+if "--body-file -" in joined or " -F -" in " " + joined or "--input -" in joined:
+    stdin_text = sys.stdin.read()
+    joined = f"{joined} {stdin_text}"
 calls = os.environ.get("GH_CALLS")
 if calls:
     with open(calls, "a") as f:
-        f.write(" ".join(argv).replace("\n", " ") + "\n")
+        f.write(joined.replace("\n", " ") + "\n")
 
 fixtures = os.environ["GH_FIXTURES"]
 jq = None
@@ -20,10 +25,6 @@ for i, a in enumerate(argv):
         jq = argv[i + 1]
     elif a.startswith("--jq=") or a.startswith("-q="):
         jq = a.split("=", 1)[1]
-
-joined = " ".join(argv)
-if "--body-file -" in joined or " -F -" in " " + joined:
-    sys.stdin.read()
 
 # A body reaches gh through a file, so $GH_BODY_FILE_COPY is the only way a test can see it.
 body_copy = os.environ.get("GH_BODY_FILE_COPY")
@@ -95,6 +96,11 @@ def bump(name: str) -> int:
 repo = "acme/widgets"
 head = " ".join(argv[:2])
 if head == "repo view":
+    if os.environ.get("GH_NO_REPOSITORY"):
+        print(
+            "failed to run git: fatal: not a git repository (or any of the parent directories): .git", file=sys.stderr
+        )
+        sys.exit(1)
     respond(json.dumps({"nameWithOwner": repo}))
 elif head == "repo edit":
     if os.environ.get("GH_REPO_EDIT_FAILS"):
@@ -164,9 +170,10 @@ elif head == "pr create":
 elif head == "pr edit":
     sys.exit(0)
 elif head == "pr view":
-    if os.environ.get("GH_PR_EXISTS"):
-        respond(json.dumps({"url": f"https://github.com/{repo}/pull/1000"}))
-    print("no pull requests found for the branch", file=sys.stderr)
+    # A view is asked by URL, and $GH_PR_STATE is the state it answers with for that URL.
+    if os.environ.get("GH_PR_STATE"):
+        respond(json.dumps({"state": os.environ["GH_PR_STATE"], "url": argv[2]}))
+    print("no pull requests found", file=sys.stderr)
     sys.exit(1)
 elif head == "pr list":
     # A list answers with an array where a view answers with an object, and an empty one where a
@@ -178,16 +185,28 @@ elif head == "pr list":
         respond(json.dumps([{"url": f"https://github.com/{repo}/pull/1000"}]))
     respond(os.environ.get("GH_PR_LIST_BODY", "[]"))
 elif head == "api graphql":
+    if "createProjectV2Field" in joined:
+        respond('{"data":{"createProjectV2Field":{}}}')
+    if "updateProjectV2Field" in joined:
+        respond('{"data":{"updateProjectV2Field":{}}}')
     # The other project queries match on projectV2(number, so they answer an organization( and a
     # user( form alike; the linked-projects query is the only one that names projectsV2(first.
     if "projectsV2(first" in joined:
         respond(fixture("GH_LINKED_PROJECTS", "linked-one.json"))
+    if "projectV2(number" in joined and "views(" in joined:
+        respond(fixture("GH_PROJECT_VIEWS_FILE", "project-views.json"))
     if "projectV2(number" in joined and "items(" in joined:
         respond(fixture("GH_PROJECT_ITEMS_FILE", "graphql-project-items.json"))
     if "projectV2(number" in joined and "fields(first" in joined:
         respond(fixture("GH_PROJECT_FIELDS_FILE", "project-fields.json"))
     if "fieldValues" in joined:
         respond(fixture("GH_FIELDVALUES_FILE", "graphql-fieldvalues.json"))
+    if (
+        "projectItems(first" in joined
+        and os.environ.get("GH_ITEM_MISSING_CALLS")
+        and bump("item") <= int(os.environ["GH_ITEM_MISSING_CALLS"])
+    ):
+        respond('{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}')
     respond(fixture("GH_GRAPHQL_FILE", "graphql-item.json"))
 elif argv and argv[0] == "api":
     value_flags = {"-H", "--header", "-q", "--jq", "-X", "--method", "-f", "-F", "--input"}
@@ -217,15 +236,10 @@ elif argv and argv[0] == "api":
             print("could not add dependency", file=sys.stderr)
             sys.exit(1)
         respond(os.environ.get("GH_BLOCKED_BY", "[]"))
-    if path.endswith("/comments"):
-        if os.environ.get("GH_COMMENTS_FAILS"):
-            print("could not read the comments", file=sys.stderr)
-            sys.exit(1)
-        if os.environ.get("GH_COMMENTS_FILE"):
-            respond(open(os.environ["GH_COMMENTS_FILE"]).read())
-        respond(os.environ.get("GH_COMMENTS", "[]"))
     if "/issues/" in path:
         respond('{"id":5099965156,"number":246,"title":"T","state":"open"}')
+    if path == f"repos/{repo}":
+        respond(fixture("GH_REPO_SETTINGS_FILE", "repo-settings.json"))
     respond("{}")
 else:
     unhandled()

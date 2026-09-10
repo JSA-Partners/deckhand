@@ -4,9 +4,9 @@ A story process for [Claude Code](https://code.claude.com/): from feature reques
 request, kept in GitHub issues.
 
 deckhand runs on [superpowers](https://github.com/obra/superpowers), which does the brainstorming,
-planning, and implementation. deckhand adds the steps around them: one issue per story, one review
-whose findings you tick, a board that follows the work, and a pull request that opens only when
-every gate passes.
+planning, and implementation. deckhand adds the process around them: one issue per story, a review
+you decide in conversation, a board that follows the work, and a pull request that opens only from
+a commit you have read.
 
 ## Requires
 
@@ -26,43 +26,37 @@ claude plugin install deckhand@jsapartners
 
 ## Setup
 
-Run `/deckhand:setup` once in each repository you want it in. It does what the GitHub API allows and
-prints a short checklist for the rest. Run it again after upgrading.
+Run `/deckhand:setup` once in each repository you want it in. It does what the GitHub API allows,
+checks the rest, and tells you what is left and where to click. Run it again when done.
 
 ## Use
 
 You type two things.
 
-`/deckhand:new "<the request>"` turns a request into a story with its plan, or into several stories
-when the request is a feature; a number writes a stub into its story. It ends with the issue link
-and `Next: /deckhand:next N`, one line per story.
+`/deckhand:new "<the idea>"` is a conversation: a question or two for a fix, the whole brainstorm for
+a feature, a proposed split when the idea is really several stories. It ends with the story on the
+board as Draft and its review under way.
 
-`/deckhand:next N` reads the issue and runs the one step that story is due: review it, amend it from
-your ticks and replies, board it, branch and build it, or open its pull request. It ends with the
-link to look at and a `Next:` line: another `/deckhand:next N` when it is your turn again,
-`Next: merge it.` when the pull request is open, or `Next: nothing.` when the story is done. Run it
-again whenever you have done your part.
+`/deckhand:next N` carries the story on from wherever it is, through as many steps as your answers
+allow, and stops where a decision is yours: the review's verdict and findings, explained plainly with
+what accepting each would change; the story read back and the board question; a check of the plan
+against today's code before the build; the branch review in your own terminal after the build, until
+a pass is clean; the pull request text; the merge; the items that can only happen after it. Between
+stops you see a line when something takes a while. When you come back later, `next N` says where the
+story is and picks up there.
 
-The stops are yours, and they are the only ones:
-
-- the review, on the issue: tick the findings you accept, reply to the rest;
-- the board question, which sets kind, points, and blockers;
-- the choice, keep building or review and finish, when the branch already has commits;
-- the branch review, the first act of finish, one pass per round of comments;
-- the pull request text, approved before it opens;
-- the merge, on GitHub, which closes the issue; the board's own workflow sets Done.
-
-Between the stops it is an ordinary session: while it builds, talk to Claude, ask why, change course.
+You never act on GitHub. You open it to read.
 
 `/deckhand:commit` writes a conventional commit for the staged changes and `/deckhand:document`
-records what a branch taught in `docs/claude/`; both are there when you want them on their own. The
-board's Status follows the steps; nothing sets it by hand.
+records what a branch taught in `docs/claude/`; both are there when you want them on their own.
 
 ## The story
 
-A story is one GitHub issue: Story, Scope, Acceptance Criteria, Plan, Notes. The plan is folded on
-the issue and frozen once the work starts; what changes after that is a comment or a new issue. The
-issue's comments are its log, and nothing about a story is written to the repository.
+A story is one GitHub issue, written by Claude and frozen once the build starts. Its comments are the
+log: one entry per decision, so anyone can read the issue top to bottom and see what was planned,
+what was decided, and why. Every story is on the board from the moment it is written, and moves from
+Draft to Done as the work does. Nothing about a story is written to the repository, and a branch
+reaches GitHub only with its pull request, after every line has been through you.
 
 ## Contributing
 

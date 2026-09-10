@@ -95,7 +95,7 @@ def test_pr_title_rejects_an_unknown_kind(settings):
 
 
 def test_pr_title_refuses_a_subject_over_72(settings):
-    with pytest.raises(ValueError, match="title too long for a commit subject; shorten the issue title"):
+    with pytest.raises(ValueError, match="the pull request subject allows"):
         naming.pr_title(settings, "feat", "x" * 67)
 
 
@@ -108,7 +108,7 @@ def test_pr_title_returns_a_subject_of_exactly_72(settings):
 def test_pr_title_reserves_the_bang_it_may_not_use(settings):
     """A title shown without the bang must still fit once a breaking change adds one."""
     assert naming.pr_title(settings, "feat", "x" * 65) == f"feat: {'x' * 65}"
-    with pytest.raises(ValueError, match="title too long"):
+    with pytest.raises(ValueError, match="the pull request subject allows"):
         naming.pr_title(settings, "feat", "x" * 66)
 
 
@@ -140,7 +140,7 @@ def test_the_title_limit_is_what_the_pull_request_subject_leaves(settings):
 
     assert limit == naming.SUBJECT - len(longest) - len(f"{naming.BANG}: ")
     assert naming.pr_title(settings, longest, "x" * limit, breaking=True)
-    with pytest.raises(ValueError, match="too long"):
+    with pytest.raises(ValueError, match="the pull request subject allows"):
         naming.pr_title(settings, longest, "x" * (limit + 1))
 
 
@@ -166,44 +166,14 @@ def test_pr_body_adds_the_breaking_footer():
     assert result == f"{STORY}\n\nBREAKING CHANGE: Drops /v0\nCloses #248\n"
 
 
-def test_pr_body_rewraps_a_story_written_over_several_lines():
-    story = (
-        "As a guest user,\nI want to see only  the collections I was granted,\n"
-        "so that I am not exposed to other organizations' data."
+def test_pr_body_is_the_story_on_one_line_then_the_footers():
+    story = "As a guest user,\nI want to see only  the collections I was granted,\nso that nothing leaks."
+
+    body = naming.pr_body(248, story)
+
+    assert body == (
+        "As a guest user, I want to see only the collections I was granted, so that nothing leaks.\n\nCloses #248\n"
     )
-
-    paragraph = naming.pr_body(248, story).split("\n\nCloses")[0]
-
-    assert paragraph == (
-        "As a guest user, I want to see only the collections I was granted, so"
-        "\nthat I am not exposed to other organizations' data."
-    )
-
-
-def test_pr_body_wraps_at_72():
-    assert naming.WRAP == 72
-
-    story = " ".join(f"word{i}" for i in range(30))
-    paragraph = naming.pr_body(248, story).split("\n\nCloses")[0]
-
-    assert all(len(line) <= 72 for line in paragraph.splitlines())
-
-
-def test_pr_body_keeps_a_73_character_word_whole():
-    word = "x" * 73
-
-    paragraph = naming.pr_body(248, f"See {word} here.").split("\n\nCloses")[0]
-
-    assert word in paragraph.splitlines()
-
-
-def test_pr_body_never_splits_a_long_token():
-    url = "https://example.test/docs/very/long/path/to/the/grants/documentation/page#the-guest-collections-filter"
-    assert len(url) > 100, "the case is a token the wrap cannot fit on a line at all"
-
-    paragraph = naming.pr_body(248, f"The rule a guest is filtered by is written up at {url} today.")
-
-    assert url in paragraph.split("\n\nCloses")[0].splitlines()
 
 
 def test_pr_body_rejects_a_non_numeric_issue():

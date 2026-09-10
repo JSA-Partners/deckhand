@@ -4,7 +4,9 @@ import json
 import os
 from pathlib import Path
 
-from deckhand import amend, sections
+import pytest
+
+from deckhand import naming, sections
 from tests.conftest import FIXTURES, ROOT, run_deckhand
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
@@ -15,13 +17,13 @@ BODY = ISSUE["body"]
 NOTES = sections.get(BODY, "Notes")
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 NOTE = "the grant lookup retries once when the store times out"
-NEXT = "Next: /deckhand:next 248 when it reads right."
 FROZEN = (
-    "deckhand amend apply: the plan is frozen once the story is In Progress; "
-    "record the change under Notes or open a new issue with --new-issue\n"
+    "deckhand amend apply: the story is frozen once it starts; log a Deviation, or open a new issue with --new-issue\n"
 )
-SPLIT_NEXT = "Next: carry on; /deckhand:next 999 after #248 merges."
 TITLE = "Index the grant table on principal"
+DRAFTED = "Drafted: the story and its plan, split from this one."
+UNLINKED = {"GH_LINKED_PROJECTS": str(FIXTURES / "linked-none.json")}
+NO_PROJECT = "deckhand amend apply: no project is linked to acme/widgets; run /deckhand:setup\n"
 CHANGED_PLAN = sections.replace(BODY, "Plan", "### Task 1: A different approach\n\n- [ ] **Step 1: Write the test**")
 
 
@@ -51,13 +53,18 @@ def _draft(tmp_path: Path, text: str = BODY) -> str:
     return str(path)
 
 
-def _bodies(copy: Path) -> dict[str, str]:
-    """Every body file the fake recorded, by the `<verb>` of its marker line."""
-    bodies: dict[str, str] = {}
+def _chunks(copy: Path) -> list[tuple[str, str]]:
+    """Every body file the fake recorded, in order, as `(<verb> of its marker line, text)`."""
+    chunks: list[tuple[str, str]] = []
     for chunk in copy.read_text(encoding="utf-8").split("--- issue ")[1:]:
         verb, _, text = chunk.partition("\n")
-        bodies[verb] = text
-    return bodies
+        chunks.append((verb, text))
+    return chunks
+
+
+def _bodies(copy: Path) -> dict[str, str]:
+    """Every body file the fake recorded, by the `<verb>` of its marker line; a repeated verb keeps its last."""
+    return dict(_chunks(copy))
 
 
 def _story(tmp_path: Path, name: str, *, notes: str | None = None, review: str | None = None) -> dict[str, str]:
@@ -75,18 +82,6 @@ def _story(tmp_path: Path, name: str, *, notes: str | None = None, review: str |
     return {"GH_ISSUE_FILE": str(path)}
 
 
-def _raw(body: str, author: str = "arjan", at: str = "2026-09-03T09:00:00Z") -> dict[str, object]:
-    """One comment as the REST endpoint reports it; the process reads its own comments from there."""
-    return {"body": body, "created_at": at, "updated_at": at, "user": {"login": author}}
-
-
-def _comments(tmp_path: Path, name: str, *raws: dict[str, object]) -> dict[str, str]:
-    """An env where the REST comments endpoint answers with `raws`, oldest first."""
-    path = tmp_path / name
-    path.write_text(json.dumps(list(raws)), encoding="utf-8")
-    return {"GH_COMMENTS_FILE": str(path)}
-
-
 def _writes(gh_calls) -> list[str]:
     """The recorded calls that write, with the temp body-file path cut off."""
     starts = ("issue create", "issue edit", "issue comment", "api -X POST")
@@ -96,16 +91,19 @@ def _writes(gh_calls) -> list[str]:
 # --- context ----------------------------------------------------------------
 
 
-def test_context_prints_body_review_and_draft_path(fake_gh, tmp_path):
+def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, tmp_path):
     result = run_deckhand("amend", "context", "248", env=REVIEWED)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:3] == ["Status: Backlog", "", "## Body"]
-    assert lines[3] == "### Story"
+    assert lines[:4] == [f"Title: {REVIEW['title']}", "Status: Backlog", "", "## Body"]
+    assert lines[4] == "### Story"
+    assert "## Latest review" in lines
     assert lines[lines.index("## Latest review") - 1] == ""
+    assert lines[lines.index("## Latest review") + 1].startswith("Review: ")
     review = REVIEW["comments"][-1]["body"].strip("\n").splitlines()
     assert lines[lines.index("## Latest review") + 1 :][: len(review)] == review
+    assert "## Feedback" not in lines
     assert lines[-2] == f"Draft: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
     assert lines[-1] == "Write the whole edited body to the draft; keep every section heading."
 
@@ -123,7 +121,7 @@ def test_context_prints_the_body_without_the_fold(fake_gh, tmp_path):
 
 
 def test_context_says_when_a_story_is_off_the_board(fake_gh, tmp_path):
-    """The plan is frozen by a column, so the context says which column, or that there is none."""
+    """The body is frozen by a column, so the context says which column, or that there is none."""
     env = _wrapper(
         tmp_path,
         "#!/usr/bin/env bash\n"
@@ -134,7 +132,7 @@ def test_context_says_when_a_story_is_off_the_board(fake_gh, tmp_path):
     result = run_deckhand("amend", "context", "248", env={**REVIEWED, **env})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[0] == "Status: off the board"
+    assert result.stdout.splitlines()[1] == "Status: off the board"
 
 
 def test_context_reads_the_board_once(fake_gh, gh_calls):
@@ -152,61 +150,6 @@ def test_context_prints_none_without_a_review(fake_gh):
     assert lines[lines.index("## Latest review") + 1] == "  none"
 
 
-def test_context_lists_the_feedback_left_since_the_last_amend(fake_gh, tmp_path):
-    """The comments are the amendment now, so the ones a person wrote after the last amend are printed."""
-    env = {
-        **REVIEWED,
-        **_comments(
-            tmp_path,
-            "comments.json",
-            _raw("## Review\n\n- [ ] **chaos.1, P2** A claim.", "reviewer-bot", "2026-09-02T09:00:00Z"),
-            _raw("Amended: an earlier pass", "mattjmoran", "2026-09-02T10:00:00Z"),
-            _raw("Drop the second criterion.\nThe third one stands."),
-        ),
-    }
-
-    result = run_deckhand("amend", "context", "248", env=env)
-
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    start = lines.index("## Feedback")
-    assert lines[start - 1] == ""
-    assert lines[start + 1 : start + 4] == [
-        "- arjan: Drop the second criterion.",
-        "  The third one stands.",
-        "",
-    ]
-    draft = f"Draft: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
-    assert lines.index("## Latest review") < start < lines.index(draft)
-
-
-def test_context_leaves_out_the_comments_the_process_wrote(fake_gh, tmp_path):
-    env = {
-        **REVIEWED,
-        **_comments(
-            tmp_path,
-            "own-comments.json",
-            _raw("## Review\n\n- [ ] **chaos.1, P2** A claim.", "reviewer-bot", "2026-09-02T09:00:00Z"),
-            _raw("Split: #999 Index the grant table on principal, blocked by this story.", "mattjmoran"),
-            _raw("Deviation: the retry path moved into the store.", "mattjmoran"),
-        ),
-    }
-
-    result = run_deckhand("amend", "context", "248", env=env)
-
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines[lines.index("## Feedback") + 1] == "  none"
-
-
-def test_context_prints_none_without_feedback(fake_gh):
-    result = run_deckhand("amend", "context", "248")
-
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines[lines.index("## Feedback") + 1] == "  none"
-
-
 def test_context_never_fails(fake_gh, tmp_path):
     env = _wrapper(tmp_path, "#!/usr/bin/env bash\necho nope >&2\nexit 1\n")
 
@@ -215,10 +158,10 @@ def test_context_never_fails(fake_gh, tmp_path):
     assert result.returncode == 0
     assert result.stderr == ""
     out = result.stdout
+    assert "Title: unavailable (nope)" in out
     assert "Status: unavailable (nope)" in out
     assert "## Body\n  unavailable (nope)" in out
     assert "## Latest review\n  unavailable (nope)" in out
-    assert "## Feedback\n  unavailable (nope)" in out
     assert "Draft: unavailable (nope)" in out
 
 
@@ -272,8 +215,7 @@ def test_apply_writes_the_body_then_posts_the_amend_as_a_comment(fake_gh, gh_cal
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Updated #248 https://github.com/acme/widgets/issues/248",
-        "Commented on #248",
-        NEXT,
+        "Logged Amended",
     ]
     bodies = _bodies(copy)
     assert bodies["edit"] == sections.render(*sections.parse(BODY))
@@ -318,26 +260,23 @@ def test_the_drafts_notes_reach_the_issue_unchanged(fake_gh, tmp_path):
     assert "Review of" not in notes
 
 
-def test_apply_ends_the_same_way_while_the_story_is_running(fake_gh, tmp_path):
-    result = run_deckhand(
-        "amend", "apply", "248", _draft(tmp_path), "--note", NOTE, env=_status_reads(tmp_path, "In Progress")
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
-
-
-def test_apply_ends_the_same_way_off_the_board(fake_gh, tmp_path):
+def test_apply_accepts_any_change_off_the_board(fake_gh, gh_calls, tmp_path):
     none = tmp_path / "no-item.json"
     none.write_text('{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}', encoding="utf-8")
 
-    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, env={"GH_GRAPHQL_FILE": str(none)})
+    result = run_deckhand(
+        "amend", "apply", "248", _draft(tmp_path, CHANGED_PLAN), "--note", NOTE, env={"GH_GRAPHQL_FILE": str(none)}
+    )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
+    assert result.stdout.splitlines()[-1] == "Logged Amended"
+    assert _writes(gh_calls) == [
+        "issue edit 248 --repo acme/widgets",
+        "issue comment 248 --repo acme/widgets",
+    ]
 
 
-def test_apply_ends_the_same_way_when_the_status_read_fails(fake_gh, gh_calls, tmp_path):
+def test_apply_accepts_any_change_when_the_status_read_fails(fake_gh, gh_calls, tmp_path):
     env = _wrapper(
         tmp_path,
         "#!/usr/bin/env bash\n"
@@ -348,7 +287,7 @@ def test_apply_ends_the_same_way_when_the_status_read_fails(fake_gh, gh_calls, t
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path, CHANGED_PLAN), "--note", NOTE, env=env)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
+    assert result.stdout.splitlines()[-1] == "Logged Amended"
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -366,11 +305,6 @@ def test_apply_reads_the_status_before_it_writes_the_body(fake_gh, gh_calls, tmp
     assert values < edit
 
 
-def test_the_next_line_is_the_one_command_a_person_types():
-    """Every amend ends the same way, whatever the board says: the person reads it, then runs next."""
-    assert amend.next_line(248) == NEXT
-
-
 def test_apply_refuses_before_it_reads_the_status(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", "   ")
 
@@ -379,18 +313,12 @@ def test_apply_refuses_before_it_reads_the_status(fake_gh, gh_calls, tmp_path):
     assert [call for call in gh_calls() if "fieldValues" in call] == []
 
 
-# --- apply, the frozen plan ---------------------------------------------------
+# --- apply, the frozen story --------------------------------------------------
 
 
-def test_amend_refuses_a_plan_change_when_in_progress(fake_gh, gh_calls, tmp_path):
+def test_apply_refuses_any_body_change_once_the_story_is_in_progress(fake_gh, gh_calls, tmp_path):
     result = run_deckhand(
-        "amend",
-        "apply",
-        "248",
-        _draft(tmp_path, CHANGED_PLAN),
-        "--note",
-        NOTE,
-        env=_status_reads(tmp_path, "In Progress"),
+        "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, "In Progress")
     )
 
     assert result.returncode == 1
@@ -399,25 +327,16 @@ def test_amend_refuses_a_plan_change_when_in_progress(fake_gh, gh_calls, tmp_pat
     assert _writes(gh_calls) == []
 
 
-def test_trailing_whitespace_alone_is_not_a_plan_change(fake_gh, gh_calls, tmp_path):
-    padded = BODY.replace("### Task 1: Store method", "### Task 1: Store method  ")
-    assert padded != BODY
-
+@pytest.mark.parametrize("status", ["Pending Review", "Done"])
+def test_apply_refuses_a_body_change_in_pending_review_and_done(fake_gh, gh_calls, tmp_path, status):
     result = run_deckhand(
-        "amend",
-        "apply",
-        "248",
-        _draft(tmp_path, padded),
-        "--note",
-        NOTE,
-        env=_status_reads(tmp_path, "In Progress"),
+        "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, status)
     )
 
-    assert result.returncode == 0, result.stderr
-    assert _writes(gh_calls) == [
-        "issue edit 248 --repo acme/widgets",
-        "issue comment 248 --repo acme/widgets",
-    ]
+    assert result.returncode == 1
+    assert result.stderr == FROZEN
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
 
 
 def test_amend_accepts_a_plan_change_when_backlog(fake_gh, gh_calls, tmp_path):
@@ -432,29 +351,7 @@ def test_amend_accepts_a_plan_change_when_backlog(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
-    assert _writes(gh_calls) == [
-        "issue edit 248 --repo acme/widgets",
-        "issue comment 248 --repo acme/widgets",
-    ]
-
-
-def test_amend_accepts_a_plan_change_off_the_board(fake_gh, gh_calls, tmp_path):
-    none = tmp_path / "no-item.json"
-    none.write_text('{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}', encoding="utf-8")
-
-    result = run_deckhand(
-        "amend",
-        "apply",
-        "248",
-        _draft(tmp_path, CHANGED_PLAN),
-        "--note",
-        NOTE,
-        env={"GH_GRAPHQL_FILE": str(none)},
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
+    assert result.stdout.splitlines()[-1] == "Logged Amended"
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -475,15 +372,15 @@ def test_the_freeze_leaves_a_new_issue_alone(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == SPLIT_NEXT
+    assert result.stdout.splitlines()[-1] == "Logged Split"
     assert [call for call in gh_calls() if "fieldValues" in call] == []
 
 
 # --- apply, a story of its own ------------------------------------------------
 
 
-def test_new_issue_creates_links_and_comments(fake_gh, gh_calls, tmp_path):
-    copy = tmp_path / "body-copy.md"
+def test_new_issue_boards_the_new_story_as_draft_and_logs_split_and_drafted(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "comment.md"
     body = (FIXTURES / "body-valid.md").read_text(encoding="utf-8")
 
     result = run_deckhand(
@@ -494,17 +391,35 @@ def test_new_issue_creates_links_and_comments(fake_gh, gh_calls, tmp_path):
     assert result.stdout.splitlines() == [
         "Created #999 https://github.com/acme/widgets/issues/999",
         "Blocked by #248",
-        "Commented on #248",
-        SPLIT_NEXT,
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
+        "Logged Split",
     ]
     assert _writes(gh_calls) == [
         f"issue create --repo acme/widgets --title {TITLE}",
         "api -X POST repos/acme/widgets/issues/999/dependencies/blocked_by -F issue_id=5099965156",
+        "issue comment 999 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
     ]
-    bodies = _bodies(copy)
-    assert bodies["create"] == sections.render(*sections.parse(body))
-    assert bodies["comment"] == f"Split: #999 {TITLE}, blocked by this story."
+    boarded = "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/999 --format json"
+    assert boarded in gh_calls()
+    assert _chunks(copy) == [
+        ("create", sections.render(*sections.parse(body))),
+        ("comment", DRAFTED),
+        ("comment", f"Split: #999 {TITLE}, blocked by this story."),
+    ]
+
+
+def test_new_issue_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls, tmp_path):
+    body = (FIXTURES / "body-valid.md").read_text(encoding="utf-8")
+
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path, body), "--new-issue", TITLE, env=UNLINKED)
+
+    assert result.returncode == 1
+    assert result.stderr == NO_PROJECT
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
 
 
 def test_new_issue_refuses_a_bad_body(fake_gh, gh_calls, tmp_path):
@@ -574,7 +489,63 @@ def test_apply_refuses_a_blank_note(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls) == []
 
 
+def test_apply_title_sets_the_title_after_the_body(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, "--title", f" {TITLE} ")
+
+    assert result.returncode == 0, result.stderr
+    assert _writes(gh_calls) == [
+        "issue edit 248 --repo acme/widgets",
+        f"issue edit 248 --repo acme/widgets --title {TITLE}",
+        "issue comment 248 --repo acme/widgets",
+    ]
+    assert result.stdout.splitlines()[1] == f"Title: {TITLE}"
+
+
+def test_apply_title_that_already_stands_is_not_rewritten(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, "--title", ISSUE["title"])
+
+    assert result.returncode == 0, result.stderr
+    assert _writes(gh_calls) == ["issue edit 248 --repo acme/widgets", "issue comment 248 --repo acme/widgets"]
+    assert "Title:" not in result.stdout
+
+
+def test_apply_refuses_a_title_the_subject_cannot_carry(fake_gh, gh_calls, tmp_path):
+    over = "x" * (naming.title_limit() + 1)
+
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, "--title", over)
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        f"deckhand amend apply: title is {len(over)} characters; the pull request subject allows "
+        f"{naming.title_limit()}; give the issue a shorter title with --title\n"
+    )
+    assert _writes(gh_calls) == []
+
+
+def test_apply_title_with_new_issue_is_refused(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--new-issue", TITLE, "--title", TITLE)
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: --title goes with --note; --new-issue carries its title as its argument\n"
+    )
+    assert _writes(gh_calls) == []
+
+
 # --- a story of its own -------------------------------------------------------
+
+
+def test_new_issue_refuses_a_title_the_subject_cannot_carry(fake_gh, gh_calls, tmp_path):
+    over = "x" * (naming.title_limit() + 1)
+
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--new-issue", over)
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        f"deckhand amend apply: title is {len(over)} characters; the pull request subject allows "
+        f"{naming.title_limit()}; give the issue a shorter title with --title\n"
+    )
+    assert _writes(gh_calls) == []
 
 
 def test_new_issue_names_the_created_issue_before_the_dependency_write(fake_gh, gh_calls, tmp_path):

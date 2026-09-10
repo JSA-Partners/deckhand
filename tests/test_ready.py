@@ -14,7 +14,15 @@ NO_WAIT = {"DECKHAND_SETTLE": "0"}
 ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
 HEADER = "| # | Repo | Title | Estimate | Actual | Tasks | Note |"
 RULE = "| --- | --- | --- | --- | --- | --- | --- |"
-NEXT = "Next: /deckhand:next 248 when you want to build."
+ITEM_ADD = "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/248 --format json"
+EDITS = [
+    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_KIND "
+    "--single-select-option-id opt_feat",
+    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTF_POINTS --number 3",
+    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
+    "--single-select-option-id opt_backlog",
+]
+LEGACY = {"GH_ITEM_MISSING_CALLS": "1"}
 
 
 def _wrapper(tmp_path: Path, script: str) -> dict[str, str]:
@@ -147,10 +155,7 @@ def test_the_table_prints_whole_numbers_without_a_decimal_point(fake_gh, tmp_pat
     assert result.stdout.splitlines()[-1] == ("| 210 | widgets | Tag filters on the mention list | 2.5 | 8 | 2 |  |")
 
 
-def test_the_table_names_the_pagination_variable_end_cursor_so_gh_paginate_advances(fake_gh, gh_calls):
-    assert "after:$endCursor" in ready.ITEMS_QUERY
-    assert "$after" not in ready.ITEMS_QUERY
-
+def test_the_table_reads_the_items_through_gh_paginate(fake_gh, gh_calls):
     run_deckhand("ready", "context", "248")
 
     (call,) = [c for c in gh_calls() if c.startswith("api graphql") and "projectV2(number" in c]
@@ -190,9 +195,8 @@ def test_the_table_stops_at_the_limit():
         }
         for n in range(1, 26)
     ]
-    pages = [{"data": {"organization": {"projectV2": {"items": {"nodes": nodes}}}}}]
 
-    rows = ready.analogy_rows(pages, ready.LIMIT)
+    rows = ready.analogy_rows(nodes, ready.LIMIT)
 
     assert len(rows) == ready.LIMIT
     assert rows[0].startswith("| 25 |")
@@ -322,12 +326,29 @@ def test_apply_refuses_points_that_are_not_a_whole_number(fake_gh, gh_calls):
     assert _writes(gh_calls) == []
 
 
-def test_apply_refuses_without_a_review(fake_gh, gh_calls):
-    result = _apply("--kind", "feat", "--points", "3", env={"GH_ISSUE_FILE": str(FIXTURES / "issue.json")})
+def test_apply_refuses_a_story_with_no_review_entry(fake_gh, gh_calls):
+    result = run_deckhand("ready", "apply", "248", "--kind", "feat", "--points", "3")
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: no review comment on #248; run /deckhand:next 248\n"
+    assert result.stderr == "deckhand ready apply: no review on #248; run /deckhand:next 248\n"
     assert _writes(gh_calls) == []
+
+
+def test_apply_moves_a_reviewed_draft_to_backlog(fake_gh, gh_calls):
+    result = _apply("--kind", "feat", "--points", "3")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["Kind=feat", "Story Points=3", "Status=Backlog"]
+    assert _writes(gh_calls) == EDITS
+
+
+def test_apply_adds_a_story_that_is_not_on_the_board_yet(fake_gh, gh_calls):
+    """A story from before Draft existed is still boarded; the add is the one extra write."""
+    result = _apply("--kind", "feat", "--points", "3", env=LEGACY)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["Added to the board", "Kind=feat", "Story Points=3", "Status=Backlog"]
+    assert _writes(gh_calls) == [ITEM_ADD, *EDITS]
 
 
 def test_apply_boards_a_reviewed_story_with_no_approval_reply(fake_gh):
@@ -393,7 +414,7 @@ def test_apply_refuses_a_blocker_it_cannot_read(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls) == []
 
 
-def test_apply_records_dependencies_adds_the_item_and_sets_the_fields(fake_gh, gh_calls):
+def test_apply_records_dependencies_checks_the_board_and_sets_the_fields(fake_gh, gh_calls):
     result = _apply("--kind", "feat", "--points", "3", "--blocked-by", "240", env=_blocked())
 
     assert result.returncode == 0, result.stderr
@@ -403,8 +424,8 @@ def test_apply_records_dependencies_adds_the_item_and_sets_the_fields(fake_gh, g
         "issue view 240 --repo acme/widgets --json state,body",
         "api repos/acme/widgets/issues/240",
         "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156",
+        "api graphql item-id",
         "api graphql linked-projects",
-        "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/248 --format json",
         "api graphql item-id",
         "project field-list 2 --owner acme --format json",
         "project view 2 --owner acme --format json",
@@ -419,8 +440,6 @@ def test_apply_records_dependencies_adds_the_item_and_sets_the_fields(fake_gh, g
         "project view 2 --owner acme --format json",
         "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
         "--single-select-option-id opt_backlog",
-        "api graphql item-id",
-        "api graphql field-values",
     ]
 
 
@@ -431,11 +450,9 @@ def test_apply_boards_backlog_and_records_the_blocker_it_was_given(fake_gh):
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "Blocked by #240",
-        "Added to the board",
         "Kind=feat",
         "Story Points=3",
         "Status=Backlog",
-        NEXT,
     ]
 
 
@@ -443,13 +460,7 @@ def test_apply_boards_backlog_with_a_dependency_it_was_not_given(fake_gh):
     result = _apply("--kind", "feat", "--points", "3", env=_blocked())
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [
-        "Added to the board",
-        "Kind=feat",
-        "Story Points=3",
-        "Status=Backlog",
-        NEXT,
-    ]
+    assert result.stdout.splitlines() == ["Kind=feat", "Story Points=3", "Status=Backlog"]
 
 
 def test_apply_records_a_repeated_blocker_once(fake_gh, gh_calls):
@@ -469,27 +480,11 @@ def test_apply_refuses_a_story_that_blocks_itself(fake_gh, gh_calls):
     assert _writes(gh_calls) == []
 
 
-def test_apply_sets_backlog_when_nothing_blocks_the_story(fake_gh):
-    result = _apply("--kind", "fix", "--points", "0")
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [
-        "Added to the board",
-        "Kind=fix",
-        "Story Points=0",
-        "Status=Backlog",
-        NEXT,
-    ]
-
-
 def test_apply_re_sets_status_once_when_the_automation_flipped_it(fake_gh, gh_calls, tmp_path):
-    result = _apply("--kind", "feat", "--points", "3", env=_status_reads(tmp_path, "In Progress"))
+    result = _apply("--kind", "feat", "--points", "3", env={**LEGACY, **_status_reads(tmp_path, "In Progress")})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-2:] == [
-        "Status re-set to Backlog (the board's own automation had changed it)",
-        NEXT,
-    ]
+    assert result.stdout.splitlines()[-1] == "Status re-set to Backlog (the board's own automation had changed it)"
     status_writes = [c for c in gh_calls() if "PVTSSF_STATUS" in c]
     assert (
         status_writes
@@ -509,20 +504,10 @@ def test_apply_says_status_is_unverified_when_the_read_back_fails(fake_gh, tmp_p
         f'exec "{FAKE_GH}" "$@"\n',
     )
 
-    result = _apply("--kind", "feat", "--points", "3", env=env)
+    result = _apply("--kind", "feat", "--points", "3", env={**LEGACY, **env})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-2:] == [
-        "Status not verified (the field read failed)",
-        NEXT,
-    ]
-
-
-def test_apply_names_the_next_step(fake_gh):
-    result = _apply("--kind", "feat", "--points", "5")
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == NEXT
+    assert result.stdout.splitlines()[-1] == "Status not verified (the field read failed)"
 
 
 def test_the_settle_wait_defaults_to_two_seconds():

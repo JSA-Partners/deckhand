@@ -5,14 +5,16 @@
 - Python package: `deckhand/`, standard library only, behind the entry point `bin/deckhand`
 - One module per step, `deckhand/<step>.py`, the story steps with `context` and `apply`, commit and
   document with `context` alone; there is no `plan` step, `new` writes a plan and `amend` rewrites
-  one until the board says In Progress; `sections.py` folds the Plan into a details block on the way
-  out and unfolds it for every reader; `comment` is the one plain command, for the comments the
-  process writes; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
+  the body until the story starts; `sections.py` folds the Plan into a details block on the way out
+  and unfolds it for every reader; `log.py` the prefix table, the `log` command, and reading entries
+  back from the issue's comments; `board.py` the project's items and views; `checklist.py` what
+  setup verifies; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
   `issue.py` every issue read and write; `git.py` every git call; `drift.py` the plan references
-  `start` checks; `next.py` the dispatcher, context alone and no apply: it reads the story's state,
-  picks the step, and prints that step's skill body and its context
-- Skills: `skills/<name>/SKILL.md` with YAML frontmatter; lenses in `skills/review/lenses/`; agents
-  `agents/<name>.md`
+  `start` checks; `next.py` reads the log, the board, and the local branch, picks the step, and
+  prints a briefing; `finish.py` opens the pull request only from the commit the last `Reviewed:`
+  entry names
+- Skills: `skills/<name>/SKILL.md` with YAML frontmatter; the `next` skill carries the guidance for
+  every step; lenses in `skills/next/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
 
 ## Purpose
@@ -41,11 +43,11 @@ claude --plugin-dir .        # then /reload-plugins after edits
   `acme/widgets` in the fixtures; an apply asserts the exact recorded calls, a refusal asserts no
   write
 - Skills: short bodies, judgment over directive stacks, no capitalized emphasis, one injection line,
-  under 200 words; `tests/test_skills.py` enforces the shape
+  each under its own word limit; `tests/test_skills.py` enforces the shape
 - Severity P1, P2, P3; a clean result is `Nothing found.`
 - kebab-case file names; no em dashes or en dashes in prose
-- Commit messages: body wrapped at 72, no trailers of any kind, ever; `.gitlint` enforces the rest,
-  at commit-msg only, so never commit with `--no-verify`
+- Commit messages: subject under 72, body as paragraphs on their own lines, no trailers of any
+  kind, ever; `.gitlint` enforces the rest, at commit-msg only, so never commit with `--no-verify`
 
 ## Releases
 
@@ -65,6 +67,8 @@ Never leave a user-facing change on `main` untagged; the marketplace installs by
 
 - Do not fetch context by instruction when `deckhand` can inject it
 - A status is set only by a step's `apply`, never by prose
+- A step is reached through `next` and nowhere else; nothing a person reads names a step command
+- Nothing a person writes on GitHub is read; every decision comes from the session
 - Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
 - Do not hardcode organization, project, or repository values in code or tests; only the plugin
   manifests and the install commands carry them

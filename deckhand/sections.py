@@ -21,6 +21,9 @@ FOLD_CLOSE = "</details>"
 # rewriting the draft, or a hand edit all reshape it, and any of those still has to be recognised.
 _FOLD = re.compile(r"\A<details[^>]*>\s*<summary>.*?</summary>\s*(?P<body>.*?)\s*</details>\Z", re.DOTALL)
 _DETAILS_TAG = re.compile(r"<details[^>]*>|</details>")
+# The Plan's closing block: what is owed once the pull request has merged, one `- ` bullet each.
+_AFTER_MERGE = re.compile(r"^### After the merge\s*$", re.MULTILINE)
+_CHECKBOX = re.compile(r"^\[[ xX]\]\s+")
 
 # `get` has to tell "no default" from a default of None, and None is a default a caller wants.
 _RAISE = object()
@@ -135,3 +138,17 @@ def replace(text: str, name: str, content: str) -> str:
         order = {s: i for i, s in enumerate(SECTIONS)}
         parsed.sort(key=lambda kv: order[kv[0]])
     return render(preamble, parsed)
+
+
+def after_merge(body: str) -> list[str]:
+    """The items of the Plan's closing "After the merge" block, in order; empty without one.
+
+    The block is `- ` bullets, one item each; a checkbox a plan puts in front of one is not part of
+    the item, ticked or not, since the log is where an item is marked done.
+    """
+    plan = get(body, "Plan", "")
+    match = _AFTER_MERGE.search(plan)
+    if match is None:
+        return []
+    bullets = [line[2:].strip() for line in plan[match.end() :].splitlines() if line.startswith("- ")]
+    return [_CHECKBOX.sub("", bullet) for bullet in bullets]

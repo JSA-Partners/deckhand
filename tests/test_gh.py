@@ -1,10 +1,11 @@
+import json
 import os
 import subprocess
 
 import pytest
 
 from deckhand import config, gh
-from tests.conftest import FIXTURES
+from tests.conftest import FIXTURES, run_deckhand
 
 
 def test_config_exposes_defaults():
@@ -77,6 +78,20 @@ def test_repo_slug(fake_gh):
     assert gh.repo_slug() == "acme/widgets"
 
 
+def test_repo_slug_names_the_rule_outside_a_repository(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_NO_REPOSITORY", "1")
+
+    with pytest.raises(gh.GhError, match="^not inside a git repository; run deckhand from the story's repository$"):
+        gh.repo_slug()
+
+
+def test_a_command_outside_a_repository_is_one_line(fake_gh):
+    result = run_deckhand("amend", "context", "248", env={"GH_NO_REPOSITORY": "1"})
+
+    assert "not inside a git repository; run deckhand from the story's repository" in result.stdout + result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_project_id(fake_gh, settings):
     assert gh.project_id(settings) == "PVT_TEST"
 
@@ -91,8 +106,10 @@ def test_field_list_asks_the_configured_project_for_every_field(fake_gh, gh_call
 def test_project_fields_reports_every_field_with_its_data_type(fake_gh, gh_calls, settings):
     fields = gh.project_fields(settings)
 
-    assert {"id": "PVTSSF_PRIORITY", "name": "Priority", "dataType": "SINGLE_SELECT"} in fields
-    assert {"id": "PVTF_MILESTONE", "name": "Milestone", "dataType": "MILESTONE"} in fields
+    assert {"id": "PVTSSF_PRIORITY", "name": "Priority", "dataType": "SINGLE_SELECT", "options": []} in fields
+    assert {"id": "PVTF_MILESTONE", "name": "Milestone", "dataType": "MILESTONE", "options": []} in fields
+    kind = next(f for f in fields if f["name"] == "Kind")
+    assert kind["options"][0] == {"id": "opt_feat", "name": "feat", "color": "GREEN"}
     assert any("organization(login:$owner)" in c and "fields(first:50)" in c for c in gh_calls())
 
 
@@ -102,6 +119,26 @@ def test_project_fields_is_empty_when_the_owner_root_answers_nothing(fake_gh, tm
     monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(empty))
 
     assert gh.project_fields(settings) == []
+
+
+def test_update_single_select_sends_the_options_as_json_on_stdin(fake_gh, gh_calls, settings):
+    options = [{"id": "opt_feat", "name": "feat", "color": "GREEN", "description": ""}]
+
+    gh.update_single_select(settings, "PVTSSF_KIND", options)
+
+    (call,) = gh_calls()
+    assert call.startswith("api graphql --input - ")
+    payload = json.loads(call.split(" ", 4)[4])
+    assert "updateProjectV2Field(input:{fieldId:$field,singleSelectOptions:$options})" in payload["query"]
+    assert payload["variables"] == {"field": "PVTSSF_KIND", "options": options}
+
+
+def test_merge_settings_reads_the_repository_object(fake_gh, gh_calls):
+    data = gh.merge_settings("acme/widgets")
+
+    assert data["allow_squash_merge"] is True
+    assert data["squash_merge_commit_message"] == "PR_BODY"
+    assert gh_calls() == ["api repos/acme/widgets"]
 
 
 def test_field_returns_the_named_field(fake_gh, settings):

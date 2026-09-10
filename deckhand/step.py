@@ -106,19 +106,59 @@ def refuse_stub(number: int, body: str) -> None:
 
 
 def branch_for(settings: Settings, kind: str | None, title: str, number: int) -> str:
-    """The story's branch name; a `ValueError` when the board has no Kind or the title has no slug.
+    """The name a story's branch gets when `start` cuts it; a `ValueError` without a Kind or a slug.
 
-    One derivation for every caller, so the branch `next` looks for on origin is the branch `start`
-    pushed there, and a story with no Kind is sent to the one command that can give it one.
+    One derivation for every caller, and only for a story that has no branch yet: once the clone
+    has one, `local_branch` finds it by the number and the title is free to change.
     """
     if kind is None:
         raise ValueError(f"#{number} has no Kind; run /deckhand:next {number}")
     return naming.branch_name(settings, kind, number, title)
 
 
+def local_branch(number: int) -> str | None:
+    """The branch this clone has for story `number`, found by the number and never by the title.
+
+    The build stays on the person's machine until the reviewed commit is pushed, so the clone is
+    where a story's branch lives. Two branches for one number is a state the process never makes,
+    so it is a `ValueError` naming both rather than a guess.
+    """
+    found = git.run("for-each-ref", "--format=%(refname:short)", f"refs/heads/*/{number}-*").splitlines()
+    names = sorted(name for name in found if name)
+    if len(names) > 1:
+        raise ValueError(f"this clone has {len(names)} branches for #{number}: {', '.join(names)}")
+    return names[0] if names else None
+
+
+def fits_title(subject: str) -> str:
+    """`subject` when the pull request subject can carry it; the refusal names both lengths.
+
+    Every command that writes a title runs it, because the title becomes the squash subject on main
+    and the moment to hear it is over is when it is written, not when the pull request opens.
+    """
+    try:
+        return naming.fits(subject)
+    except ValueError as error:
+        raise Refusal(str(error)) from error
+
+
 def blockers_block(repo: str, number: int) -> list[str]:
     """One line per open issue blocking `number`, or `  none`."""
     return [f"  {blocker}  {title}" for blocker, title in issue.blockers(repo, number)] or ["  none"]
+
+
+def resolved_settings() -> Settings:
+    """The project every write goes to, resolved before the first write, so a missing link refuses.
+
+    A resolve that fails after a write would leave an issue created and nothing boarded; resolving
+    here, before anything reaches GitHub, turns the failure into a refusal with no write behind it.
+    """
+    settings = config.load()
+    try:
+        settings.resolve()
+    except config.ConfigError as error:
+        raise Refusal(str(error)) from error
+    return settings
 
 
 def settings_or_error() -> Settings | Exception:

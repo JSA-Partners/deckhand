@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -115,6 +116,29 @@ def registry():
     finally:
         cli._REGISTRY.clear()
         cli._REGISTRY.update(original)
+
+
+def run_git(path: Path, *args: str) -> str:
+    """git's stdout in the repository at `path`; a non-zero exit fails the test."""
+    return subprocess.run(["git", *args], cwd=path, capture_output=True, text=True, check=True).stdout
+
+
+def fieldvalues(tmp_path: Path, status: str | None, kind: str | None = "feat") -> dict[str, str]:
+    """The field values fixture with Status and Kind set, or removed where they are None."""
+    data = json.loads((FIXTURES / "graphql-fieldvalues.json").read_text(encoding="utf-8"))
+    values = data["data"]["node"]["fieldValues"]
+    wanted = {"Status": status, "Kind": kind}
+    nodes = []
+    for node in values["nodes"]:
+        name = (node.get("field") or {}).get("name")
+        if name not in wanted:
+            nodes.append(node)
+        elif wanted[name] is not None:
+            nodes.append({**node, "name": wanted[name]})
+    values["nodes"] = nodes
+    path = tmp_path / f"fieldvalues-{(status or 'none')}-{kind or 'none'}.json".replace(" ", "-").lower()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return {"GH_FIELDVALUES_FILE": str(path)}
 
 
 def run_deckhand(

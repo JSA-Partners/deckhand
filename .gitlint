@@ -1,11 +1,8 @@
 [general]
 contrib = contrib-title-conventional-commits
-ignore = body-is-missing
+ignore = body-is-missing,body-max-line-length
 
 [title-max-length]
-line-length = 72
-
-[body-max-line-length]
 line-length = 72
 
 [contrib-title-conventional-commits]

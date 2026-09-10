@@ -20,7 +20,8 @@ fake `gh` in `tests/fakes/`.
 ## Pull requests
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), with no
-trailers; the commit hook lints them. A commit body and a pull request body both wrap at 72 columns.
+trailers; the commit hook lints them. A commit body and a pull request body are paragraphs on their
+own lines, never wrapped.
 Pull requests are squash merged, and the pull request title and body become the commit on `main`, so
 write them as one. Keep a pull request to one change.
 

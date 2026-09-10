@@ -20,4 +20,4 @@ superpowers:writing-plans into the draft for the Plan, then run
 Ask nobody anything. Where the requirements are silent, take the simplest reading, write it, and say
 so under Notes; the review is where that gets caught, and a question here stalls every other story.
 
-Return the `Written` and `Next` lines apply printed, or the refusal you could not fix.
+Return the `Written` and `Logged` lines apply printed, or the refusal you could not fix.

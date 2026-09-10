@@ -2,7 +2,7 @@
 
 The repository squashes with the pull request title and body as the commit message, so the title is
 a commit subject and the body is a commit body: the subject has a length a reader can scan, and the
-body is the story as one wrapped paragraph over the footers a tool reads. An issue title is that
+body is the story as one paragraph on one line over the footers a tool reads. An issue title is that
 subject too, less the kind it will be given, so it is measured here as well.
 
 A name that cannot be made is a `ValueError`; the step that asked for it turns that into a refusal.
@@ -11,14 +11,12 @@ A name that cannot be made is a `ValueError`; the step that asked for it turns t
 from __future__ import annotations
 
 import re
-import textwrap
 
 from deckhand import config, sections
 from deckhand.config import Settings
 
 SUBJECT = 72  # the longest commit subject a git log, a terminal, and GitHub all show whole
 BANG = "!"  # marks a breaking change, and is reserved in every title so a late one cannot overflow
-WRAP = 72  # the commit body's width: git's own convention, and what GitHub shows verbatim
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _WANT = re.compile(r"\bI want (.+?), so that\b", re.IGNORECASE)
@@ -58,8 +56,12 @@ def pr_title(settings: Settings, kind: str, title: str, breaking: bool = False) 
     """
     if kind not in settings.kinds:
         raise ValueError(f"unknown kind {kind!r} (one of: {' '.join(settings.kinds)})")
-    if len(f"{kind}{BANG}: {title}") > SUBJECT:
-        raise ValueError("title too long for a commit subject; shorten the issue title")
+    allowed = SUBJECT - len(f"{kind}{BANG}: ")
+    if len(title) > allowed:
+        raise ValueError(
+            f"title is {len(title)} characters; the pull request subject allows {allowed}; "
+            "give the issue a shorter title with --title"
+        )
     return f"{kind}{BANG if breaking else ''}: {title}"
 
 
@@ -97,22 +99,21 @@ def fits(subject: str) -> str:
     limit = title_limit()
     if len(subject) > limit:
         raise ValueError(
-            f"title is {len(subject)} characters; the pull request subject allows {limit}. "
-            "Pass --title with a shorter one"
+            f"title is {len(subject)} characters; the pull request subject allows {limit}; "
+            "give the issue a shorter title with --title"
         )
     return subject
 
 
 def pr_body(number: str | int, story: str, breaking: str | None = None) -> str:
-    """The story as one wrapped paragraph, then the footer block; `number` must be an integer.
+    """The story as one paragraph on one line, then the footer block; `number` must be an integer.
 
-    The story is rewrapped rather than copied, because the issue's own line breaks are the width of
-    an issue body and the commit body is read in a git log. A long word is left long: a path or a
-    URL broken over two lines is one a reader cannot copy and a tool cannot follow.
+    The story's own line breaks are the width of an issue body, and they go: GitHub renders every
+    line break in a pull request body, and git does not care how long a line of a commit body is.
     """
     if not _NUMBER_RE.match(str(number)):
         raise ValueError(f"issue number must be an integer, got {number!r}")
     footers = [f"BREAKING CHANGE: {breaking}"] if breaking else []
     footers.append(f"Closes #{number}")
-    paragraph = textwrap.fill(" ".join(story.split()), WRAP, break_long_words=False, break_on_hyphens=False)
+    paragraph = " ".join(story.split())
     return paragraph + "\n\n" + "\n".join(footers) + "\n"
