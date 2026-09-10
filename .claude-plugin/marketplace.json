@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Claude Code plugins by JSA+Partners.",
-    "version": "2.1.0"
+    "version": "3.0.0"
   },
   "plugins": [
     {
       "name": "deckhand",
       "description": "A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.",
-      "version": "2.1.0",
+      "version": "3.0.0",
       "author": {
         "name": "JSA+Partners",
         "url": "https://jsapartners.co"

@@ -1,6 +1,6 @@
 [project]
 name = "deckhand"
-version = "2.1.0"
+version = "3.0.0"
 description = "A story process for shipping code with Claude Code and superpowers"
 requires-python = ">=3.12"
 readme = "README.md"
