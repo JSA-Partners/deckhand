@@ -5,7 +5,7 @@ arguments: issue
 argument-hint: "<issue-number>"
 effort: high
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh pr merge *) Bash(gh run view *) Read Write Edit Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(deckhand:*)
+allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh pr merge *) Bash(gh run view *) Read Write Edit Grep Glob Agent AskUserQuestion EnterWorktree Skill(superpowers:*) Skill(deckhand:*)
 ---
 
 # Next $issue
@@ -17,9 +17,13 @@ above, then run the step it names and carry on to the next step in the same conv
 decision is the person's, or until you are unsure what they would want, and ask. Every command below
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
 did not print, run `<step> context $issue` yourself. When a command refuses, fix the rule it names
-and run it again; when you cannot, say so in one sentence. Done and stop have nothing to run: say
-what the briefing says, in the Speaking rules' shape. Every commit goes through deckhand:commit,
-which never skips a hook; nothing is amended past the last reviewed commit or pushed by hand.
+and run it again; when you cannot, say so in one sentence. When the briefing or a command prints a
+`Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
+else; in a worktree entered for the first time, run the repository's own setup commands from its
+CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
+baseline. Done and stop have nothing to run: say what the briefing says, in the Speaking
+rules' shape. Every commit goes through deckhand:commit, which never skips a hook; nothing is
+amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
 
@@ -74,8 +78,9 @@ then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 From the start context (above, or run it), compare the plan with the code and with what landed on
 main since the review; say what you found and recommend build, amend, or review again. When they say build, run
-`start apply $issue --note "<the check's conclusion>"`, then superpowers:subagent-driven-development
-on the plan, one commit per task with deckhand:commit, nothing pushed. A change that serves the
+`start apply $issue --note "<the check's conclusion>"`; it prints the story's worktree, where the
+build runs. Then superpowers:subagent-driven-development on the plan, one commit per task with
+deckhand:commit, nothing pushed. A change that serves the
 criteria as written: build it and run `log $issue "Deviation: <what and why>"`. A change that
 alters what the story delivers: say so in one sentence with the diff's size and a recommendation,
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
@@ -115,4 +120,5 @@ request section again: finish pushes and keeps the pull request.
 
 On a merged story with items left, walk them one at a time, doing what can be done here and asking
 for what is theirs, logging `After the merge: <item>` as each is done. When nothing is left, say the
-story is finished and name the next story the briefing gave.
+story is finished and name the next story the briefing gave; when the briefing says the worktree is
+here, add that its folder goes away on the next run from the clone.

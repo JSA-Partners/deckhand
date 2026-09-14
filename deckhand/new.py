@@ -21,7 +21,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from deckhand import board, fields, gh, issue, lint, log, naming, sections, stub
+from deckhand import board, fields, gh, issue, lint, log, naming, sections, stub, worktree
 from deckhand.config import BODY_LIMIT, Settings
 from deckhand.step import (
     Refusal,
@@ -374,6 +374,14 @@ def apply(args: argparse.Namespace) -> int:
         args.usage.error("--from is only for --split")
     if args.split and args.title is not None:
         args.usage.error("--title is not for --split; every story takes its title from the file")
+    code = _write(args)
+    # Bookkeeping after the writes, from the clone: the worktrees of stories merged since the last run.
+    for line in worktree.sweep(gh.repo_slug()):
+        print(line)
+    return code
+
+
+def _write(args: argparse.Namespace) -> int:
     draft = read_draft(args.file)
     if args.stub is not None:
         return _write_stub(gh.repo_slug(), args.stub, draft, args.title)

@@ -10,7 +10,7 @@ import pytest
 from deckhand import lint, log, naming, new, sections, step, stub
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
-from tests.conftest import FIXTURES, ROOT, run_deckhand
+from tests.conftest import FIXTURES, ROOT, run_deckhand, run_git
 
 VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
@@ -935,3 +935,20 @@ def test_apply_park_refuses_a_file_without_the_heading(fake_gh, gh_calls, tmp_pa
     assert result.stderr.strip() == "deckhand new apply: a parked feature starts with ## Requirements"
     assert result.stdout == ""
     assert _writes(gh_calls()) == []
+
+
+def test_apply_sweeps_the_worktrees_of_closed_stories_from_the_clone(fake_gh, gh_calls, repo, tmp_path):
+    finished = repo.resolve() / ".claude" / "worktrees" / "fix/57-finished"
+    run_git(repo, "worktree", "add", str(finished), "-b", "fix/57-finished")
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data.update(number=57, state="CLOSED")
+    (tmp_path / "issue-57.json").write_text(json.dumps(data), encoding="utf-8")
+
+    env = {"GH_ISSUE_FILE_57": str(tmp_path / "issue-57.json")}
+    result = run_deckhand("new", "apply", str(VALID), cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0].startswith("Created #999 ")
+    assert lines[-1] == f"Removed worktree {finished}"
+    assert not finished.exists()

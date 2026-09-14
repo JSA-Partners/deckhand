@@ -6,17 +6,20 @@ already committed on the branch, the plan references that no longer resolve, and
 because the skill reads the plan against the repository before it branches, and a story that no
 longer holds is the one case that sends it back to review.
 
-`apply` refuses a story that is blocked or off the board, then cuts the branch locally from a
-freshly fetched `origin/main`, sets In Progress, and logs `Started:` with the pre-build check's
-conclusion; nothing is pushed until the branch is reviewed and finished. A branch this clone
-already has for the number is checked out instead: with the story In Progress it is being picked
-back up, so the status is left alone; still in Backlog, it is the start that failed between the
-cut and the board, so the status is written now. The `Started:` entry is owed until the issue's
-log has one, whichever run gets that far, so starting is idempotent and the entry appears once. A
-story is cut only from Backlog and resumed only from Backlog or In Progress; any other column is a
-refusal naming it. Whoever ran it is then assigned the issue, on both paths, so the board says who
-has it. Both verbs end with the same plan, commits, drift, and landed blocks, because the model
-needs them either way.
+`apply` refuses a story that is blocked or off the board, then cuts the branch from a freshly
+fetched `origin/main` in the story's own worktree under the clone's `.claude/worktrees/`, sets In
+Progress, and logs `Started:` with the pre-build check's conclusion; nothing is pushed until the
+branch is reviewed and finished. A branch this clone already has for the number is taken up
+instead: checked out in the current directory it is worked on there; checked out in no worktree
+it gets one; checked out in another worktree it is a refusal naming the path, because the build
+belongs there. With the story In Progress the branch is being picked back up, so the status is
+left alone; still in Backlog, it is the start that failed between the cut and the board, so the
+status is written now. The `Started:` entry is owed until the issue's log has one, whichever run
+gets that far, so starting is idempotent and the entry appears once. A story is cut only from
+Backlog and resumed only from Backlog or In Progress; any other column is a refusal naming it.
+Whoever ran it is then assigned the issue, on both paths, so the board says who has it. Both
+verbs end with the same plan, commits, drift, and landed blocks, because the model needs them
+either way, and the worktree's path is the last line before them.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, drift, fields, gh, git, issue, log, sections
+from deckhand import config, drift, fields, gh, git, issue, log, sections, worktree
 from deckhand.config import Settings
 from deckhand.step import (
     MAIN,
@@ -58,19 +61,29 @@ def _branch_name(settings: Settings, kind: str | None, title: str, number: int) 
         raise Refusal(str(error)) from error
 
 
-def _start_branch(branch: str) -> None:
-    """Branch from `origin/main`, freshly fetched; nothing is pushed until the branch is reviewed."""
+def _worktree(branch: str, new: bool) -> Path:
+    """The story's worktree, or the refusal carrying git's one line about why it could not be made."""
+    try:
+        return worktree.add(branch, new=new)
+    except git.GitError as error:
+        raise Refusal(str(error)) from error
+
+
+def _start_branch(branch: str) -> Path:
+    """Branch from `origin/main`, freshly fetched, in the story's own worktree; nothing is pushed yet."""
     refuse_git("fetch", "origin", MAIN)
-    refuse_git("checkout", "-b", branch, f"origin/{MAIN}")
+    path = _worktree(branch, new=True)
     print(f"Branch {branch} created from origin/{MAIN}")
+    return path
 
 
 # --- the blocks both verbs print --------------------------------------------
 
 
-def _commits_block() -> list[str]:
-    """What is already committed on this branch, so a story picked back up skips those tasks."""
-    return indented(git.run("log", "--reverse", f"{trunk()}..HEAD", "--format=%h %s").splitlines())
+def _commits_block(number: int) -> list[str]:
+    """What is already committed on the story's branch, wherever it is checked out, so a resume skips those tasks."""
+    name = local_branch(number) or "HEAD"
+    return indented(git.run("log", "--reverse", f"{trunk()}..{name}", "--format=%h %s").splitlines())
 
 
 def _drift_block(text: str) -> list[str]:
@@ -104,14 +117,14 @@ def _landed_block(story: issue.Issue | Exception) -> list[str]:
     return indented(landed)
 
 
-def _report(story: issue.Issue | Exception) -> None:
+def _report(story: issue.Issue | Exception, number: int) -> None:
     """Print the plan, the commits on the branch, the stale references, and what landed on main."""
 
     def plan_text() -> str:
         return sections.get(usable(story).body, "Plan").strip("\n")
 
     block("## Plan", lambda: plan_text().splitlines() or ["  none"])
-    block("## Commits", _commits_block)
+    block("## Commits", lambda: _commits_block(number))
     block("## Plan drift", lambda: _drift_block(plan_text()))
     block("## Landed on main since the review", lambda: _landed_block(story))
 
@@ -127,16 +140,25 @@ def _story(number: int) -> issue.Issue | Exception:
         return error
 
 
+def _where(branch: str) -> str:
+    """`here`, `at <path>`, or `local` for a branch no worktree has checked out."""
+    where = worktree.checked_out(branch)
+    if where is None:
+        return "local"
+    return "here" if worktree.here(where) else f"at {where}"
+
+
 def _branch_line(settings: Settings | Exception, story: issue.Issue | Exception, number: int) -> str:
-    """`Branch: <name> (local|none)`."""
+    """`Branch: <name> (here|at <path>|local|none)`."""
     try:
         resolved = usable(settings)
         repo = gh.repo_slug()
         kind = fields.get_fields(resolved, repo, number, ("Kind",))["Kind"]
         branch, found = _branch_name(resolved, kind, usable(story).title, number)
+        where = _where(branch) if found else "none"
     except Exception as error:  # the blockers and the plan are the blocks the model needs most
         return f"Branch: unavailable ({reason(error)})"
-    return f"Branch: {branch} ({'local' if found else 'none'})"
+    return f"Branch: {branch} ({where})"
 
 
 def _agreement(story: issue.Issue | Exception) -> None:
@@ -156,7 +178,7 @@ def context(args: argparse.Namespace) -> int:
     print(_branch_line(settings, story, args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     _agreement(story)
-    _report(story)
+    _report(story, args.issue)
     return 0
 
 
@@ -169,7 +191,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 @step("start", _configure)
 def apply(args: argparse.Namespace) -> int:
-    """Branch a story locally from origin/main, or check out the branch it already has, and log the start."""
+    """Branch a story from origin/main in its own worktree, or take up the branch it has, and log the start."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
     refuse_stub(args.issue, story.body)
@@ -182,23 +204,28 @@ def apply(args: argparse.Namespace) -> int:
     settings = config.load()
     values = fields.get_fields(settings, repo, args.issue, ("Status", "Kind"))
     branch, found = _branch_name(settings, values["Kind"], story.title, args.issue)
+    where = worktree.checked_out(branch) if found else None
+    if where is not None and not worktree.here(where):
+        raise Refusal(f"Branch {branch} is checked out at {where}.")
     status = values["Status"]
     # A branch the clone has while the story is still Backlog is a start that failed between the
     # cut and the board, so the status is still owed; a branch with the story In Progress is one
     # being picked back up. The log entry is owed until the issue has it, whichever run got there.
     fresh = not found or status == "Backlog"
     owed = log.last(story, "Started:") is None
+    made: Path | None = None
     if found:
         if status not in ("Backlog", "In Progress"):
             raise Refusal(f"#{args.issue} has branch {branch} but is {status or 'off the board'}")
-        refuse_git("checkout", branch)
+        if where is None:
+            made = _worktree(branch, new=False)
         print(f"Existing branch {branch}; {'finishing the interrupted start' if fresh else 'status unchanged'}")
     elif status is None:
         raise Refusal(f"#{args.issue} is off the board; board it first with /deckhand:next {args.issue}")
     elif status != "Backlog":
         raise Refusal(f"#{args.issue} is {status}; a branch is cut only from Backlog")
     else:
-        _start_branch(branch)
+        made = _start_branch(branch)
     if fresh:
         print(fields.set_field(settings, repo, args.issue, "Status", "In Progress"))
     # Bookkeeping, so it comes after the status write the step exists to make: whoever started the
@@ -208,5 +235,7 @@ def apply(args: argparse.Namespace) -> int:
     if owed:
         issue.comment(repo, args.issue, log.checked(f"Started: {note}"))
         print("Logged Started")
-    _report(story)
+    if made is not None:
+        print(f"Worktree: {made}")
+    _report(story, args.issue)
     return 0

@@ -34,9 +34,9 @@ TYPED = {"setup", "new", "next"}
 # command to type.
 STEPS = ("amend", "finish", "ready", "review", "start")
 
-# The word limit is one per skill file: `next` carries what five skills carried, and `new` runs a
-# whole brainstorm; everything else stays short.
-WORD_LIMITS = {"next": 1250, "new": 300}
+# The word limit is one per skill file: `next` carries what five skills carried plus the worktree
+# rule, and `new` runs a whole brainstorm; everything else stays short.
+WORD_LIMITS = {"next": 1300, "new": 300}
 DEFAULT_WORD_LIMIT = 200
 
 GRANT = 'Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *)'

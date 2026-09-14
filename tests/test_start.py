@@ -50,6 +50,11 @@ def _commit(repo: Path, subject: str, date: str | None = None) -> str:
     return run_git(repo, "rev-parse", "--short", "HEAD").strip()
 
 
+def _worktree(repo: Path, branch: str) -> Path:
+    """Where start puts a story's worktree."""
+    return repo.resolve() / ".claude" / "worktrees" / branch
+
+
 def _undated_review(tmp_path: Path) -> dict[str, str]:
     """The reviewed story with its Review: entry carrying no date."""
     data = json.loads((FIXTURES / "issue-reviewed.json").read_text(encoding="utf-8"))
@@ -151,33 +156,43 @@ def test_apply_refuses_a_blank_note(fake_gh, gh_calls, repo, origin):
     assert _branches(repo) == ["main"]
 
 
-def test_apply_creates_a_local_branch_and_pushes_nothing(fake_gh, gh_calls, repo, origin, tmp_path):
+def test_apply_cuts_the_branch_in_its_own_worktree_and_pushes_nothing(fake_gh, gh_calls, repo, origin, tmp_path):
     copy = tmp_path / "comment.md"
 
     result = _start("apply", repo, {"GH_BODY_FILE_COPY": str(copy)}, "--note", STARTED[9:])
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:4] == [
+    path = _worktree(repo, BRANCH)
+    assert result.stdout.splitlines()[:5] == [
         f"Branch {BRANCH} created from origin/main",
         "Status=In Progress",
         "Assigned @me",
         "Logged Started",
+        f"Worktree: {path}",
     ]
-    assert run_git(repo, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
+    assert run_git(path, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
+    assert run_git(repo, "symbolic-ref", "HEAD").strip() == "refs/heads/main"
+    assert run_git(repo, "status", "--porcelain") == ""
     assert _branches(origin) == ["main"]
     assert _writes(gh_calls) == [IN_PROGRESS, ASSIGN, COMMENT]
     assert copy.read_text(encoding="utf-8").endswith(f"--- issue comment\n{STARTED}")
 
 
-def test_apply_resumes_a_local_branch_found_by_number(fake_gh, gh_calls, repo, origin, tmp_path):
+def test_apply_resumes_a_branch_found_by_number_in_a_new_worktree(fake_gh, gh_calls, repo, origin, tmp_path):
     run_git(repo, "branch", "feat/248-old-name")
     env = {**_started(tmp_path), **fieldvalues(tmp_path, "In Progress")}
 
     result = _start("apply", repo, env, "--note", "resumed")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:2] == ["Existing branch feat/248-old-name; status unchanged", "Assigned @me"]
-    assert run_git(repo, "symbolic-ref", "HEAD").strip() == "refs/heads/feat/248-old-name"
+    path = _worktree(repo, "feat/248-old-name")
+    assert result.stdout.splitlines()[:3] == [
+        "Existing branch feat/248-old-name; status unchanged",
+        "Assigned @me",
+        f"Worktree: {path}",
+    ]
+    assert run_git(path, "symbolic-ref", "HEAD").strip() == "refs/heads/feat/248-old-name"
+    assert run_git(repo, "symbolic-ref", "HEAD").strip() == "refs/heads/main"
     assert _writes(gh_calls) == [ASSIGN]
 
 
@@ -188,10 +203,11 @@ def test_apply_logs_the_start_a_failed_run_never_logged(fake_gh, gh_calls, repo,
     result = _start("apply", repo, fieldvalues(tmp_path, "In Progress"), "--note", STARTED[9:])
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:3] == [
+    assert result.stdout.splitlines()[:4] == [
         f"Existing branch {BRANCH}; status unchanged",
         "Assigned @me",
         "Logged Started",
+        f"Worktree: {_worktree(repo, BRANCH)}",
     ]
     assert _writes(gh_calls) == [ASSIGN, COMMENT]
 
@@ -204,15 +220,43 @@ def test_apply_finishes_an_interrupted_start(fake_gh, gh_calls, repo, origin, tm
     result = _start("apply", repo, {"GH_BODY_FILE_COPY": str(copy)}, "--note", STARTED[9:])
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:4] == [
+    assert result.stdout.splitlines()[:5] == [
         f"Existing branch {BRANCH}; finishing the interrupted start",
         "Status=In Progress",
         "Assigned @me",
         "Logged Started",
+        f"Worktree: {_worktree(repo, BRANCH)}",
     ]
-    assert run_git(repo, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
+    assert run_git(_worktree(repo, BRANCH), "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
     assert _writes(gh_calls) == [IN_PROGRESS, ASSIGN, COMMENT]
     assert copy.read_text(encoding="utf-8").count("Started:") == 1
+
+
+def test_apply_works_in_place_when_the_branch_is_checked_out_here(fake_gh, gh_calls, repo, origin, tmp_path):
+    """A story started before worktrees, or a session already in the story's worktree: nothing moves."""
+    run_git(repo, "checkout", "-q", "-b", BRANCH)
+    env = {**_started(tmp_path), **fieldvalues(tmp_path, "In Progress")}
+
+    result = _start("apply", repo, env, "--note", "resumed")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:3] == [f"Existing branch {BRANCH}; status unchanged", "Assigned @me", "## Plan"]
+    assert "Worktree:" not in result.stdout
+    assert run_git(repo, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
+    assert run_git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
+    assert _writes(gh_calls) == [ASSIGN]
+
+
+def test_apply_refuses_a_branch_checked_out_in_another_worktree(fake_gh, gh_calls, repo, origin, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    run_git(repo, "worktree", "add", str(elsewhere), "-b", BRANCH)
+
+    result = _start("apply", repo, fieldvalues(tmp_path, "In Progress"), "--note", "x")
+
+    assert result.returncode == 1
+    assert result.stderr == f"deckhand start apply: Branch {BRANCH} is checked out at {elsewhere}.\n"
+    assert _writes(gh_calls) == []
+    assert run_git(repo, "symbolic-ref", "HEAD").strip() == "refs/heads/main"
 
 
 def test_apply_refuses_to_resume_a_story_in_another_column(fake_gh, gh_calls, repo, origin, tmp_path):
@@ -300,12 +344,29 @@ def test_context_reads_the_commits_in_a_clone_that_has_no_local_main(fake_gh, re
     ]
 
 
-def test_context_reports_the_branch_the_clone_already_has(fake_gh, repo, origin):
+def test_context_reports_a_branch_checked_out_nowhere_as_local(fake_gh, repo, origin):
     run_git(repo, "branch", BRANCH)
 
     result = _start("context", repo)
 
     assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (local)"
+
+
+def test_context_reports_a_branch_checked_out_here(fake_gh, repo, origin):
+    run_git(repo, "checkout", "-q", "-b", BRANCH)
+
+    result = _start("context", repo)
+
+    assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (here)"
+
+
+def test_context_reports_where_a_branch_is_checked_out_elsewhere(fake_gh, repo, origin, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    run_git(repo, "worktree", "add", str(elsewhere), "-b", BRANCH)
+
+    result = _start("context", repo)
+
+    assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (at {elsewhere})"
 
 
 def _titled(tmp_path: Path, title: str) -> dict[str, str]:

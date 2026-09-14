@@ -621,3 +621,112 @@ def test_a_story_in_a_column_next_cannot_act_on_stops(fake_gh, repo, tmp_path):
 
     lines = _briefing(result, "stop", "#248 is Pending Review with no open pull request; nothing decided.")
     assert lines[5:] == ["  none"]
+
+
+# --- worktrees ----------------------------------------------------------------
+
+
+def _worktree(repo: Path, branch: str) -> Path:
+    """The story's worktree, made where start would put it, on a new branch from main."""
+    path = repo.resolve() / ".claude" / "worktrees" / branch
+    run_git(repo, "worktree", "add", str(path), "-b", branch)
+    return path
+
+
+def _closed_story(tmp_path: Path, number: int) -> dict[str, str]:
+    """A closed story under the fake gh's per-number switch, for the sweep to find."""
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data.update(number=number, state="CLOSED")
+    path = tmp_path / f"issue-{number}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return {f"GH_ISSUE_FILE_{number}": str(path)}
+
+
+def test_the_briefing_names_the_worktree_when_the_branch_is_checked_out_elsewhere(fake_gh, repo, origin, tmp_path):
+    path = _worktree(repo, BRANCH)
+
+    result = _next(repo, env=fieldvalues(tmp_path, "In Progress"))
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:6] == [
+        "Step: build",
+        "Started, nothing built yet.",
+        TITLE,
+        f"Issue: {ISSUE_URL}",
+        f"Worktree: {path}",
+        "Log:",
+    ]
+
+
+def test_the_briefing_has_no_worktree_line_from_inside_it(fake_gh, repo, origin, tmp_path):
+    path = _worktree(repo, BRANCH)
+
+    result = run_deckhand("next", "context", "248", cwd=path, env=fieldvalues(tmp_path, "In Progress"))
+
+    _briefing(result, "build", "Started, nothing built yet.")
+    assert "Worktree:" not in result.stdout
+
+
+def test_done_from_the_clone_removes_the_worktree_and_the_branch(fake_gh, repo, origin, tmp_path):
+    path = _worktree(repo, BRANCH)
+    env = {**_story(tmp_path, "closed.json", state="CLOSED"), **fieldvalues(tmp_path, "Done"), **_board(tmp_path)}
+
+    result = _next(repo, env=env)
+
+    lines = _briefing(result, "done", f"#248 is closed. Removed worktree {path}.")
+    assert "Worktree:" not in result.stdout
+    assert not path.exists()
+    assert run_git(repo, "branch", "--format=%(refname:short)").split() == ["main"]
+    assert lines[-1] == "Next story: none"
+
+
+def test_done_from_inside_the_worktree_only_says_where_it_is(fake_gh, repo, origin, tmp_path):
+    path = _worktree(repo, BRANCH)
+    env = {**_story(tmp_path, "closed.json", state="CLOSED"), **fieldvalues(tmp_path, "Done"), **_board(tmp_path)}
+
+    result = run_deckhand("next", "context", "248", cwd=path, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:5] == ["Step: done", "#248 is closed.", TITLE, f"Issue: {ISSUE_URL}", f"Worktree: {path} (here)"]
+    assert path.exists()
+
+
+def test_done_from_the_clone_leaves_a_worktree_with_changes_and_says_so(fake_gh, repo, origin, tmp_path):
+    path = _worktree(repo, BRANCH)
+    (path / "wip").write_text("x\n", encoding="utf-8")
+    env = {**_story(tmp_path, "closed.json", state="CLOSED"), **fieldvalues(tmp_path, "Done"), **_board(tmp_path)}
+
+    result = _next(repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:4] == ["Step: done", "#248 is closed.", TITLE, f"Issue: {ISSUE_URL}"]
+    assert lines[4].startswith(f"Worktree: {path} (left: ")
+    assert lines[5] == "Log:"
+    assert path.exists()
+
+
+def test_the_sweep_runs_from_the_clone_before_the_briefing(fake_gh, repo, origin, tmp_path):
+    finished = _worktree(repo, "fix/57-finished")
+    env = {**_closed_story(tmp_path, 57), **fieldvalues(tmp_path, "Backlog")}
+
+    result = _next(repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == [f"Removed worktree {finished}", "Step: check"]
+    assert not finished.exists()
+
+
+def test_the_sweep_never_runs_from_a_worktree(fake_gh, repo, origin, tmp_path):
+    finished = _worktree(repo, "fix/57-finished")
+    mine = _worktree(repo, BRANCH)
+    env = {**_closed_story(tmp_path, 57), **fieldvalues(tmp_path, "In Progress")}
+
+    result = run_deckhand("next", "context", "248", cwd=mine, env=env)
+
+    _briefing(result, "build", "Started, nothing built yet.")
+    assert "Removed" not in result.stdout
+    assert finished.exists()

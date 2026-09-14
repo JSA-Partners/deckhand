@@ -6,6 +6,11 @@ command prints a briefing: the step, why, the story's title, the last lines of t
 step's own context. The skill that injects it carries the guidance for every step and carries the
 story on from one to the next; this command has no `apply`, so nothing here can be half done.
 
+The clone's worktrees are read too: a branch checked out in another worktree is named as
+`Worktree: <path>` so the session moves there, a done story's worktree is removed when the run is
+not standing in it, and before the story is read the worktrees of other closed stories are swept,
+from the clone only. Nothing here writes to GitHub.
+
 A fact that could not be read is never guessed at: a story missing one stops with what could not
 be read rather than being sent to a step chosen from half the answer.
 """
@@ -17,7 +22,7 @@ import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from deckhand import board, config, fields, gh, git, issue, log, sections, stub
+from deckhand import board, config, fields, gh, git, issue, log, sections, stub, worktree
 from deckhand.step import MAIN, branch_for, local_branch, reason, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
@@ -233,22 +238,64 @@ def _next_story(repo: str, number: int) -> None:
     print(f"Next story: #{found[0]} {found[1]}" if found else "Next story: none")
 
 
+def _sweep(repo: str, number: int) -> None:
+    """Remove the worktrees of other closed stories, from the clone; a sweep that fails costs nothing."""
+    try:
+        lines = worktree.sweep(repo, exclude=number)
+    except Exception as error:
+        lines = [f"Sweep: unavailable ({reason(error)})"]
+    for line in lines:
+        print(line)
+
+
+def _worktree(name: str, branch: str | None) -> tuple[str | None, str | None]:
+    """`(line, removed)`: the briefing's `Worktree:` line, and what the done row removed.
+
+    The line is printed when the branch is checked out somewhere other than the current directory,
+    so the skill moves the session there; on the done row from inside the worktree it says `(here)`
+    instead, because git will not remove the directory a session stands in. On the done row from
+    anywhere else the worktree, its branch, and its tracking ref go, and the reason says so.
+    """
+    if not branch:
+        return None, None
+    try:
+        where = worktree.checked_out(branch)
+        if where is None:
+            return None, None
+        if worktree.here(where):
+            return (f"Worktree: {where} (here)" if name == "done" else None), None
+        if name != "done":
+            return f"Worktree: {where}", None
+        try:
+            worktree.remove(branch, where)
+        except git.GitError as error:
+            return f"Worktree: {where} (left: {error})", None
+        return None, f"Removed worktree {where}."
+    except Exception as error:
+        return f"Worktree: unavailable ({reason(error)})", None
+
+
 @step("next")
 def context(args: argparse.Namespace) -> int:
     """Print the step the story is due, why, its title, the log's tail, and the context that step needs."""
     number = args.issue
     reader = Reader()
     repo = reader.read("repository", gh.repo_slug)
+    if repo:
+        _sweep(repo, number)
     story = reader.read("issue", lambda: issue.view(repo, number)) if repo else None
     facts = _facts(repo, number, story, reader)
     for note in reader.notes:
         print(note)
     name, why = decide(number, facts)
+    line, removed = _worktree(name, facts.branch)
     print(f"Step: {name}")
-    print(why)
+    print(f"{why} {removed}" if removed else why)
     if story:
         print(f"Title: {story.title}")
         print(f"Issue: {story.url}")
+    if line:
+        print(line)
     _log_block(story)
     if name in CONTEXT_OF:
         _context(name, number)

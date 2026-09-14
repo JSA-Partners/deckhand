@@ -9,7 +9,8 @@
   and unfolds it for every reader; `log.py` the prefix table, the `log` command, and reading entries
   back from the issue's comments; `board.py` the project's items and views; `checklist.py` what
   setup verifies; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
-  `issue.py` every issue read and write; `git.py` every git call; `drift.py` the plan references
+  `issue.py` every issue read and write; `git.py` every git call; `worktree.py` every story's
+  worktree, where its branch is checked out, and the sweep of merged ones; `drift.py` the plan references
   `start` checks; `next.py` reads the log, the board, and the local branch, picks the step, and
   prints a briefing; `finish.py` opens the pull request only from the commit the last `Reviewed:`
   entry names
@@ -72,6 +73,8 @@ Never leave a user-facing change on `main` untagged; the marketplace installs by
 - Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
 - Do not hardcode organization, project, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
+- The build happens in the story's worktree, which `start` makes and `next` names; a branch is
+  never checked out by hand, and the clone stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec
   (`git commit -- <files>`), never `git add -A`, `git commit -a`, or a bare `git stash`, and let only
   the orchestrator commit. pre-commit stashes unstaged edits, so run it only when no other agent is

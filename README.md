@@ -47,8 +47,9 @@ story is and picks up there.
 
 You never act on GitHub. You open it to read.
 
-To work on several stories at once, run one session per story, each in its own clone or git
-worktree. Nothing else is shared between stories.
+Every story builds in its own git worktree under `.claude/worktrees/`, so several sessions can
+work on several stories from one clone. When a story merges, deckhand removes its worktree and
+branch.
 
 `/deckhand:commit` writes a conventional commit for the staged changes and `/deckhand:document`
 records what a branch taught in `docs/claude/`; both are there when you want them on their own.
