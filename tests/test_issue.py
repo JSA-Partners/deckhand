@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -249,6 +250,30 @@ def test_pull_request_rejects_a_malformed_repo(fake_gh, gh_calls):
 
 
 PR_URL = "https://github.com/acme/widgets/pull/1000"
+
+
+def test_pull_request_checks_names_the_failed_and_counts_the_running(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+    monkeypatch.setenv(
+        "GH_PR_CHECKS",
+        json.dumps(
+            [
+                {"name": "Unit tests", "conclusion": "FAILURE"},
+                {"name": "Lint", "conclusion": "SUCCESS"},
+                {"name": "Integration tests", "conclusion": None, "state": "IN_PROGRESS"},
+                {"context": "ci/legacy", "state": "PENDING"},
+            ]
+        ),
+    )
+
+    assert issue.pull_request_checks(REPO, PR_URL) == (["Unit tests"], 2)
+    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json statusCheckRollup"]
+
+
+def test_pull_request_checks_is_clean_with_no_checks(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+
+    assert issue.pull_request_checks(REPO, PR_URL) == ([], 0)
 
 
 def test_pull_request_state_returns_the_url_while_it_is_open(fake_gh, gh_calls, monkeypatch):

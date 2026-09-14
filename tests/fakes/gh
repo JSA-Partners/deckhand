@@ -171,8 +171,11 @@ elif head == "pr edit":
     sys.exit(0)
 elif head == "pr view":
     # A view is asked by URL, and $GH_PR_STATE is the state it answers with for that URL.
-    if os.environ.get("GH_PR_STATE"):
-        respond(json.dumps({"state": os.environ["GH_PR_STATE"], "url": argv[2]}))
+    # A pull request the list branch answers with ($GH_PR_EXISTS) is open here too.
+    state = os.environ.get("GH_PR_STATE") or ("OPEN" if os.environ.get("GH_PR_EXISTS") else "")
+    if state:
+        checks = json.loads(os.environ.get("GH_PR_CHECKS", "[]"))
+        respond(json.dumps({"state": state, "url": argv[2], "statusCheckRollup": checks}))
     print("no pull requests found", file=sys.stderr)
     sys.exit(1)
 elif head == "pr list":

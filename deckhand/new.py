@@ -133,7 +133,7 @@ def _request_context(source: str) -> int:
     A source that is not a file is the request itself, because what a person types there is a
     request far more often than it is a path; either way it goes under the heading a stub uses.
     """
-    path = Path(source)
+    path = Path(source).expanduser()
     try:
         text = path.read_text(encoding="utf-8-sig").strip("\n") if path.is_file() else source
     except (OSError, UnicodeDecodeError) as error:

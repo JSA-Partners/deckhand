@@ -36,7 +36,7 @@ STEPS = ("amend", "finish", "ready", "review", "start")
 
 # The word limit is one per skill file: `next` carries what five skills carried, and `new` runs a
 # whole brainstorm; everything else stays short.
-WORD_LIMITS = {"next": 1100, "new": 300}
+WORD_LIMITS = {"next": 1250, "new": 300}
 DEFAULT_WORD_LIMIT = 200
 
 GRANT = 'Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *)'
@@ -195,6 +195,7 @@ def test_the_next_skill_speaks_and_asks_with_a_recommendation():
         "## Speaking",
         "## Review",
         "## Board",
+        "## Fix",
         "## Check and build",
         "## Branch review",
         "## Pull request",

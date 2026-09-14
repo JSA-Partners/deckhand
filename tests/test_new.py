@@ -317,6 +317,17 @@ def test_context_from_a_file_prints_its_requirements(fake_gh, tmp_path):
     assert "Rules:" in lines
 
 
+def test_context_reads_a_file_under_a_tilde(fake_gh, tmp_path):
+    """A shell expands the tilde; a skill argument does not, and the request must not become the path."""
+    (tmp_path / "req.md").write_text("Bring the toolchain current.\n", encoding="utf-8")
+
+    result = run_deckhand("new", "context", "~/req.md", env={"HOME": str(tmp_path)})
+
+    assert result.returncode == 0, result.stderr
+    assert "Bring the toolchain current." in result.stdout
+    assert "~/req.md" not in result.stdout
+
+
 def test_context_says_so_when_an_existing_file_cannot_be_read(fake_gh, tmp_path):
     source = tmp_path / "request.md"
     source.write_bytes(b"\xff\xfe bad bytes")

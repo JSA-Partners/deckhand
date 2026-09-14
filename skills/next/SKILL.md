@@ -5,7 +5,7 @@ arguments: issue
 argument-hint: "<issue-number>"
 effort: high
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh pr merge *) Read Write Edit Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(deckhand:*)
+allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh pr merge *) Bash(gh run view *) Read Write Edit Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(deckhand:*)
 ---
 
 # Next $issue
@@ -18,7 +18,8 @@ decision is the person's, or until you are unsure what they would want, and ask.
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
 did not print, run `<step> context $issue` yourself. When a command refuses, fix the rule it names
 and run it again; when you cannot, say so in one sentence. Done and stop have nothing to run: say
-what the briefing says, in the Speaking rules' shape.
+what the briefing says, in the Speaking rules' shape. Every commit goes through deckhand:commit,
+which never skips a hook; nothing is amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
 
@@ -54,8 +55,9 @@ the findings file alone with `--verdict`. Then amend from the accepted findings.
 
 From the amend context (above, or run it), edit the body into the draft keeping every heading, with
 superpowers:writing-plans for a plan rewrite, and run
-`amend apply $issue <draft> --note "<what changed and why>"`, with `--title "<new title>"` when
-the Story no longer matches it. If the amend changed what the story delivers, recommend reviewing
+`amend apply $issue <draft> --note "<what changed and why>"`, the note saying what changed and
+why and never where it came from, with `--title "<new title>"` when the Story no longer matches
+it. If the amend changed what the story delivers, recommend reviewing
 again and ask; otherwise carry on to the board. When the briefing's step is reconsider, that
 question is the step. Work that belongs in its own story: overwrite the draft with its whole body
 and run `amend apply $issue <draft> --new-issue "<title>"`.
@@ -64,8 +66,8 @@ and run `amend apply $issue <draft> --new-issue "<title>"`.
 
 From the ready context (above, or run it), tell the story plainly, propose kind and points from
 the done stories that most resemble it, and ask one question: board it, review it again, or not
-yet. Say the kind and the points in the sentence before boarding, even when the answer came
-early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
+yet. Points measure the size of the work and never the calendar; a day away changes nothing.
+Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Check and build
@@ -90,16 +92,24 @@ Fix every comment, commit with deckhand:commit, and give them
 `tuicr -r <last reviewed commit>..HEAD`, the HEAD the previous pass read, for the new commits,
 until a pass has no comments. Log the clean pass with `log $issue "Reviewed: <full sha> <one
 line>"`, the full sha first; the pull request opens only from that commit. Then run the
-deckhand:document skill; its commit lands past the reviewed one and needs no pass, because
-docs/claude is Claude's alone.
+deckhand:document skill: fix what its audit lists first, then record what the branch taught; its
+commits land past the reviewed one and need no pass, because docs/claude is Claude's alone.
 
 ## Pull request
 
 From the finish context (above, or run it), read them the title and body, and on yes run
-`finish apply $issue --actual P --check "<cmd>"`, Actual in the estimate's units and proposed from
-it, the check commands from CLAUDE.md or the detected list, adding `--breaking "<text>"` when a
-client must react. Say where the pull request is and that merging is theirs, on GitHub or by saying
-merge here, which runs `gh pr merge --squash`. On the merge row, make the same offer.
+`finish apply $issue --actual P --check "<cmd>"`, Actual in the estimate's units and the size the
+work turned out to be, the check commands from CLAUDE.md or the detected list, adding
+`--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
+theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. On the merge row,
+say which checks are still running when the briefing names them, and make the same offer.
+
+## Fix
+
+On the fix row a check failed after the pull request opened. Read the failed job with
+`gh run view --log`, say the cause in a sentence, fix it on the branch through deckhand:commit,
+and log a Deviation. Then the Branch review section from the last reviewed commit, and the Pull
+request section again: finish pushes and keeps the pull request.
 
 ## After the merge
 

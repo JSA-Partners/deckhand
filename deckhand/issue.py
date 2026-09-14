@@ -174,6 +174,33 @@ def pull_request(repo: str, branch: str) -> str | None:
     return data[0].get("url") if isinstance(data, list) and data else None
 
 
+FAILED = ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE")
+SETTLED = ("SUCCESS", "SKIPPED", "NEUTRAL")
+
+
+def pull_request_checks(repo: str, url: str) -> tuple[list[str], int]:
+    """`(the names of the checks that failed, how many are still running)` on the pull request at `url`.
+
+    A merge row that reads only the state would send a person to merge a red pull request; the
+    checks are the one thing left that GitHub decides after the push.
+    """
+    gh.split_repo(repo)
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", "statusCheckRollup")
+    rollup = data.get("statusCheckRollup") if isinstance(data, dict) else None
+    failed: list[str] = []
+    pending = 0
+    for check in rollup or []:
+        if not isinstance(check, dict):
+            continue
+        outcome = check.get("conclusion") or check.get("state") or ""
+        name = check.get("name") or check.get("context") or "a check"
+        if outcome.upper() in FAILED:
+            failed.append(str(name))
+        elif outcome.upper() not in SETTLED:
+            pending += 1
+    return failed, pending
+
+
 def pull_request_state(repo: str, url: str) -> str | None:
     """`url` while the pull request there is open, else None; a URL gh cannot read is an error.
 

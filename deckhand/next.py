@@ -22,6 +22,7 @@ from deckhand.step import MAIN, branch_for, local_branch, reason, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
 CONTEXT_OF = {
+    "fix": "start",
     "write": "new",
     "review": "review",
     "reconsider": "amend",
@@ -44,6 +45,8 @@ class Facts(NamedTuple):
     branch: str | None  # the clone's branch, or the name start would cut; None without a Kind
     commits: int | None  # past what has landed on main; None when this clone has no branch for the story
     pull_request: str | None  # the URL of the open pull request
+    failed_checks: tuple[str, ...]  # the pull request's checks that failed, by name
+    pending_checks: int  # the pull request's checks still running
     pull_requested: bool  # a `Pull request:` entry, so a closed story is a merged one
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
@@ -58,6 +61,11 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
         return "done", f"#{number} is closed."
     if f.unavailable:
         return "stop", f"Cannot read {', '.join(f.unavailable)}; nothing decided."
+    if f.pull_request and f.failed_checks:
+        return "fix", f"Pull request open; {', '.join(f.failed_checks)} failed."
+    if f.pull_request and f.pending_checks:
+        checks = "check is" if f.pending_checks == 1 else "checks are"
+        return "merge", f"Pull request open; {f.pending_checks} {checks} still running."
     if f.pull_request:
         return "merge", f"Pull request open: {f.pull_request}"
     if f.status == "In Progress" and f.commits:
@@ -164,6 +172,7 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         if repo and story and not closed
         else None
     )
+    checks = reader.read("checks", lambda: issue.pull_request_checks(repo, pull)) if pull else None
     reviewed = story is not None and log.last(story, "Review:") is not None
     return Facts(
         closed=closed,
@@ -174,6 +183,8 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         branch=branch,
         commits=commits,
         pull_request=pull,
+        failed_checks=tuple(checks[0]) if checks else (),
+        pending_checks=checks[1] if checks else 0,
         pull_requested=story is not None and log.last(story, "Pull request:") is not None,
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),

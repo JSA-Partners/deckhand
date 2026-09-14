@@ -35,6 +35,8 @@ def facts(**changes) -> Facts:
         branch=None,
         commits=None,
         pull_request=None,
+        failed_checks=(),
+        pending_checks=0,
         pull_requested=False,
         after_merge_left=0,
         unavailable=(),
@@ -386,6 +388,38 @@ def test_a_story_without_a_kind_has_no_branch_to_read(fake_gh, repo, tmp_path):
 
     _briefing(result, "review", "Not reviewed.")
     assert "unavailable" not in result.stdout
+
+
+def test_a_failed_check_routes_to_the_fix():
+    assert decide(248, facts(pull_request=PR_URL, failed_checks=("Unit tests",))) == (
+        "fix",
+        "Pull request open; Unit tests failed.",
+    )
+
+
+def test_running_checks_are_named_on_the_merge_row():
+    assert decide(248, facts(pull_request=PR_URL, pending_checks=2)) == (
+        "merge",
+        "Pull request open; 2 checks are still running.",
+    )
+
+
+def test_a_failed_check_prints_the_start_context(fake_gh, repo, origin, branch, tmp_path):
+    checks = json.dumps([{"name": "Unit tests", "conclusion": "FAILURE"}, {"name": "Lint", "conclusion": "SUCCESS"}])
+    env = {
+        **fieldvalues(tmp_path, "Pending Review"),
+        "GH_PR_EXISTS": "1",
+        "GH_PR_STATE": "OPEN",
+        "GH_PR_CHECKS": checks,
+    }
+
+    result = _next(repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Step: fix", "Pull request open; Unit tests failed."]
+    assert "## Context" in lines
+    assert any(line.startswith("Branch: ") for line in lines)
 
 
 def test_merge_prints_the_link_and_nothing_more(fake_gh, repo, origin, branch, tmp_path):
