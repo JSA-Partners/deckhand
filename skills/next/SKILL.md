@@ -14,9 +14,9 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh 
 
 If no number was given, ask which story. Say where the story is in two sentences from the briefing
 above, then run the step it names and carry on to the next step in the same conversation until a
-decision is the person's, or until you are unsure what they would want, and ask. Every command below
+decision is the person's, or until you are unsure what they want, and ask. Every command below
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
-did not print, run `<step> context $issue` yourself. When a command refuses, fix the rule it names
+did not print, run `<step> context $issue`. When a command refuses, fix the rule it names
 and run it again; when you cannot, say so in one sentence. When the briefing or a command prints a
 `Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
 else; in a worktree entered for the first time, run the repository's own setup commands from its
@@ -57,7 +57,7 @@ the findings file alone with `--verdict`. Then amend from the accepted findings.
 
 ## Amend
 
-From the amend context (above, or run it), edit the body into the draft keeping every heading, with
+From the amend context (above, or run it), edit the body into the draft it names, keeping every heading, with
 superpowers:writing-plans for a plan rewrite, and run
 `amend apply $issue <draft> --note "<what changed and why>"`, the note saying what changed and
 why and never where it came from, with `--title "<new title>"` when the Story no longer matches

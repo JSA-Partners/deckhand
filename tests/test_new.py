@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -90,12 +91,18 @@ BROKEN = {
 }
 
 
+def _draft_line(lines: list[str], tmp_path: Path, kind: str, label: str = "Draft") -> bool:
+    """True when a line names a `<kind>-<timestamp>.md` draft in the widgets cache, unique to the run."""
+    folder = re.escape(str(tmp_path / "cache" / "widgets"))
+    return any(re.fullmatch(rf"{label}: {folder}/{kind}-\d{{8}}-\d{{6}}\.md", line) for line in lines)
+
+
 def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
     result = run_deckhand("new", "context")
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == f"Draft: {tmp_path / 'cache' / 'widgets' / 'new.md'}"
+    assert _draft_line(lines[:1], tmp_path, "new")
     assert lines[1] == ""
     assert [line for line in lines if line.startswith("###")] == [
         "### Story",
@@ -312,7 +319,7 @@ def test_context_from_a_file_prints_its_requirements(fake_gh, tmp_path):
     lines = result.stdout.splitlines()
     assert lines[0] == "## Requirements"
     assert "Guests should be able to share a collection." in lines
-    assert f"Draft: {tmp_path / 'cache' / 'widgets' / 'new.md'}" in lines
+    assert _draft_line(lines, tmp_path, "new")
     assert "### Story" in lines
     assert "Rules:" in lines
 
@@ -540,7 +547,7 @@ def test_context_shows_the_split_file_when_there_is_no_source(fake_gh, tmp_path)
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines.index(SPLIT_NOTE) > lines.index("Rules:")
-    assert f"Split file: {tmp_path / 'cache' / 'widgets' / 'split.md'}" in lines
+    assert _draft_line(lines, tmp_path, "split", "Split file")
     assert _split_skeleton(lines)
 
 
@@ -568,7 +575,7 @@ def test_context_takes_a_blank_source_as_none(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == f"Draft: {tmp_path / 'cache' / 'widgets' / 'new.md'}"
+    assert _draft_line(lines, tmp_path, "new")
     assert "Rules:" in lines
 
 
@@ -952,3 +959,13 @@ def test_apply_sweeps_the_worktrees_of_closed_stories_from_the_clone(fake_gh, gh
     assert lines[0].startswith("Created #999 ")
     assert lines[-1] == f"Removed worktree {finished}"
     assert not finished.exists()
+
+
+def test_the_draft_and_split_names_are_unique_to_the_run(fake_gh, tmp_path):
+    """Two sessions drafting in one repository never share a file: the names carry the run's time."""
+    lines = run_deckhand("new", "context").stdout.splitlines()
+
+    draft = next(line for line in lines if line.startswith("Draft: "))
+    split = next(line for line in lines if line.startswith("Split file: "))
+    token = re.search(r"new-(\d{8}-\d{6})\.md$", draft).group(1)
+    assert split.endswith(f"split-{token}.md")

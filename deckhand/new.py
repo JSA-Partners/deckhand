@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from deckhand import board, fields, gh, issue, lint, log, naming, sections, stub, worktree
@@ -37,8 +38,9 @@ from deckhand.step import (
     usable,
 )
 
-DRAFT = "new.md"
-SPLIT = "split.md"
+_RUN = datetime.now().strftime("%Y%m%d-%H%M%S")  # one token per run, so two sessions never share a draft
+DRAFT = f"new-{_RUN}.md"
+SPLIT = f"split-{_RUN}.md"
 DEPENDS_HEADING = "## Depends on"
 SPLIT_NOTE = "If this is more than one story, write the split file instead."
 DRAFTED = "Drafted: the story and its plan, from the request."
@@ -375,7 +377,6 @@ def apply(args: argparse.Namespace) -> int:
     if args.split and args.title is not None:
         args.usage.error("--title is not for --split; every story takes its title from the file")
     code = _write(args)
-    # Bookkeeping after the writes, from the clone: the worktrees of stories merged since the last run.
     for line in worktree.sweep(gh.repo_slug()):
         print(line)
     return code
