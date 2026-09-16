@@ -867,7 +867,7 @@ def test_apply_split_and_stub_together_is_a_usage_error(fake_gh, gh_calls):
 
 # --- apply --park ------------------------------------------------------------
 
-FEATURE_LINE = "Guests should be able to share a collection with another guest."
+FEATURE_LINE = "Guests should be able to share a collection with a guest."
 FEATURE = f"## Requirements\n\n{FEATURE_LINE}\n"
 
 
@@ -1100,3 +1100,15 @@ def test_split_parks_a_story_for_another_repository(fake_gh, gh_calls, tmp_path)
     assert creates[1].startswith("issue create --repo acme/widgets --title Guest screen ")
     assert "api repos/acme/gadgets/issues/60" in gh_calls()
     assert "api -X POST repos/acme/widgets/issues/61/dependencies/blocked_by -F issue_id=5099965156" in gh_calls()
+
+
+def test_park_refuses_a_first_line_too_long_for_a_title(fake_gh, gh_calls, tmp_path):
+    """A notes file opens with a sentence; the park asks for a title rather than cutting one from it."""
+    sentence = "One story for the infrastructure repository, because the router delivers the header from outside."
+    path = _park_file(tmp_path, f"## Requirements\n\n{sentence}\n")
+
+    result = run_deckhand("new", "apply", "--park", str(path))
+
+    assert result.returncode == 1
+    assert "give the issue a shorter title with --title" in result.stderr
+    assert _writes(gh_calls()) == []

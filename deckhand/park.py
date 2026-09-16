@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from deckhand import board, fields, gh, issue, log, stub
 from deckhand.config import Settings
-from deckhand.step import Refusal, issue_ref, ref_label
+from deckhand.step import Refusal, fits_title, issue_ref, ref_label
 
 
 def board_draft(settings: Settings, repo: str, number: int, url: str, note: str | None) -> None:
@@ -63,7 +63,8 @@ def feature(settings: Settings, repo: str, text: str, flag: str | None, target: 
         if story[0] != repo:
             raise Refusal("--blocks names a story in this repository")
     first = next(line for line in requirements.splitlines() if line.strip())
-    title = (flag or "").strip() or first.strip()
+    # A notes file opens with a sentence, not a name; the subject limit is what tells the two apart.
+    title = fits_title((flag or "").strip() or first.strip())
     origin = ref_label(repo, story[1], target) if story else repo
     number, _ = open_parked(settings, repo, target, title, stub.render(requirements, []), origin)
     if story is not None:
