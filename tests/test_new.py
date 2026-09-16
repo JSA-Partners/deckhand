@@ -1091,7 +1091,7 @@ def test_repo_and_blocks_are_only_for_park(fake_gh, gh_calls):
     result = run_deckhand("new", "apply", str(VALID), "--repo", "acme/gadgets")
 
     assert result.returncode == 2
-    assert "--repo and --blocks are only for --park" in result.stderr
+    assert "--repo, --blocks and --after are only for --park" in result.stderr
     assert gh_calls() == []
 
 

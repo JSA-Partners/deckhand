@@ -44,8 +44,43 @@ def block(here: str, story: int, target: str, number: int, title: str) -> None:
     print(f"#{story} blocked by {ref_label(target, number, here)}", flush=True)
 
 
-def feature(settings: Settings, repo: str, text: str, flag: str | None, target: str | None, blocks: str | None) -> int:
-    """Park a feature with no stories, in this repository or another, and block a story here on it."""
+def unsplit(repo: str, number: int) -> str:
+    """The feature's URL; refuse anything but a feature nobody has split yet, before the first write.
+
+    A split writes the numbered stub body onto the feature it came from, and that body lists its
+    stories, so a feature that lists them has been split already and running the same file again
+    would open the rest a second time.
+    """
+    story = issue.view(repo, number)
+    if not stub.is_stub(story.body) or stub.read(story.body)[1]:
+        raise Refusal(f"#{number} is not a parked feature")
+    return story.url
+
+
+def _ref(value: str, repo: str) -> tuple[str, int]:
+    """One issue reference, with the form named when it will not parse."""
+    try:
+        return issue_ref(value, repo)
+    except ValueError as error:
+        raise Refusal(str(error)) from error
+
+
+def feature(
+    settings: Settings,
+    repo: str,
+    text: str,
+    flag: str | None,
+    target: str | None,
+    blocks: str | None,
+    came_from: int | None = None,
+    after: str | None = None,
+) -> int:
+    """Park a feature with no stories, in this repository or another, saying where it came from.
+
+    `blocks` is a story here that waits on the feature and names its origin. `came_from` names the
+    origin alone, for a review that parked a finding nobody waits on. `after` is a story the feature
+    itself waits on, for a split that parks a chain of them.
+    """
     if not stub.is_stub(text):
         raise Refusal(f"a parked feature starts with {stub.STUB_HEADING}")
     requirements = stub.read(text)[0]
@@ -54,21 +89,21 @@ def feature(settings: Settings, repo: str, text: str, flag: str | None, target: 
     if stub.lists_stories(text):
         raise Refusal("a parked feature has no stories yet; use --split")
     target = target or repo
-    story = None
-    if blocks:
-        try:
-            story = issue_ref(blocks, repo)
-        except ValueError as error:
-            raise Refusal(str(error)) from error
-        if story[0] != repo:
-            raise Refusal("--blocks names a story in this repository")
+    story = _ref(blocks, repo) if blocks else None
+    if story is not None and story[0] != repo:
+        raise Refusal("--blocks names a story in this repository")
+    waits_on = _ref(after, repo) if after else None
     first = next(line for line in requirements.splitlines() if line.strip())
     # A notes file opens with a sentence, not a name; the subject limit is what tells the two apart.
     title = fits_title((flag or "").strip() or first.strip())
-    origin = ref_label(repo, story[1], target) if story else repo
+    came = story[1] if story is not None else came_from
+    origin = ref_label(repo, came, target) if came is not None else repo
     number, _ = open_parked(settings, repo, target, title, stub.render(requirements, []), origin)
     if story is not None:
         block(repo, story[1], target, number, title)
+    if waits_on is not None:
+        issue.add_dependency(target, number, blocked_by=waits_on)
+        print(f"{ref_label(target, number, repo)} blocked by {ref_label(*waits_on, repo)}", flush=True)
     return 0
 
 

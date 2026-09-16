@@ -259,19 +259,6 @@ def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
     return 0
 
 
-def _parked(repo: str, number: int) -> str:
-    """The feature's URL; refuse anything but a feature nobody has split yet, before the first write.
-
-    A split writes the numbered stub body onto the feature it came from, and that body lists its
-    stories, so a feature that lists them has been split already and running the same file again
-    would open the rest a second time.
-    """
-    story = issue.view(repo, number)
-    if not stub.is_stub(story.body) or stub.read(story.body)[1]:
-        raise Refusal(f"#{number} is not a parked feature")
-    return story.url
-
-
 def _split(repo: str, text: str, parked: int | None) -> int:
     """Open one stub per story of a feature, number them all, then record what waits on what.
 
@@ -285,7 +272,7 @@ def _split(repo: str, text: str, parked: int | None) -> int:
         requirements, entries = stub.parse_split(text)
     except ValueError as error:
         raise Refusal(f"split file {error}") from error
-    parked_url = _parked(repo, parked) if parked is not None else None
+    parked_url = park.unsplit(repo, parked) if parked is not None else None
     if parked is not None and entries[0].repo:
         raise Refusal(f"the first story of #{parked} is written into it, so it stays in this repository")
     settings = resolved_settings()
@@ -350,8 +337,10 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         dest="parked",
         type=issue_number,
         metavar="N",
-        help="with --split, the parked feature these stories came from; it is closed at the end",
+        help="with --split, the feature these stories came from, which becomes the first of them; "
+        "with --park, the story the feature came from, which does not wait on it",
     )
+    parser.add_argument("--after", metavar="REF", help="with --park, a story the feature waits on")
     parser.add_argument("--title", help="the issue title; the default is the Story's I want clause")
     parser.add_argument("--repo", metavar="OWNER/NAME", help="with --park, the repository the feature opens in")
     parser.add_argument("--blocks", metavar="REF", help="with --park, the story here that waits on the feature")
@@ -363,12 +352,14 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 @step("new", _configure, issue_bound=False, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
     """Open a story or a stub from the drafted body, split a feature, or park one for later."""
-    if args.parked is not None and not args.split:
-        args.usage.error("--from is only for --split")
+    if args.parked is not None and not (args.split or args.park):
+        args.usage.error("--from is for --split or --park")
     if args.split and args.title is not None:
         args.usage.error("--title is not for --split; every story takes its title from the file")
-    if (args.repo or args.blocks) and not args.park:
-        args.usage.error("--repo and --blocks are only for --park")
+    if (args.repo or args.blocks or args.after) and not args.park:
+        args.usage.error("--repo, --blocks and --after are only for --park")
+    if args.park and args.parked is not None and args.blocks:
+        args.usage.error("--from and --blocks both name where the feature came from; use one")
     code = _write(args)
     for line in worktree.sweep(gh.repo_slug()):
         print(line)
@@ -382,7 +373,8 @@ def _write(args: argparse.Namespace) -> int:
     if args.split:
         return _split(gh.repo_slug(), draft, args.parked)
     if args.park:
-        return park.feature(resolved_settings(), gh.repo_slug(), draft, args.title, args.repo, args.blocks)
+        settings, repo = resolved_settings(), gh.repo_slug()
+        return park.feature(settings, repo, draft, args.title, args.repo, args.blocks, args.parked, args.after)
     body = lint.checked(draft)
     subject = title(args.title, body)
     settings = resolved_settings()
