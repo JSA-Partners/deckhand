@@ -173,15 +173,28 @@ def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
     ]
 
 
-def blocking(repo: str, number: int) -> list[int]:
-    """The numbers of the open issues `number` blocks, in ascending order.
+def blocking(repo: str, number: int) -> list[tuple[str, int, str]]:
+    """`(repository, number, title)` of every open issue waiting on `number`, by number ascending.
 
     A story that unblocks others is the one place the process has to look forward: whoever merges it
-    is the person who can say what is now ready to be reviewed.
+    is the person who can say what is now ready to be reviewed, and a parked feature that becomes
+    several stories has to hand what waited on it to every one of them. The repository may be
+    another of the organization's, so it is carried the way `blockers` carries it.
     """
     gh.split_repo(repo)
     items = gh.paginated(f"repos/{repo}/issues/{number}/dependencies/blocking")
-    return sorted(item["number"] for item in items if item.get("state") == "open")
+    return sorted(
+        (
+            (
+                (item.get("repository") or {}).get("full_name") or repo,
+                item["number"],
+                " ".join((item.get("title") or "").split()),
+            )
+            for item in items
+            if item.get("state") == "open"
+        ),
+        key=lambda found: found[1],
+    )
 
 
 def pull_request(repo: str, branch: str) -> str | None:

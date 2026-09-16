@@ -221,12 +221,22 @@ def test_blocking_lists_open_issues_only_in_ascending_order(fake_gh, monkeypatch
         "GH_BLOCKING",
         '[{"number":4,"state":"open"},{"number":9,"state":"closed"},{"number":3,"state":"open"}]',
     )
-    assert issue.blocking(REPO, 248) == [3, 4]
+    assert [number for _, number, _ in issue.blocking(REPO, 248)] == [3, 4]
+
+
+def test_blocking_names_the_repository_of_an_issue_elsewhere(fake_gh, monkeypatch):
+    waiting = [
+        {"number": 9, "title": "Waits  on  it", "state": "open", "repository": {"full_name": "acme/other"}},
+        {"number": 10, "title": "Done", "state": "closed", "repository": {"full_name": REPO}},
+    ]
+    monkeypatch.setenv("GH_BLOCKING", json.dumps(waiting))
+
+    assert issue.blocking(REPO, 248) == [("acme/other", 9, "Waits on it")]
 
 
 def test_blocking_accepts_repo(fake_gh, gh_calls, monkeypatch):
     monkeypatch.setenv("GH_BLOCKING", '[{"number":9,"state":"open"}]')
-    assert issue.blocking("acme/gadgets", 248) == [9]
+    assert [number for _, number, _ in issue.blocking("acme/gadgets", 248)] == [9]
     assert gh_calls() == ["api repos/acme/gadgets/issues/248/dependencies/blocking --paginate --slurp"]
 
 
