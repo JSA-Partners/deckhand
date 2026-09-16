@@ -22,8 +22,8 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import board, fields, gh, issue, lint, log, naming, sections, stub, worktree
-from deckhand.config import BODY_LIMIT, Settings
+from deckhand import gh, issue, lint, naming, park, sections, stub, worktree
+from deckhand.config import BODY_LIMIT
 from deckhand.step import (
     Refusal,
     block,
@@ -33,6 +33,7 @@ from deckhand.step import (
     issue_number,
     read_draft,
     reason,
+    ref_label,
     resolved_settings,
     step,
     usable,
@@ -235,20 +236,6 @@ def title(flag: str | None, body: str) -> str:
         raise Refusal(str(error)) from error
 
 
-def board_draft(settings: Settings, repo: str, number: int, url: str, note: str | None) -> None:
-    """Put the issue on the board as Draft, then log that it was written when `note` is given.
-
-    Shared with the amend step, which boards the story it splits off the same way; every write prints
-    as it lands, so the printed lines are the record of how far the story got.
-    """
-    board.add(settings, url)
-    print("Added to the board", flush=True)
-    print(fields.set_field(settings, repo, number, "Status", "Draft"), flush=True)
-    if note is not None:
-        issue.comment(repo, number, log.checked(note))
-        print(f"Logged {note.split(':', 1)[0]}", flush=True)
-
-
 def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
     """Rewrite the stub as the story it stands for; its number and dependencies are untouched."""
     story = issue.view(repo, number)
@@ -264,7 +251,7 @@ def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
     if subject:  # the stub's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
         print(f"Title: {subject}", flush=True)
-    board_draft(settings, repo, number, story.url, STUB_DRAFTED)
+    park.board_draft(settings, repo, number, story.url, STUB_DRAFTED)
     return 0
 
 
@@ -284,8 +271,9 @@ def _parked(repo: str, number: int) -> None:
 def _split(repo: str, text: str, parked: int | None) -> int:
     """Open one stub per story of a feature, number them all, then record what waits on what.
 
-    Every write prints as it lands and nothing is retried, so a failure part way through leaves the
-    printed lines as the record of what was opened.
+    A story that belongs to another repository is parked there instead, with the requirements and
+    its own sentence, for that repository's session to write. Every write prints as it lands and
+    nothing is retried, so a failure part way through leaves the printed lines as the record.
     """
     try:
         requirements, entries = stub.parse_split(text)
@@ -297,48 +285,45 @@ def _split(repo: str, text: str, parked: int | None) -> int:
     # Every stub carries the whole feature, so the first pass writes it unnumbered: no story can
     # name its siblings' numbers until every issue exists.
     provisional = stub.render(requirements, entries)
+    origin = f"{repo}#{parked}" if parked is not None else f"a split in {repo}"
     numbers: list[int] = []
     urls: list[str] = []
+    local: list[int] = []
     for entry in entries:
-        number, url = issue.create(repo, entry.title, provisional)
-        print(f"Created #{number} {entry.title}", flush=True)
+        if entry.repo:
+            body = stub.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
+            number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin)
+        else:
+            number, url = issue.create(repo, entry.title, provisional)
+            print(f"Created #{number} {entry.title}", flush=True)
+            local.append(number)
         numbers.append(number)
         urls.append(url)
     body = stub.render(requirements, [replace(e, number=n) for e, n in zip(entries, numbers, strict=True)])
     for number, url in zip(numbers, urls, strict=True):
+        if number not in local:
+            continue
         issue.update_body(repo, number, body)
         print(f"Numbered #{number}", flush=True)
-        board_draft(settings, repo, number, url, None)  # a stub is not drafted yet; its author logs that
+        park.board_draft(settings, repo, number, url, None)  # a stub is not drafted yet; its author logs that
     for entry, number in zip(entries, numbers, strict=True):
+        home = entry.repo or repo
         for position in entry.after:
-            blocker = numbers[position - 1]
+            blocker = (entries[position - 1].repo or repo, numbers[position - 1])
+            blocked, by = ref_label(home, number, repo), ref_label(*blocker, repo)
             try:
-                issue.add_dependency(repo, number, blocked_by=blocker)
+                issue.add_dependency(home, number, blocked_by=blocker)
             except Exception as error:  # the edge is the one thing the printed record cannot show
-                raise Refusal(f"#{number} blocked by #{blocker} failed: {reason(error)}; add it by hand") from error
-            print(f"#{number} blocked by #{blocker}", flush=True)
+                raise Refusal(f"{blocked} blocked by {by} failed: {reason(error)}; add it by hand") from error
+            print(f"{blocked} blocked by {by}", flush=True)
     if parked is not None:
-        issue.comment(repo, parked, f"Split into {', '.join(f'#{number}' for number in numbers)}.")
+        named = [ref_label(e.repo or repo, n, repo) for e, n in zip(entries, numbers, strict=True)]
+        issue.comment(repo, parked, f"Split into {', '.join(named)}.")
         issue.close(repo, parked)
         print(f"Closed #{parked}", flush=True)
     # An agent gets no plugin-root substitution, so the launcher it is to run travels in the line.
-    stubs = " ".join(f"#{number}" for number in numbers)
+    stubs = " ".join(f"#{number}" for number in local)
     print(f"Dispatch deckhand:author for each of {stubs} with {Path(sys.argv[0]).resolve()}")
-    return 0
-
-
-def _park(repo: str, text: str, flag: str | None) -> int:
-    """Open a feature stub with no stories: a feature the session settled but nobody is splitting."""
-    if not stub.is_stub(text):
-        raise Refusal(f"a parked feature starts with {stub.STUB_HEADING}")
-    requirements = stub.read(text)[0]
-    if not requirements.strip():
-        raise Refusal(f"{stub.STUB_HEADING} has no text")
-    if stub.lists_stories(text):
-        raise Refusal("a parked feature has no stories yet; use --split")
-    first = next(line for line in requirements.splitlines() if line.strip())
-    number, url = issue.create(repo, (flag or "").strip() or first.strip(), stub.render(requirements, []))
-    print(f"Parked #{number} {url}")
     return 0
 
 
@@ -364,6 +349,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         help="with --split, the parked feature these stories came from; it is closed at the end",
     )
     parser.add_argument("--title", help="the issue title; the default is the Story's I want clause")
+    parser.add_argument("--repo", metavar="OWNER/NAME", help="with --park, the repository the feature opens in")
+    parser.add_argument("--blocks", metavar="REF", help="with --park, the story here that waits on the feature")
     # Only the parser that read these arguments knows the usage line to print a usage error with,
     # and argparse cannot say that one option is allowed only alongside another.
     parser.set_defaults(usage=parser)
@@ -376,6 +363,8 @@ def apply(args: argparse.Namespace) -> int:
         args.usage.error("--from is only for --split")
     if args.split and args.title is not None:
         args.usage.error("--title is not for --split; every story takes its title from the file")
+    if (args.repo or args.blocks) and not args.park:
+        args.usage.error("--repo and --blocks are only for --park")
     code = _write(args)
     for line in worktree.sweep(gh.repo_slug()):
         print(line)
@@ -389,14 +378,14 @@ def _write(args: argparse.Namespace) -> int:
     if args.split:
         return _split(gh.repo_slug(), draft, args.parked)
     if args.park:
-        return _park(gh.repo_slug(), draft, args.title)
+        return park.feature(resolved_settings(), gh.repo_slug(), draft, args.title, args.repo, args.blocks)
     body = lint.checked(draft)
     subject = title(args.title, body)
     settings = resolved_settings()
     repo = gh.repo_slug()
     number, url = issue.create(repo, subject, body)
     print(f"Created #{number} {url}", flush=True)
-    board_draft(settings, repo, number, url, DRAFTED)
+    park.board_draft(settings, repo, number, url, DRAFTED)
     if (note := lint.headroom(body)) is not None:
         print(note)
     return 0

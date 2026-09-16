@@ -221,3 +221,21 @@ def test_lists_stories_is_false_without_the_stories_heading():
 
 def test_lists_stories_ignores_a_bullet_above_the_stories_heading():
     assert stub.lists_stories(_split(requirements=f"{REQUIREMENTS}\n\n- One requirement")) is False
+
+
+def test_parse_split_reads_a_repository_prefix():
+    stories = "- acme/gadgets: Endpoint | Lists grants.\n- Screen | Shows them. (after 1)\n"
+    text = f"## Requirements\n\nR.\n\n## Stories\n\n{stories}"
+
+    _, entries = stub.parse_split(text)
+
+    assert [(e.repo, e.title, e.after) for e in entries] == [("acme/gadgets", "Endpoint", ()), (None, "Screen", (1,))]
+
+
+def test_render_writes_the_repository_prefix_back():
+    entry = Entry(title="Endpoint", sentence="Lists grants.", after=(), number=60, repo="acme/gadgets")
+
+    body = stub.render("R.", [entry])
+
+    assert "1. acme/gadgets: #60 Endpoint | Lists grants." in body
+    assert stub.read(body)[1][0].repo == "acme/gadgets"

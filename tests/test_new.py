@@ -538,7 +538,8 @@ SPLIT_NOTE = "If this is more than one story, write the split file instead."
 
 def _split_skeleton(lines: list[str]) -> bool:
     """Whether the split file's shape is printed: both headings and the example bullet."""
-    return "## Requirements" in lines and "## Stories" in lines and "- <title> | <one sentence> (after 1)" in lines
+    bullet = "- [owner/name: ]<title> | <one sentence> (after 1)"
+    return "## Requirements" in lines and "## Stories" in lines and bullet in lines
 
 
 def test_context_shows_the_split_file_when_there_is_no_source(fake_gh, tmp_path):
@@ -883,12 +884,18 @@ def test_apply_park_opens_a_feature_stub_with_no_stories(fake_gh, gh_calls, tmp_
     result = run_deckhand("new", "apply", "--park", str(_park_file(tmp_path, FEATURE)), env=env)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["Parked #61 https://github.com/acme/widgets/issues/61"]
+    assert result.stdout.splitlines() == [
+        "Parked #61 https://github.com/acme/widgets/issues/61",
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
+    ]
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
     assert f" --title {FEATURE_LINE} --body-file " in call
-    ((_, body),) = _bodies(copy)
+    (_, body), (_, drafted) = _bodies(copy)
     assert body == stub.render(FEATURE_LINE, [])
     assert stub.read(body) == (FEATURE_LINE, [])
+    assert drafted == "Drafted: parked from acme/widgets"
 
 
 def test_apply_park_takes_the_title_flag(fake_gh, gh_calls, tmp_path):
@@ -980,3 +987,116 @@ def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1].startswith("Body is ")
+
+
+def test_park_opens_the_feature_in_another_repository_and_boards_it(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "body.md"
+
+    result = run_deckhand(
+        "new",
+        "apply",
+        "--park",
+        str(_park_file(tmp_path, FEATURE)),
+        "--repo",
+        "acme/gadgets",
+        env={"GH_BODY_FILE_COPY": str(copy)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "Parked acme/gadgets#999 https://github.com/acme/widgets/issues/999",
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
+    ]
+    create = next(c for c in gh_calls() if c.startswith("issue create"))
+    assert create.startswith(f"issue create --repo acme/gadgets --title {FEATURE_LINE} --body-file")
+    text = copy.read_text(encoding="utf-8")
+    assert text.startswith(f"--- issue create\n## Requirements\n\n{FEATURE_LINE}")
+    assert "--- issue comment\nDrafted: parked from acme/widgets" in text
+    assert (
+        "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/999 --format json" in gh_calls()
+    )
+
+
+def test_park_blocks_a_story_here_and_logs_both_sides(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "body.md"
+
+    result = run_deckhand(
+        "new",
+        "apply",
+        "--park",
+        str(_park_file(tmp_path, FEATURE)),
+        "--repo",
+        "acme/gadgets",
+        "--blocks",
+        "248",
+        env={"GH_BODY_FILE_COPY": str(copy)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-3:] == ["Logged Drafted", "Logged Parked", "#248 blocked by acme/gadgets#999"]
+    text = copy.read_text(encoding="utf-8")
+    assert "--- issue comment\nDrafted: parked from acme/widgets#248" in text
+    assert f"--- issue comment\nParked: acme/gadgets#999 {FEATURE_LINE}" in text
+    assert "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156" in gh_calls()
+
+
+def test_park_refuses_a_bad_blocks_reference_and_writes_nothing(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("new", "apply", "--park", str(_park_file(tmp_path, FEATURE)), "--blocks", "acme")
+
+    assert result.returncode == 1
+    assert "owner/name#M" in result.stderr
+    assert _writes(gh_calls()) == []
+
+
+def test_park_refuses_a_blocks_story_in_another_repository(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("new", "apply", "--park", str(_park_file(tmp_path, FEATURE)), "--blocks", "acme/gadgets#9")
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == "deckhand new apply: --blocks names a story in this repository"
+    assert _writes(gh_calls()) == []
+
+
+def test_repo_and_blocks_are_only_for_park(fake_gh, gh_calls):
+    result = run_deckhand("new", "apply", str(VALID), "--repo", "acme/gadgets")
+
+    assert result.returncode == 2
+    assert "--repo and --blocks are only for --park" in result.stderr
+    assert gh_calls() == []
+
+
+def test_split_parks_a_story_for_another_repository(fake_gh, gh_calls, tmp_path):
+    split = tmp_path / "split.md"
+    split.write_text(
+        "## Requirements\n\nGuests see granted collections.\n\n## Stories\n\n"
+        "- acme/gadgets: Grant endpoint | Lists grants for a guest.\n"
+        "- Guest screen | Shows the grants. (after 1)\n",
+        encoding="utf-8",
+    )
+    copy = tmp_path / "body.md"
+
+    result = run_deckhand(
+        "new", "apply", "--split", str(split), env={"GH_NEW_ISSUE": "60,61", "GH_BODY_FILE_COPY": str(copy)}
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:6] == [
+        "Parked acme/gadgets#60 https://github.com/acme/widgets/issues/60",
+        "Added to the board",
+        "Status=Draft",
+        "Logged Drafted",
+        "Created #61 Guest screen",
+        "Numbered #61",
+    ]
+    assert "#61 blocked by acme/gadgets#60" in lines
+    assert lines[-1].startswith("Dispatch deckhand:author for each of #61 with ")
+    text = copy.read_text(encoding="utf-8")
+    assert "## Requirements\n\nGuests see granted collections.\n\nLists grants for a guest.\n\n## Stories\n" in text
+    assert "--- issue comment\nDrafted: parked from a split in acme/widgets" in text
+    creates = [c for c in gh_calls() if c.startswith("issue create")]
+    assert creates[0].startswith("issue create --repo acme/gadgets --title Grant endpoint ")
+    assert creates[1].startswith("issue create --repo acme/widgets --title Guest screen ")
+    assert "api repos/acme/gadgets/issues/60" in gh_calls()
+    assert "api -X POST repos/acme/widgets/issues/61/dependencies/blocked_by -F issue_id=5099965156" in gh_calls()

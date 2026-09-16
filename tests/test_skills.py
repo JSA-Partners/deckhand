@@ -36,7 +36,7 @@ STEPS = ("amend", "finish", "ready", "review", "start")
 
 # The word limit is one per skill file: `next` carries what five skills carried plus the worktree
 # rule, and `new` runs a whole brainstorm; everything else stays short.
-WORD_LIMITS = {"next": 1300, "new": 300}
+WORD_LIMITS = {"next": 1550, "new": 300}
 DEFAULT_WORD_LIMIT = 200
 
 GRANT = 'Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *)'
@@ -207,6 +207,11 @@ def test_the_next_skill_speaks_and_asks_with_a_recommendation():
     # The pass runs in the story worktree, and the second one starts where the first ended.
     assert 'cd "<the worktree>" && tuicr -r origin/main..HEAD' in body
     assert "<the previous pass's last commit>..HEAD" in body
+    # The agent review is bounded, a blocked story waits, a stale pull request is updated, a story
+    # that is several is split.
+    flat = " ".join(body.split())  # a phrase may wrap across lines in the file
+    for phrase in ("P1 and P2", "Blocked by:", "update apply $issue", "more than one story"):
+        assert phrase in flat, phrase
     assert "--stdout" not in body  # the export is pasted either way, and the flag needs a terminal
 
 

@@ -193,6 +193,7 @@ def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
         "review": ["apply", "context"],
         "setup": ["apply", "context"],
         "start": ["apply", "context"],
+        "update": ["apply", "context"],
     }
 
 

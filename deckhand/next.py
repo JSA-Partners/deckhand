@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from deckhand import board, config, fields, gh, git, issue, log, sections, stub, worktree
-from deckhand.step import MAIN, branch_for, local_branch, reason, step, trunk
+from deckhand.step import MAIN, branch_for, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
 CONTEXT_OF = {
@@ -48,10 +48,12 @@ class Facts(NamedTuple):
     reviewed: bool  # a `Review:` entry
     amended_since_review: bool  # an `Amended:` entry after the latest `Review:`, so a second review clears it
     branch: str | None  # the clone's branch, or the name start would cut; None without a Kind
+    blockers: tuple[str, ...]  # the open blockers, each `<label>  <title>`, printed on the build rows
     commits: int | None  # past what has landed on main; None when this clone has no branch for the story
     pull_request: str | None  # the URL of the open pull request
     failed_checks: tuple[str, ...]  # the pull request's checks that failed, by name
     pending_checks: int  # the pull request's checks still running
+    behind: bool  # the pull request is behind main, or in conflict with it
     pull_requested: bool  # a `Pull request:` entry, so a closed story is a merged one
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
@@ -68,6 +70,8 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
         return "stop", f"Cannot read {', '.join(f.unavailable)}; nothing decided."
     if f.pull_request and f.failed_checks:
         return "fix", f"Pull request open; {', '.join(f.failed_checks)} failed."
+    if f.pull_request and f.behind:
+        return "update", "Pull request open; main has moved on."
     if f.pull_request and f.pending_checks:
         checks = "check is" if f.pending_checks == 1 else "checks are"
         return "merge", f"Pull request open; {f.pending_checks} {checks} still running."
@@ -178,6 +182,15 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         else None
     )
     checks = reader.read("checks", lambda: issue.pull_request_checks(repo, pull)) if pull else None
+    behind = reader.read("merge state", lambda: issue.merge_state(repo, pull) in issue.BEHIND) if pull else False
+    blockers = (
+        reader.read(
+            "blockers",
+            lambda: tuple(f"{ref_label(where, n, repo)}  {title}" for where, n, title in issue.blockers(repo, number)),
+        )
+        if repo and story and not closed
+        else None
+    )
     reviewed = story is not None and log.last(story, "Review:") is not None
     return Facts(
         closed=closed,
@@ -186,10 +199,12 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         reviewed=reviewed,
         amended_since_review=reviewed and any(e.prefix == "Amended:" for e in log.since(story, "Review:")),
         branch=branch,
+        blockers=blockers or (),
         commits=commits,
         pull_request=pull,
         failed_checks=tuple(checks[0]) if checks else (),
         pending_checks=checks[1] if checks else 0,
+        behind=bool(behind),
         pull_requested=story is not None and log.last(story, "Pull request:") is not None,
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
@@ -296,6 +311,10 @@ def context(args: argparse.Namespace) -> int:
         print(f"Issue: {story.url}")
     if line:
         print(line)
+    if name in ("build", "resume") and facts.blockers:
+        print("Blocked by:")
+        for blocker in facts.blockers:
+            print(f"  {blocker}")
     _log_block(story)
     if name in CONTEXT_OF:
         _context(name, number)

@@ -175,7 +175,10 @@ elif head == "pr view":
     state = os.environ.get("GH_PR_STATE") or ("OPEN" if os.environ.get("GH_PR_EXISTS") else "")
     if state:
         checks = json.loads(os.environ.get("GH_PR_CHECKS", "[]"))
-        respond(json.dumps({"state": state, "url": argv[2], "statusCheckRollup": checks}))
+        merge_state = os.environ.get("GH_PR_MERGE_STATE", "CLEAN")
+        respond(
+            json.dumps({"state": state, "url": argv[2], "statusCheckRollup": checks, "mergeStateStatus": merge_state})
+        )
     print("no pull requests found", file=sys.stderr)
     sys.exit(1)
 elif head == "pr list":
@@ -239,6 +242,13 @@ elif argv and argv[0] == "api":
             print("could not add dependency", file=sys.stderr)
             sys.exit(1)
         respond(os.environ.get("GH_BLOCKED_BY", "[]"))
+    if path.endswith("/update-branch"):
+        if os.environ.get("GH_UPDATE_BRANCH_FAILS"):
+            print('{"message":"merge conflict between base and head"}', file=sys.stderr)
+            sys.exit(1)
+        respond(
+            '{"message":"Updating pull request branch.","url":"https://api.github.com/repos/acme/widgets/pulls/1000"}'
+        )
     if "/issues/" in path:
         respond('{"id":5099965156,"number":246,"title":"T","state":"open"}')
     if path == f"repos/{repo}":

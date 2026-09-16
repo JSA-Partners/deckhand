@@ -133,26 +133,37 @@ def comment(repo: str, number: int, body: str) -> str:
     return _parsed_url(output, "issue comment")[1]
 
 
-def add_dependency(repo: str, number: int, blocked_by: int) -> None:
-    """Record that `number` is blocked by `blocked_by`; the API takes the blocker's database id."""
+def add_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> None:
+    """Record that `number` is blocked by `blocked_by`, `(repository, number)`; the API takes the blocker's id.
+
+    The blocker may live in another repository of the organization; its database id is looked up
+    there, and the relation is written on the blocked issue.
+    """
     gh.split_repo(repo)
-    blocker = gh.issue_id(repo, blocked_by)
+    blocker_repo, blocker = blocked_by
+    blocker_id = gh.issue_id(blocker_repo, blocker)
     gh.run(
         "api",
         "-X",
         "POST",
         f"repos/{repo}/issues/{number}/dependencies/blocked_by",
         "-F",
-        f"issue_id={blocker}",
+        f"issue_id={blocker_id}",
     )
 
 
-def blockers(repo: str, number: int) -> list[tuple[int, str]]:
-    """The `(number, title)` of every open issue blocking `number`."""
+def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
+    """`(repository, number, title)` of every open issue blocking `number`; the repository may be another."""
     gh.split_repo(repo)
     items = gh.paginated(f"repos/{repo}/issues/{number}/dependencies/blocked_by")
     return [
-        (item["number"], " ".join((item.get("title") or "").split())) for item in items if item.get("state") == "open"
+        (
+            (item.get("repository") or {}).get("full_name") or repo,
+            item["number"],
+            " ".join((item.get("title") or "").split()),
+        )
+        for item in items
+        if item.get("state") == "open"
     ]
 
 
@@ -199,6 +210,16 @@ def pull_request_checks(repo: str, url: str) -> tuple[list[str], int]:
         elif outcome.upper() not in SETTLED:
             pending += 1
     return failed, pending
+
+
+BEHIND = {"BEHIND", "DIRTY"}  # main moved on, or the merge would conflict; both need the branch brought up
+
+
+def merge_state(repo: str, url: str) -> str:
+    """GitHub's merge state for the pull request at `url`, upper case; empty when it reports none."""
+    gh.split_repo(repo)
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", "mergeStateStatus")
+    return str(data.get("mergeStateStatus") or "").upper() if isinstance(data, dict) else ""
 
 
 def pull_request_state(repo: str, url: str) -> str | None:

@@ -31,8 +31,9 @@ from deckhand.step import (
     Refusal,
     block,
     blockers_block,
-    issue_number,
+    issue_ref,
     reason,
+    ref_label,
     refuse_stub,
     settings_or_error,
     step,
@@ -147,21 +148,22 @@ def _reviewed(story: issue.Issue, number: int) -> None:
         raise Refusal(f"no review on #{number}; run /deckhand:next {number}")
 
 
-def _open_issue(repo: str, number: int) -> None:
-    """Refuse unless issue `number` exists and is open; a blocker that is neither blocks nothing.
+def _open_issue(repo: str, number: int, here: str) -> None:
+    """Refuse unless issue `number` of `repo` exists and is open; a blocker that is neither blocks nothing.
 
     Only the sibling read: a blocker's comments are none of this step's business, and its state is
     the half of that read this step acts on.
     """
+    label = ref_label(repo, number, here)
     try:
         state = issue.sibling(repo, number)[0]
     except gh.GhError as error:
         said = reason(error)
         if _NOT_FOUND.search(said):
-            raise Refusal(f"#{number} does not exist") from error
-        raise Refusal(f"#{number} cannot be read: {said}") from error
+            raise Refusal(f"{label} does not exist") from error
+        raise Refusal(f"{label} cannot be read: {said}") from error
     if state.upper() != "OPEN":
-        raise Refusal(f"#{number} is closed")
+        raise Refusal(f"{label} is closed")
 
 
 def _hold_status(settings: Settings, repo: str, number: int, status: str) -> None:
@@ -186,11 +188,10 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--points", required=True, help="the story points, a non-negative integer")
     parser.add_argument(
         "--blocked-by",
-        type=issue_number,
         action="append",
         default=[],
-        metavar="N",
-        help="an open issue this story waits on; repeat it for more than one",
+        metavar="REF",
+        help="an open issue this story waits on, owner/name#M or M for this repository; repeat it for more",
     )
 
 
@@ -205,14 +206,17 @@ def apply(args: argparse.Namespace) -> int:
         raise Refusal(f"kind must be one of: {', '.join(settings.kinds)}")
     points = _points(args.points)
     _reviewed(story, args.issue)
-    blockers = list(dict.fromkeys(args.blocked_by or []))
-    if args.issue in blockers:
+    try:
+        blockers = list(dict.fromkeys(issue_ref(value, repo) for value in args.blocked_by or []))
+    except ValueError as error:
+        raise Refusal(str(error)) from error
+    if (repo, args.issue) in blockers:
         raise Refusal(f"#{args.issue} cannot block itself")
-    for number in blockers:
-        _open_issue(repo, number)
-    for number in blockers:
-        issue.add_dependency(repo, args.issue, number)
-        print(f"Blocked by #{number}")
+    for where, number in blockers:
+        _open_issue(where, number, repo)
+    for where, number in blockers:
+        issue.add_dependency(repo, args.issue, (where, number))
+        print(f"Blocked by {ref_label(where, number, repo)}")
     # Every story boards in the same column: a blocker is a dependency GitHub holds and `start`
     # reads live, not a column that would need clearing when the last blocker closed.
     status = "Backlog"

@@ -698,3 +698,45 @@ def test_apply_puts_the_deviations_in_the_body(fake_gh, gh_calls, repo, origin, 
         f"{STORY}\n\nthe lock moved into one helper, ordered by level. The criteria are unchanged.\n\n"
         "the route table left the server package.\n\nCloses #248\n",
     )
+
+
+def test_apply_refuses_a_blocked_story_before_any_check(fake_gh, gh_calls, repo, origin, branch):
+    blockers = '[{"number":9,"title":"Endpoint","state":"open","repository":{"full_name":"acme/gadgets"}}]'
+
+    result = _apply(repo, "--check", "false", env={"GH_BLOCKED_BY": blockers})
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand finish apply: blocked by acme/gadgets#9 Endpoint; the pull request opens when it closes\n"
+    )
+    assert BRANCH not in _branches(origin)
+
+
+def test_apply_accepts_a_merge_of_main_on_the_reviewed_commit(fake_gh, gh_calls, repo, origin, branch):
+    """GitHub's update-branch makes this shape; the only new lines are main's own."""
+    reviewed = _sha(repo, "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "other.py", "x = 1\n", "feat: other story")
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "checkout", "-q", BRANCH)
+    _git(repo, "merge", "-q", "--no-edit", "origin/main")
+    assert _sha(repo, "HEAD") != reviewed
+
+    result = _finish("apply", repo, "--actual", "3", "--check", "true", env=_reviewed_issue(repo.parent, reviewed))
+
+    assert result.returncode == 0, result.stderr
+    assert "Pushed" in result.stdout.splitlines()
+
+
+def test_apply_refuses_a_merge_whose_other_side_is_not_main(fake_gh, gh_calls, repo, origin, branch):
+    reviewed = _sha(repo, "HEAD")
+    _git(repo, "checkout", "-q", "-b", "side", "main")
+    _commit(repo, "side.py", "y = 2\n", "feat: side work")
+    _git(repo, "checkout", "-q", BRANCH)
+    _git(repo, "merge", "-q", "--no-edit", "side")
+
+    result = _finish("apply", repo, "--actual", "3", "--check", "true", env=_reviewed_issue(repo.parent, reviewed))
+
+    assert result.returncode == 1
+    assert "is not the last reviewed commit" in result.stderr
+    assert BRANCH not in _branches(origin)

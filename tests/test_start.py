@@ -15,7 +15,12 @@ APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 REVIEW_DATE = "2026-09-02T09:00:00Z"  # the Review: entry in the reviewed fixture
 BRANCH = "feat/248-guest-users-see-only"
-ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
+ONE_BLOCKER = json.dumps(
+    [{"number": 240, "title": "Grant store", "state": "open", "repository": {"full_name": "acme/widgets"}}]
+)
+ELSEWHERE = json.dumps(
+    [{"number": 9, "title": "Endpoint", "state": "open", "repository": {"full_name": "acme/gadgets"}}]
+)
 IN_PROGRESS = (
     "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
     "--single-select-option-id opt_inprogress"
@@ -307,7 +312,7 @@ def test_context_prints_branch_blockers_plan_commits_and_drift(fake_gh, gh_calls
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:3] == [f"Branch: {BRANCH} (none)", "Blockers:", "  240  Grant store"]
+    assert lines[:3] == [f"Branch: {BRANCH} (none)", "Blockers:", "  #240  Grant store"]
     # The skill judges whether the Story and the Scope still hold, so both come before the plan.
     assert [line for line in lines if line.startswith("## ")] == [
         "## Story",
@@ -446,3 +451,18 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
         "## Plan drift",
         LANDED,
     ]
+
+
+def test_apply_names_a_blocker_in_another_repository(fake_gh, gh_calls, repo, origin):
+    result = _start("apply", repo, {"GH_BLOCKED_BY": ELSEWHERE}, "--note", "x")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand start apply: blocked by acme/gadgets#9 Endpoint\n"
+    assert _writes(gh_calls) == []
+
+
+def test_context_prints_a_blocker_in_another_repository_with_its_repository(fake_gh, repo, origin):
+    result = _start("context", repo, {"GH_BLOCKED_BY": ELSEWHERE})
+
+    lines = result.stdout.splitlines()
+    assert lines[lines.index("Blockers:") + 1] == "  acme/gadgets#9  Endpoint"

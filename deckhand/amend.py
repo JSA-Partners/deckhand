@@ -23,7 +23,7 @@ import argparse
 from pathlib import Path
 
 from deckhand import config, fields, gh, issue, lint, log, sections
-from deckhand.new import board_draft
+from deckhand.park import board_draft
 from deckhand.step import (
     Refusal,
     block,
@@ -179,7 +179,7 @@ def _new_issue(repo: str, number: int, draft: str, title: str) -> int:
     # Printed before the links are written: the issue exists from here on, and a failure below has
     # to leave the number where the user can see it rather than in a lost temp file.
     print(f"Created #{new} {url}", flush=True)
-    issue.add_dependency(repo, new, blocked_by=number)
+    issue.add_dependency(repo, new, blocked_by=(repo, number))
     print(f"Blocked by #{number}", flush=True)
     board_draft(settings, repo, new, url, SPLIT_DRAFTED)
     issue.comment(repo, number, log.checked(f"Split: #{new} {title}, blocked by this story."))

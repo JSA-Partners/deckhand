@@ -12,4 +12,8 @@ A finding names the task, quotes the step, and says which of the three questions
 
 Evidence is the plan step plus, where the duplication is real, the `file:line` of the existing code.
 
+Ask whether the story delivers one outcome or several: a body that names two things a user gets,
+or a plan whose tasks serve different criteria, is more than one story. Say so as a finding named
+"more than one story" with the split you would make, one line per story.
+
 Nothing found is a valid result. Say so in one line.

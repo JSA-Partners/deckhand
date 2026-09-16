@@ -15,8 +15,10 @@ from deckhand.step import (
     branch_for,
     draft_path,
     indented,
+    issue_ref,
     local_branch,
     read_draft,
+    ref_label,
     refuse_git,
     step,
 )
@@ -375,3 +377,25 @@ def test_local_branch_refuses_two_branches_for_one_number(repo):
 def test_the_plugin_root_holds_the_skills_and_the_package():
     assert (PLUGIN_ROOT / "skills").is_dir()
     assert (PLUGIN_ROOT / "deckhand" / "step.py").is_file()
+
+
+# --- issue references --------------------------------------------------------
+
+
+def test_issue_ref_takes_a_bare_number_as_this_repository():
+    assert issue_ref("240", "acme/widgets") == ("acme/widgets", 240)
+
+
+def test_issue_ref_takes_owner_name_and_number():
+    assert issue_ref("acme/gadgets#9", "acme/widgets") == ("acme/gadgets", 9)
+
+
+@pytest.mark.parametrize("value", ["", "abc", "acme/gadgets", "acme#9", "acme/gadgets#", "acme/gadgets#x", "#9"])
+def test_issue_ref_refuses_anything_else_by_naming_the_form(value):
+    with pytest.raises(ValueError, match="owner/name#M"):
+        issue_ref(value, "acme/widgets")
+
+
+def test_ref_label_names_the_repository_only_when_it_is_not_this_one():
+    assert ref_label("acme/widgets", 240, "acme/widgets") == "#240"
+    assert ref_label("acme/gadgets", 9, "acme/widgets") == "acme/gadgets#9"

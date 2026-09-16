@@ -34,7 +34,7 @@ from pathlib import Path
 
 from deckhand import config, document, fields, gh, git, issue, log, naming, sections
 from deckhand.config import Settings
-from deckhand.step import MAIN, ORIGIN_MAIN, Refusal, block, indented, refuse_git, step, trunk
+from deckhand.step import MAIN, ORIGIN_MAIN, Refusal, block, indented, ref_label, refuse_git, step, trunk
 
 CONVENTIONAL = re.compile(rf"^({'|'.join(config.TYPES)})(\([^)]+\))?!?: .+$")
 STORY_NUMBER = re.compile(r"#[0-9]+")
@@ -199,10 +199,36 @@ def _reviewed_head(story: issue.Issue, number: int) -> None:
         git.run("merge-base", "--is-ancestor", wanted, head)
     except git.GitError as error:
         raise Refusal(f"HEAD {head} is not the last reviewed commit {wanted}; review the branch again") from error
+    if _merge_of_main(head, wanted) or _only_docs(wanted, head):
+        return
+    raise Refusal(f"HEAD {head} is not the last reviewed commit {wanted}; review the branch again")
+
+
+def _only_docs(wanted: str, head: str) -> bool:
+    """True when every file changed between the reviewed commit and `head` is under docs/claude."""
     changed = git.run("diff", "--name-only", f"{wanted}..{head}").splitlines()
-    unread = [path for path in changed if not path.startswith(f"{document.DEFAULT_DIR}/")]
-    if unread:
-        raise Refusal(f"HEAD {head} is not the last reviewed commit {wanted}; review the branch again")
+    return all(path.startswith(f"{document.DEFAULT_DIR}/") for path in changed)
+
+
+def _merge_of_main(head: str, wanted: str) -> bool:
+    """True when `head` is a merge whose sides are the reviewed commit, or docs past it, and a commit of main.
+
+    GitHub makes this commit when it brings a branch up to date; the only new lines are main's own,
+    which were read when they merged. The reviewed side may carry docs commits, as it may without
+    the merge, so it is checked the way the plain case is.
+    """
+    parents = git.run("rev-list", "--parents", "-n", "1", head).split()[1:]
+    if len(parents) != 2:
+        return False
+    for ours, theirs in ((parents[0], parents[1]), (parents[1], parents[0])):
+        try:
+            git.run("merge-base", "--is-ancestor", wanted, ours)
+            git.run("merge-base", "--is-ancestor", theirs, ORIGIN_MAIN)
+        except git.GitError:
+            continue
+        if _only_docs(wanted, ours):
+            return True
+    return False
 
 
 def _clean_tree() -> None:
@@ -250,7 +276,8 @@ def _messages() -> list[tuple[str, str]]:
     One `git log` reads them: the records are separated by a record separator and the sha from the
     message by a null, neither of which a commit message can carry.
     """
-    log = refuse_git("log", "--reverse", "--format=%h%x00%B%x1e", f"{ORIGIN_MAIN}..HEAD")
+    # A merge of main carries git's own subject and never reaches main through the squash.
+    log = refuse_git("log", "--reverse", "--no-merges", "--format=%h%x00%B%x1e", f"{ORIGIN_MAIN}..HEAD")
     found = []
     for record in log.split("\x1e"):
         short, _, message = record.strip().partition("\x00")
@@ -323,6 +350,10 @@ def apply(args: argparse.Namespace) -> int:
     settings = config.load()
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
+    open_blockers = issue.blockers(repo, args.issue)
+    if open_blockers:
+        named = "; ".join(f"{ref_label(where, number, repo)} {title}" for where, number, title in open_blockers)
+        raise Refusal(f"blocked by {named}; the pull request opens when it closes")
     title, body = _message(settings, repo, args.issue, breaking, story)
     branch = _branch()
     _reviewed_head(story, args.issue)

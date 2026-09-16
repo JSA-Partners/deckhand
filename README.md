@@ -49,7 +49,9 @@ You never act on GitHub. You open it to read.
 
 Every story builds in its own git worktree under `.claude/worktrees/`, so several sessions can
 work on several stories from one clone. When a story merges, deckhand removes its worktree and
-branch.
+branch. A story found while building can be parked in any repository of the project, with
+everything the session learned, and can block the story here until it lands; a feature's split
+sends each story to its repository.
 
 `/deckhand:commit` writes a conventional commit for the staged changes and `/deckhand:document`
 records what a branch taught in `docs/claude/`; both are there when you want them on their own.

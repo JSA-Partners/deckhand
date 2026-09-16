@@ -21,6 +21,7 @@ _BULLET = re.compile(r"^-\s+(.*)$")
 _NUMBERED = re.compile(r"^[0-9]+\.\s+(.*)$")
 _AFTER = re.compile(r"\s*\(after\s+([0-9]+(?:\s*,\s*[0-9]+)*)\)\s*$")
 _ISSUE = re.compile(r"^#([0-9]+)\s+(.*)$")
+_REPO = re.compile(r"^([^\s:/]+/[^\s:/]+):\s+(.*)$")  # `owner/name: ` before the title, the story's repository
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class Entry:
     sentence: str
     after: tuple[int, ...]  # 1-based positions in the list, always earlier than this entry's own
     number: int | None = None  # the issue number once it has been created
+    repo: str | None = None  # the repository the story belongs to when it is not this one
 
 
 def _lines(text: str) -> list[str]:
@@ -61,6 +63,10 @@ def _entry(text: str) -> Entry:
     would take half of it into the sentence and mistitle the issue with nobody the wiser.
     """
     rest, after = _after_positions(text.strip())
+    repo = None
+    home = _REPO.match(rest)
+    if home is not None:
+        repo, rest = home.group(1), home.group(2)
     number = None
     issue = _ISSUE.match(rest)
     if issue is not None:
@@ -70,7 +76,7 @@ def _entry(text: str) -> Entry:
         raise ValueError("a title or sentence cannot contain '|'")
     if len(parts) != 2 or not parts[0] or not parts[1]:
         raise ValueError("expected '<title> | <sentence>'")
-    return Entry(title=parts[0], sentence=parts[1], after=after, number=number)
+    return Entry(title=parts[0], sentence=parts[1], after=after, number=number, repo=repo)
 
 
 def _checked(numbered: list[tuple[int, Entry]]) -> list[Entry]:
@@ -136,14 +142,15 @@ def split_skeleton() -> str:
     The shape `parse_split` reads, in the one place that owns it, so a context can show the session
     what to write without the wording drifting from what the parser accepts.
     """
-    return "\n\n".join([STUB_HEADING, STORIES_HEADING, "- <title> | <one sentence> (after 1)"])
+    return "\n\n".join([STUB_HEADING, STORIES_HEADING, "- [owner/name: ]<title> | <one sentence> (after 1)"])
 
 
 def _rendered(entry: Entry) -> str:
     """One entry's own text, without its position: what `_entry` reads back."""
+    home = f"{entry.repo}: " if entry.repo else ""
     issue = f"#{entry.number} " if entry.number is not None else ""
     after = f" (after {', '.join(str(position) for position in entry.after)})" if entry.after else ""
-    return f"{issue}{entry.title} | {entry.sentence}{after}"
+    return f"{home}{issue}{entry.title} | {entry.sentence}{after}"
 
 
 def render(requirements: str, entries: list[Entry]) -> str:

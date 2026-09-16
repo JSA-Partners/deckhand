@@ -216,7 +216,7 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
     blockers = lines.index("Blockers:")
     assert lines[blockers : blockers + 9] == [
         "Blockers:",
-        "  240  Grant store",
+        "  #240  Grant store",
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
@@ -522,3 +522,20 @@ def test_the_settle_wait_is_never_negative(monkeypatch):
 
     monkeypatch.setenv("DECKHAND_SETTLE", "-5")
     assert ready.settle_seconds() == 0.0
+
+
+def test_apply_records_a_blocker_in_another_repository(fake_gh, gh_calls, tmp_path):
+    result = _apply("--kind", "feat", "--points", "3", "--blocked-by", "acme/gadgets#9", env=_blocked())
+
+    assert result.returncode == 0, result.stderr
+    assert "Blocked by acme/gadgets#9" in result.stdout.splitlines()
+    assert "api repos/acme/gadgets/issues/9" in gh_calls()
+    assert "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156" in gh_calls()
+
+
+def test_apply_refuses_a_blocker_that_is_not_a_reference(fake_gh, gh_calls, tmp_path):
+    result = _apply("--kind", "feat", "--points", "3", "--blocked-by", "acme/gadgets", env=_blocked())
+
+    assert result.returncode == 1
+    assert "owner/name#M" in result.stderr
+    assert _writes(gh_calls) == []

@@ -21,7 +21,8 @@ and run it again; when you cannot, say so in one sentence. When the briefing or 
 `Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
 else; in a worktree entered for the first time, run the repository's setup commands from its
 CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
-baseline. Done and stop have nothing to run: say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook; nothing is
+baseline; when setup or a test there fails for a file the clone has and git ignores, copy it from
+the clone once and say so. Done and stop have nothing to run: say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook; nothing is
 amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
@@ -47,8 +48,10 @@ sentence what it wrote, and carry on to the review.
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
 agent with the body and the brief and write its lines as they are to the findings file. If it found
 something, run the deckhand:skeptic agent with those lines and the body and write its lines to the
-verdicts file. Then speak: a verdict on the story as a whole, sound, needs amending, or flawed, and
-why; a flawed story is rewritten and reviewed again before anything else is asked. Then the findings
+verdicts file. Then speak: a verdict on the story as a whole, sound, needs amending, flawed, or more than one
+story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
+story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, blocked
+as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
 ones, each as a sentence on the problem and one on what accepting it would do. Take the decisions in
 conversation, write them to the decisions file, and run
@@ -86,15 +89,23 @@ alters what the story delivers: say so in one sentence with the diff's size and 
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
 amend step. Ask when unsure. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
-commits cover.
+commits cover. When the briefing lists `Blocked by:`, say the story waits on them and ask whether
+to build the parts that do not depend on them, recommending that; the pull request opens when
+they close.
 
 ## Branch review
 
-When the plan is done, say so and give them `cd "<the worktree>" && tuicr -r origin/main..HEAD`
-as a plain message they can copy, to run in a terminal of their own; they paste the export or say
-there are no comments. Fix every comment, commit with deckhand:commit, and give them the same with
-`<the previous pass's last commit>..HEAD`, until a pass has no comments. Log the clean pass with `log $issue "Reviewed: <full sha> <one
-line>"`, the full sha first; the pull request opens only from that commit. Then run the
+When the plan is done, run one superpowers code-review subagent over `origin/main..HEAD` with the
+story, plan, and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
+line. Fix P1 and P2 through deckhand:commit and keep the P3s. Then say what the review found and
+fixed in a sentence, list the P3s one line each for them to take or leave, and give them
+`cd "<the worktree>" && tuicr -r origin/main..HEAD` as a plain message for a terminal of their own;
+they paste the export or say there are no comments. On comments: fix every
+one, commit with deckhand:commit, run the same review over
+`<the previous pass's last commit>..HEAD` only, fix its P1 and P2, and hand off the same way with
+that range. The review never runs on its own fixes and never after a clean pass; only their
+comments start a round. Log the clean pass with `log $issue "Reviewed: <full sha> <one line>"`, the
+full sha first; the pull request opens only from that commit. Then run the
 deckhand:document skill, fixing what its audit lists first; its commits land past the reviewed one
 and need no pass, because docs/claude is Claude's alone.
 
@@ -105,7 +116,9 @@ From the finish context (above, or run it), read them the title and body, and on
 work turned out to be, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
 theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. On the merge row,
-say which checks are still running when the briefing names them, and make the same offer.
+say which checks are still running when the briefing names them, and make the same offer. On the
+update row, run `update apply $issue`, say main moved on and the checks run again, and carry on;
+when it refuses for a conflict, do what it says and log a Deviation.
 
 ## Fix
 

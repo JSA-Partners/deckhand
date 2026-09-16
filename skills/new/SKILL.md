@@ -12,8 +12,8 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Read Write Edit Grep
 !`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new context "$source"`
 
 Run superpowers:brainstorming from what is printed above, aimed at a story: the design it reaches is
-Story, Scope In and Out, and Acceptance Criteria, told to the person plainly, what a user gets and
-how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Give `new apply` a
+Story, Scope In and Out, and Acceptance Criteria, told plainly, what a user gets and how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Design the feature across the
+project's repositories; a story elsewhere is one outcome. Give `new apply` a
 `--title` that reads as the change would in a commit subject: what it does, not what was wanted. Scale it to the
 idea: a fix needs a question or two, a feature the whole conversation.
 
@@ -24,9 +24,11 @@ end of the Plan for anything that can only happen once the code is on main, and 
 `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md`, speaking as its Speaking section says.
 
 Several outcomes: settle the requirements, propose the split as one bullet per story in dependency
-order, confirm it in one question, write the split file, and run `... new apply --split <file>`
+order, each opening with `owner/name:` when it belongs elsewhere, where it is parked for that
+repository's session, confirm it in one question, write the split file, and run `... new apply --split <file>`
 (with `--from $source` for a parked feature). Dispatch one deckhand:author agent per stub on the
 line it printed, all at once, then run `... next context N` for each and carry on from that file's
-Review section. Park any other feature the conversation produced with `... new apply --park <file>`.
+Review section. Park any other feature the conversation produced with `... new apply --park <file>`, with
+`--repo owner/name` for another repository and `--blocks N` for the story here waiting on it.
 
 If a command refuses, fix the rule it names and run it again.

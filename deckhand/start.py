@@ -38,6 +38,7 @@ from deckhand.step import (
     indented,
     local_branch,
     reason,
+    ref_label,
     refuse_git,
     refuse_stub,
     settings_or_error,
@@ -197,7 +198,8 @@ def apply(args: argparse.Namespace) -> int:
     refuse_stub(args.issue, story.body)
     open_blockers = issue.blockers(repo, args.issue)
     if open_blockers:
-        raise Refusal("blocked by " + "; ".join(f"#{number} {title}" for number, title in open_blockers))
+        named = "; ".join(f"{ref_label(where, number, repo)} {title}" for where, number, title in open_blockers)
+        raise Refusal(f"blocked by {named}")
     note = " ".join(args.note.split())
     if not note:
         raise Refusal("--note needs the pre-build check's conclusion")

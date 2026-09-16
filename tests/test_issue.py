@@ -170,7 +170,7 @@ def test_the_temp_file_is_removed_on_the_error_path(fake_gh, gh_calls, body_copy
 
 
 def test_add_dependency_posts_the_blocking_issue_id(fake_gh, gh_calls):
-    issue.add_dependency(REPO, 248, 240)
+    issue.add_dependency(REPO, 248, (REPO, 240))
     assert gh_calls() == [
         "api repos/acme/widgets/issues/240",
         "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156",
@@ -184,18 +184,29 @@ def test_blockers_returns_nothing_when_unblocked(fake_gh):
     assert issue.blockers(REPO, 248) == []
 
 
-def test_blockers_lists_open_blockers_only(fake_gh, monkeypatch):
+def test_blockers_lists_open_blockers_with_their_repository(fake_gh, monkeypatch):
     monkeypatch.setenv(
         "GH_BLOCKED_BY",
-        '[{"number":240,"title":"Grant store","state":"open"},{"number":230,"title":"Old","state":"closed"}]',
+        '[{"number":240,"title":"Grant  store","state":"open","repository":{"full_name":"acme/widgets"}},'
+        '{"number":9,"title":"Endpoint","state":"open","repository":{"full_name":"acme/gadgets"}},'
+        '{"number":230,"title":"Old","state":"closed","repository":{"full_name":"acme/widgets"}}]',
     )
-    assert issue.blockers(REPO, 248) == [(240, "Grant store")]
+    assert issue.blockers(REPO, 248) == [("acme/widgets", 240, "Grant store"), ("acme/gadgets", 9, "Endpoint")]
 
 
-def test_blockers_accepts_repo(fake_gh, gh_calls, monkeypatch):
+def test_blockers_takes_the_story_repository_for_an_item_without_one(fake_gh, gh_calls, monkeypatch):
     monkeypatch.setenv("GH_BLOCKED_BY", '[{"number":9,"title":"X","state":"open"}]')
-    assert issue.blockers("acme/gadgets", 248) == [(9, "X")]
+    assert issue.blockers("acme/gadgets", 248) == [("acme/gadgets", 9, "X")]
     assert gh_calls() == ["api repos/acme/gadgets/issues/248/dependencies/blocked_by --paginate --slurp"]
+
+
+def test_add_dependency_looks_the_blocker_up_in_its_own_repository(fake_gh, gh_calls):
+    issue.add_dependency(REPO, 248, ("acme/gadgets", 9))
+
+    assert gh_calls() == [
+        "api repos/acme/gadgets/issues/9",
+        "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156",
+    ]
 
 
 # --- blocking ---------------------------------------------------------------
@@ -299,3 +310,10 @@ def test_pull_request_state_rejects_a_malformed_repo(fake_gh, gh_calls):
     with pytest.raises(gh.GhError):
         issue.pull_request_state("widgets", PR_URL)
     assert gh_calls() == []
+
+
+def test_merge_state_reads_the_pull_request(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+    monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
+
+    assert issue.merge_state(REPO, "https://github.com/acme/widgets/pull/1000") == "BEHIND"

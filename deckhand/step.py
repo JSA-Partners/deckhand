@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import re
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -38,6 +39,23 @@ def issue_number(value: str) -> int:
     if not (value.isascii() and value.isdigit()):
         raise argparse.ArgumentTypeError(f"issue number must be an integer, got {value!r}")
     return int(value)
+
+
+_REF = re.compile(r"^(?:([^/\s#]+/[^/\s#]+)#)?([0-9]+)$")
+REF_FORM = "a blocker is owner/name#M, or M for this repository"
+
+
+def issue_ref(value: str, repo: str) -> tuple[str, int]:
+    """`(repository, number)` from `owner/name#M`, or from a bare `M` in `repo`; a `ValueError` names the form."""
+    found = _REF.match(value.strip())
+    if found is None:
+        raise ValueError(f"{REF_FORM}, got {value!r}")
+    return found.group(1) or repo, int(found.group(2))
+
+
+def ref_label(repo: str, number: int, here: str) -> str:
+    """`#M` for an issue of `here`, else `owner/name#M`, the one way a person sees a blocker named."""
+    return f"#{number}" if repo == here else f"{repo}#{number}"
 
 
 def reason(error: Exception) -> str:
@@ -143,8 +161,9 @@ def fits_title(subject: str) -> str:
 
 
 def blockers_block(repo: str, number: int) -> list[str]:
-    """One line per open issue blocking `number`, or `  none`."""
-    return [f"  {blocker}  {title}" for blocker, title in issue.blockers(repo, number)] or ["  none"]
+    """One line per open issue blocking `number`, named as a person sees it, or `  none`."""
+    found = issue.blockers(repo, number)
+    return [f"  {ref_label(where, blocker, repo)}  {title}" for where, blocker, title in found] or ["  none"]
 
 
 def resolved_settings() -> Settings:

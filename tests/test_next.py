@@ -33,10 +33,12 @@ def facts(**changes) -> Facts:
         reviewed=False,
         amended_since_review=False,
         branch=None,
+        blockers=(),
         commits=None,
         pull_request=None,
         failed_checks=(),
         pending_checks=0,
+        behind=False,
         pull_requested=False,
         after_merge_left=0,
         unavailable=(),
@@ -109,6 +111,11 @@ def test_the_rows_are_tried_in_order():
     assert decide(248, everything)[0] == "done"
     assert decide(248, everything._replace(closed=False))[0] == "stop"
     assert decide(248, everything._replace(closed=False, unavailable=()))[0] == "merge"
+    assert decide(248, everything._replace(closed=False, unavailable=(), behind=True))[0] == "update"
+    assert (
+        decide(248, everything._replace(closed=False, unavailable=(), behind=True, failed_checks=("lint",)))[0] == "fix"
+    )
+    assert decide(248, everything._replace(closed=False, unavailable=(), behind=True, pending_checks=2))[0] == "update"
     assert decide(248, everything._replace(closed=False, unavailable=(), pull_request=None))[0] == "resume"
 
 
@@ -730,3 +737,43 @@ def test_the_sweep_never_runs_from_a_worktree(fake_gh, repo, origin, tmp_path):
     _briefing(result, "build", "Started, nothing built yet.")
     assert "Removed" not in result.stdout
     assert finished.exists()
+
+
+# --- blockers and the update row ------------------------------------------------
+
+ELSEWHERE = '[{"number":9,"title":"Endpoint","state":"open","repository":{"full_name":"acme/gadgets"}}]'
+
+
+def test_a_pull_request_behind_main_is_updated(fake_gh, repo, origin, branch, tmp_path):
+    story = _logged(tmp_path, "pr.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
+    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "OPEN", "GH_PR_MERGE_STATE": "BEHIND"}
+
+    result = _next(repo, env=env)
+
+    lines = _briefing(result, "update", "Pull request open; main has moved on.")
+    assert "## Context" not in lines
+
+
+def test_the_briefing_names_open_blockers_on_the_build_row(fake_gh, repo, empty_branch, tmp_path):
+    result = _next(repo, env={**fieldvalues(tmp_path, "In Progress"), "GH_BLOCKED_BY": ELSEWHERE})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Step: build", "Started, nothing built yet."]
+    assert lines[4:7] == ["Blocked by:", "  acme/gadgets#9  Endpoint", "Log:"]
+
+
+def test_the_briefing_names_open_blockers_on_the_resume_row(fake_gh, repo, origin, branch, tmp_path):
+    result = _next(repo, env={**fieldvalues(tmp_path, "In Progress"), "GH_BLOCKED_BY": ELSEWHERE})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Step: resume", f"Branch {BRANCH} has 2 commits."]
+    assert lines[4:6] == ["Blocked by:", "  acme/gadgets#9  Endpoint"]
+
+
+def test_the_briefing_names_no_blockers_on_a_backlog_row(fake_gh, repo, tmp_path):
+    result = _next(repo, env={**fieldvalues(tmp_path, "Backlog"), "GH_BLOCKED_BY": ELSEWHERE})
+
+    _briefing(result, "check", "On the board; check the plan against the code, then build.")
+    assert "Blocked by:" not in result.stdout

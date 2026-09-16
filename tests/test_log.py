@@ -95,7 +95,7 @@ def test_the_command_refuses_text_with_no_prefix(fake_gh, gh_calls):
     assert result.returncode == 1
     assert result.stderr == (
         "deckhand log: the text must open with one of: Drafted:, Review:, Amended:, Started:, Deviation:, Split:, "
-        "Reviewed:, Pull request:, After the merge:\n"
+        "Parked:, Reviewed:, Pull request:, After the merge:\n"
     )
     assert [c for c in gh_calls() if c.startswith("issue comment")] == []
 

@@ -23,6 +23,7 @@ PREFIXES = (
     "Started:",
     "Deviation:",
     "Split:",
+    "Parked:",  # a feature parked elsewhere for this story
     "Reviewed:",  # the commit sha first, then a line on the pass
     "Pull request:",
     "After the merge:",
