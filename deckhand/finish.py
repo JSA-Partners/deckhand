@@ -32,9 +32,21 @@ import re
 import subprocess
 from pathlib import Path
 
-from deckhand import config, document, fields, gh, git, issue, log, naming, sections
+from deckhand import config, document, fields, gh, git, issue, log, naming
 from deckhand.config import Settings
-from deckhand.step import MAIN, ORIGIN_MAIN, Refusal, block, indented, ref_label, refuse_git, step, trunk
+from deckhand.step import (
+    MAIN,
+    ORIGIN_MAIN,
+    Refusal,
+    block,
+    draft_line,
+    indented,
+    read_draft,
+    ref_label,
+    refuse_git,
+    step,
+    trunk,
+)
 
 CONVENTIONAL = re.compile(rf"^({'|'.join(config.TYPES)})(\([^)]+\))?!?: .+$")
 STORY_NUMBER = re.compile(r"#[0-9]+")
@@ -93,11 +105,24 @@ def _title(settings: Settings, kind: str, story_title: str, breaking: bool) -> s
         raise Refusal(str(error)) from error
 
 
-def _body(number: int, story: issue.Issue, breaking: str | None) -> str:
-    """The story and its deviations as the commit body; a story that says nothing has no message for main."""
-    text = sections.get(story.body, "Story", "").strip()
+# `i.e.` sits a word boundary away from a standalone I, and the style guide allows it sparingly.
+_FIRST_PERSON = re.compile(r"\bI\b(?!\.)|\b(?:we|our|ours|my)\b", re.IGNORECASE)
+PREVIEW = "<the summary you write goes here>"
+
+
+def _body(number: int, story: issue.Issue, breaking: str | None, summary: str) -> str:
+    """The summary the session wrote, its deviations, and the footers; the Story is not read.
+
+    A Story is written "As a ..., I want ...", so copying it put first person into a shared artifact
+    and, on the squash, into main's history for good. What a branch changed cannot be computed from
+    the issue, so the session writes it and this refuses what it must not carry.
+    """
+    text = summary.strip()
     if not text:
-        raise Refusal(f"#{number} has no Story section; run /deckhand:next {number}")
+        raise Refusal(f"#{number} needs a summary: one or two paragraphs of what the branch changed")
+    found = _FIRST_PERSON.search(text)
+    if found is not None:
+        raise Refusal(f"the summary says {found.group(0)!r}; a pull request body is written in the third person")
     deviations = [entry.body.partition("Deviation:")[2] for entry in log.entries(story) if entry.prefix == "Deviation:"]
     return naming.pr_body(number, text, breaking=breaking, deviations=deviations)
 
@@ -119,7 +144,9 @@ def _breaking(value: str | None) -> str | None:
     return value
 
 
-def _message(settings: Settings, repo: str, number: int, breaking: str | None, story: issue.Issue) -> tuple[str, str]:
+def _message(
+    settings: Settings, repo: str, number: int, breaking: str | None, story: issue.Issue, summary: str
+) -> tuple[str, str]:
     """The title and body the pull request opens with, which the squash makes the commit message.
 
     `apply` computes it before any gate runs: a check suite can run for minutes, and a story off the
@@ -128,7 +155,7 @@ def _message(settings: Settings, repo: str, number: int, breaking: str | None, s
     kind = fields.get_fields(settings, repo, number, ("Kind",))["Kind"]
     if kind is None:
         raise Refusal(f"#{number} has no Kind; run /deckhand:next {number}")
-    return _title(settings, kind, story.title, bool(breaking)), _body(number, story, breaking)
+    return _title(settings, kind, story.title, bool(breaking)), _body(number, story, breaking, summary)
 
 
 # --- context ----------------------------------------------------------------
@@ -141,7 +168,7 @@ def _stat_block(base: str) -> list[str]:
 def _pr_block(number: int) -> list[str]:
     """The message apply would open with, blank line and all, because that is what a human approves."""
     repo = gh.repo_slug()
-    title, body = _message(config.load(), repo, number, None, issue.view(repo, number))
+    title, body = _message(config.load(), repo, number, None, issue.view(repo, number), PREVIEW)
     return [f"  Title: {title}", *[f"  {line}".rstrip() for line in body.splitlines()]]
 
 
@@ -155,6 +182,7 @@ def context(args: argparse.Namespace) -> int:
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))
     block("## Checks detected", lambda: indented(checks(Path.cwd()), "none detected"))
+    print(draft_line("Summary", f"{args.issue}-summary.md"))
     return 0
 
 
@@ -331,6 +359,7 @@ def _check(command: str) -> None:
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("file", type=Path, help="the summary of what the branch changed")
     parser.add_argument("--actual", required=True, help="the points the story actually took")
     parser.add_argument(
         "--check",
@@ -354,7 +383,7 @@ def apply(args: argparse.Namespace) -> int:
     if open_blockers:
         named = "; ".join(f"{ref_label(where, number, repo)} {title}" for where, number, title in open_blockers)
         raise Refusal(f"blocked by {named}; the pull request opens when it closes")
-    title, body = _message(settings, repo, args.issue, breaking, story)
+    title, body = _message(settings, repo, args.issue, breaking, story, read_draft(args.file))
     branch = _branch()
     _reviewed_head(story, args.issue)
     _clean_tree()

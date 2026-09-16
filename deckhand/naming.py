@@ -113,16 +113,18 @@ def fits(subject: str) -> str:
     return subject
 
 
-def pr_body(number: str | int, story: str, breaking: str | None = None, deviations: Sequence[str] = ()) -> str:
-    """The story, then each deviation, one paragraph each on one line, then the footer block.
+def pr_body(number: str | int, summary: str, breaking: str | None = None, deviations: Sequence[str] = ()) -> str:
+    """The summary's paragraphs, then each deviation, one paragraph each on one line, then the footers.
 
-    The story's own line breaks are the width of an issue body, and they go: GitHub renders every
-    line break in a pull request body, and git does not care how long a line of a commit body is.
-    The deviations are what the branch did that the story did not say, so main's history has them.
+    A line break inside a paragraph is the width of the file it was drafted in, and it goes: GitHub
+    renders every line break in a pull request body, and git does not care how long a line of a
+    commit body is. A blank line stays, because one or two paragraphs is the shape of a body. The
+    deviations are what the branch did that the story did not say, so main's history has them.
     """
     if not _NUMBER_RE.match(str(number)):
         raise ValueError(f"issue number must be an integer, got {number!r}")
     footers = [f"BREAKING CHANGE: {breaking}"] if breaking else []
     footers.append(f"Closes #{number}")
-    paragraphs = [" ".join(text.split()) for text in (story, *deviations) if text.strip()]
+    chunks = [*re.split(r"\n\s*\n", summary.strip()), *deviations]
+    paragraphs = [" ".join(text.split()) for text in chunks if text.strip()]
     return "\n\n".join(paragraphs) + "\n\n" + "\n".join(footers) + "\n"

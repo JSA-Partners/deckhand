@@ -111,8 +111,11 @@ and need no pass, because docs/claude is Claude's alone.
 
 ## Pull request
 
-From the finish context (above, or run it), read them the title and body, and on yes run
-`finish apply $issue --actual P --check "<cmd>"`, Actual in the estimate's units and the size the
+From the finish context (above, or run it), write the summary it names: one or two paragraphs in
+the third person saying what the branch changed and what it means for a reader, in the shape of the
+repository's recent merged pull requests, never "I" or "we". The story's "so that" clause is where
+the why comes from. Read them the title and that summary, and on yes run
+`finish apply $issue <summary> --actual P --check "<cmd>"`, Actual in the estimate's units and the size the
 work turned out to be, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
 theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. On the merge row,

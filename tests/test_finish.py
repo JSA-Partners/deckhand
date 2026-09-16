@@ -19,7 +19,8 @@ STORY = (
     "As a guest user, I want to see only the collections I was granted, "
     "so that I am not exposed to other organizations' data."
 )
-BODY = f"{STORY}\n\nCloses #248\n"
+SUMMARY = "Guests reach only the collections granted to them, on every collection-scoped route."
+BODY = f"{SUMMARY}\n\nCloses #248\n"
 PR_LIST = f"pr list --repo acme/widgets --head {BRANCH} --state open --json url"
 PR_URL = "https://github.com/acme/widgets/pull/1000"
 PENDING = (
@@ -140,9 +141,16 @@ def _finish(verb: str, repo: Path, *args: str, env: dict[str, str] | None = None
     return run_deckhand("finish", verb, "248", *args, cwd=repo, env={**APPROVED, **(env or {})})
 
 
-def _apply(repo: Path, *extra: str, env: dict[str, str] | None = None):
-    """Apply with HEAD reviewed unless an issue in `env` says otherwise."""
-    args = ["--actual", "3", *extra]
+def _summary_file(repo: Path, text: str = SUMMARY) -> str:
+    """The summary draft a finish reads; every apply writes one, as a session does."""
+    path = repo.parent / "summary.md"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def _apply(repo: Path, *extra: str, env: dict[str, str] | None = None, summary: str = SUMMARY):
+    """Apply with HEAD reviewed unless an issue in `env` says otherwise, from a written summary."""
+    args = [_summary_file(repo, summary), "--actual", "3", *extra]
     if "--check" not in args:
         args += ["--check", "true"]
     reviewed = _reviewed_issue(repo.parent, _sha(repo, "HEAD"))
@@ -163,7 +171,8 @@ def test_context_prints_the_stat_and_the_checks_but_never_the_commits(fake_gh, r
     assert any("store.py" in line for line in stat)
     assert any("store_test.py" in line for line in stat)
     assert not any(FIRST in line or SECOND in line for line in lines)
-    assert lines[lines.index("## Checks detected") + 1 :] == ["  none detected"]
+    assert lines[lines.index("## Checks detected") + 1 : -1] == ["  none detected"]
+    assert lines[-1].startswith("Summary: ")
 
 
 def test_context_prints_the_pull_request_block(fake_gh, repo, branch):
@@ -173,7 +182,8 @@ def test_context_prints_the_pull_request_block(fake_gh, repo, branch):
     lines = result.stdout.splitlines()
     assert lines.index("## Pull request") > lines.index("## Diff stat")
     said = lines[lines.index("## Pull request") + 1 : lines.index("## Checks detected")]
-    assert said == [f"  Title: feat: {SUBJECT}", *[f"  {line}".rstrip() for line in BODY.splitlines()]]
+    preview = "<the summary you write goes here>\n\nCloses #248\n"
+    assert said == [f"  Title: feat: {SUBJECT}", *[f"  {line}".rstrip() for line in preview.splitlines()]]
 
 
 @pytest.mark.parametrize(
@@ -201,13 +211,14 @@ def test_context_detects_checks_from_project_files(fake_gh, repo, branch):
     result = _finish("context", repo)
 
     lines = result.stdout.splitlines()
-    assert lines[lines.index("## Checks detected") + 1 :] == [
+    assert lines[lines.index("## Checks detected") + 1 : -1] == [
         "  uv run pre-commit run --all-files",
         "  uv run pytest -q",
         "  npm run test",
         "  npm run lint",
         "  make test",
     ]
+    assert lines[-1].startswith("Summary: ")
 
 
 def test_context_reads_the_branch_in_a_clone_that_has_no_local_main(fake_gh, clone):
@@ -247,7 +258,9 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
         "## Diff stat",
         "## Pull request",
         "## Checks detected",
+        lines[-1],  # the summary path, which without gh is one line saying why it could not be built
     ]
+    assert lines[-1].startswith("Summary: ")
     assert lines[1].startswith("  unavailable (")
 
 
@@ -503,15 +516,13 @@ def test_apply_refuses_a_title_over_72(fake_gh, gh_calls, repo, origin, branch, 
     assert BRANCH not in _branches(origin)
 
 
-def test_apply_refuses_a_story_without_a_story_section(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+def test_apply_does_not_need_a_story_section(fake_gh, repo, origin, branch, tmp_path):
+    """The body is the summary the session wrote, so the Story is the issue's alone."""
     body = "### Scope\n\n#### In\n\n- The grant filter\n\n### Notes\n\nNone\n"
 
     result = _apply(repo, env=_issue(tmp_path, "no-story", body=body))
 
-    assert result.returncode == 1
-    assert result.stderr == "deckhand finish apply: #248 has no Story section; run /deckhand:next 248\n"
-    assert _writes(gh_calls) == []
-    assert BRANCH not in _branches(origin)
+    assert "Story" not in result.stderr  # it reaches the gates, which is as far as this fixture goes
 
 
 def test_apply_refuses_a_breaking_with_no_text(fake_gh, gh_calls, repo, origin, branch):
@@ -614,7 +625,7 @@ def test_apply_adds_the_bang_and_the_footer_when_breaking(fake_gh, gh_calls, rep
     create = next(call for call in gh_calls() if call.startswith("pr create"))
     assert create == _create_call(
         f"feat!: {SUBJECT}",
-        f"{STORY}\n\nBREAKING CHANGE: The response shape changes for guests.\nCloses #248\n",
+        f"{SUMMARY}\n\nBREAKING CHANGE: The response shape changes for guests.\nCloses #248\n",
     )
 
 
@@ -695,7 +706,7 @@ def test_apply_puts_the_deviations_in_the_body(fake_gh, gh_calls, repo, origin, 
     create = next(call for call in gh_calls() if call.startswith("pr create"))
     assert create == _create_call(
         f"feat: {SUBJECT}",
-        f"{STORY}\n\nthe lock moved into one helper, ordered by level. The criteria are unchanged.\n\n"
+        f"{SUMMARY}\n\nthe lock moved into one helper, ordered by level. The criteria are unchanged.\n\n"
         "the route table left the server package.\n\nCloses #248\n",
     )
 
@@ -722,7 +733,8 @@ def test_apply_accepts_a_merge_of_main_on_the_reviewed_commit(fake_gh, gh_calls,
     _git(repo, "merge", "-q", "--no-edit", "origin/main")
     assert _sha(repo, "HEAD") != reviewed
 
-    result = _finish("apply", repo, "--actual", "3", "--check", "true", env=_reviewed_issue(repo.parent, reviewed))
+    env = _reviewed_issue(repo.parent, reviewed)
+    result = _finish("apply", repo, _summary_file(repo), "--actual", "3", "--check", "true", env=env)
 
     assert result.returncode == 0, result.stderr
     assert "Pushed" in result.stdout.splitlines()
@@ -735,8 +747,44 @@ def test_apply_refuses_a_merge_whose_other_side_is_not_main(fake_gh, gh_calls, r
     _git(repo, "checkout", "-q", BRANCH)
     _git(repo, "merge", "-q", "--no-edit", "side")
 
-    result = _finish("apply", repo, "--actual", "3", "--check", "true", env=_reviewed_issue(repo.parent, reviewed))
+    env = _reviewed_issue(repo.parent, reviewed)
+    result = _finish("apply", repo, _summary_file(repo), "--actual", "3", "--check", "true", env=env)
 
     assert result.returncode == 1
     assert "is not the last reviewed commit" in result.stderr
     assert BRANCH not in _branches(origin)
+
+
+# --- the body the session writes ----------------------------------------------
+
+
+def test_apply_builds_the_body_from_the_summary_and_not_the_story(fake_gh, gh_calls, repo, origin, branch):
+    """A Story is written in the first person, and a pull request body is shared and squashed to main."""
+    result = _apply(repo)
+
+    assert result.returncode == 0, result.stderr
+    create = next(call for call in gh_calls() if call.startswith("pr create"))
+    assert create == _create_call(f"feat: {SUBJECT}", BODY)
+    assert "I want" not in BODY
+
+
+@pytest.mark.parametrize("word", ["I", "we", "Our", "my"])
+def test_apply_refuses_a_summary_in_the_first_person(word, fake_gh, repo, origin, branch):
+    result = _apply(repo, summary=f"This is what {word} changed on the branch.")
+
+    assert result.returncode == 1
+    assert "third person" in result.stderr
+
+
+def test_apply_allows_a_summary_that_says_i_dot_e(fake_gh, repo, origin, branch):
+    """The style guide allows a sparing i.e., which is a word boundary away from a standalone I."""
+    result = _apply(repo, summary="The guard runs at the chokepoint, i.e. where the slug resolves.")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_apply_refuses_an_empty_summary(fake_gh, repo, origin, branch):
+    result = _apply(repo, summary="   \n")
+
+    assert result.returncode == 1
+    assert "needs a summary" in result.stderr
