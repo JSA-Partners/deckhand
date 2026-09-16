@@ -301,3 +301,22 @@ def test_paginated_names_gh_api_on_an_object_page_with_no_args(monkeypatch):
 def test_split_repo_rejects_an_unsafe_name(repo):
     with pytest.raises(gh.GhError, match="expected OWNER/REPO"):
         gh.split_repo(repo)
+
+
+# --- the cache a context reads inside -----------------------------------------
+
+
+def test_cached_runs_one_call_for_a_repeated_read(fake_gh, gh_calls):
+    with gh.cached():
+        first = gh.run("repo", "view", "--json", "nameWithOwner")
+        second = gh.run("repo", "view", "--json", "nameWithOwner")
+
+    assert first == second
+    assert len([c for c in gh_calls() if c.startswith("repo view")]) == 1
+
+
+def test_a_read_outside_cached_runs_every_time(fake_gh, gh_calls):
+    gh.run("repo", "view", "--json", "nameWithOwner")
+    gh.run("repo", "view", "--json", "nameWithOwner")
+
+    assert len([c for c in gh_calls() if c.startswith("repo view")]) == 2

@@ -303,7 +303,8 @@ def _context(name: str, verb: Handler, args: argparse.Namespace, issue_bound: bo
     context = sys.modules[verb.__module__].context
     tail = "Say what could not be read and stop."
     try:
-        return context(args) or 0
+        with gh.cached():  # a context reads and never writes, so one fact is read once
+            return context(args) or 0
     except Exception as error:  # a skill injects this output; one line beats a failed prompt
         print(f"(deckhand {name} context failed: {error}. {tail})")
         return 0

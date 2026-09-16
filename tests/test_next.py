@@ -777,3 +777,12 @@ def test_the_briefing_names_no_blockers_on_a_backlog_row(fake_gh, repo, tmp_path
 
     _briefing(result, "check", "On the board; check the plan against the code, then build.")
     assert "Blocked by:" not in result.stdout
+
+
+def test_a_context_reads_each_fact_once(fake_gh, gh_calls, repo, tmp_path):
+    """Every step's context runs inside one cache, so the briefing and the step's own context share a read."""
+    story = _logged(tmp_path, "cached.json", _entry("Drafted: from a brainstorm", "2026-09-01T10:00:00Z"))
+
+    _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
+
+    assert len([c for c in gh_calls() if c.startswith("issue view 248")]) == 1

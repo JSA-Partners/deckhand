@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import subprocess
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:  # a runtime import would be circular: config resolves the project through this module
@@ -31,14 +33,40 @@ class GhError(Exception):
     """gh exited non-zero; the message is gh's stderr."""
 
 
+_cache: dict[tuple[tuple[str, ...], str | None], str] | None = None
+
+
+@contextlib.contextmanager
+def cached() -> Iterator[None]:
+    """Memoise every successful `run` for the length of the block, keyed on the call itself.
+
+    For a context, which reads and never writes: one fact asked for twice in one command is one
+    fact. An apply never runs inside a block, so a read after a write is always the write's result.
+    """
+    global _cache
+    if _cache is not None:  # already inside a block; the outer one owns the cache
+        yield
+        return
+    _cache = {}
+    try:
+        yield
+    finally:
+        _cache = None
+
+
 def run(*args: str, stdin: str | None = None) -> str:
     """Run `gh <args>` and return stdout; raise GhError with stderr on failure."""
+    key = (args, stdin)
+    if _cache is not None and key in _cache:
+        return _cache[key]
     try:
         result = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=False)
     except FileNotFoundError as error:
         raise GhError("the GitHub CLI (gh) is not installed or not on PATH") from error
     if result.returncode != 0:
         raise GhError(result.stderr.strip() or f"gh {' '.join(args)} failed with status {result.returncode}")
+    if _cache is not None:
+        _cache[key] = result.stdout
     return result.stdout
 
 
