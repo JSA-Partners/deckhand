@@ -87,7 +87,7 @@ wheels = [
 
 [[package]]
 name = "deckhand"
-version = "3.2.0"
+version = "3.2.1"
 source = { virtual = "." }
 
 [package.dev-dependencies]
