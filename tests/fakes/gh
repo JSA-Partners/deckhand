@@ -238,6 +238,9 @@ elif argv and argv[0] == "api":
             respond(open(os.environ["GH_BLOCKING_FILE"]).read())
         respond(os.environ.get("GH_BLOCKING", "[]"))
     if "/dependencies/blocked_by" in path:
+        if "POST" in argv and os.environ.get("GH_DEPENDENCY_TAKEN"):
+            print("Validation failed: Target issue has already been taken (HTTP 422)", file=sys.stderr)
+            sys.exit(1)
         if "POST" in argv and os.environ.get("GH_DEPENDENCY_FAILS"):
             print("could not add dependency", file=sys.stderr)
             sys.exit(1)

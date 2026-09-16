@@ -317,3 +317,24 @@ def test_merge_state_reads_the_pull_request(fake_gh, monkeypatch):
     monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
 
     assert issue.merge_state(REPO, "https://github.com/acme/widgets/pull/1000") == "BEHIND"
+
+
+# --- a dependency GitHub already holds ----------------------------------------
+
+EDGE = json.dumps([{"number": 7, "title": "The blocker", "state": "open", "repository": {"full_name": REPO}}])
+
+
+def test_a_dependency_already_recorded_is_not_an_error(fake_gh, monkeypatch):
+    """The state the caller asked for is the state there is, so the write is done."""
+    monkeypatch.setenv("GH_DEPENDENCY_TAKEN", "1")
+    monkeypatch.setenv("GH_BLOCKED_BY", EDGE)
+
+    issue.add_dependency(REPO, 8, blocked_by=(REPO, 7))
+
+
+def test_a_dependency_that_failed_for_another_reason_raises(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_DEPENDENCY_TAKEN", "1")
+    monkeypatch.setenv("GH_BLOCKED_BY", "[]")
+
+    with pytest.raises(gh.GhError):
+        issue.add_dependency(REPO, 8, blocked_by=(REPO, 7))

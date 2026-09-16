@@ -137,19 +137,25 @@ def add_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> None:
     """Record that `number` is blocked by `blocked_by`, `(repository, number)`; the API takes the blocker's id.
 
     The blocker may live in another repository of the organization; its database id is looked up
-    there, and the relation is written on the blocked issue.
+    there, and the relation is written on the blocked issue. An edge GitHub already holds is not a
+    failure: the state the caller asked for is the state there is, and the check costs one read only
+    when the write did not land.
     """
     gh.split_repo(repo)
     blocker_repo, blocker = blocked_by
     blocker_id = gh.issue_id(blocker_repo, blocker)
-    gh.run(
-        "api",
-        "-X",
-        "POST",
-        f"repos/{repo}/issues/{number}/dependencies/blocked_by",
-        "-F",
-        f"issue_id={blocker_id}",
-    )
+    try:
+        gh.run(
+            "api",
+            "-X",
+            "POST",
+            f"repos/{repo}/issues/{number}/dependencies/blocked_by",
+            "-F",
+            f"issue_id={blocker_id}",
+        )
+    except gh.GhError:
+        if blocked_by not in [(where, found) for where, found, _ in blockers(repo, number)]:
+            raise
 
 
 def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
