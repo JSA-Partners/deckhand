@@ -280,3 +280,20 @@ def test_the_author_runs_the_deckhand_its_message_hands_it():
     assert "new apply --stub" in body
     assert BARE_GRANT not in front.get("tools", "")
     assert [name for name in _INVOCATION.findall(body) if name in _surface()] == []
+
+
+def test_the_new_skill_says_how_a_parked_feature_becomes_a_story():
+    """Four sessions read the command's help to find this out; the skill says it now."""
+    _, body = _split((ROOT / "skills" / "new" / "SKILL.md").read_text(encoding="utf-8"))
+
+    flat = " ".join(body.split())  # a phrase may wrap across lines in the file
+    for phrase in ("new apply --stub", "--from $source", "the whole issue"):
+        assert phrase in flat, phrase
+
+
+def test_the_next_skill_boards_a_story_that_waits_on_others():
+    _, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+
+    flat = " ".join(body.split())
+    assert "--blocked-by" in flat
+    assert "third person" in flat

@@ -74,6 +74,7 @@ Never leave a user-facing change on `main` untagged; the marketplace installs by
 - Do not hardcode organization, project, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
 - A blocker is `owner/name#M`; a bare number is this repository
+- A parked feature is written in place and becomes the story; only finished work closes an issue
 - The build happens in the story's worktree, which `start` makes and `next` names; a branch is
   never checked out by hand, and the clone stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec

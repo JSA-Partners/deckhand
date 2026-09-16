@@ -73,7 +73,8 @@ and run `amend apply $issue <draft> --new-issue "<title>"`.
 
 From the ready context (above, or run it), tell the story plainly, propose kind and points from
 the done stories that most resemble it, and ask one question: board it, review it again, or not
-yet. Points measure the size of the work, never the calendar.
+yet. Points measure the size of the work, never the calendar. A story whose plan waits on other stories
+boards with them as blockers rather than waiting unboarded.
 Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
