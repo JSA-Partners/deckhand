@@ -13,7 +13,8 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Read Write Edit Grep
 
 Run superpowers:brainstorming from what is printed above, aimed at a story: the design it reaches is
 Story, Scope In and Out, and Acceptance Criteria, told to the person plainly, what a user gets and
-how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Scale it to the
+how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Give `new apply` a
+`--title` that reads as the change would in a commit subject: what it does, not what was wanted. Scale it to the
 idea: a fix needs a question or two, a feature the whole conversation.
 
 One story: run superpowers:writing-plans into the draft, with an "After the merge" block at the

@@ -568,3 +568,14 @@ def test_new_issue_refuses_a_blank_title(fake_gh, gh_calls, tmp_path):
     assert result.returncode == 1
     assert result.stderr == "deckhand amend apply: --new-issue needs a title\n"
     assert _writes(gh_calls) == []
+
+
+def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
+    draft = _draft(tmp_path, sections.replace(BODY, "Notes", "note " * 12000))
+
+    result = run_deckhand("amend", "apply", "248", draft, "--note", NOTE)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Updated #248 https://github.com/acme/widgets/issues/248", "Logged Amended"]
+    assert lines[2].startswith("Body is ")

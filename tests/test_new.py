@@ -969,3 +969,14 @@ def test_the_draft_and_split_names_are_unique_to_the_run(fake_gh, tmp_path):
     split = next(line for line in lines if line.startswith("Split file: "))
     token = re.search(r"new-(\d{8}-\d{6})\.md$", draft).group(1)
     assert split.endswith(f"split-{token}.md")
+
+
+def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
+    body = sections.replace(_valid(), "Notes", "note " * 12000)
+    draft = tmp_path / "big.md"
+    draft.write_text(body, encoding="utf-8")
+
+    result = run_deckhand("new", "apply", str(draft))
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1].startswith("Body is ")

@@ -94,11 +94,22 @@ def _title(settings: Settings, kind: str, story_title: str, breaking: bool) -> s
 
 
 def _body(number: int, story: issue.Issue, breaking: str | None) -> str:
-    """The story as the commit body; a story that says nothing has no message to squash into main."""
+    """The story and its deviations as the commit body; a story that says nothing has no message for main."""
     text = sections.get(story.body, "Story", "").strip()
     if not text:
         raise Refusal(f"#{number} has no Story section; run /deckhand:next {number}")
-    return naming.pr_body(number, text, breaking=breaking)
+    deviations = [entry.body.partition("Deviation:")[2] for entry in log.entries(story) if entry.prefix == "Deviation:"]
+    return naming.pr_body(number, text, breaking=breaking, deviations=deviations)
+
+
+def _push(branch: str) -> None:
+    """Push the branch; a refusal carries the tail of what git said, which is where a hook names its reason."""
+    try:
+        git.run("push", "-u", "origin", branch)
+    except git.GitError as error:
+        lines = [line for line in error.stderr.splitlines() if line.strip()]
+        tail = [line for line in lines[-TAIL:] if line.strip() != str(error)]
+        raise Refusal("\n".join([str(error), *tail])) from error
 
 
 def _breaking(value: str | None) -> str | None:
@@ -323,8 +334,8 @@ def apply(args: argparse.Namespace) -> int:
         _check(command)
 
     # A plain push, with -u for the first time; git's own non-fast-forward refusal stands where the
-    # lease once did. Past the refusal point: a failure here reaches cli.main.
-    git.run("push", "-u", "origin", branch)
+    # lease once did.
+    _push(branch)
     print("Pushed")
     url = issue.pull_request(repo, branch)
     if url:

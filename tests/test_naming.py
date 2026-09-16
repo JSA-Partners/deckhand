@@ -81,12 +81,16 @@ def test_branch_name_rejects_a_two_word_kind(settings):
 
 def test_pr_title_renders_kind_title(settings):
     result = naming.pr_title(settings, "feat", "Guest users see only their granted collections")
-    assert result == "feat: Guest users see only their granted collections"
+    assert result == "feat: guest users see only their granted collections"
+
+
+def test_pr_title_keeps_an_acronym_that_opens_the_title(settings):
+    assert naming.pr_title(settings, "feat", "API cleanup for guests") == "feat: API cleanup for guests"
 
 
 def test_pr_title_adds_bang_when_breaking(settings):
     result = naming.pr_title(settings, "fix", "Drop the v0 routes", breaking=True)
-    assert result == "fix!: Drop the v0 routes"
+    assert result == "fix!: drop the v0 routes"
 
 
 def test_pr_title_rejects_an_unknown_kind(settings):
@@ -179,3 +183,9 @@ def test_pr_body_is_the_story_on_one_line_then_the_footers():
 def test_pr_body_rejects_a_non_numeric_issue():
     with pytest.raises(ValueError):
         naming.pr_body("abc", STORY)
+
+
+def test_pr_body_puts_each_deviation_in_its_own_paragraph():
+    body = naming.pr_body(248, STORY, deviations=["The lock moved\ninto one helper.", "  ", "Routes left the server."])
+
+    assert body == f"{STORY}\n\nThe lock moved into one helper.\n\nRoutes left the server.\n\nCloses #248\n"

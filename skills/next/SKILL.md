@@ -19,15 +19,15 @@ runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a co
 did not print, run `<step> context $issue`. When a command refuses, fix the rule it names
 and run it again; when you cannot, say so in one sentence. When the briefing or a command prints a
 `Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
-else; in a worktree entered for the first time, run the repository's own setup commands from its
+else; in a worktree entered for the first time, run the repository's setup commands from its
 CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
-baseline. Done and stop have nothing to run: say what the briefing says, in the Speaking
-rules' shape. Every commit goes through deckhand:commit, which never skips a hook; nothing is
+baseline. Done and stop have nothing to run: say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook; nothing is
 amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
 
-Talk to the person as to a colleague from another project. Say one line when something will take
+Talk to the person as to a colleague from another project, in plain words, an analogy only when
+they ask. Say one line when something will take
 more than a moment. Ask only when a decision is theirs or you are unsure, with a recommendation every
 time. When the run ends because the story waits on something outside this session, say where it is,
 the one link worth opening, and what happens next, in two or three sentences. Never show what a
@@ -70,7 +70,7 @@ and run `amend apply $issue <draft> --new-issue "<title>"`.
 
 From the ready context (above, or run it), tell the story plainly, propose kind and points from
 the done stories that most resemble it, and ask one question: board it, review it again, or not
-yet. Points measure the size of the work and never the calendar; a day away changes nothing.
+yet. Points measure the size of the work, never the calendar.
 Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
@@ -84,21 +84,19 @@ deckhand:commit, nothing pushed. A change that serves the
 criteria as written: build it and run `log $issue "Deviation: <what and why>"`. A change that
 alters what the story delivers: say so in one sentence with the diff's size and a recommendation,
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
-amend step. Ask when unsure. When the briefing says build, the check is done: check the branch out
-and run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
-on or review what is there, recommending carry on while tasks are left; carrying on skips the tasks
-the commits cover.
+amend step. Ask when unsure. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
+on or review what is there, recommending carry on while tasks are left, which skips the tasks the
+commits cover.
 
 ## Branch review
 
-When the plan is done, say so and give them `tuicr -r origin/main..HEAD` as a plain message they
-can copy, to run in a terminal of their own; they paste the export or say there are no comments.
-Fix every comment, commit with deckhand:commit, and give them
-`tuicr -r <last reviewed commit>..HEAD`, the HEAD the previous pass read, for the new commits,
-until a pass has no comments. Log the clean pass with `log $issue "Reviewed: <full sha> <one
+When the plan is done, say so and give them `cd "<the worktree>" && tuicr -r origin/main..HEAD`
+as a plain message they can copy, to run in a terminal of their own; they paste the export or say
+there are no comments. Fix every comment, commit with deckhand:commit, and give them the same with
+`<the previous pass's last commit>..HEAD`, until a pass has no comments. Log the clean pass with `log $issue "Reviewed: <full sha> <one
 line>"`, the full sha first; the pull request opens only from that commit. Then run the
-deckhand:document skill: fix what its audit lists first, then record what the branch taught; its
-commits land past the reviewed one and need no pass, because docs/claude is Claude's alone.
+deckhand:document skill, fixing what its audit lists first; its commits land past the reviewed one
+and need no pass, because docs/claude is Claude's alone.
 
 ## Pull request
 
@@ -119,6 +117,6 @@ request section again: finish pushes and keeps the pull request.
 ## After the merge
 
 On a merged story with items left, walk them one at a time, doing what can be done here and asking
-for what is theirs, logging `After the merge: <item>` as each is done. When nothing is left, say the
-story is finished and name the next story the briefing gave; when the briefing says the worktree is
+for what is theirs, logging `After the merge: <item>` as each is done, or deferred with where it went, so the story
+closes. When nothing is left, say the story is finished and name the next story the briefing gave; when the briefing says the worktree is
 here, add that its folder goes away on the next run from the clone.

@@ -13,6 +13,7 @@ from tests.conftest import FIXTURES, run_deckhand
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
 BRANCH = "feat/248-guest-users-see-only"
 TITLE = "Guest users see only their granted collections"
+SUBJECT = "guest users see only their granted collections"  # the title as a commit subject reads
 LONG_TITLE = "Guest users see only the collections their organization granted them today"
 STORY = (
     "As a guest user, I want to see only the collections I was granted, "
@@ -172,7 +173,7 @@ def test_context_prints_the_pull_request_block(fake_gh, repo, branch):
     lines = result.stdout.splitlines()
     assert lines.index("## Pull request") > lines.index("## Diff stat")
     said = lines[lines.index("## Pull request") + 1 : lines.index("## Checks detected")]
-    assert said == [f"  Title: feat: {TITLE}", *[f"  {line}".rstrip() for line in BODY.splitlines()]]
+    assert said == [f"  Title: feat: {SUBJECT}", *[f"  {line}".rstrip() for line in BODY.splitlines()]]
 
 
 @pytest.mark.parametrize(
@@ -594,7 +595,7 @@ def test_apply_uses_the_kind_in_the_title(fake_gh, gh_calls, repo, origin, branc
 
     assert result.returncode == 0, result.stderr
     create = next(call for call in gh_calls() if call.startswith("pr create"))
-    assert create.startswith(f"pr create --repo acme/widgets --base main --head {BRANCH} --title fix: {TITLE} ")
+    assert create.startswith(f"pr create --repo acme/widgets --base main --head {BRANCH} --title fix: {SUBJECT} ")
 
 
 def test_apply_opens_the_pull_request_with_the_computed_message(fake_gh, gh_calls, repo, origin, branch):
@@ -602,7 +603,7 @@ def test_apply_opens_the_pull_request_with_the_computed_message(fake_gh, gh_call
 
     assert result.returncode == 0, result.stderr
     create = next(call for call in gh_calls() if call.startswith("pr create"))
-    assert create == _create_call(f"feat: {TITLE}", BODY)
+    assert create == _create_call(f"feat: {SUBJECT}", BODY)
     assert "--body-file" not in create
 
 
@@ -612,7 +613,7 @@ def test_apply_adds_the_bang_and_the_footer_when_breaking(fake_gh, gh_calls, rep
     assert result.returncode == 0, result.stderr
     create = next(call for call in gh_calls() if call.startswith("pr create"))
     assert create == _create_call(
-        f"feat!: {TITLE}",
+        f"feat!: {SUBJECT}",
         f"{STORY}\n\nBREAKING CHANGE: The response shape changes for guests.\nCloses #248\n",
     )
 
@@ -655,3 +656,45 @@ def test_apply_works_in_a_clone_that_has_no_local_main(fake_gh, gh_calls, repo, 
     assert result.returncode == 0, result.stderr
     assert f"Opened {PR_URL}" in result.stdout
     assert [call for call in gh_calls() if "item-edit" in call] == [PENDING, ACTUAL]
+
+
+def test_apply_reports_what_the_hook_said_when_the_push_is_refused(fake_gh, gh_calls, repo, origin, branch):
+    """A pre-push hook's own lines are the reason; git's summary line alone says nothing a session can act on."""
+    hook = repo / ".git" / "hooks" / "pre-push"
+    hook.write_text('#!/bin/sh\necho "--- FAIL: TestAuth (0.00s)" >&2\necho "FAIL" >&2\nexit 1\n', encoding="utf-8")
+    hook.chmod(0o755)
+
+    result = _apply(repo)
+
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert lines[0].startswith("deckhand finish apply: error: failed to push some refs")
+    assert "--- FAIL: TestAuth (0.00s)" in lines
+    assert BRANCH not in _branches(origin)
+    assert not any(call.startswith("pr create") for call in gh_calls())
+
+
+def test_apply_puts_the_deviations_in_the_body(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    """What the branch did that the story did not say goes to main with the story."""
+    data = json.loads((FIXTURES / "issue-approved.json").read_text(encoding="utf-8"))
+    entry = {"author": {"login": "claude"}, "createdAt": "2026-09-03T09:30:00Z"}
+    data["comments"] += [
+        {
+            **entry,
+            "body": "Deviation: the lock moved into one helper,\nordered by level.\n\nThe criteria are unchanged.",
+        },
+        {**entry, "body": "Deviation: the route table left the server package."},
+        {**entry, "body": f"Reviewed: {_sha(repo, 'HEAD')} clean pass"},
+    ]
+    path = tmp_path / "issue-deviated.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = _apply(repo, env={"GH_ISSUE_FILE": str(path)})
+
+    assert result.returncode == 0, result.stderr
+    create = next(call for call in gh_calls() if call.startswith("pr create"))
+    assert create == _create_call(
+        f"feat: {SUBJECT}",
+        f"{STORY}\n\nthe lock moved into one helper, ordered by level. The criteria are unchanged.\n\n"
+        "the route table left the server package.\n\nCloses #248\n",
+    )

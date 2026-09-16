@@ -90,3 +90,11 @@ def test_message_prefers_the_rejected_line_over_the_push_summary():
     )
 
     assert git.message(stderr) == "! [rejected] feat/248-guest -> feat/248-guest (stale info)"
+
+
+def test_run_keeps_the_whole_stderr_on_the_error(repo):
+    with pytest.raises(git.GitError) as caught:
+        git.run("rev-parse", "--verify", "nope")
+
+    assert str(caught.value).startswith("fatal:")
+    assert str(caught.value) in caught.value.stderr

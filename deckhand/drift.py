@@ -5,9 +5,12 @@ prints it the files it names may have moved or shrunk. The plan comes out of the
 is text before it is ever a file, and both helpers take text.
 
 Drift is what the model should open before implementing, so only what the plan expects to already
-be there counts. A reference is a path whose last segment ends in an extension, which keeps out the
-versions and branch names a release plan names in passing, and a file the plan says it will create
-is skipped, because the implementation is what writes it.
+be there counts. A reference is a path with a directory whose last segment ends in an extension,
+which keeps out the versions and branch names a release plan names in passing and the dotted
+identifiers a plan is full of, and a file the plan says it will create is skipped, because the
+implementation is what writes it. A path the plan wrote relative to the package it was discussing
+resolves against the repository's tracked files by its tail, so `handlers/list.go` is found under
+`internal/server/`.
 """
 
 from __future__ import annotations
@@ -15,10 +18,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from deckhand import git
+
 # A backticked path, optionally followed by `:LINE` or `:LINE-LINE`. The extension opens with a
 # letter, which is what tells `internal/store/collection.go` from the versions and the branch names
 # a release plan is full of: `2.0.0` and `chore/release-v1.1.0-v0.4.0` end in digits, not in a type.
-_REFERENCE = re.compile(r"`([A-Za-z0-9_./@+-]+\.[A-Za-z][A-Za-z0-9]*(?::[0-9]+(?:-[0-9]+)?)?)`")
+_REFERENCE = re.compile(r"`([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)+\.[A-Za-z][A-Za-z0-9]*(?::[0-9]+(?:-[0-9]+)?)?)`")
 
 # How a Files block names a file the plan will write; the bullet and the case both vary.
 _CREATES = ("- create:", "create:")
@@ -38,17 +43,35 @@ def _created(text: str) -> set[str]:
     return written
 
 
+def _tracked(root: Path) -> list[str]:
+    """The repository's tracked files, or none outside a repository; the tail lookup reads them once."""
+    try:
+        return git.run("ls-files", cwd=root).splitlines()
+    except git.GitError:
+        return []
+
+
+def _resolve(root: Path, path: str, tracked: list[str]) -> Path | None:
+    """The file `path` names under `root`, directly or as the tail of one tracked file; None when neither."""
+    target = root / path
+    if target.exists():
+        return target
+    found = [name for name in tracked if name.endswith("/" + path)]
+    return root / found[0] if len(found) == 1 else None
+
+
 def drift_text(text: str, root: Path | None = None) -> list[tuple[str, str]]:
     """`(reference, reason)` for each reference in `text` that does not resolve under `root`."""
     root = root or Path.cwd()
     writes = _created(text)
+    tracked = _tracked(root)
     problems: list[tuple[str, str]] = []
     for ref in references(text):
         path, _, rest = ref.partition(":")
         if path in writes:
             continue
-        target = root / path
-        if not target.exists():
+        target = _resolve(root, path, tracked)
+        if target is None:
             problems.append((ref, "missing"))
             continue
         if not rest:

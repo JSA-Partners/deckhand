@@ -157,3 +157,17 @@ def _criteria(body: str) -> list[str]:
         if _SCOPE_EXCLUSION.search(line):
             fail.append(f"acceptance bullet is a scope exclusion; move it to Scope > Out: {short}")
     return fail
+
+
+HEADROOM = 0.9  # of the limit: a body this full is one or two amends from refusing, and usually two stories
+
+
+def headroom(text: str) -> str | None:
+    """A note when the body is within `HEADROOM` of the limit, or None; the size is the one lint measures."""
+    size = len(text.replace("\r\n", "\n"))
+    if size < BODY_LIMIT * HEADROOM:
+        return None
+    return (
+        f"Body is {size} of {BODY_LIMIT} characters; a story this size is usually more than one, "
+        "and the next amend may not fit: move what belongs in its own story out with --new-issue"
+    )

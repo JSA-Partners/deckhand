@@ -11,6 +11,7 @@ A name that cannot be made is a `ValueError`; the step that asked for it turns t
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from deckhand import config, sections
 from deckhand.config import Settings
@@ -62,7 +63,14 @@ def pr_title(settings: Settings, kind: str, title: str, breaking: bool = False) 
             f"title is {len(title)} characters; the pull request subject allows {allowed}; "
             "give the issue a shorter title with --title"
         )
-    return f"{kind}{BANG if breaking else ''}: {title}"
+    return f"{kind}{BANG if breaking else ''}: {subject_case(title)}"
+
+
+def subject_case(title: str) -> str:
+    """`title` with its first letter lowered, as a commit subject reads; an acronym keeps its case."""
+    if len(title) > 1 and title[0].isupper() and title[1].islower():
+        return title[0].lower() + title[1:]
+    return title
 
 
 def title_limit() -> int:
@@ -105,15 +113,16 @@ def fits(subject: str) -> str:
     return subject
 
 
-def pr_body(number: str | int, story: str, breaking: str | None = None) -> str:
-    """The story as one paragraph on one line, then the footer block; `number` must be an integer.
+def pr_body(number: str | int, story: str, breaking: str | None = None, deviations: Sequence[str] = ()) -> str:
+    """The story, then each deviation, one paragraph each on one line, then the footer block.
 
     The story's own line breaks are the width of an issue body, and they go: GitHub renders every
     line break in a pull request body, and git does not care how long a line of a commit body is.
+    The deviations are what the branch did that the story did not say, so main's history has them.
     """
     if not _NUMBER_RE.match(str(number)):
         raise ValueError(f"issue number must be an integer, got {number!r}")
     footers = [f"BREAKING CHANGE: {breaking}"] if breaking else []
     footers.append(f"Closes #{number}")
-    paragraph = " ".join(story.split())
-    return paragraph + "\n\n" + "\n".join(footers) + "\n"
+    paragraphs = [" ".join(text.split()) for text in (story, *deviations) if text.strip()]
+    return "\n\n".join(paragraphs) + "\n\n" + "\n".join(footers) + "\n"

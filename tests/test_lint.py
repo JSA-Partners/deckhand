@@ -219,3 +219,23 @@ def test_empty_in_and_empty_acceptance_criteria_are_reported():
     failures = "\n".join(lint.lint(body))
     assert "'#### In' has no bullets" in failures
     assert "Acceptance Criteria has no bullets" in failures
+
+
+def test_headroom_is_nothing_for_a_body_well_under_the_limit():
+    assert lint.headroom(VALID) is None
+
+
+def test_headroom_names_the_size_when_the_body_nears_the_limit():
+    body = sections.replace(VALID, "Notes", "note " * (BODY_LIMIT // 5))
+
+    note = lint.headroom(body)
+
+    assert note is not None
+    assert note.startswith(f"Body is {len(body)} of {BODY_LIMIT} characters")
+    assert "--new-issue" in note
+
+
+def test_headroom_measures_the_body_as_lint_does():
+    body = sections.replace(VALID, "Notes", "note\r\n" * (BODY_LIMIT // 5))
+
+    assert f"Body is {len(body.replace(chr(13), ''))} of" in (lint.headroom(body) or "")

@@ -162,6 +162,8 @@ def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None
         print(f"Title: {title}", flush=True)
     issue.comment(repo, number, log.checked(f"Amended: {note}"))
     print("Logged Amended")
+    if (room := lint.headroom(body)) is not None:
+        print(room)
     return 0
 
 

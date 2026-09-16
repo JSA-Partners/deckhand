@@ -397,4 +397,6 @@ def _write(args: argparse.Namespace) -> int:
     number, url = issue.create(repo, subject, body)
     print(f"Created #{number} {url}", flush=True)
     board_draft(settings, repo, number, url, DRAFTED)
+    if (note := lint.headroom(body)) is not None:
+        print(note)
     return 0

@@ -16,7 +16,11 @@ REJECTED = "! [rejected]"
 
 
 class GitError(Exception):
-    """git exited non-zero; the message is the line of its stderr that says why."""
+    """git exited non-zero; the message is the line of its stderr that says why, `stderr` the whole of it."""
+
+    def __init__(self, message: str, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
 
 
 def message(stderr: str) -> str:
@@ -55,6 +59,6 @@ def run(*args: str, cwd: Path | None = None) -> str:
     except FileNotFoundError as error:
         raise GitError("git is not installed or not on PATH") from error
     if result.returncode != 0:
-        said = message(result.stderr.decode("utf-8", errors="replace"))
-        raise GitError(said or f"git {' '.join(args)} failed")
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        raise GitError(message(stderr) or f"git {' '.join(args)} failed", stderr)
     return result.stdout.decode("utf-8", errors="replace").strip("\n")

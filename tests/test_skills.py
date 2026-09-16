@@ -204,7 +204,9 @@ def test_the_next_skill_speaks_and_asks_with_a_recommendation():
         assert heading in body, heading
     assert RECOMMEND.search(body)
     assert "verdict" in body
-    assert "tuicr -r origin/main..HEAD" in body and "tuicr -r <last reviewed commit>..HEAD" in body
+    # The pass runs in the story worktree, and the second one starts where the first ended.
+    assert 'cd "<the worktree>" && tuicr -r origin/main..HEAD' in body
+    assert "<the previous pass's last commit>..HEAD" in body
     assert "--stdout" not in body  # the export is pasted either way, and the flag needs a terminal
 
 
