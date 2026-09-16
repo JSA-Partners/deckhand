@@ -202,9 +202,22 @@ def _id(ref: str) -> tuple[str, int] | None:
     return lens, int(ordinal)
 
 
+def _fields(line: str, *wanted: int) -> list[str]:
+    """The line's fields: `" | "` when that gives one of `wanted`, else the bare `"|"`.
+
+    A claim may hold a pipe, a regex alternation for one, and splitting on the bare character takes
+    half the claim into the next field and refuses a line the brief permitted. The bare split stays
+    as the fallback, so a line written without the spaces around its separators still reads.
+    """
+    spaced = [part.strip() for part in line.split(" | ")]
+    if len(spaced) in wanted:
+        return spaced
+    return [part.strip() for part in line.split("|")]
+
+
 def _parse(line: str) -> Finding | None:
     """One findings line as a `Finding`, or None when it is not in the format the brief stated."""
-    parts = [part.strip() for part in line.split("|")]
+    parts = _fields(line, 5)
     if len(parts) != 5:
         return None
     ref, severity, verdict, claim, evidence = parts
@@ -216,7 +229,7 @@ def _parse(line: str) -> Finding | None:
 
 def _parse_verdict(line: str) -> tuple[str, str, str] | None:
     """`(id, verdict, reason)` from one verdict line, or None; a rejection has to say why."""
-    parts = [part.strip() for part in line.split("|")]
+    parts = _fields(line, 2, 3)
     if len(parts) not in (2, 3) or _id(parts[0]) is None or parts[1] not in VERDICTS:
         return None
     reason_text = parts[2] if len(parts) == 3 else ""
@@ -227,7 +240,7 @@ def _parse_verdict(line: str) -> tuple[str, str, str] | None:
 
 def _parse_decision(line: str) -> tuple[str, str, str] | None:
     """`(id, decision, reason)` from one decision line, or None; the reason is the person's and optional."""
-    parts = [part.strip() for part in line.split("|")]
+    parts = _fields(line, 2, 3)
     if len(parts) not in (2, 3) or _id(parts[0]) is None or parts[1] not in DECISIONS:
         return None
     return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
