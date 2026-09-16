@@ -94,8 +94,8 @@ def test_the_command_refuses_text_with_no_prefix(fake_gh, gh_calls):
 
     assert result.returncode == 1
     assert result.stderr == (
-        "deckhand log: the text must open with one of: Drafted:, Review:, Amended:, Started:, Deviation:, Split:, "
-        "Parked:, Reviewed:, Pull request:, After the merge:\n"
+        "deckhand log: the text must open with one of: Drafted:, Review:, Amended:, Started:, Deviation:, Noted:, "
+        "Split:, Parked:, Reviewed:, Pull request:, After the merge:\n"
     )
     assert [c for c in gh_calls() if c.startswith("issue comment")] == []
 
@@ -115,3 +115,11 @@ def test_the_command_refuses_a_prefix_whose_text_is_on_a_later_line(fake_gh, gh_
     assert result.returncode == 1
     assert "nothing after" in result.stderr
     assert [c for c in gh_calls() if c.startswith("issue comment")] == []
+
+
+def test_noted_is_a_prefix_for_a_fact_no_step_acts_on():
+    story = _story("Noted: the dashboard shows the allowlist off.")
+
+    found = log.entries(story)
+
+    assert [(e.prefix, e.text) for e in found] == [("Noted:", "the dashboard shows the allowlist off.")]

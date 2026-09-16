@@ -22,6 +22,7 @@ PREFIXES = (
     "Amended:",
     "Started:",
     "Deviation:",
+    "Noted:",  # a fact a later reader needs and no step acts on
     "Split:",
     "Parked:",  # a feature parked elsewhere for this story
     "Reviewed:",  # the commit sha first, then a line on the pass
