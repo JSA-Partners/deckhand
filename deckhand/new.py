@@ -237,12 +237,16 @@ def title(flag: str | None, body: str) -> str:
 
 
 def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
-    """Rewrite the stub as the story it stands for; its number and dependencies are untouched."""
+    """Rewrite the stub as the story it stands for; its number and dependencies are untouched.
+
+    A parked feature is a stub too, and a feature with one outcome is written straight into it: the
+    feature becomes the story, so every blocker and every reference already pointing at it still
+    points at the work. A feature with several outcomes goes through the split instead, which makes
+    it the first of them.
+    """
     story = issue.view(repo, number)
     if not stub.is_stub(story.body):
         raise Refusal(f"#{number} is already a story; run /deckhand:next {number}")
-    if not stub.read(story.body)[1]:
-        raise Refusal(f"#{number} is a parked feature; run /deckhand:new {number} to split it")
     subject = fits_title((flag or "").strip())
     body = lint.checked(draft)
     settings = resolved_settings()

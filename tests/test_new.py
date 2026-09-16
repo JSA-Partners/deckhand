@@ -496,13 +496,14 @@ def test_apply_stub_refuses_a_story_and_writes_nothing(fake_gh, gh_calls):
     assert _writes(gh_calls()) == []
 
 
-def test_apply_stub_refuses_a_parked_feature_and_writes_nothing(fake_gh, gh_calls):
+def test_apply_stub_writes_a_parked_feature_into_its_story(fake_gh, gh_calls):
+    """One outcome keeps the number, so everything already pointing at the feature points at the story."""
     result = run_deckhand("new", "apply", "--stub", "60", str(VALID), env=PARKED)
 
-    assert result.returncode == 1
-    assert result.stderr.strip() == "deckhand new apply: #60 is a parked feature; run /deckhand:new 60 to split it"
-    assert result.stdout == ""
-    assert _writes(gh_calls()) == []
+    assert result.returncode == 0, result.stderr
+    assert "Written #60" in result.stdout
+    assert not [c for c in gh_calls() if c.startswith("issue close")]
+    assert not [c for c in gh_calls() if c.startswith("issue create")]
 
 
 def test_apply_stub_refuses_a_bad_body_and_writes_nothing(fake_gh, gh_calls):
