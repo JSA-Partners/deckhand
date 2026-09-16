@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from deckhand import board, fields, gh, issue, log, stub
 from deckhand.config import Settings
-from deckhand.step import Refusal, fits_title, issue_ref, ref_label
+from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 
 
 def board_draft(settings: Settings, repo: str, number: int, url: str, note: str | None) -> None:
@@ -70,3 +70,33 @@ def feature(settings: Settings, repo: str, text: str, flag: str | None, target: 
     if story is not None:
         block(repo, story[1], target, number, title)
     return 0
+
+
+def wire(here: str, entries: list[stub.Entry], numbers: list[int]) -> None:
+    """Record what each story of a split waits on, in the order the file gave them.
+
+    Every write prints as it lands, and a failed edge is the one thing the printed record cannot
+    show, so it refuses rather than carrying on quietly.
+    """
+    for entry, number in zip(entries, numbers, strict=True):
+        home = entry.repo or here
+        for position in entry.after:
+            blocker = (entries[position - 1].repo or here, numbers[position - 1])
+            blocked, by = ref_label(home, number, here), ref_label(*blocker, here)
+            try:
+                issue.add_dependency(home, number, blocked_by=blocker)
+            except Exception as error:
+                raise Refusal(f"{blocked} blocked by {by} failed: {reason(error)}; add it by hand") from error
+            print(f"{blocked} blocked by {by}", flush=True)
+
+
+def inherit(here: str, feature: int, siblings: list[tuple[str, int]]) -> None:
+    """Give every issue waiting on `feature` an edge to each story it became besides the first.
+
+    The feature is the first story now, so what waited on it still waits on it; the rest of what it
+    became has to be waited on too, or the work is released before it is done.
+    """
+    for where, number, _ in issue.blocking(here, feature):
+        for repo, sibling in siblings:
+            issue.add_dependency(where, number, blocked_by=(repo, sibling))
+            print(f"{ref_label(where, number, here)} blocked by {ref_label(repo, sibling, here)}", flush=True)

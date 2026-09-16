@@ -740,7 +740,8 @@ def test_apply_split_creates_unnumbered_bodies_and_rewrites_them_numbered(fake_g
     assert [body for call, body in bodies if call == "issue edit"] == [_numbered_body()] * 3
 
 
-def test_apply_split_from_a_parked_feature_comments_and_closes_it_last(fake_gh, gh_calls, tmp_path):
+def test_apply_split_from_a_parked_feature_keeps_it_as_the_first_story(fake_gh, gh_calls, tmp_path):
+    """The feature is story one, so its number, its board item and its blockers never move."""
     copy = tmp_path / "body-copy.md"
     env = {**NUMBERS, **PARKED, "GH_BODY_FILE_COPY": str(copy)}
 
@@ -748,14 +749,40 @@ def test_apply_split_from_a_parked_feature_comments_and_closes_it_last(fake_gh, 
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[-2] == "Closed #60"
-    _dispatch(lines[-1])
+    assert lines[0] == "Kept #60 Grant store"
+    assert "Logged Split" in lines
     calls = gh_calls()
-    comment = next(call for call in calls if call.startswith("issue comment"))
-    close = next(call for call in calls if call.startswith("issue close"))
-    assert calls.index(_api(calls)[-1]) < calls.index(comment) < calls.index(close)
-    assert close == "issue close 60 --repo acme/widgets"
-    assert ("issue comment", "Split into #57, #58, #59.") in _bodies(copy)
+    assert [c for c in calls if c.startswith("issue close")] == []
+    assert len([c for c in calls if c.startswith("issue create")]) == 2
+    assert ("issue comment", "Split: into #57, #58") in _bodies(copy)
+
+
+def test_apply_split_hands_what_waited_on_the_feature_to_every_story(fake_gh, gh_calls, tmp_path):
+    waits = [{"number": 99, "title": "Waits", "state": "open", "repository": {"full_name": "acme/widgets"}}]
+    waiting = json.dumps(waits)
+    env = {**NUMBERS, **PARKED, "GH_BLOCKING": waiting}
+
+    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--from", "60", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "#99 blocked by #57" in result.stdout
+    assert "#99 blocked by #58" in result.stdout
+
+
+def test_apply_split_refuses_a_first_story_that_belongs_elsewhere(fake_gh, gh_calls, tmp_path):
+    led = tmp_path / "led-elsewhere.md"
+    led.write_text(
+        SPLIT_FILE.read_text(encoding="utf-8").replace("- Grant store |", "- acme/other: Grant store |"),
+        encoding="utf-8",
+    )
+
+    result = run_deckhand("new", "apply", "--split", str(led), "--from", "60", env={**NUMBERS, **PARKED})
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "deckhand new apply: the first story of #60 is written into it, so it stays in this repository"
+    )
+    assert _writes(gh_calls()) == []
 
 
 def test_apply_split_refuses_a_from_that_is_not_a_parked_feature(fake_gh, gh_calls):
@@ -768,10 +795,11 @@ def test_apply_split_refuses_a_from_that_is_not_a_parked_feature(fake_gh, gh_cal
 
 
 def test_apply_split_refuses_a_parked_feature_that_was_already_split(fake_gh, gh_calls, tmp_path):
+    """A split writes the numbered body onto the feature, and a body that lists stories has been split."""
     data = json.loads((FIXTURES / "stub-parked.json").read_text(encoding="utf-8"))
-    data["state"] = "CLOSED"
-    closed = tmp_path / "parked-closed.json"
-    closed.write_text(json.dumps(data), encoding="utf-8")
+    data["body"] = _numbered_body()
+    split_already = tmp_path / "parked-split.json"
+    split_already.write_text(json.dumps(data), encoding="utf-8")
 
     result = run_deckhand(
         "new",
@@ -780,11 +808,11 @@ def test_apply_split_refuses_a_parked_feature_that_was_already_split(fake_gh, gh
         str(SPLIT_FILE),
         "--from",
         "60",
-        env={**NUMBERS, "GH_ISSUE_FILE": str(closed)},
+        env={**NUMBERS, "GH_ISSUE_FILE": str(split_already)},
     )
 
     assert result.returncode == 1
-    assert result.stderr.strip() == "deckhand new apply: #60 was already split"
+    assert result.stderr.strip() == "deckhand new apply: #60 is not a parked feature"
     assert result.stdout == ""
     assert _writes(gh_calls()) == []
 

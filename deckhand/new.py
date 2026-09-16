@@ -22,7 +22,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import gh, issue, lint, naming, park, sections, stub, worktree
+from deckhand import gh, issue, lint, log, naming, park, sections, stub, worktree
 from deckhand.config import BODY_LIMIT
 from deckhand.step import (
     Refusal,
@@ -259,32 +259,35 @@ def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
     return 0
 
 
-def _parked(repo: str, number: int) -> None:
-    """Refuse anything but a feature nobody has split yet; this runs before the first write.
+def _parked(repo: str, number: int) -> str:
+    """The feature's URL; refuse anything but a feature nobody has split yet, before the first write.
 
-    A split closes the feature it came from, so a closed one has been split already and running the
-    same file again would open the whole set a second time.
+    A split writes the numbered stub body onto the feature it came from, and that body lists its
+    stories, so a feature that lists them has been split already and running the same file again
+    would open the rest a second time.
     """
-    state, body = issue.sibling(repo, number)
-    if not stub.is_stub(body) or stub.read(body)[1]:
+    story = issue.view(repo, number)
+    if not stub.is_stub(story.body) or stub.read(story.body)[1]:
         raise Refusal(f"#{number} is not a parked feature")
-    if state.lower() != "open":
-        raise Refusal(f"#{number} was already split")
+    return story.url
 
 
 def _split(repo: str, text: str, parked: int | None) -> int:
     """Open one stub per story of a feature, number them all, then record what waits on what.
 
     A story that belongs to another repository is parked there instead, with the requirements and
-    its own sentence, for that repository's session to write. Every write prints as it lands and
+    its own sentence, for that repository's session to write. A feature these stories came from is
+    the first of them rather than a second issue that closes: its number, its board item and
+    everything already waiting on it stay where they are. Every write prints as it lands and
     nothing is retried, so a failure part way through leaves the printed lines as the record.
     """
     try:
         requirements, entries = stub.parse_split(text)
     except ValueError as error:
         raise Refusal(f"split file {error}") from error
-    if parked is not None:
-        _parked(repo, parked)
+    parked_url = _parked(repo, parked) if parked is not None else None
+    if parked is not None and entries[0].repo:
+        raise Refusal(f"the first story of #{parked} is written into it, so it stays in this repository")
     settings = resolved_settings()
     # Every stub carries the whole feature, so the first pass writes it unnumbered: no story can
     # name its siblings' numbers until every issue exists.
@@ -293,10 +296,15 @@ def _split(repo: str, text: str, parked: int | None) -> int:
     numbers: list[int] = []
     urls: list[str] = []
     local: list[int] = []
-    for entry in entries:
+    for position, entry in enumerate(entries):
         if entry.repo:
             body = stub.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
             number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin)
+        elif position == 0 and parked is not None:
+            number, url = parked, parked_url or ""
+            issue.set_title(repo, number, entry.title)
+            print(f"Kept #{number} {entry.title}", flush=True)
+            local.append(number)
         else:
             number, url = issue.create(repo, entry.title, provisional)
             print(f"Created #{number} {entry.title}", flush=True)
@@ -310,21 +318,13 @@ def _split(repo: str, text: str, parked: int | None) -> int:
         issue.update_body(repo, number, body)
         print(f"Numbered #{number}", flush=True)
         park.board_draft(settings, repo, number, url, None)  # a stub is not drafted yet; its author logs that
-    for entry, number in zip(entries, numbers, strict=True):
-        home = entry.repo or repo
-        for position in entry.after:
-            blocker = (entries[position - 1].repo or repo, numbers[position - 1])
-            blocked, by = ref_label(home, number, repo), ref_label(*blocker, repo)
-            try:
-                issue.add_dependency(home, number, blocked_by=blocker)
-            except Exception as error:  # the edge is the one thing the printed record cannot show
-                raise Refusal(f"{blocked} blocked by {by} failed: {reason(error)}; add it by hand") from error
-            print(f"{blocked} blocked by {by}", flush=True)
-    if parked is not None:
-        named = [ref_label(e.repo or repo, n, repo) for e, n in zip(entries, numbers, strict=True)]
-        issue.comment(repo, parked, f"Split into {', '.join(named)}.")
-        issue.close(repo, parked)
-        print(f"Closed #{parked}", flush=True)
+    park.wire(repo, entries, numbers)
+    siblings = [(e.repo or repo, n) for e, n in zip(entries[1:], numbers[1:], strict=True)]
+    if parked is not None and siblings:  # one story shed nothing, so there is nothing to say or inherit
+        named = ", ".join(ref_label(where, number, repo) for where, number in siblings)
+        issue.comment(repo, parked, log.checked(f"Split: into {named}"))
+        print("Logged Split", flush=True)
+        park.inherit(repo, parked, siblings)
     # An agent gets no plugin-root substitution, so the launcher it is to run travels in the line.
     stubs = " ".join(f"#{number}" for number in local)
     print(f"Dispatch deckhand:author for each of {stubs} with {Path(sys.argv[0]).resolve()}")
