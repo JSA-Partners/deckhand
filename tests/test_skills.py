@@ -19,6 +19,7 @@ AGENTS = sorted((ROOT / "agents").glob("*.md"))
 
 # The one command each skill injects, by skill name.
 INJECTS = {
+    "captain": "captain context",
     "commit": "commit context",
     "document": "document context",
     "new": "new context",
@@ -28,7 +29,7 @@ INJECTS = {
 
 # The skills a person types and the model never picks: each one writes to GitHub, so its timing
 # belongs to the person.
-TYPED = {"setup", "new", "next"}
+TYPED = {"setup", "new", "next", "captain"}
 
 # The steps `next` carries. They were skills once; nothing a person reads may still name one as a
 # command to type.
@@ -185,7 +186,7 @@ def test_every_skill_stays_under_its_word_limit(skill):
 
 
 def test_the_hidden_skills_are_gone():
-    assert sorted(p.name for p in SKILLS) == ["commit", "document", "new", "next", "setup"]
+    assert sorted(p.name for p in SKILLS) == ["captain", "commit", "document", "new", "next", "setup"]
 
 
 def test_the_next_skill_speaks_and_asks_with_a_recommendation():
