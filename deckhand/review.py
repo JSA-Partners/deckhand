@@ -246,6 +246,32 @@ def _parse_decision(line: str) -> tuple[str, str, str] | None:
     return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
 
 
+SHAPES = ("findings", "verdicts", "decisions")
+
+
+def _reads_as(text: str, passed: str) -> str | None:
+    """The one of `SHAPES` every line of `text` parses as, when that is not `passed`; else None.
+
+    The three files are three positional arguments of the same shape, so a swap arrives as a format
+    error about one line. Naming the shape the whole file does read as turns that into the mistake
+    it is, and the order is what the person needs to hear next.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    for shape, parse in zip(SHAPES, (_parse, _parse_verdict, _parse_decision), strict=True):
+        if shape != passed and all(parse(line) is not None for line in lines):
+            return shape
+    return None
+
+
+def _refusal(number: int, expected: str, text: str, passed: str) -> Refusal:
+    """The format refusal for one line, saying which of the three shapes the whole file reads as."""
+    found = _reads_as(text, passed)
+    hint = f"; that file reads as {found}, and the order is findings, verdicts, decisions" if found else ""
+    return Refusal(f"line {number}: {expected}{hint}")
+
+
 def _by_finding(
     text: str, found: list[Finding], parse: Callable[[str], tuple[str, str, str] | None], noun: str, expected: str
 ) -> dict[str, tuple[str, str]]:
@@ -261,7 +287,7 @@ def _by_finding(
             continue
         parsed = parse(line)
         if parsed is None:
-            raise Refusal(f"line {number}: {expected}")
+            raise _refusal(number, expected, text, f"{noun}s")
         ref, word, why = parsed
         if ref not in ids:
             raise Refusal(f"line {number}: {ref} is not a finding")
@@ -302,7 +328,7 @@ def findings(text: str) -> list[Finding]:
             continue
         found = _parse(line)
         if found is None:
-            raise Refusal(f"line {number}: {_EXPECTED}")
+            raise _refusal(number, _EXPECTED, text, "findings")
         if found.lens not in known:
             raise Refusal(f"line {number}: no lens named '{found.lens}'")
         if found.id in seen:

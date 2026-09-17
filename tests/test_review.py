@@ -584,3 +584,32 @@ def test_a_verdict_reason_may_contain_a_pipe():
         "REJECTED",
         "The guard reads `a|b` already.",
     )
+
+
+# --- a file passed where another one belongs -----------------------------------
+
+
+def test_a_verdicts_file_passed_as_findings_says_which_shape_it_reads_as(fake_gh, tmp_path):
+    result = _apply(
+        tmp_path,
+        findings="chaos.1 | CONFIRMED\n",
+        verdicts="chaos.1 | CONFIRMED\n",
+        decisions="chaos.1 | accepted\n",
+    )
+
+    assert result.returncode == 1
+    assert "reads as verdicts" in result.stderr
+    assert "findings, verdicts, decisions" in result.stderr
+
+
+def test_a_genuinely_malformed_findings_file_still_gets_the_format(fake_gh, tmp_path):
+    result = _apply(
+        tmp_path,
+        findings="this is not a finding at all\n",
+        verdicts="chaos.1 | CONFIRMED\n",
+        decisions="chaos.1 | accepted\n",
+    )
+
+    assert result.returncode == 1
+    assert "expected <lens>.<n>" in result.stderr
+    assert "reads as" not in result.stderr
