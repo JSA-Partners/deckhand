@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from deckhand import sessions
@@ -107,3 +108,49 @@ def test_a_session_whose_last_word_was_a_tool_result_is_not_waiting(tmp_path):
         }
     ]
     assert sessions.pulse(_transcript(tmp_path, extra=extra), REPOS, now=0.0).waiting is False
+
+
+def test_sessions_are_lettered_by_when_they_started(tmp_path, monkeypatch):
+    root = tmp_path / "projects"
+    for name, start in (("old.jsonl", 1_000_000), ("new.jsonl", 2_000_000)):
+        _write(
+            root / "acme" / name,
+            [
+                {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+                {"type": "cost-state", "totalCostUSD": 1.0, "startTime": start * 1000},
+            ],
+        )
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
+    found = sessions.discover(REPOS, since=999, exclude="")
+    assert [(pulse.label, pulse.session) for pulse in found] == [("a", "old"), ("b", "new")]
+
+
+def test_the_captains_own_session_is_not_in_the_fleet(tmp_path, monkeypatch):
+    root = tmp_path / "projects"
+    _write(
+        root / "acme" / "mine.jsonl", [{"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}}]
+    )
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
+    assert sessions.discover(REPOS, since=999, exclude="mine") == []
+
+
+def test_a_transcript_older_than_the_window_is_left_alone(tmp_path, monkeypatch):
+    root = tmp_path / "projects"
+    path = _write(
+        root / "acme" / "stale.jsonl", [{"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}}]
+    )
+    os.utime(path, (0, 0))
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
+    assert sessions.discover(REPOS, since=24, exclude="") == []
+
+
+def test_a_deep_read_gives_the_last_prompt_and_the_last_word(tmp_path):
+    records = [
+        {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+        {"type": "last-prompt", "lastPrompt": "proceed"},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Which kind is it?"}]}},
+    ]
+    path = _write(tmp_path / "s.jsonl", records)
+    read = sessions.deep(path, limit=5)
+    assert read.prompt == "proceed"
+    assert read.lines[-1] == "assistant: Which kind is it?"

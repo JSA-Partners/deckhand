@@ -12,7 +12,7 @@ import os
 import re
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 CHUNK = 262_144
@@ -20,6 +20,10 @@ CHUNK = 262_144
 # transcript whose last deckhand command is older than this is reported without one.
 CAP = 4_194_304
 FREE = "free"
+DEFAULT_ROOT = Path.home() / ".claude" / "projects"
+LETTERS = "abcdefghijklmnopqrstuvwxyz"
+DEEP_LINES = 12
+_SAID = 400
 
 _COMMAND = re.compile(r"<command-name>/deckhand:([a-z]+)</command-name>")
 _ARGS = re.compile(r"<command-args>([^<]*)</command-args>")
@@ -155,3 +159,56 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
         started=started,
         path=path,
     )
+
+
+@dataclass(frozen=True)
+class Deep:
+    """One session read properly, which is paid for only when a person asks about that session."""
+
+    prompt: str
+    lines: list[str]
+
+
+def root() -> Path:
+    """Where Claude Code keeps its transcripts; `DECKHAND_SESSIONS` moves it, which is what tests do."""
+    return Path(os.environ.get("DECKHAND_SESSIONS") or DEFAULT_ROOT)
+
+
+def _label(index: int) -> str:
+    """`a` to `z`, then `aa`; a letter is how a person names a session back to the captain."""
+    letters = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, len(LETTERS))
+        letters = LETTERS[remainder] + letters
+    return letters
+
+
+def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
+    """Every session working in one of `repos` and touched within `since` hours, oldest start first."""
+    cutoff = time.time() - since * 3600
+    found = []
+    for path in sorted(root().glob("*/*.jsonl")):
+        if path.stem == exclude or path.stat().st_mtime < cutoff:
+            continue
+        beat = pulse(path, repos)
+        if beat is not None:
+            found.append(beat)
+    found.sort(key=lambda beat: (beat.started, beat.session))
+    return [replace(beat, label=_label(index)) for index, beat in enumerate(found)]
+
+
+def deep(path: Path, limit: int = DEEP_LINES) -> Deep:
+    """The tail of one transcript: the last prompt a person typed, and what has been said since."""
+    prompt = ""
+    lines: list[str] = []
+    for record in records_back(path):
+        if not prompt and record.get("type") == "last-prompt":
+            prompt = " ".join(str(record.get("lastPrompt") or "").split())
+        if len(lines) < limit:
+            said = " ".join(_text(record).split())
+            if said:
+                lines.append(f"{record.get('type')}: {said[:_SAID]}")
+        if prompt and len(lines) >= limit:
+            break
+    return Deep(prompt=prompt, lines=list(reversed(lines)))
