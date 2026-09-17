@@ -183,6 +183,7 @@ def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
 
     assert {name: _verbs(sub) for name, sub in commands.items()} == {
         "amend": ["apply", "context"],
+        "captain": ["context"],
         "log": [],
         "commit": ["context"],
         "document": ["context"],
