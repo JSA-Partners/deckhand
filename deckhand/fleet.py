@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from deckhand import board, gh, issue
+from deckhand import board, gh, issue, log, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -101,3 +101,39 @@ def _nodes(settings: Settings) -> list[dict]:
         project = ((page.get("data") or {}).get(root) or {}).get("projectV2") or {}
         found.extend((project.get("items") or {}).get("nodes") or [])
     return found
+
+
+def allowed(story: Story) -> tuple[str, ...]:
+    """The board Statuses this story's log allows, canonical one first.
+
+    Every status is written by a step's apply, so a board holding anything else was moved by
+    something that was not a step. Boarding is the one place a person's answer sits between two
+    statuses: a reviewed story is Backlog once the question has been answered and Draft until then.
+    """
+    if story.closed:
+        return (DONE,)
+    if log.last(story.issue, "Started:") is not None:
+        return ("In Progress",)
+    if log.last(story.issue, "Review:") is not None:
+        return ("Backlog", "Draft")
+    return ("Draft",)
+
+
+def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
+    """The one thing worth saying about this story beyond its column."""
+    if story.status == "In Progress":
+        if behind:
+            return "pull request behind main"
+        if log.last(story.issue, "Pull request:") is not None:
+            return "pull request open"
+        if log.last(story.issue, "Reviewed:") is not None:
+            return "reviewed, no pull request"
+        return "building"
+    if blockers:
+        named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
+        return f"waits on {named}"
+    if story.status == "Backlog":
+        return "ready"
+    if story.status == DONE and story.closed:
+        return "done"
+    return "reviewed, not boarded" if log.last(story.issue, "Review:") is not None else "review not run"
