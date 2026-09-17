@@ -297,3 +297,11 @@ def test_the_next_skill_boards_a_story_that_waits_on_others():
     flat = " ".join(body.split())
     assert "--blocked-by" in flat
     assert "third person" in flat
+
+
+def test_the_next_skill_says_which_way_a_split_runs_and_which_model_to_use():
+    _, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+
+    flat = " ".join(body.split())
+    for phrase in ("--before", "least powerful model"):
+        assert phrase in flat, phrase

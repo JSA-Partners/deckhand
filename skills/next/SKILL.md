@@ -67,7 +67,7 @@ why and never where it came from, with `--title "<new title>"` when the Story no
 it. If the amend changed what the story delivers, recommend reviewing
 again and ask; otherwise carry on to the board. When the briefing's step is reconsider, that
 question is the step. Work that belongs in its own story: overwrite the draft with its whole body
-and run `amend apply $issue <draft> --new-issue "<title>"`.
+and run `amend apply $issue <draft> --new-issue "<title>"`; work that must land first takes `--before`.
 
 ## Board
 
@@ -83,7 +83,8 @@ then carry on to the check. Review it again: the Review section. Not yet: stop.
 From the start context (above, or run it), compare the plan with the code and with what landed on
 main since the review; say what you found and recommend build, amend, or review again. When they say build, run
 `start apply $issue --note "<the check's conclusion>"`; it prints the story's worktree, where the
-build runs. Then superpowers:subagent-driven-development on the plan, one commit per task with
+build runs. Then superpowers:subagent-driven-development on the plan, using the least
+powerful model that can do the task, one commit per task with
 deckhand:commit, nothing pushed. A change that serves the
 criteria as written: build it and run `log $issue "Deviation: <what and why>"`. A change that
 alters what the story delivers: say so in one sentence with the diff's size and a recommendation,
@@ -113,9 +114,8 @@ and need no pass, because docs/claude is Claude's alone.
 ## Pull request
 
 From the finish context (above, or run it), write the summary it names: one or two paragraphs in
-the third person saying what the branch changed and what it means for a reader, in the shape of the
-repository's recent merged pull requests, never "I" or "we". The story's "so that" clause is where
-the why comes from. Read them the title and that summary, and on yes run
+the third person, never "I" or "we", saying what the branch changed and what it means for a reader,
+in the shape of the repository's recent merged pull requests. The story's "so that" clause has the why. Read them the title and that summary, and on yes run
 `finish apply $issue <summary> --actual P --check "<cmd>"`, Actual in the estimate's units and the size the
 work turned out to be, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
