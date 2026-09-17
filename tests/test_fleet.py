@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from deckhand import fleet
+from deckhand import fleet, sessions
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -113,3 +113,59 @@ def test_a_cycle_leaves_everyone_placed():
     }
     ranked = fleet.order(_backlog(), blockers)
     assert sorted(row.story.number for row in ranked) == [13, 253, 257, 258]
+
+
+def _pulse(story: str, label: str = "a", repo: str = "acme/widgets"):
+    return sessions.Pulse(
+        label=label,
+        session=label,
+        repo=repo,
+        story=story,
+        command="next",
+        idle=60.0,
+        cost=1.0,
+        waiting=False,
+        started=1.0,
+        path=Path("x.jsonl"),
+    )
+
+
+def test_a_done_story_whose_issue_is_open_is_an_anomaly():
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[])
+    entry = next(item for item in found if item.number == 268)
+    assert entry.what == "Done, but the log allows Draft"
+    assert entry.fix == "Status Draft"
+
+
+def test_a_story_in_flight_with_nobody_on_it_is_reported_and_not_fixed():
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[])
+    entry = next(item for item in found if item.number == 117)
+    assert entry.what == "In Progress, no session open"
+    assert entry.fix == "none"
+
+
+def test_a_story_two_sessions_share_is_reported():
+    pulses = [_pulse("117", "a"), _pulse("117", "b")]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    entry = next(item for item in found if item.number == 117)
+    assert entry.what == "sessions a and b are both on it"
+
+
+def test_a_pull_request_behind_main_names_the_command():
+    behind = {("acme/widgets", 117)}
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=behind, pulses=[_pulse("117")])
+    entry = next(item for item in found if item.number == 117)
+    assert entry.fix == "run next 117"
+
+
+def test_a_drafted_issue_that_never_reached_the_board_is_an_anomaly():
+    missing = [("acme/widgets", 281, "https://github.com/acme/widgets/issues/281")]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, set(), [], missing)
+    entry = next(item for item in found if item.number == 281)
+    assert (entry.what, entry.fix) == ("drafted, but not on the board", "add it")
+
+
+def test_a_fleet_that_agrees_with_its_logs_has_no_status_anomaly():
+    kept = [story for story in fleet.stories(_nodes()) if story.number != 268]
+    found = fleet.anomalies(kept, BLOCKERS, behind=set(), pulses=[_pulse("117")])
+    assert [item.number for item in found] == []

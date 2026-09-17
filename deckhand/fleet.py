@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from deckhand import board, gh, issue, log, step
+from deckhand import board, gh, issue, log, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -222,3 +222,50 @@ def order(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
         Ranked(story=story, why=_why(story, blockers.get(story.key) or [], weights[story.key], points))
         for story in placed
     ]
+
+
+@dataclass(frozen=True)
+class Anomaly:
+    """Something on the board that no step could have produced, and what puts it right."""
+
+    number: int
+    repo: str
+    what: str
+    fix: str
+
+
+def anomalies(
+    found: list[Story],
+    blockers: Blockers,
+    behind: set[Key],
+    pulses: list,
+    missing: list[tuple[str, int, str]] | None = None,
+) -> list[Anomaly]:
+    """Every disagreement worth a line: a wrong Status, a story off the board, a stall, a cycle."""
+    waiting = _waiting(blockers)
+    on: dict[str, list[str]] = {}
+    for beat in pulses:
+        if beat.story != sessions.FREE:
+            on.setdefault(beat.story, []).append(beat.label)
+    out: list[Anomaly] = []
+    for story in found:
+        may = allowed(story)
+        if story.status and story.status not in may:
+            out.append(
+                Anomaly(story.number, story.repo, f"{story.status}, but the log allows {may[0]}", f"Status {may[0]}")
+            )
+        labels = on.get(str(story.number)) or []
+        if story.status == "In Progress" and not labels:
+            out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
+        if len(labels) > 1:
+            named = " and ".join(labels)
+            out.append(Anomaly(story.number, story.repo, f"sessions {named} are both on it", "close one"))
+        if story.key in behind:
+            out.append(Anomaly(story.number, story.repo, "pull request behind main", f"run next {story.number}"))
+        if story.key in _downstream(story.key, waiting) or story.key in {
+            (where, number) for where, number, _ in blockers.get(story.key) or []
+        }:
+            out.append(Anomaly(story.number, story.repo, "its blockers run in a circle", "none"))
+    for repo, number, _ in missing or []:
+        out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
+    return out
