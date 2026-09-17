@@ -142,6 +142,14 @@ elif head == "issue view":
     # A per-number fixture, so one call can answer for a sibling and another for the issue itself.
     per_issue = f"GH_ISSUE_FILE_{number}"
     respond(fixture(per_issue if per_issue in os.environ else "GH_ISSUE_FILE", "issue.json"))
+elif head == "issue list":
+    # A fleet asks each repository in turn, so the answer is keyed by slug the way issue view is by number.
+    slug = ""
+    for i, a in enumerate(argv):
+        if a == "--repo" and i + 1 < len(argv):
+            slug = argv[i + 1]
+    per_repo = "GH_ISSUE_LIST_" + slug.replace("/", "_").replace("-", "_").upper()
+    respond(fixture(per_repo if per_repo in os.environ else "GH_ISSUE_LIST_FILE", "issue-list.json"))
 elif head == "issue create":
     # $GH_NEW_ISSUE takes a comma-separated list, consumed in order across calls, so one split can
     # open several issues; a single value answers every call, as it always did.
@@ -195,6 +203,8 @@ elif head == "api graphql":
         respond('{"data":{"createProjectV2Field":{}}}')
     if "updateProjectV2Field" in joined:
         respond('{"data":{"updateProjectV2Field":{}}}')
+    if "updateProjectV2ItemPosition" in joined:
+        respond('{"data":{"updateProjectV2ItemPosition":{}}}')
     # The other project queries match on projectV2(number, so they answer an organization( and a
     # user( form alike; the linked-projects query is the only one that names projectsV2(first.
     if "projectsV2(first" in joined:
@@ -244,6 +254,12 @@ elif argv and argv[0] == "api":
         if "POST" in argv and os.environ.get("GH_DEPENDENCY_FAILS"):
             print("could not add dependency", file=sys.stderr)
             sys.exit(1)
+        # A fleet has a different answer per issue, so $GH_BLOCKED_BY_MAP keys the answers by number.
+        mapped = os.environ.get("GH_BLOCKED_BY_MAP")
+        if mapped:
+            parts = path.split("/")
+            number = parts[parts.index("issues") + 1]
+            respond(json.dumps(json.load(open(mapped)).get(number, [])))
         respond(os.environ.get("GH_BLOCKED_BY", "[]"))
     if path.endswith("/update-branch"):
         if os.environ.get("GH_UPDATE_BRANCH_FAILS"):

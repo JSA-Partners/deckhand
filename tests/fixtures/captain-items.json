@@ -1,0 +1,299 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "items": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "I_253",
+              "content": {
+                "number": 253,
+                "title": "Seed the role matrix",
+                "url": "https://github.com/acme/widgets/issues/253",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 3,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_257",
+              "content": {
+                "number": 257,
+                "title": "Export the role matrix",
+                "url": "https://github.com/acme/widgets/issues/257",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 5,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_258",
+              "content": {
+                "number": 258,
+                "title": "Show the role matrix",
+                "url": "https://github.com/acme/gadgets/issues/258",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/gadgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 2,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_13",
+              "content": {
+                "number": 13,
+                "title": "Deploy the registry split",
+                "url": "https://github.com/acme/gadgets/issues/13",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/gadgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 3,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_117",
+              "content": {
+                "number": 117,
+                "title": "Warn on an unconfirmed email",
+                "url": "https://github.com/acme/widgets/issues/117",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Started: on feat-117-warn",
+                      "createdAt": "2026-09-12T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Pull request: https://github.com/acme/widgets/pull/1000",
+                      "createdAt": "2026-09-13T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "In Progress",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 2,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_268",
+              "content": {
+                "number": 268,
+                "title": "Rate limit the token issuer",
+                "url": "https://github.com/acme/widgets/issues/268",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
