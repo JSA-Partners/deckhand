@@ -12,8 +12,9 @@ from __future__ import annotations
 import argparse
 import os
 
-from deckhand import fleet, gh, sessions
-from deckhand.step import block, indented, settings_or_error, step, usable
+from deckhand import board, config, fields, fleet, gh, sessions
+from deckhand.config import Settings
+from deckhand.step import Refusal, block, indented, settings_or_error, step, usable
 
 WINDOW = 24.0
 
@@ -124,7 +125,6 @@ def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
     return 0
 
 
-@step("captain", None, issue_bound=False, configure_context=_configure_context)
 def context(args: argparse.Namespace) -> int:
     """Read the fleet: every story, every session, the build order, and anything out of place."""
     settings = usable(settings_or_error())
@@ -142,4 +142,59 @@ def context(args: argparse.Namespace) -> int:
         block("## Sessions", lambda: _session_rows(pulses))
         print()
         block("## Anomalies", lambda: _anomaly_rows(read, pulses))
+    return 0
+
+
+def _configure_apply(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--order", action="store_true", help="write the build order onto the board")
+    parser.add_argument("--repair", action="store_true", help="set every Status the board holds that its log forbids")
+
+
+def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
+    ranked = _ranked(read)
+    if len(ranked) < 2:
+        raise Refusal("fewer than two stories in Backlog, so there is no order to write")
+    project = gh.project_id(settings)
+    after: str | None = None
+    for row in ranked:
+        board.move(project, row.story.item, after)
+        after = row.story.item
+    print(f"Ordered {len(ranked)} stories")
+    print("A view with its own sort shows that sort rather than the board order.")
+    return len(ranked)
+
+
+def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
+    wrong = [
+        (story, fleet.allowed(story)[0])
+        for story in read.stories
+        if story.status and story.status not in fleet.allowed(story)
+    ]
+    if not wrong and not read.missing:
+        raise Refusal(
+            f"nothing to repair: every Status of the {len(read.stories)} stories agrees with its log, "
+            "and no drafted issue is off the board"
+        )
+    for story, want in wrong:
+        # Several stories may be put right in one run, so the line names which one rather than
+        # returning the bare `Status=X` a step prints about the story a person already named.
+        fields.set_field(settings, story.repo, story.number, "Status", want)
+        print(f"{story.repo}#{story.number} Status {want}")
+    for repo, number, url in read.missing:
+        board.add(settings, url)
+        print(f"Added {repo}#{number} to the board")
+    return len(wrong) + len(read.missing)
+
+
+@step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)
+def apply(args: argparse.Namespace) -> int:
+    """Write the build order onto the board, or set a Status the board holds that its log forbids."""
+    if not args.order and not args.repair:
+        raise Refusal("say what to write: --order, --repair, or both")
+    settings = config.load()
+    read = fleet.read(settings)
+    if args.order:
+        _order_writes(settings, read)
+    if args.repair:
+        _repair_writes(settings, read)
     return 0

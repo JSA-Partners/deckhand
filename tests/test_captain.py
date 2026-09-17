@@ -85,3 +85,27 @@ def test_a_named_session_prints_its_last_prompt_and_its_last_word(fleet_env, cap
 def test_a_session_letter_nobody_has_says_so(fleet_env, capsys):
     assert cli.main(["captain", "context", "--session", "z"]) == 0
     assert "no session z" in capsys.readouterr().out
+
+
+def test_an_apply_with_no_flag_refuses(fleet_env, capsys):
+    assert cli.main(["captain", "apply"]) == 1
+    assert "--order" in capsys.readouterr().err
+
+
+def test_the_order_is_written_to_the_board(fleet_env, gh_calls, capsys):
+    assert cli.main(["captain", "apply", "--order"]) == 0
+    calls = "\n".join(gh_calls())
+    assert calls.count("updateProjectV2ItemPosition") == 4
+    assert "Ordered 4 stories" in capsys.readouterr().out
+
+
+def test_a_repair_sets_the_status_the_log_allows(fleet_env, capsys):
+    assert cli.main(["captain", "apply", "--repair"]) == 0
+    out = capsys.readouterr().out
+    assert "268" in out and "Draft" in out
+
+
+def test_a_repair_with_nothing_to_repair_refuses(fleet_env, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-clean.json"))
+    assert cli.main(["captain", "apply", "--repair"]) == 1
+    assert "nothing to repair" in capsys.readouterr().err
