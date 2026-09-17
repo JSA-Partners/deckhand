@@ -288,7 +288,7 @@ def test_pull_request_checks_names_the_failed_and_counts_the_running(fake_gh, gh
     )
 
     assert issue.pull_request_checks(REPO, PR_URL) == (["Unit tests"], 2)
-    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json statusCheckRollup"]
+    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json {issue.PR_FIELDS}"]
 
 
 def test_pull_request_checks_is_clean_with_no_checks(fake_gh, monkeypatch):
@@ -301,7 +301,7 @@ def test_pull_request_state_returns_the_url_while_it_is_open(fake_gh, gh_calls, 
     monkeypatch.setenv("GH_PR_STATE", "OPEN")
 
     assert issue.pull_request_state(REPO, PR_URL) == PR_URL
-    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json state,url"]
+    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json {issue.PR_FIELDS}"]
 
 
 @pytest.mark.parametrize("state", ["MERGED", "CLOSED"])

@@ -204,6 +204,10 @@ def pull_request(repo: str, branch: str) -> str | None:
     return data[0].get("url") if isinstance(data, list) and data else None
 
 
+# One field list for every read of a pull request, so a briefing that wants two of them makes one
+# call: `gh.cached` keys on the arguments, and three readers asking for three sets defeated it.
+PR_FIELDS = "state,url,statusCheckRollup,mergeStateStatus"
+
 FAILED = ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE")
 SETTLED = ("SUCCESS", "SKIPPED", "NEUTRAL")
 
@@ -215,7 +219,7 @@ def pull_request_checks(repo: str, url: str) -> tuple[list[str], int]:
     checks are the one thing left that GitHub decides after the push.
     """
     gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", "statusCheckRollup")
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
     rollup = data.get("statusCheckRollup") if isinstance(data, dict) else None
     failed: list[str] = []
     pending = 0
@@ -237,7 +241,7 @@ BEHIND = {"BEHIND", "DIRTY"}  # main moved on, or the merge would conflict; both
 def merge_state(repo: str, url: str) -> str:
     """GitHub's merge state for the pull request at `url`, upper case; empty when it reports none."""
     gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", "mergeStateStatus")
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
     return str(data.get("mergeStateStatus") or "").upper() if isinstance(data, dict) else ""
 
 
@@ -248,5 +252,5 @@ def pull_request_state(repo: str, url: str) -> str | None:
     URL is the one handle that finds it wherever it was pushed from.
     """
     gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", "state,url")
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
     return data.get("url") if isinstance(data, dict) and data.get("state") == "OPEN" else None

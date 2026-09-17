@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import issue
 from deckhand.next import Facts, decide
 from tests.conftest import FIXTURES, fieldvalues, run_deckhand, run_git
 
@@ -450,7 +451,7 @@ def test_the_pull_request_is_read_from_the_log_when_the_branch_is_elsewhere(fake
 
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Step: merge", f"Pull request open: {PR_URL}"], result.stdout
-    assert f"pr view {PR_URL} --repo acme/widgets --json state,url" in gh_calls()
+    assert f"pr view {PR_URL} --repo acme/widgets --json {issue.PR_FIELDS}" in gh_calls()
     assert not any(call.startswith("pr list") for call in gh_calls())
 
 
@@ -786,3 +787,14 @@ def test_a_context_reads_each_fact_once(fake_gh, gh_calls, repo, tmp_path):
     _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
 
     assert len([c for c in gh_calls() if c.startswith("issue view 248")]) == 1
+
+
+def test_a_briefing_reads_the_pull_request_once(fake_gh, gh_calls, repo, tmp_path):
+    """Three readers asking for one superset of fields is one call inside a context's cache."""
+    story = _logged(tmp_path, "pr.json", _entry("Pull request: " + PR_URL, "2026-09-05T10:00:00Z"))
+
+    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "OPEN"}
+
+    _next(repo, env=env)
+
+    assert len([c for c in gh_calls() if c.startswith("pr view")]) == 1
