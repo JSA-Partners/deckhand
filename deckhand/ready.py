@@ -40,6 +40,10 @@ from deckhand.step import (
     usable,
 )
 
+# About three quarters of the body limit. Over it a story is usually several, and the ninety per
+# cent note was printed past five stories in one evening, so the gate is here where scope is judged.
+BOARDING_LIMIT = 50_000
+
 FIELDS = ("Kind", "Story Points", "Actual")
 LIMIT = 20
 SETTLE = 2.0
@@ -185,6 +189,9 @@ def _hold_status(settings: Settings, repo: str, number: int, status: str) -> Non
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kind", required=True, help="the kind of change, one the project defines")
+    parser.add_argument(
+        "--oversized", metavar="WHY", help="board a body over the size gate, saying why it is one story"
+    )
     parser.add_argument("--points", required=True, help="the story points, a non-negative integer")
     parser.add_argument(
         "--blocked-by",
@@ -206,6 +213,12 @@ def apply(args: argparse.Namespace) -> int:
         raise Refusal(f"kind must be one of: {', '.join(settings.kinds)}")
     points = _points(args.points)
     _reviewed(story, args.issue)
+    size = len(story.body.replace("\r\n", "\n"))
+    if size > BOARDING_LIMIT and not args.oversized:
+        raise Refusal(
+            f"body is {size} characters; a story over {BOARDING_LIMIT} is usually more than one story. "
+            "Split it, or board it with --oversized '<why it is one>'"
+        )
     try:
         blockers = list(dict.fromkeys(issue_ref(value, repo) for value in args.blocked_by or []))
     except ValueError as error:
@@ -229,4 +242,7 @@ def apply(args: argparse.Namespace) -> int:
     print(fields.set_field(settings, repo, args.issue, "Status", status))
     if added:
         _hold_status(settings, repo, args.issue, status)
+    if args.oversized:  # the size was judged here, so the judgment belongs on the record here
+        issue.comment(repo, args.issue, log.checked(f"Noted: boarded at {size} characters. {args.oversized}"))
+        print("Logged Noted")
     return 0

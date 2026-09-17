@@ -539,3 +539,41 @@ def test_apply_refuses_a_blocker_that_is_not_a_reference(fake_gh, gh_calls, tmp_
     assert result.returncode == 1
     assert "owner/name#M" in result.stderr
     assert _writes(gh_calls) == []
+
+
+# --- the size gate --------------------------------------------------------------
+
+OVERSIZED = "### Story\n\nAs a maintainer, I want one thing, so that it is done.\n\n" + "x" * 50_000
+
+
+def _ready(tmp_path: Path, body: str, *extra: str):
+    """Board 248 with `body` as its reviewed body, plus any extra flags."""
+    data = json.loads((FIXTURES / "issue-reviewed.json").read_text(encoding="utf-8"))
+    data["body"] = body
+    path = tmp_path / "sized.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return _apply("--kind", "feat", "--points", "2", *extra, env={"GH_ISSUE_FILE": str(path)})
+
+
+def test_a_body_over_the_ceiling_is_refused_at_boarding(fake_gh, gh_calls, tmp_path):
+    result = _ready(tmp_path, OVERSIZED)
+
+    assert result.returncode == 1
+    assert "is usually more than one story" in result.stderr
+    assert "--oversized" in result.stderr
+    assert [c for c in gh_calls() if "item-edit" in c] == []
+
+
+def test_oversized_boards_it_and_logs_the_reason(fake_gh, gh_calls, tmp_path):
+    result = _ready(tmp_path, OVERSIZED, "--oversized", "The cutover is one change across 56 routes.")
+
+    assert result.returncode == 0, result.stderr
+    assert "Logged Noted" in result.stdout
+    assert [c for c in gh_calls() if "item-edit" in c] != []
+
+
+def test_a_body_under_the_ceiling_boards_untouched(fake_gh, tmp_path):
+    result = _ready(tmp_path, "### Story\n\nAs a maintainer, I want one thing, so that it is done.\n")
+
+    assert result.returncode == 0, result.stderr
+    assert "Logged Noted" not in result.stdout
