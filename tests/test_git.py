@@ -98,3 +98,13 @@ def test_run_keeps_the_whole_stderr_on_the_error(repo):
 
     assert str(caught.value).startswith("fatal:")
     assert str(caught.value) in caught.value.stderr
+
+
+def test_a_command_outside_a_repository_says_so_in_deckhands_words(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(git.GitError) as caught:
+        git.run("rev-parse", "--show-toplevel")
+
+    assert "not inside a git repository" in str(caught.value)
+    assert str(tmp_path) in str(caught.value)

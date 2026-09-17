@@ -13,6 +13,7 @@ from pathlib import Path
 
 MARKERS = ("fatal:", "error:")
 REJECTED = "! [rejected]"
+NO_REPO = "not a git repository"
 
 
 class GitError(Exception):
@@ -60,5 +61,10 @@ def run(*args: str, cwd: Path | None = None) -> str:
         raise GitError("git is not installed or not on PATH") from error
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
+        if NO_REPO in stderr:
+            # git names the directory it searched from; what a caller needs is where it ran and that
+            # deckhand wanted a repository, because the usual cause is a step run from the cache.
+            where = cwd or Path.cwd()
+            raise GitError(f"not inside a git repository: {where}; run deckhand from the clone", stderr)
         raise GitError(message(stderr) or f"git {' '.join(args)} failed", stderr)
     return result.stdout.decode("utf-8", errors="replace").strip("\n")
