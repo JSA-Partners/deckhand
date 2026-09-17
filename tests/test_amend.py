@@ -579,3 +579,44 @@ def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Updated #248 https://github.com/acme/widgets/issues/248", "Logged Amended"]
     assert lines[2].startswith("Body is ")
+
+
+# --- which way a split runs ----------------------------------------------------
+
+
+def _split_out(tmp_path: Path, *extra: str, copy: Path | None = None):
+    """Split the valid body out as its own story, with any extra flags."""
+    body = (FIXTURES / "body-valid.md").read_text(encoding="utf-8")
+    env = {**REVIEWED}
+    if copy is not None:
+        env["GH_BODY_FILE_COPY"] = str(copy)
+    return run_deckhand("amend", "apply", "248", _draft(tmp_path, body), "--new-issue", TITLE, *extra, env=env)
+
+
+def test_before_makes_this_story_wait_on_the_new_one(fake_gh, tmp_path):
+    copy = tmp_path / "bodies.md"
+
+    result = _split_out(tmp_path, "--before", copy=copy)
+
+    assert result.returncode == 0, result.stderr
+    assert "Blocks #248" in result.stdout
+    assert f"Split: #999 {TITLE}, which this story waits on." in copy.read_text(encoding="utf-8")
+
+
+def test_the_default_still_makes_the_new_story_follow(fake_gh, tmp_path):
+    copy = tmp_path / "bodies.md"
+
+    result = _split_out(tmp_path, copy=copy)
+
+    assert result.returncode == 0, result.stderr
+    assert "Blocked by #248" in result.stdout
+    assert f"Split: #999 {TITLE}, blocked by this story." in copy.read_text(encoding="utf-8")
+
+
+def test_before_without_new_issue_is_a_usage_error(fake_gh, tmp_path):
+    body = (FIXTURES / "body-valid.md").read_text(encoding="utf-8")
+
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path, body), "--note", "A note", "--before", env=REVIEWED)
+
+    assert result.returncode == 2
+    assert "--before is only for --new-issue" in result.stderr

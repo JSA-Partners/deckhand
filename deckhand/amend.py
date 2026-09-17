@@ -167,8 +167,13 @@ def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None
     return 0
 
 
-def _new_issue(repo: str, number: int, draft: str, title: str) -> int:
-    """Open the drafted body as its own story, blocked by this one, board it as Draft, and log both ends."""
+def _new_issue(repo: str, number: int, draft: str, title: str, before: bool) -> int:
+    """Open the drafted body as its own story, record which way the dependency runs, and log both ends.
+
+    `before` is work that has to land first, so this story waits on the new one; without it the new
+    story is follow-on work and waits on this one, which is the common case and the default. The
+    `Split:` entry names the direction, so the log and GitHub can never disagree about it.
+    """
     title = " ".join(title.split())
     if not title:
         raise Refusal("--new-issue needs a title")
@@ -179,10 +184,15 @@ def _new_issue(repo: str, number: int, draft: str, title: str) -> int:
     # Printed before the links are written: the issue exists from here on, and a failure below has
     # to leave the number where the user can see it rather than in a lost temp file.
     print(f"Created #{new} {url}", flush=True)
-    issue.add_dependency(repo, new, blocked_by=(repo, number))
-    print(f"Blocked by #{number}", flush=True)
+    if before:
+        issue.add_dependency(repo, number, blocked_by=(repo, new))
+        print(f"Blocks #{number}", flush=True)
+    else:
+        issue.add_dependency(repo, new, blocked_by=(repo, number))
+        print(f"Blocked by #{number}", flush=True)
     board_draft(settings, repo, new, url, SPLIT_DRAFTED)
-    issue.comment(repo, number, log.checked(f"Split: #{new} {title}, blocked by this story."))
+    ran = "which this story waits on" if before else "blocked by this story"
+    issue.comment(repo, number, log.checked(f"Split: #{new} {title}, {ran}."))
     print("Logged Split")
     return 0
 
@@ -193,11 +203,20 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     mode.add_argument("--note", help="one line saying what changed and why")
     mode.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
     parser.add_argument("--title", help="with --note: the story's new title")
+    parser.add_argument(
+        "--before",
+        action="store_true",
+        help="with --new-issue: the new story lands first, so this story waits on it",
+    )
+    # Only the parser that read these arguments knows the usage line to print a usage error with.
+    parser.set_defaults(usage=parser)
 
 
 @step("amend", _configure)
 def apply(args: argparse.Namespace) -> int:
     """Amend a story from the drafted body, or split the draft out as its own blocked story."""
+    if args.before and args.new_issue is None:
+        args.usage.error("--before is only for --new-issue")
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
     refuse_stub(args.issue, story.body)
@@ -205,5 +224,5 @@ def apply(args: argparse.Namespace) -> int:
     if args.new_issue is not None:
         if args.title is not None:
             raise Refusal("--title goes with --note; --new-issue carries its title as its argument")
-        return _new_issue(repo, args.issue, draft, args.new_issue)
+        return _new_issue(repo, args.issue, draft, args.new_issue, args.before)
     return _amend(repo, args.issue, draft, args.note, args.title, story)
