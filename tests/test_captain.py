@@ -109,3 +109,24 @@ def test_a_repair_with_nothing_to_repair_refuses(fleet_env, monkeypatch, capsys)
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-clean.json"))
     assert cli.main(["captain", "apply", "--repair"]) == 1
     assert "nothing to repair" in capsys.readouterr().err
+
+
+def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
+    _session(
+        fleet_env / "sessions",
+        "wordy",
+        [
+            {
+                "type": "user",
+                "cwd": "/x/widgets",
+                "message": {
+                    "content": "<command-name>/deckhand:new</command-name>\n"
+                    "<command-args>the test refactor and idiomatic discussion we had in this session</command-args>"
+                },
+            }
+        ],
+    )
+    cli.main(["captain", "context"])
+    row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("| a |"))
+    assert "new the test refactor" in row
+    assert len(row) < 110

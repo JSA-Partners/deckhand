@@ -154,3 +154,32 @@ def test_a_deep_read_gives_the_last_prompt_and_the_last_word(tmp_path):
     read = sessions.deep(path, limit=5)
     assert read.prompt == "proceed"
     assert read.lines[-1] == "assistant: Which kind is it?"
+
+
+def test_a_file_path_argument_is_not_a_story_number(tmp_path):
+    records = [
+        {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+        {
+            "type": "user",
+            "message": {
+                "content": "<command-name>/deckhand:new</command-name>\n"
+                "<command-args>/Users/x/Desktop/04-registry-split.md</command-args>"
+            },
+        },
+    ]
+    path = _write(tmp_path / "projects" / "acme" / "path.jsonl", records)
+    assert sessions.pulse(path, REPOS, now=0.0).story == sessions.FREE
+
+
+def test_a_word_before_the_number_does_not_hide_the_story(tmp_path):
+    records = [
+        {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+        {
+            "type": "user",
+            "message": {
+                "content": "<command-name>/deckhand:new</command-name>\n<command-args>resume 248</command-args>"
+            },
+        },
+    ]
+    path = _write(tmp_path / "projects" / "acme" / "resume.jsonl", records)
+    assert sessions.pulse(path, REPOS, now=0.0).story == "248"

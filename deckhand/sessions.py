@@ -28,7 +28,9 @@ _SAID = 400
 _COMMAND = re.compile(r"<command-name>/deckhand:([a-z]+)</command-name>")
 _ARGS = re.compile(r"<command-args>([^<]*)</command-args>")
 _BRANCH_NUMBER = re.compile(r"^[a-z]+-([0-9]+)-")
-_NUMBER = re.compile(r"[0-9]+")
+# A whole word, because `new` takes a path as readily as a number and `.../04-registry-split.md`
+# holds digits that are not a story.
+_NUMBER = re.compile(r"^[0-9]+$")
 
 
 @dataclass(frozen=True)
@@ -143,9 +145,9 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
         return None
     if not started:
         started = path.stat().st_mtime
-    number = _NUMBER.search(args) if args else None
+    number = next((word for word in args.split() if _NUMBER.match(word)), None)
     from_branch = _BRANCH_NUMBER.match(branch)
-    story = number.group(0) if number else (from_branch.group(1) if from_branch else FREE)
+    story = number or (from_branch.group(1) if from_branch else FREE)
     clock = time.time() if now is None else now
     return Pulse(
         label="",

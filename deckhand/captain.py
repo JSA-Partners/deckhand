@@ -17,6 +17,8 @@ from deckhand.config import Settings
 from deckhand.step import Refusal, block, indented, settings_or_error, step, usable
 
 WINDOW = 24.0
+# `new` takes a whole idea as its argument, and the table is read across, not down.
+COMMAND = 28
 
 
 def _name(repo: str) -> str:
@@ -75,6 +77,10 @@ def _next_line(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> str:
     return "Next per repository: " + (", ".join(seen.values()) if seen else "nothing ready")
 
 
+def _short(command: str) -> str:
+    return command if len(command) <= COMMAND else command[: COMMAND - 3].rstrip() + "..."
+
+
 def _session_rows(pulses: list[sessions.Pulse]) -> list[str]:
     if not pulses:
         return ["  none"]
@@ -84,7 +90,7 @@ def _session_rows(pulses: list[sessions.Pulse]) -> list[str]:
     ]
     for beat in pulses:
         rows.append(
-            f"| {beat.label} | {_name(beat.repo)} | {beat.story} | {beat.command} | "
+            f"| {beat.label} | {_name(beat.repo)} | {beat.story} | {_short(beat.command)} | "
             f"{_since(beat.idle)} | ${beat.cost:.2f} | {'yes' if beat.waiting else 'no'} |"
         )
     return rows

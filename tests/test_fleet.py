@@ -8,6 +8,7 @@ from pathlib import Path
 from deckhand import fleet, sessions
 
 FIXTURES = Path(__file__).parent / "fixtures"
+REPO = "acme/widgets"
 
 
 def _nodes() -> list[dict]:
@@ -211,3 +212,32 @@ def test_an_open_issue_with_a_log_and_no_board_item_is_missing(fake_gh, settings
     monkeypatch.setenv("GH_ISSUE_LIST_ACME_WIDGETS", str(listing))
     monkeypatch.setenv("GH_ISSUE_FILE_281", str(drafted))
     assert fleet.read(settings).missing == [("acme/widgets", 281, "https://github.com/acme/widgets/issues/281")]
+
+
+def _foreign(status: str) -> list[dict]:
+    """A board item for an issue the process never wrote to: no log, and a column of its own."""
+    return [
+        {
+            "id": "I_96",
+            "content": {
+                "number": 96,
+                "title": "Client-side CSV export",
+                "url": "https://github.com/acme/widgets/issues/96",
+                "state": "OPEN",
+                "closedAt": None,
+                "repository": {"nameWithOwner": REPO},
+                "comments": {"nodes": []},
+            },
+            "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
+        }
+    ]
+
+
+def test_an_issue_the_process_never_touched_is_not_judged():
+    found = fleet.anomalies(fleet.stories(_foreign("Pending Review")), {}, set(), [])
+    assert found == []
+
+
+def test_an_issue_the_process_never_touched_says_so_in_its_row():
+    story = fleet.stories(_foreign("Pending Review"))[0]
+    assert fleet.note(story, [], behind=False) == "not a deckhand story"

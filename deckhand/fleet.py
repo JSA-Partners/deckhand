@@ -123,8 +123,20 @@ def allowed(story: Story) -> tuple[str, ...]:
     return ("Draft",)
 
 
+def touched(story: Story) -> bool:
+    """Whether the process ever wrote to this issue, which is what makes its column deckhand's business.
+
+    A board holds issues older than the process and issues opened by hand. Nothing deckhand knows
+    applies to them: their column was chosen by a person, and reading it against a log that does not
+    exist would call every one of them broken.
+    """
+    return bool(log.entries(story.issue))
+
+
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
     """The one thing worth saying about this story beyond its column."""
+    if not touched(story):
+        return "not a deckhand story"
     if story.status == "In Progress":
         if behind:
             return "pull request behind main"
@@ -252,6 +264,8 @@ def anomalies(
             on.setdefault(beat.story, []).append(beat.label)
     out: list[Anomaly] = []
     for story in found:
+        if not touched(story):
+            continue
         may = allowed(story)
         if story.status and story.status not in may:
             out.append(
