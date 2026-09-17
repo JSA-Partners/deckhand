@@ -26,6 +26,7 @@ from deckhand.config import Settings
 VERB = "_deckhand_verb"  # a private dest, so a step's own flags can never route the verb
 MAIN = "main"  # the trunk every story branches from and returns to
 ORIGIN_MAIN = f"origin/{MAIN}"  # what has landed on it, which is what every range is read against
+TAIL = 10  # lines of a failed command's output, enough to name the failure without a wall of text
 # The checkout or installed plugin this package sits in, which is where the skill files are.
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 

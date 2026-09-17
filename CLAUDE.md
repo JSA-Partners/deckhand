@@ -13,7 +13,8 @@
   worktree, where its branch is checked out, and the sweep of merged ones; `drift.py` the plan references
   `start` checks; `next.py` reads the log, the board, and the local branch, picks the step, and
   prints a briefing; `finish.py` opens the pull request only from the commit the last `Reviewed:`
-  entry names
+  entry names; `gates.py` what must be true before a branch becomes a pull request, run only from
+  `finish.apply`
 - Skills: `skills/<name>/SKILL.md` with YAML frontmatter; the `next` skill carries the guidance for
   every step; lenses in `skills/next/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
