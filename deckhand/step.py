@@ -235,6 +235,22 @@ def read_draft(path: Path) -> str:
         raise Refusal(f"cannot read '{path}': it is not valid UTF-8") from error
 
 
+def _verb_error(fall_back: Callable[[str], None], name: str) -> Callable[[str], None]:
+    """The parser's `error`, with a numeric invalid choice answered by the command it meant.
+
+    A person who types `deckhand next 4` gave the issue number and left the verb out, which is the
+    one mistake the choice list cannot explain, because the number was never one of the choices.
+    """
+
+    def error(message: str) -> None:
+        found = re.search(r"invalid choice: '([0-9]+)'", message)
+        if found is not None:
+            return fall_back(f"{message}; did you mean `deckhand {name} context {found.group(1)}`?")
+        return fall_back(message)
+
+    return error
+
+
 def step(
     name: str,
     configure_apply: Configure | None = None,
@@ -259,6 +275,8 @@ def step(
     def configure(parser: argparse.ArgumentParser) -> None:
         metavar = "{context,apply}" if configure_apply is not None else "{context}"
         verbs = parser.add_subparsers(dest=VERB, required=True, metavar=metavar)
+        # argparse names the choice it wanted; a number there is a missing verb, not a bad one.
+        parser.error = _verb_error(parser.error, name)  # type: ignore[method-assign]
         context_parser = verbs.add_parser("context", help=f"Print what {name} needs; never fails.")
         verb_parsers = [context_parser]
         if configure_apply is not None:

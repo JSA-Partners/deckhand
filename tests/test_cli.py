@@ -212,3 +212,10 @@ def test_no_printed_next_line_names_a_step_command():
     ]
 
     assert offenders == []
+
+
+def test_a_step_run_without_its_verb_names_the_command(fake_gh, repo):
+    result = run_deckhand("next", "4", cwd=repo)
+
+    assert result.returncode == 2
+    assert "deckhand next context 4" in result.stderr
