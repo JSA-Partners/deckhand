@@ -89,6 +89,13 @@ def sibling(repo: str, number: int) -> tuple[str, str]:
     return (data.get("state") or "", data.get("body") or "")
 
 
+def list_open(repo: str) -> list[int]:
+    """The number of every open issue of `repo`, which is where a story that never boarded is found."""
+    gh.split_repo(repo)
+    data = gh.json_out("issue", "list", "--repo", repo, "--state", "open", "--limit", "200", "--json", "number")
+    return [item["number"] for item in data or [] if isinstance(item, dict) and "number" in item]
+
+
 def create(repo: str, title: str, body: str) -> tuple[int, str]:
     """Create an issue; returns its `(number, url)`."""
     gh.split_repo(repo)

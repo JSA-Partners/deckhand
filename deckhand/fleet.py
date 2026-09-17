@@ -7,6 +7,7 @@ the board in a single paginated read instead of one read per story.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -27,6 +28,8 @@ ITEMS_QUERY = (
 )
 
 DONE = "Done"
+
+_PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
 
 @dataclass(frozen=True)
@@ -269,3 +272,56 @@ def anomalies(
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
     return out
+
+
+@dataclass(frozen=True)
+class Fleet:
+    """One reading of the project: its stories, its Backlog's blockers, what is behind main, what is off it."""
+
+    stories: list[Story]
+    blockers: Blockers
+    behind: set[Key]
+    missing: list[tuple[str, int, str]]
+
+
+def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
+    """`(repo, number, url)` of every open story that carries a log and never reached the board.
+
+    One cheap list per repository, and a read of an issue only when the board does not already hold
+    it, so the usual answer of none costs one call per repository and nothing else. An issue with no
+    `Drafted:` entry is not a story and is never reported.
+    """
+    on_board = {story.key for story in found}
+    off: list[tuple[str, int, str]] = []
+    for repo in sorted({story.repo for story in found if story.repo}):
+        for number in issue.list_open(repo):
+            if (repo, number) in on_board:
+                continue
+            story = issue.view(repo, number)
+            if log.last(story, "Drafted:") is not None:
+                off.append((repo, number, story.url))
+    return off
+
+
+def read(settings: Settings) -> Fleet:
+    """The whole fleet: one query, a blockers read per Backlog story, a merge state per open pull request."""
+    found = stories(_nodes(settings))
+    blockers: Blockers = {}
+    for story in found:
+        if story.status == "Backlog":
+            blockers[story.key] = issue.blockers(story.repo, story.number)
+    behind: set[Key] = set()
+    for story in found:
+        if story.status != "In Progress":
+            continue
+        entry = log.last(story.issue, "Pull request:")
+        url = _PR_URL.search(entry.text) if entry is not None else None
+        if url is None:
+            continue
+        try:
+            state = issue.merge_state(story.repo, url.group(0))
+        except gh.GhError:
+            continue  # a pull request gh cannot read says nothing about main; the row stands without it
+        if state in issue.BEHIND:
+            behind.add(story.key)
+    return Fleet(stories=found, blockers=blockers, behind=behind, missing=_missing(found))

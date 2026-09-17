@@ -169,3 +169,45 @@ def test_a_fleet_that_agrees_with_its_logs_has_no_status_anomaly():
     kept = [story for story in fleet.stories(_nodes()) if story.number != 268]
     found = fleet.anomalies(kept, BLOCKERS, behind=set(), pulses=[_pulse("117")])
     assert [item.number for item in found] == []
+
+
+def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, settings, tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked.json"
+    blocked.write_text(
+        json.dumps(
+            {"257": [{"number": 253, "state": "open", "title": "Seed", "repository": {"full_name": "acme/widgets"}}]}
+        )
+    )
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(blocked))
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+    monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
+    read = fleet.read(settings)
+    assert [story.number for story in read.stories] == [253, 257, 258, 13, 117, 268]
+    assert read.blockers[("acme/widgets", 257)] == [("acme/widgets", 253, "Seed")]
+    assert read.behind == {("acme/widgets", 117)}
+    assert read.missing == []
+
+
+def test_an_open_issue_with_a_log_and_no_board_item_is_missing(fake_gh, settings, tmp_path, monkeypatch):
+    listing = tmp_path / "list.json"
+    listing.write_text(json.dumps([{"number": 281}]))
+    drafted = tmp_path / "281.json"
+    drafted.write_text(
+        json.dumps(
+            {
+                "number": 281,
+                "title": "Never boarded",
+                "state": "OPEN",
+                "url": "https://github.com/acme/widgets/issues/281",
+                "body": "### Story",
+                "comments": [
+                    {"body": "Drafted: from a request", "createdAt": "2026-09-15T00:00:00Z", "author": {"login": "mjm"}}
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    monkeypatch.setenv("GH_ISSUE_LIST_ACME_WIDGETS", str(listing))
+    monkeypatch.setenv("GH_ISSUE_FILE_281", str(drafted))
+    assert fleet.read(settings).missing == [("acme/widgets", 281, "https://github.com/acme/widgets/issues/281")]

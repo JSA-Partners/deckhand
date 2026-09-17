@@ -30,6 +30,21 @@ VIEWS_QUERY = (
 )
 
 
+POSITION_MUTATION = (
+    "mutation($project:ID!,$item:ID!,$after:ID){ updateProjectV2ItemPosition("
+    "input:{projectId:$project, itemId:$item, afterId:$after}){ clientMutationId } }"
+)
+
+
+def move(project: str, item: str, after: str | None) -> None:
+    """Put `item` directly after `after` on the board, or at the top when `after` is None.
+
+    Takes the project's id rather than the settings, because a whole order is written one item at a
+    time and looking the project up again for each of them would be a call per story.
+    """
+    gh.graphql_json(POSITION_MUTATION, {"project": project, "item": item, "after": after})
+
+
 def add(settings: Settings, url: str) -> None:
     """Put the issue at `url` on the project; GitHub takes an issue already there as a no-op."""
     gh.run("project", "item-add", str(settings.project), "--owner", settings.owner, "--url", url, "--format", "json")
