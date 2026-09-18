@@ -14,32 +14,24 @@ from __future__ import annotations
 import argparse
 import os
 import re
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass, replace
+from collections.abc import Iterable
 from pathlib import Path
 
+from deckhand import findings as findings_file
 from deckhand import gh, issue, sections
 from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, reason, refuse_stub, step
 
 BRIEF_HEADING = "## Reviewer brief"
-CLEAN = "Nothing found."
 FINDING_FORMAT = (
     "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
-    f"<evidence, citing the section>; or exactly `{CLEAN}`"
+    f"<evidence, citing the section>; or exactly `{findings_file.CLEAN}`"
 )
 VERDICT_FORMAT = (
     "Report verdicts as lines, one per finding in the reviewer's order: <lens>.<n> | CONFIRMED, "
     "or <lens>.<n> | REJECTED | <reason>"
 )
 DECISION_FORMAT = "Report decisions as lines, one per finding: <lens>.<n> | accepted|declined|changed [| <reason>]"
-SEVERITIES = ("P1", "P2", "P3")
-PENDING = "PENDING"
-VERDICTS = ("CONFIRMED", "REJECTED")
-DECISIONS = ("accepted", "declined", "changed")
 
-_EXPECTED = f"expected <lens>.<n> | P1|P2|P3 | {PENDING} | <claim> | <evidence>"
-_EXPECTED_VERDICT = "expected <lens>.<n> | CONFIRMED, or <lens>.<n> | REJECTED | <reason>"
-_EXPECTED_DECISION = "expected <lens>.<n> | accepted|declined|changed [| <reason>]"
 _FRONTMATTER_FIELD = re.compile(r"^([a-z_]+):\s*(.*)$")
 # `Lenses: a, b` anywhere in Notes, as a line of its own or as a bullet.
 _NAMED_LENSES = re.compile(r"^[\s-]*Lenses:\s*(.+)$", re.MULTILINE)
@@ -177,176 +169,13 @@ def context(args: argparse.Namespace) -> int:
 # --- apply ------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Finding:
-    """One finding: the reviewer's line split into its columns, with the skeptic's verdict on it."""
-
-    lens: str
-    ordinal: int
-    severity: str
-    verdict: str
-    claim: str
-    evidence: str
-    rejection: str = ""
-
-    @property
-    def id(self) -> str:
-        return f"{self.lens}.{self.ordinal}"
-
-
-def _id(ref: str) -> tuple[str, int] | None:
-    """`(lens, ordinal)` from `<lens>.<n>`, or None when it is not one."""
-    lens, dot, ordinal = ref.partition(".")
-    if not lens or not dot or not (ordinal.isascii() and ordinal.isdigit()):
-        return None
-    return lens, int(ordinal)
-
-
-def _fields(line: str, *wanted: int) -> list[str]:
-    """The line's fields: `" | "` when that gives one of `wanted`, else the bare `"|"`.
-
-    A claim may hold a pipe, a regex alternation for one, and splitting on the bare character takes
-    half the claim into the next field and refuses a line the brief permitted. The bare split stays
-    as the fallback, so a line written without the spaces around its separators still reads.
-    """
-    spaced = [part.strip() for part in line.split(" | ")]
-    if len(spaced) in wanted:
-        return spaced
-    return [part.strip() for part in line.split("|")]
-
-
-def _parse(line: str) -> Finding | None:
-    """One findings line as a `Finding`, or None when it is not in the format the brief stated."""
-    parts = _fields(line, 5)
-    if len(parts) != 5:
-        return None
-    ref, severity, verdict, claim, evidence = parts
-    found = _id(ref)
-    if found is None or severity not in SEVERITIES or verdict != PENDING or not claim or not evidence:
-        return None
-    return Finding(*found, severity, verdict, claim, evidence)
-
-
-def _parse_verdict(line: str) -> tuple[str, str, str] | None:
-    """`(id, verdict, reason)` from one verdict line, or None; a rejection has to say why."""
-    parts = _fields(line, 2, 3)
-    if len(parts) not in (2, 3) or _id(parts[0]) is None or parts[1] not in VERDICTS:
-        return None
-    reason_text = parts[2] if len(parts) == 3 else ""
-    if parts[1] == "REJECTED" and not reason_text:
-        return None
-    return parts[0], parts[1], reason_text if parts[1] == "REJECTED" else ""
-
-
-def _parse_decision(line: str) -> tuple[str, str, str] | None:
-    """`(id, decision, reason)` from one decision line, or None; the reason is the person's and optional."""
-    parts = _fields(line, 2, 3)
-    if len(parts) not in (2, 3) or _id(parts[0]) is None or parts[1] not in DECISIONS:
-        return None
-    return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
-
-
-SHAPES = ("findings", "verdicts", "decisions")
-
-
-def _reads_as(text: str, passed: str) -> str | None:
-    """The one of `SHAPES` every line of `text` parses as, when that is not `passed`; else None.
-
-    The three files are three positional arguments of the same shape, so a swap arrives as a format
-    error about one line. Naming the shape the whole file does read as turns that into the mistake
-    it is, and the order is what the person needs to hear next.
-    """
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        return None
-    for shape, parse in zip(SHAPES, (_parse, _parse_verdict, _parse_decision), strict=True):
-        if shape != passed and all(parse(line) is not None for line in lines):
-            return shape
-    return None
-
-
-def _refusal(number: int, expected: str, text: str, passed: str) -> Refusal:
-    """The format refusal for one line, saying which of the three shapes the whole file reads as."""
-    found = _reads_as(text, passed)
-    hint = f"; that file reads as {found}, and the order is findings, verdicts, decisions" if found else ""
-    return Refusal(f"line {number}: {expected}{hint}")
-
-
-def _by_finding(
-    text: str, found: list[Finding], parse: Callable[[str], tuple[str, str, str] | None], noun: str, expected: str
-) -> dict[str, tuple[str, str]]:
-    """One `(word, reason)` per finding id from `text`, read with `parse`; every finding gets one, and only findings do.
-
-    The verdicts and the decisions are the same shape read from two files, so one reader holds the
-    rules and each caller names only its parse and its noun for the refusals.
-    """
-    ids = {finding.id for finding in found}
-    read: dict[str, tuple[str, str]] = {}
-    for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        parsed = parse(line)
-        if parsed is None:
-            raise _refusal(number, expected, text, f"{noun}s")
-        ref, word, why = parsed
-        if ref not in ids:
-            raise Refusal(f"line {number}: {ref} is not a finding")
-        if ref in read:
-            raise Refusal(f"line {number}: {ref} already has a {noun}")
-        read[ref] = (word, why)
-    missing = [finding.id for finding in found if finding.id not in read]
-    if missing:
-        raise Refusal(f"no {noun} for {', '.join(missing)}")
-    return read
-
-
-def verdicts(text: str, found: list[Finding]) -> dict[str, tuple[str, str]]:
-    """The skeptic's verdict and reason by finding id."""
-    return _by_finding(text, found, _parse_verdict, "verdict", _EXPECTED_VERDICT)
-
-
-def decisions(text: str, found: list[Finding]) -> dict[str, tuple[str, str]]:
-    """The person's decision and reason by finding id."""
-    return _by_finding(text, found, _parse_decision, "decision", _EXPECTED_DECISION)
-
-
-def judged(found: list[Finding], text: str) -> list[Finding]:
-    """The findings with the skeptic's verdicts on them, in the reviewer's order."""
-    by_id = verdicts(text, found)
-    return [replace(f, verdict=by_id[f.id][0], rejection=by_id[f.id][1]) for f in found]
-
-
-def findings(text: str) -> list[Finding]:
-    """Every finding in `text`; a line that is not in the stated format is a refusal, not a guess."""
-    if text.strip() == CLEAN:
-        return []
-    known = {path.stem for path in lenses_dir().glob("*.md")}
-    parsed: list[Finding] = []
-    seen: set[str] = set()
-    for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        found = _parse(line)
-        if found is None:
-            raise _refusal(number, _EXPECTED, text, "findings")
-        if found.lens not in known:
-            raise Refusal(f"line {number}: no lens named '{found.lens}'")
-        if found.id in seen:
-            raise Refusal(f"line {number}: {found.id} is already the id of an earlier finding")
-        seen.add(found.id)
-        parsed.append(found)
-    if not parsed:
-        raise Refusal(f"the findings file is empty; write the findings, or exactly `{CLEAN}`")
-    return parsed
-
-
 def _stop(text: str) -> str:
     """`text` ended with a stop, so the claim and the evidence each read as a sentence of their own."""
     stripped = text.rstrip()
     return stripped if stripped.endswith((".", "!", "?", ":")) else stripped + "."
 
 
-def _line(finding: Finding, decision: str, why: str) -> str:
+def _line(finding: findings_file.Finding, decision: str, why: str) -> str:
     """One finding as the log reads it: id, severity, the decision, the skeptic's verdict, then the text."""
     verdict = ", rejected by the skeptic" if finding.verdict == "REJECTED" else ""
     reason_text = f" {_stop(why[0].upper() + why[1:])}" if why else ""
@@ -354,11 +183,11 @@ def _line(finding: Finding, decision: str, why: str) -> str:
     return f"- {finding.id}, {finding.severity}, {decision}{verdict}: {text}"
 
 
-def comment_body(verdict: str, found: list[Finding], decided: dict[str, tuple[str, str]]) -> str:
+def comment_body(verdict: str, found: list[findings_file.Finding], decided: dict[str, tuple[str, str]]) -> str:
     """The `Review:` entry: the verdict, then every finding with the person's decision beside it."""
     head = f"Review: {verdict}"
     if not found:
-        return f"{head}\n\n{CLEAN}\n"
+        return f"{head}\n\n{findings_file.CLEAN}\n"
     lines = [_line(f, *decided[f.id]) for f in found]
     return head + "\n\n" + "\n".join(lines) + "\n"
 
@@ -389,12 +218,13 @@ def apply(args: argparse.Namespace) -> int:
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
     refuse_stub(args.issue, story.body)
-    found = findings(read_draft(args.findings))
+    known = {path.stem for path in lenses_dir().glob("*.md")}
+    found = findings_file.findings(read_draft(args.findings), known)
     decided: dict[str, tuple[str, str]] = {}
     if found:
         if args.verdicts is None or args.decisions is None:
             raise Refusal("the findings need the skeptic's verdicts and the person's decisions; pass both files")
-        found = judged(found, read_draft(args.verdicts))
-        decided = decisions(read_draft(args.decisions), found)
+        found = findings_file.judged(found, read_draft(args.verdicts))
+        decided = findings_file.decisions(read_draft(args.decisions), found)
     print(issue.comment(repo, args.issue, comment_body(verdict, found, decided)))
     return 0

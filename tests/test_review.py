@@ -558,34 +558,6 @@ def test_a_confirmed_verdict_may_carry_a_reason_that_is_not_posted(fake_gh, tmp_
     assert "rejected" not in _posted(copy)
 
 
-# --- a claim may hold a pipe --------------------------------------------------
-
-
-def test_a_claim_may_contain_a_pipe():
-    line = "chaos.1 | P2 | PENDING | The pattern `^(a|b)$` admits an empty match. | store.go:14"
-
-    found = review._parse(line)
-
-    assert found is not None
-    assert found.claim == "The pattern `^(a|b)$` admits an empty match."
-    assert found.evidence == "store.go:14"
-
-
-def test_a_line_written_without_spaces_still_parses():
-    found = review._parse("chaos.1|P2|PENDING|A claim.|store.go:14")
-
-    assert found is not None
-    assert found.claim == "A claim."
-
-
-def test_a_verdict_reason_may_contain_a_pipe():
-    assert review._parse_verdict("chaos.1 | REJECTED | The guard reads `a|b` already.") == (
-        "chaos.1",
-        "REJECTED",
-        "The guard reads `a|b` already.",
-    )
-
-
 # --- a file passed where another one belongs -----------------------------------
 
 
