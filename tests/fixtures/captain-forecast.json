@@ -1,0 +1,225 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "items": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "I_253",
+              "content": {
+                "number": 253,
+                "title": "Seed the role matrix",
+                "url": "https://github.com/acme/widgets/issues/253",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 3,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_500",
+              "content": {
+                "number": 500,
+                "title": "Seed the widget cache",
+                "url": "https://github.com/acme/widgets/issues/500",
+                "state": "CLOSED",
+                "closedAt": "2026-09-01T02:00:00Z",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-08-31T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Started: on feat-500-cache",
+                      "createdAt": "2026-09-01T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Pull request: https://github.com/acme/widgets/pull/500",
+                      "createdAt": "2026-09-01T02:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_501",
+              "content": {
+                "number": 501,
+                "title": "Warm the widget cache",
+                "url": "https://github.com/acme/widgets/issues/501",
+                "state": "CLOSED",
+                "closedAt": "2026-09-02T04:00:00Z",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-01T12:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Started: on feat-501-warm",
+                      "createdAt": "2026-09-02T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Pull request: https://github.com/acme/widgets/pull/501",
+                      "createdAt": "2026-09-02T04:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_502",
+              "content": {
+                "number": 502,
+                "title": "Evict the widget cache",
+                "url": "https://github.com/acme/widgets/issues/502",
+                "state": "CLOSED",
+                "closedAt": "2026-09-03T10:00:00Z",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-02T12:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Started: on feat-502-evict",
+                      "createdAt": "2026-09-03T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Pull request: https://github.com/acme/widgets/pull/502",
+                      "createdAt": "2026-09-03T10:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 2,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

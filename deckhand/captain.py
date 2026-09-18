@@ -11,9 +11,11 @@ command that would fix it, because every other write is a step's, and a step is 
 from __future__ import annotations
 
 import argparse
+import math
 import os
+import statistics
 
-from deckhand import board, config, fields, fleet, gh, issue, sessions
+from deckhand import board, config, fields, fleet, forecast, gh, issue, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -120,16 +122,73 @@ def _anomaly_rows(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
 
 
 BLOCKS = ("fleet", "order", "sessions", "anomalies")
+ON_REQUEST = ("forecast",)  # a simulation is not worth paying for on every rerun of the context
+THIN = 10  # samples in a band below which a percentile is a fit to noise, so the worst run is used
+HOURS_A_DAY = 24.0  # the durations are elapsed wall clock, including the hours a story waited
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", metavar="ID", help="read one session properly, by the id in the table")
     parser.add_argument("--since", type=float, default=WINDOW, help="how many hours back to look for sessions")
-    parser.add_argument("--only", choices=BLOCKS, help="print one block instead of all four")
+    parser.add_argument("--only", choices=(*BLOCKS, *ON_REQUEST), help="print one block instead of all four")
+    parser.add_argument(
+        "--sessions", type=int, help="sessions to forecast across; defaults to the ones the fleet currently sees"
+    )
 
 
 def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
     return sessions.discover(_repos(read.stories), since, os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+
+
+def _days(hours: float) -> int:
+    return math.ceil(hours / HOURS_A_DAY)
+
+
+def _forecast_row(label: str, hours: float, note: str) -> str:
+    return f"  {label:<12}{_days(hours):>3} days   {note}"
+
+
+def _forecast_rows(read: fleet.Fleet, sessions_count: int) -> list[str]:
+    """The floor, the commitment, and the control that pools points away, over what is not yet Done."""
+    left = [story for story in read.stories if not story.closed]
+    if not left:
+        return ["  nothing left to forecast"]
+
+    points = sum(story.points or 0 for story in left)
+    session_word = "session" if sessions_count == 1 else "sessions"
+    story_word = "story" if len(left) == 1 else "stories"
+    header = f"  {len(left)} {story_word}, {points} points, {sessions_count} {session_word}"
+
+    history = forecast.durations(read.stories)
+    if not history:
+        return [f"{header}: no finished stories, so no Floor and no Commitment."]
+
+    pooled = sorted(hours for band in history.values() for hours in band)
+    thin = any(len(band) < THIN for band in history.values())
+    commitment_p = 100 if thin else 85
+    worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
+    medians = {band: statistics.median(hours) for band, hours in history.items()}
+
+    floor_hours = forecast.floor(left, read.blockers, sessions_count, medians)
+    banded = forecast.simulate(left, read.blockers, sessions_count, history)
+    unbanded = forecast.simulate(left, read.blockers, sessions_count, {None: pooled})
+    commitment_note = ("worst run" if thin else "85th percentile") + ", banded by points"
+
+    rows = [
+        header,
+        "",
+        _forecast_row("Floor", floor_hours, "critical path, nothing stalls"),
+        _forecast_row("Commitment", banded[commitment_p], commitment_note),
+        _forecast_row("Worst seen", banded[worst_p], f"{worst_p}th percentile"),
+        "",
+        _forecast_row("Unbanded", unbanded[commitment_p], "the same, points ignored"),
+        "",
+        f"  From {len(pooled)} finished stories, the longest {pooled[-1]:.1f} hours against a median "
+        f"of {statistics.median(pooled):.1f}.",
+    ]
+    if thin:
+        rows.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
+    return rows
 
 
 def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
@@ -170,6 +229,10 @@ def context(args: argparse.Namespace) -> int:
             print()
         if "anomalies" in wanted:
             block("## Anomalies", lambda: _anomaly_rows(read, pulses))
+            print()
+        if "forecast" in wanted:
+            sessions_count = args.sessions if args.sessions is not None else max(len(pulses), 1)
+            block("## Forecast", lambda: _forecast_rows(read, sessions_count))
     return 0
 
 

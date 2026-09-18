@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import cli
+from deckhand import captain, cli
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -160,6 +160,51 @@ def test_block_and_unblock_together_refuses(fake_gh, gh_calls, capsys):
     assert cli.main(["captain", "apply", "--block", "253", "--unblock", "253", "--by", "117"]) == 1
     assert "one at a time" in capsys.readouterr().err
     assert gh_calls() == []
+
+
+def test_the_forecast_is_not_one_of_the_default_blocks(fleet_env, capsys):
+    """The skill reruns the context for every later question, so the default must stay cheap."""
+    assert cli.main(["captain", "context"]) == 0
+    assert "## Forecast" not in capsys.readouterr().out
+
+
+def test_the_forecast_prints_a_floor_and_a_commitment(fleet_env, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+    assert cli.main(["captain", "context", "--only", "forecast"]) == 0
+    out = capsys.readouterr().out
+    assert "## Forecast" in out
+    assert "Floor" in out
+    assert "Commitment" in out
+
+
+def test_a_thin_band_reports_the_worst_run_and_says_so(fleet_env, monkeypatch, capsys):
+    """Under ten samples a percentile is a fit to noise, so the commitment is the worst thing seen."""
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+
+    assert cli.main(["captain", "context", "--only", "forecast"]) == 0
+
+    out = capsys.readouterr().out
+    assert "worst run, banded by points" in out
+    assert "Thin history" in out
+
+
+def test_a_full_band_reports_a_percentile_and_drops_the_warning(fleet_env, monkeypatch, capsys):
+    """The label must track the number it describes: an 85th percentile is not the observed maximum."""
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+    monkeypatch.setattr(captain, "THIN", 1)  # the fixture's bands are enough once the bar is this low
+
+    assert cli.main(["captain", "context", "--only", "forecast"]) == 0
+
+    out = capsys.readouterr().out
+    assert "85th percentile, banded by points" in out
+    assert "observed maximum" not in out
+    assert "Thin history" not in out
+
+
+def test_the_forecast_never_prints_a_median(fleet_env, capsys):
+    """A number on the page gets quoted, and the median forecast is the one that must not be."""
+    cli.main(["captain", "context", "--only", "forecast"])
+    assert "50th" not in capsys.readouterr().out
 
 
 def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
