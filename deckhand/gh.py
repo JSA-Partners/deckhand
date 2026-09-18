@@ -5,8 +5,10 @@ from __future__ import annotations
 import contextlib
 import functools
 import json
+import os
 import subprocess
 from collections.abc import Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:  # a runtime import would be circular: config resolves the project through this module
@@ -127,22 +129,44 @@ def split_repo(repo: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-NO_REPOSITORY = "not inside a git repository; run deckhand from the story's repository"
+NO_REPOSITORY = "run deckhand from the story's repository"
+
+
+def _repo_view() -> str:
+    return json_out("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
 
 
 @functools.lru_cache(maxsize=1)
 def repo_slug() -> str:
     """`owner/name` of the repository the working directory is in; the one place every command starts.
 
-    gh answers from the checkout, so outside one it fails with git's own words; those are turned into
-    the one rule a person can act on, because every command that follows would fail the same way.
+    gh answers from the checkout, so outside one this tries the directory the session running under
+    `CLAUDE_CODE_SESSION_ID` last recorded as its own: no skill's injected context sets a directory,
+    so a step runs wherever the shell was last left, which with a worktree per story is routinely a
+    scratchpad rather than the story's clone. Both directories are named when neither is a
+    repository, because every command that follows would fail the same way.
     """
+    cwd = Path.cwd()
     try:
-        return json_out("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
+        return _repo_view()
     except GhError as error:
-        if "not a git repository" in str(error):
-            raise GhError(NO_REPOSITORY) from error
-        raise
+        if "not a git repository" not in str(error):
+            raise
+        from deckhand import sessions  # sessions imports nothing from deckhand; kept local to stay that way
+
+        session_dir = sessions.own_cwd(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+        if session_dir:
+            try:
+                with contextlib.chdir(session_dir):
+                    return _repo_view()
+            except GhError as retry:
+                if "not a git repository" not in str(retry):
+                    raise
+            raise GhError(
+                f"not inside a git repository: {cwd}; neither is the session's own directory "
+                f"{session_dir}; {NO_REPOSITORY}"
+            ) from error
+        raise GhError(f"not inside a git repository: {cwd}; {NO_REPOSITORY}") from error
 
 
 class LinkedProject(NamedTuple):

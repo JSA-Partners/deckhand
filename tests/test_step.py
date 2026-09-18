@@ -223,6 +223,34 @@ def test_a_context_prints_the_rules_its_step_declares(capsys, monkeypatch):
     assert "Rule one." in out
 
 
+def test_a_context_warns_when_a_newer_deckhand_is_installed(demo, capsys, monkeypatch):
+    monkeypatch.setattr(step_module, "newer_installed", lambda: "9.9.9")
+
+    def context(args):
+        return 0
+
+    register(demo, context, unused, issue_bound=False)
+
+    assert cli.main(["demo", "context"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == (
+        f"deckhand {step_module.__version__} is running and 9.9.9 is installed. Restart this session to pick it up."
+    )
+
+
+def test_a_context_says_nothing_when_this_is_the_newest(demo, capsys, monkeypatch):
+    monkeypatch.setattr(step_module, "newer_installed", lambda: "")
+
+    def context(args):
+        print("body")
+        return 0
+
+    register(demo, context, unused, issue_bound=False)
+
+    assert cli.main(["demo", "context"]) == 0
+    assert capsys.readouterr().out == "body\n"
+
+
 def test_a_step_without_context_is_a_real_error(demo, capsys):
     def apply(args):
         """Demo step."""

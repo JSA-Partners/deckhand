@@ -19,8 +19,8 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
-from deckhand import config, gh, git, issue, naming, stub
-from deckhand.cli import Configure, Handler, command
+from deckhand import __version__, config, gh, git, issue, naming, stub
+from deckhand.cli import Configure, Handler, command, newer_installed
 from deckhand.config import Settings
 
 VERB = "_deckhand_verb"  # a private dest, so a step's own flags can never route the verb
@@ -352,6 +352,9 @@ def _context(
     on a guess writes the wrong thing to GitHub.
     """
     context = sys.modules[verb.__module__].context
+    behind = newer_installed()
+    if behind:
+        print(f"deckhand {__version__} is running and {behind} is installed. Restart this session to pick it up.")
     if rules:  # the gates the apply below will hold, said before the writer starts rather than after
         block("Rules:", lambda: indented(rules))
         print()

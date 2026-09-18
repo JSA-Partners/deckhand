@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from deckhand import __version__
 
 Handler = Callable[[argparse.Namespace], int]
 Configure = Callable[[argparse.ArgumentParser], None]
 _REGISTRY: dict[str, tuple[Configure, Handler]] = {}
+
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def command(name: str, configure: Configure) -> Callable[[Handler], Handler]:
@@ -68,3 +72,28 @@ def main(argv: Sequence[str]) -> int:
     except Exception as error:  # one line for the model, never a traceback
         print(f"deckhand {args.command}: {error}", file=sys.stderr)
         return 1
+
+
+def _package_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def _version_key(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split("."))
+
+
+def newer_installed() -> str:
+    """The newest deckhand beside this one in the plugin cache, or empty when this is it.
+
+    The plugin cache holds one directory per version and a session resolves that path once, at
+    start, so a session upgraded mid-flight keeps running the version it opened with.
+    """
+    parent = _package_dir().parent
+    if not _SEMVER.match(parent.name):
+        return ""
+    try:
+        siblings = [p.name for p in parent.parent.iterdir() if p.is_dir() and _SEMVER.match(p.name)]
+    except OSError:
+        return ""
+    newer = sorted((v for v in siblings if _version_key(v) > _version_key(__version__)), key=_version_key)
+    return newer[-1] if newer else ""

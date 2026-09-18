@@ -196,6 +196,21 @@ def root() -> Path:
     return Path(os.environ.get("DECKHAND_SESSIONS") or DEFAULT_ROOT)
 
 
+def own_cwd(session: str) -> str:
+    """The directory this session records as its own, or empty when it cannot be read.
+
+    The harness writes the directory on every record and resets it after a command, so the newest
+    record holds the session's real directory even when the shell has been left somewhere else.
+    """
+    if not session:
+        return ""
+    for path in root().glob(f"*/{session}.jsonl"):
+        for record in records_back(path):
+            if record.get("cwd"):
+                return str(record["cwd"])
+    return ""
+
+
 def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
     """Every session working in one of `repos` and touched within `since` hours, oldest start first.
 

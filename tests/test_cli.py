@@ -222,6 +222,34 @@ def test_a_step_run_without_its_verb_names_the_command(fake_gh, repo):
     assert "deckhand next context 4" in result.stderr
 
 
+def test_newer_installed_reports_a_newer_sibling(tmp_path, monkeypatch):
+    plugin = tmp_path / "deckhand"
+    for version in ("3.3.0", "3.5.1", "3.6.0"):
+        (plugin / version / "deckhand").mkdir(parents=True)
+    monkeypatch.setattr(cli, "_package_dir", lambda: plugin / "3.3.0" / "deckhand")
+    monkeypatch.setattr(cli, "__version__", "3.3.0")
+
+    assert cli.newer_installed() == "3.6.0"
+
+
+def test_newer_installed_reports_nothing_when_this_is_the_newest(tmp_path, monkeypatch):
+    plugin = tmp_path / "deckhand"
+    for version in ("3.3.0", "3.5.1"):
+        (plugin / version / "deckhand").mkdir(parents=True)
+    monkeypatch.setattr(cli, "_package_dir", lambda: plugin / "3.5.1" / "deckhand")
+    monkeypatch.setattr(cli, "__version__", "3.5.1")
+
+    assert cli.newer_installed() == ""
+
+
+def test_newer_installed_reports_nothing_from_a_checkout(tmp_path, monkeypatch):
+    checkout = tmp_path / "deckhand"
+    (checkout / "deckhand").mkdir(parents=True)
+    monkeypatch.setattr(cli, "_package_dir", lambda: checkout / "deckhand")
+
+    assert cli.newer_installed() == ""
+
+
 def test_no_module_is_over_the_size_rule():
     """CLAUDE.md caps a module at 400 lines, and nothing else enforces it."""
     limit = 400

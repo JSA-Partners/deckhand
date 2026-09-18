@@ -1,11 +1,41 @@
 import json
 import os
+import re
+import shlex
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from deckhand import config, gh
-from tests.conftest import FIXTURES, run_deckhand
+from tests.conftest import FIXTURES, ROOT, run_deckhand
+
+FAKE_GH = ROOT / "tests" / "fakes" / "gh"
+
+
+def _session_file(root: Path, session: str, cwd: Path) -> Path:
+    """A session transcript, one record, recording `cwd` as its own."""
+    path = root / "acme" / f"{session}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"type": "user", "cwd": str(cwd)}) + "\n", encoding="utf-8")
+    return path
+
+
+def _cwd_gated_gh(tmp_path: Path, works_in: Path) -> Path:
+    """A gh on PATH ahead of the fake that fails `repo view` unless run from `works_in`."""
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    script = fake_bin / "gh"
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1 $2" = "repo view" ] && [ "$PWD" != {shlex.quote(str(works_in))} ]; then\n'
+        '  echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        f'exec "{FAKE_GH}" "$@"\n'
+    )
+    script.chmod(0o755)
+    return fake_bin
 
 
 def test_config_exposes_defaults():
@@ -78,17 +108,60 @@ def test_repo_slug(fake_gh):
     assert gh.repo_slug() == "acme/widgets"
 
 
-def test_repo_slug_names_the_rule_outside_a_repository(fake_gh, monkeypatch):
+def test_repo_slug_names_the_rule_outside_a_repository(fake_gh, monkeypatch, tmp_path):
     monkeypatch.setenv("GH_NO_REPOSITORY", "1")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(gh.GhError, match="^not inside a git repository; run deckhand from the story's repository$"):
+    pattern = rf"^not inside a git repository: {re.escape(str(tmp_path))}; run deckhand from the story's repository$"
+    with pytest.raises(gh.GhError, match=pattern):
         gh.repo_slug()
 
 
-def test_a_command_outside_a_repository_is_one_line(fake_gh):
-    result = run_deckhand("amend", "context", "248", env={"GH_NO_REPOSITORY": "1"})
+def test_repo_slug_falls_back_to_the_session_recorded_directory(fake_gh, tmp_path, monkeypatch):
+    """The directory a session recorded as its own answers even when the shell has moved elsewhere."""
+    real_dir = tmp_path / "story-repo"
+    real_dir.mkdir()
+    elsewhere = tmp_path / "scratchpad"
+    elsewhere.mkdir()
+    sessions_root = tmp_path / "sessions"
+    _session_file(sessions_root, "cafef00d", real_dir)
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(sessions_root))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "cafef00d")
+    monkeypatch.setenv("PATH", f"{_cwd_gated_gh(tmp_path, real_dir)}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.chdir(elsewhere)
 
-    assert "not inside a git repository; run deckhand from the story's repository" in result.stdout + result.stderr
+    assert gh.repo_slug() == "acme/widgets"
+    assert Path.cwd() == elsewhere  # the fallback tries the other directory, and leaves the shell where it was
+
+
+def test_repo_slug_gives_up_naming_both_directories(fake_gh, tmp_path, monkeypatch):
+    cwd = tmp_path / "scratchpad"
+    cwd.mkdir()
+    session_dir = tmp_path / "recorded"
+    session_dir.mkdir()
+    sessions_root = tmp_path / "sessions"
+    _session_file(sessions_root, "deadbeef", session_dir)
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(sessions_root))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "deadbeef")
+    monkeypatch.setenv("GH_NO_REPOSITORY", "1")
+    monkeypatch.chdir(cwd)
+
+    with pytest.raises(gh.GhError) as info:
+        gh.repo_slug()
+
+    message = str(info.value)
+    assert str(cwd) in message
+    assert str(session_dir) in message
+    assert "run deckhand from the story's repository" in message
+
+
+def test_a_command_outside_a_repository_is_one_line(fake_gh):
+    result = run_deckhand("amend", "context", "248", env={"GH_NO_REPOSITORY": "1", "CLAUDE_CODE_SESSION_ID": ""})
+
+    combined = result.stdout + result.stderr
+    assert "not inside a git repository:" in combined
+    assert "run deckhand from the story's repository" in combined
     assert "Traceback" not in result.stderr
 
 

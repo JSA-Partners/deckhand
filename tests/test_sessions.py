@@ -216,6 +216,34 @@ def test_a_file_path_argument_is_not_a_story_number(tmp_path):
     assert sessions.pulse(path, REPOS, now=0.0).story == sessions.FREE
 
 
+def test_own_cwd_reads_the_newest_directory_recorded(tmp_path, monkeypatch):
+    root = tmp_path / "projects"
+    _write(
+        root / "acme" / "abcd1234.jsonl",
+        [
+            {"type": "user", "cwd": "/Users/x/old-place"},
+            {"type": "assistant", "cwd": "/Users/x/acme/widgets"},
+        ],
+    )
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
+
+    assert sessions.own_cwd("abcd1234") == "/Users/x/acme/widgets"
+
+
+def test_own_cwd_is_empty_for_an_empty_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))
+
+    assert sessions.own_cwd("") == ""
+
+
+def test_own_cwd_is_empty_for_an_unknown_id(tmp_path, monkeypatch):
+    root = tmp_path / "projects"
+    _write(root / "acme" / "abcd1234.jsonl", [{"type": "user", "cwd": "/Users/x/acme/widgets"}])
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
+
+    assert sessions.own_cwd("zzzz0000") == ""
+
+
 def test_a_word_before_the_number_does_not_hide_the_story(tmp_path):
     records = [
         {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},

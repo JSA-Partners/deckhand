@@ -30,10 +30,15 @@ def settings() -> Settings:
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear ambient DECKHAND_* env vars so tests are isolated from the environment they run in."""
+    """Clear the ambient env a test could read by accident, so a run does not depend on its machine.
+
+    CLAUDE_CODE_SESSION_ID is set whenever the suite runs inside a session, and `gh.repo_slug` reads
+    it to find that session's own directory, which would be this machine's real transcripts.
+    """
     for name in list(os.environ):
         if name.startswith("DECKHAND_"):
             monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
 
 
 @pytest.fixture(autouse=True)
