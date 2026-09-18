@@ -1,9 +1,10 @@
 """The ready step: a reviewed story moves to Backlog with its kind, its points, and its blockers.
 
-`context` prints the kinds the project defines, the story itself, the open blockers, the fields as
-the board has them, and the analogy table the estimate comes from. The kinds and the story are what
-the board question is answered from, and the question is asked in the turn this prints into. Each
-block degrades to one line of its own, so a lookup that fails never costs the model the rest of the
+`context` prints the rules `apply` holds, the story and its plan, the Review: entry that is the
+gate, the open blockers, the other open stories a blocker could be chosen from, the fields as the
+board has them, and the analogy table the estimate comes from. The plan is what the points are
+estimated against, and the review is read here rather than by a separate `gh` call. Each block
+degrades to one line of its own, so a lookup that fails never costs the model the rest of the
 prompt.
 
 `apply` validates the kind, the points, the review, and every blocker before it writes anything,
@@ -31,6 +32,7 @@ from deckhand.step import (
     Refusal,
     block,
     blockers_block,
+    indented,
     issue_ref,
     reason,
     ref_label,
@@ -115,6 +117,18 @@ def _story_lines(number: int) -> list[str]:
     return sections.get(issue.view(gh.repo_slug(), number).body, "Story", "").strip("\n").splitlines()
 
 
+def _plan_lines(number: int) -> list[str]:
+    """The Plan section, which is the work the points are estimated against."""
+    body = issue.view(gh.repo_slug(), number).body
+    return indented(sections.get(body, "Plan", "").strip("\n").splitlines(), "no plan")
+
+
+def _review_lines(number: int) -> list[str]:
+    """The latest Review: entry, which is the gate this step holds."""
+    entry = log.last(issue.view(gh.repo_slug(), number), "Review:")
+    return indented(entry.body.splitlines() if entry is not None else [], "no review")
+
+
 def _fields_block(settings: Settings | Exception, number: int) -> list[str]:
     values = fields.get_fields(usable(settings), gh.repo_slug(), number, FIELDS)
     return [f"  {name}: {'unset' if value is None else value}" for name, value in values.items()]
@@ -125,13 +139,28 @@ def _table_block(settings: Settings | Exception) -> list[str]:
     return [TABLE_HEADER, TABLE_RULE, *rows] if rows else ["  none"]
 
 
+def _could_block(settings: Settings | Exception, number: int) -> list[str]:
+    """Every other open story on the board, so a blocker is chosen here and not on the board by hand."""
+    rows = []
+    for node in board.items(usable(settings)):
+        content = node.get("content") or {}
+        status = board.field_value(node, "Status", "name") or "-"
+        if content.get("number") == number or status == "Done":
+            continue
+        rows.append(f"#{content.get('number')} {status} {content.get('title') or ''}".rstrip())
+    return indented(rows, "none")
+
+
 def context(args: argparse.Namespace) -> int:
-    """Print the kinds, the story, the open blockers, the fields, and the Done stories to compare to."""
+    """Print the kinds, the story, the plan, the review, the blockers, the fields, and the Done stories."""
     settings = settings_or_error()
     print(_kinds_line(settings))
     print()
     block("## Story", lambda: _story_lines(args.issue))
+    block("## Plan", lambda: _plan_lines(args.issue))
+    block("Review:", lambda: _review_lines(args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
+    block("Could block this story:", lambda: _could_block(settings, args.issue))
     block("Fields:", lambda: _fields_block(settings, args.issue))
     block(f"Done stories (last {LIMIT}):", lambda: _table_block(settings))
     return 0
@@ -149,7 +178,7 @@ def _points(value: str) -> int:
 def _reviewed(story: issue.Issue, number: int) -> None:
     """Refuse unless the story carries a `Review:` entry, which is the only gate this step holds."""
     if log.last(story, "Review:") is None:
-        raise Refusal(f"no review on #{number}; run /deckhand:next {number}")
+        raise Refusal(f"{RULE_REVIEWED} Run /deckhand:next {number}.")
 
 
 def _open_issue(repo: str, number: int, here: str) -> None:
@@ -187,6 +216,11 @@ def _hold_status(settings: Settings, repo: str, number: int, status: str) -> Non
     print(f"Status re-set to {status} (the board's own automation had changed it)")
 
 
+RULE_REVIEWED = "A story boards only with a Review: entry in its log."
+RULE_SIZE = f"A body over {BOARDING_LIMIT} characters needs --oversized saying why it is one story."
+RULES = (RULE_REVIEWED, RULE_SIZE)
+
+
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kind", required=True, help="the kind of change, one the project defines")
     parser.add_argument(
@@ -202,7 +236,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     )
 
 
-@step("ready", _configure)
+@step("ready", _configure, rules=RULES)
 def apply(args: argparse.Namespace) -> int:
     """Move a reviewed story to Backlog with its kind, its points, and its blockers."""
     repo = gh.repo_slug()
@@ -215,10 +249,7 @@ def apply(args: argparse.Namespace) -> int:
     _reviewed(story, args.issue)
     size = len(story.body.replace("\r\n", "\n"))
     if size > BOARDING_LIMIT and not args.oversized:
-        raise Refusal(
-            f"body is {size} characters; a story over {BOARDING_LIMIT} is usually more than one story. "
-            "Split it, or board it with --oversized '<why it is one>'"
-        )
+        raise Refusal(f"{RULE_SIZE} Body is {size} characters; board it with --oversized '<why it is one>'.")
     try:
         blockers = list(dict.fromkeys(issue_ref(value, repo) for value in args.blocked_by or []))
     except ValueError as error:

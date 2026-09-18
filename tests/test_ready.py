@@ -210,13 +210,16 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "Kinds: feat, fix, chore, refactor, docs, perf"
-    assert lines[2] == "## Story"
-    assert lines[3].startswith("As a guest user, I want to see only")
+    assert lines[0] == "Rules:"
+    assert lines[4] == "Kinds: feat, fix, chore, refactor, docs, perf"
+    assert lines[6] == "## Story"
+    assert lines[7].startswith("As a guest user, I want to see only")
     blockers = lines.index("Blockers:")
-    assert lines[blockers : blockers + 9] == [
+    assert lines[blockers : blockers + 11] == [
         "Blockers:",
         "  #240  Grant store",
+        "Could block this story:",
+        "  #300 Backlog Not done yet",
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
@@ -242,7 +245,7 @@ def test_context_prints_the_story_the_points_are_estimated_from(fake_gh):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[2] == "## Story"
+    assert lines[6] == "## Story"
     assert "### Scope" not in lines
     assert lines.index("## Story") < lines.index("Blockers:")
 
@@ -275,8 +278,29 @@ def test_context_degrades_each_block_on_its_own(fake_gh, tmp_path):
     lines = result.stdout.splitlines()
     blockers = lines.index("Blockers:")
     assert lines[blockers + 1] == "  none"
-    assert lines[blockers + 3] == "  unavailable (the field read failed)"
+    assert lines[blockers + 3] == "  #300 Backlog Not done yet"
+    assert lines[blockers + 5] == "  unavailable (the field read failed)"
     assert HEADER in lines
+
+
+def test_context_prints_the_plan_and_the_review_the_step_holds(fake_gh):
+    """Points are estimated against the plan, and the Review: entry is the gate this step holds."""
+    result = run_deckhand("ready", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    assert "### Task 1: Store method" in result.stdout
+    assert "Review: sound" in result.stdout
+    assert "A story boards only with a Review: entry in its log." in result.stdout
+
+
+def test_context_lists_the_stories_a_blocker_could_be(fake_gh):
+    """A blocker is chosen here, so the stories it could be are on the page rather than on the board."""
+    result = run_deckhand("ready", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    listed = result.stdout.split("Could block this story:")[1]
+    assert "#300" in listed
+    assert "#248" not in listed
 
 
 def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
@@ -287,14 +311,19 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert [line for line in lines if not line.startswith("  ")] == [
+        "Rules:",
+        "",
         "Kinds: feat, fix, chore, refactor, docs, perf",
         "",
         "## Story",
+        "## Plan",
+        "Review:",
         "Blockers:",
+        "Could block this story:",
         "Fields:",
         "Done stories (last 20):",
     ]
-    assert lines.count("  unavailable (nope)") == 4
+    assert lines.count("  unavailable (nope)") == 7
 
 
 # --- apply ------------------------------------------------------------------
@@ -330,7 +359,9 @@ def test_apply_refuses_a_story_with_no_review_entry(fake_gh, gh_calls):
     result = run_deckhand("ready", "apply", "248", "--kind", "feat", "--points", "3")
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: no review on #248; run /deckhand:next 248\n"
+    assert result.stderr == (
+        "deckhand ready apply: A story boards only with a Review: entry in its log. Run /deckhand:next 248.\n"
+    )
     assert _writes(gh_calls) == []
 
 
@@ -559,8 +590,8 @@ def test_a_body_over_the_ceiling_is_refused_at_boarding(fake_gh, gh_calls, tmp_p
     result = _ready(tmp_path, OVERSIZED)
 
     assert result.returncode == 1
-    assert "is usually more than one story" in result.stderr
-    assert "--oversized" in result.stderr
+    assert "needs --oversized saying why it is one story" in result.stderr
+    assert "Body is 50067 characters" in result.stderr
     assert [c for c in gh_calls() if "item-edit" in c] == []
 
 
