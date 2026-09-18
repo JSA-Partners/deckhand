@@ -2,11 +2,11 @@
 
 Reading the branch line by line is this step's first act, before anything here runs: the loop of
 exports and fixes is what earns the sha the `Reviewed:` entry names, so no code reaches a pull
-request unread. `context` prints what the branch changed, the pull request message it would open,
-and the check commands the project's own files say it runs. The message is what the human approves:
-the repository squashes, so the pull request title and body are the commit that lands on main and
-the branch's own commits never do. The commits themselves are read by the gate that checks their
-subjects rather than printed, because the review above has already put them in front of a person.
+request unread. `context` prints the branch's commits, what it changed, the pull request message it
+would open, and the check commands the project's own files say it runs. The commits are the one
+thing the Reviewed: entry is checked against, and no other block in this context answers what they
+are. The message is what the human approves: the repository squashes, so the pull request title and
+body are the commit that lands on main and the branch's own commits never do.
 
 `apply` is the one gate of the loop, and every part of it is a refusal before a single write. The
 pull request opens only when HEAD is the commit the last `Reviewed:` entry names, the tree is
@@ -152,6 +152,11 @@ def _message(
 # --- context ----------------------------------------------------------------
 
 
+def _commits_block(base: str) -> list[str]:
+    """The commits this branch adds, which is what the Reviewed: entry is checked against."""
+    return indented(refuse_git("log", "--oneline", f"{base}..HEAD").splitlines(), "none")
+
+
 def _stat_block(base: str) -> list[str]:
     return indented(git.run("diff", "--stat", f"{base}...HEAD").splitlines())
 
@@ -170,6 +175,7 @@ def context(args: argparse.Namespace) -> int:
     printed here is read against a branch a person has already been through comment by comment.
     """
     base = trunk()
+    block("## Commits", lambda: _commits_block(base))
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))
     block("## Checks detected", lambda: indented(checks(Path.cwd()), "none detected"))

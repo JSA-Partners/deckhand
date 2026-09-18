@@ -160,19 +160,35 @@ def _apply(repo: Path, *extra: str, env: dict[str, str] | None = None, summary: 
 # --- context ----------------------------------------------------------------
 
 
-def test_context_prints_the_stat_and_the_checks_but_never_the_commits(fake_gh, repo, branch):
-    """The person read the branch at the end of start; only the gates read its commits now."""
+def test_context_prints_the_commits_before_the_stat_and_the_checks(fake_gh, repo, branch):
+    """The commits are what the Reviewed: entry is checked against, so they lead the stat and the checks."""
     result = _finish("context", repo)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert "## Commits" not in lines
+    assert lines.index("## Commits") < lines.index("## Diff stat")
+    commits = lines[lines.index("## Commits") + 1 : lines.index("## Diff stat")]
+    assert any(FIRST in line for line in commits)
+    assert any(SECOND in line for line in commits)
     stat = lines[lines.index("## Diff stat") + 1 : lines.index("## Pull request")]
     assert any("store.py" in line for line in stat)
     assert any("store_test.py" in line for line in stat)
-    assert not any(FIRST in line or SECOND in line for line in lines)
+    assert not any(FIRST in line or SECOND in line for line in stat)
     assert lines[lines.index("## Checks detected") + 1 : -1] == ["  none detected"]
     assert lines[-1].startswith("Summary: ")
+
+
+def test_context_prints_the_commits_the_pull_request_will_carry(fake_gh, repo):
+    """The pull request opens from the commit the Reviewed: entry names, so the commits are the page."""
+    _git(repo, "checkout", "-q", "-b", BRANCH)
+    _commit(repo, "store.py", "def by_grant():\n    return []\n", FIRST)
+
+    result = _finish("context", repo)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    commits = lines[lines.index("## Commits") + 1 : lines.index("## Diff stat")]
+    assert any(FIRST in line for line in commits)
 
 
 def test_context_prints_the_pull_request_block(fake_gh, repo, branch):
@@ -255,6 +271,7 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
     assert result.stderr == ""
     lines = result.stdout.splitlines()
     assert [line for line in lines if not line.startswith("  ")] == [
+        "## Commits",
         "## Diff stat",
         "## Pull request",
         "## Checks detected",

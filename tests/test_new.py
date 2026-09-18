@@ -123,6 +123,18 @@ def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
     assert any("Notes" in rule for rule in rules)
 
 
+def test_context_prints_the_stub_and_park_shape(fake_gh, tmp_path):
+    """The shape arrived as a refusal because nothing stated it where the file is written."""
+    source = tmp_path / "source.md"
+    source.write_text("A feature worth parking.\n", encoding="utf-8")
+
+    result = run_deckhand("new", "context", str(source))
+
+    assert result.returncode == 0, result.stderr
+    assert "## Requirements" in result.stdout
+    assert "## Stories" in result.stdout
+
+
 def test_context_still_prints_when_the_repository_is_unknown(no_real_gh, tmp_path):
     result = run_deckhand("new", "context", env={"DECKHAND_CACHE": str(tmp_path / "cache")})
 

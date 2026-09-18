@@ -23,12 +23,15 @@ import argparse
 from pathlib import Path
 
 from deckhand import config, fields, gh, issue, lint, log, sections
+from deckhand.new import RULES as BODY_RULES
+from deckhand.new import skeleton
 from deckhand.park import board_draft
 from deckhand.step import (
     Refusal,
     block,
     draft_line,
     fits_title,
+    indented,
     read_draft,
     reason,
     refuse_stub,
@@ -110,6 +113,8 @@ def context(args: argparse.Namespace) -> int:
     print(_status_line(args.issue))
     print()
     block(BODY_HEADING, lambda: _body_lines(story))
+    print()
+    block("Shape:", lambda: indented(skeleton().splitlines()))
     print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
     print()
@@ -212,7 +217,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(usage=parser)
 
 
-@step("amend", _configure)
+@step("amend", _configure, rules=BODY_RULES)
 def apply(args: argparse.Namespace) -> int:
     """Amend a story from the drafted body, or split the draft out as its own blocked story."""
     if args.before and args.new_issue is None:

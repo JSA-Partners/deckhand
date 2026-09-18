@@ -30,6 +30,7 @@ from deckhand.step import (
     blockers_block,
     draft_line,
     fits_title,
+    indented,
     issue_number,
     read_draft,
     reason,
@@ -121,6 +122,8 @@ def _tail(name: str, split: str | None = None) -> int:
     print(draft_line("Draft", name))
     print()
     print(skeleton())
+    print()
+    block("Stub and park shape:", lambda: indented(stub.skeleton().splitlines()))
     print()
     _rules()
     if split is not None:

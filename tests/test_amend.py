@@ -96,8 +96,9 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:4] == [f"Title: {REVIEW['title']}", "Status: Backlog", "", "## Body"]
-    assert lines[4] == "### Story"
+    title = lines.index(f"Title: {REVIEW['title']}")
+    assert lines[title : title + 4] == [f"Title: {REVIEW['title']}", "Status: Backlog", "", "## Body"]
+    assert lines[title + 4] == "### Story"
     assert "## Latest review" in lines
     assert lines[lines.index("## Latest review") - 1] == ""
     assert lines[lines.index("## Latest review") + 1].startswith("Review: ")
@@ -106,6 +107,15 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
     assert "## Feedback" not in lines
     assert lines[-2] == f"Draft: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
     assert lines[-1] == "Write the whole edited body to the draft; keep every section heading."
+
+
+def test_context_prints_the_body_rules_and_the_shape(fake_gh):
+    """One validator guards new and amend, and only new told the writer what it wanted."""
+    result = run_deckhand("amend", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    assert "Plan holds at least a '### Task 1' block." in result.stdout
+    assert "### Acceptance Criteria" in result.stdout
 
 
 def test_context_prints_the_body_without_the_fold(fake_gh, tmp_path):
@@ -132,7 +142,8 @@ def test_context_says_when_a_story_is_off_the_board(fake_gh, tmp_path):
     result = run_deckhand("amend", "context", "248", env={**REVIEWED, **env})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[1] == "Status: off the board"
+    lines = result.stdout.splitlines()
+    assert lines[lines.index(f"Title: {REVIEW['title']}") + 1] == "Status: off the board"
 
 
 def test_context_reads_the_board_once(fake_gh, gh_calls):
