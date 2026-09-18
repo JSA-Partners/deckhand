@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import types
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import cli
+from deckhand import step as step_module
 from deckhand.config import Settings
 from deckhand.step import (
     PLUGIN_ROOT,
@@ -22,7 +24,7 @@ from deckhand.step import (
     refuse_git,
     step,
 )
-from tests.conftest import run_git
+from tests.conftest import ROOT, run_git
 
 MODULE = "deckhand_demo_step"
 
@@ -203,6 +205,22 @@ def test_context_swallows_a_refusal_too(demo, capsys):
 
     assert cli.main(["demo", "context", "5"]) == 0
     assert "not yet" in capsys.readouterr().out
+
+
+def test_a_context_prints_the_rules_its_step_declares(capsys, monkeypatch):
+    """A rule the apply enforces is a rule the context states, or the writer learns it by refusal."""
+    monkeypatch.setattr(sys.modules[__name__], "context", lambda args: 0, raising=False)
+
+    def verb(args):
+        return 0
+
+    verb.__module__ = __name__
+    printed = step_module._context("demo", verb, argparse.Namespace(), issue_bound=False, rules=("Rule one.",))
+
+    out = capsys.readouterr().out
+    assert printed == 0
+    assert "Rules:" in out
+    assert "Rule one." in out
 
 
 def test_a_step_without_context_is_a_real_error(demo, capsys):
@@ -399,3 +417,19 @@ def test_issue_ref_refuses_anything_else_by_naming_the_form(value):
 def test_ref_label_names_the_repository_only_when_it_is_not_this_one():
     assert ref_label("acme/widgets", 240, "acme/widgets") == "#240"
     assert ref_label("acme/gadgets", 9, "acme/widgets") == "acme/gadgets#9"
+
+
+# --- rule drift ---------------------------------------------------------------
+
+
+def test_every_declared_rule_is_referenced_by_its_module():
+    """A rule printed but never raised is a promise the apply does not keep, and drift starts there."""
+    named = re.compile(r"^(RULE_[A-Z0-9_]+) =", re.MULTILINE)
+    unused: dict[str, list[str]] = {}
+    for path in sorted((ROOT / "deckhand").glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        loose = [name for name in named.findall(source) if source.count(name) < 2]
+        if loose:
+            unused[path.name] = loose
+
+    assert not unused, f"declared but never used: {unused}"

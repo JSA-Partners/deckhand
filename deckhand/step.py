@@ -16,7 +16,7 @@ import argparse
 import functools
 import re
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 from deckhand import config, gh, git, issue, naming, stub
@@ -257,12 +257,16 @@ def step(
     configure_apply: Configure | None = None,
     issue_bound: bool = True,
     configure_context: Configure | None = None,
+    rules: Sequence[str] = (),
 ) -> Callable[[Handler], Handler]:
     """Register `deckhand <name> context [N]` and, with a `configure_apply`, `apply N ...` beside it.
 
     `configure_context` is for the step whose context takes more than an issue number; it runs
     against the context subparser once the issue positional is on it, so a step reads its own
     arguments in the order it declared them.
+
+    `rules` names the gates `apply` holds, printed by `context` under a `Rules:` heading before its
+    own output, so the writer reads a rule before it is refused by one.
 
     Decorates a module-level pair: the decorated function is `apply(args) -> int`, and `context` is
     looked up by that name in the same module when the verb runs, so the two stay plain functions a
@@ -300,7 +304,7 @@ def step(
         @functools.wraps(verb)  # the command's help is the decorated docstring, as cli._summary expects
         def handler(args: argparse.Namespace) -> int:
             if configure_apply is None or getattr(args, VERB) == "context":
-                return _context(name, verb, args, issue_bound)
+                return _context(name, verb, args, issue_bound, rules)
             return _apply(name, verb, args)
 
         command(name, configure)(handler)
@@ -309,7 +313,13 @@ def step(
     return register
 
 
-def _context(name: str, verb: Handler, args: argparse.Namespace, issue_bound: bool = True) -> int:
+def _context(
+    name: str,
+    verb: Handler,
+    args: argparse.Namespace,
+    issue_bound: bool = True,
+    rules: Sequence[str] = (),
+) -> int:
     """Run `context` from the module `verb` was defined in; nothing it raises escapes.
 
     The lookup itself sits outside the guard: a step module without `context` is a deckhand bug and
@@ -320,6 +330,9 @@ def _context(name: str, verb: Handler, args: argparse.Namespace, issue_bound: bo
     on a guess writes the wrong thing to GitHub.
     """
     context = sys.modules[verb.__module__].context
+    if rules:  # the gates the apply below will hold, said before the writer starts rather than after
+        block("Rules:", lambda: indented(rules))
+        print()
     tail = "Say what could not be read and stop."
     try:
         with gh.cached():  # a context reads and never writes, so one fact is read once
