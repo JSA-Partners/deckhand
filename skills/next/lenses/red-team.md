@@ -11,4 +11,5 @@ Attack the story, not the prose: a finding is a concrete sequence of steps that 
 
 Evidence is a quote from the artifact or a `file:line` in the repository. A finding without either is a hunch; leave it out.
 
-Nothing found is a valid result. If the story's boundaries hold, say so in one line.
+Nothing found is a valid result when the story's boundaries hold. Write no line for this lens;
+the brief records it as clean.

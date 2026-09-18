@@ -12,4 +12,4 @@ A finding is one of: a criterion with no task; a task with no criterion; a step 
 
 Evidence is the criterion text and the task number, or the two mismatched names with their task numbers.
 
-Nothing found is a valid result. Say so in one line.
+Nothing found is a valid result. Write no line for this lens; the brief records it as clean.

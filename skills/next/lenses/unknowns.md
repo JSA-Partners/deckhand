@@ -10,4 +10,5 @@ List what the artifact assumes without saying. Look for verbs without subjects, 
 
 A finding is an assumption, whether it holds (checked, with `file:line`), fails (checked, with `file:line`), or cannot be checked from here (say what would settle it). Rank the ones that would change the plan above the ones that would change a sentence.
 
-Nothing found is rare for this lens and is still valid. Say so in one line.
+Nothing found is rare for this lens and is still valid. Write no line for this lens; the brief
+records it as clean.

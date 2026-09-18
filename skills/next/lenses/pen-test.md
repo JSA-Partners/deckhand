@@ -11,4 +11,4 @@ A finding names the interface, the input, and the effect, in a form someone coul
 
 Evidence is the artifact text that omits the control, or the `file:line` where a similar control already lives and is not reused.
 
-Nothing found is a valid result. Say so in one line.
+Nothing found is a valid result. Write no line for this lens; the brief records it as clean.

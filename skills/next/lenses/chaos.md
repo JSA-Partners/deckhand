@@ -11,6 +11,6 @@ A finding is a failure mode the acceptance criteria neither prevent nor acknowle
 
 Evidence is the sentence that makes the failure possible, or the `file:line` that shows the assumption already exists in the code.
 
-Nothing found is a valid result. Say so in one line.
+Nothing found is a valid result. Write no line for this lens; the brief records it as clean.
 
 Source: Principles of Chaos Engineering, principlesofchaos.org.

@@ -4,9 +4,10 @@
 selects, so one reviewer agent carries them all. `apply` reads the reviewer's findings, the
 skeptic's verdicts, and the decisions the person made in the session as the three files the
 session wrote, joins them itself, validates every line before it writes anything, and posts one
-`Review:` log entry: the verdict on the story as a whole, then every finding on a line with the
-person's decision beside it and the skeptic's rejection marked. Neither agent's lines are retyped
-on the way, so a format only one of them keeps cannot cost a finding.
+`Review:` log entry: the verdict on the story as a whole, which lenses the same selection ran with
+the silent ones marked clean, then every finding on a line with the person's decision beside it and
+the skeptic's rejection marked. Neither agent's lines are retyped on the way, so a format only one
+of them keeps cannot cost a finding.
 """
 
 from __future__ import annotations
@@ -183,13 +184,22 @@ def _line(finding: findings_file.Finding, decision: str, why: str) -> str:
     return f"- {finding.id}, {finding.severity}, {decision}{verdict}: {text}"
 
 
-def comment_body(verdict: str, found: list[findings_file.Finding], decided: dict[str, tuple[str, str]]) -> str:
-    """The `Review:` entry: the verdict, then every finding with the person's decision beside it."""
-    head = f"Review: {verdict}"
-    if not found:
-        return f"{head}\n\n{findings_file.CLEAN}\n"
-    lines = [_line(f, *decided[f.id]) for f in found]
-    return head + "\n\n" + "\n".join(lines) + "\n"
+def _lens_line(ran: list[str], found: list[findings_file.Finding]) -> str:
+    """Which lenses ran, and which had nothing to say; absence is the record, so it is written down."""
+    spoke = {finding.lens for finding in found}
+    named = [name if name in spoke else f"{name} (clean)" for name in ran]
+    return f"Lenses: {', '.join(named)}"
+
+
+def comment_body(
+    verdict: str, ran: list[str], found: list[findings_file.Finding], decided: dict[str, tuple[str, str]]
+) -> str:
+    """The `Review:` entry: the verdict, which lenses ran, then every finding with its decision beside it."""
+    parts = [f"Review: {verdict}"]
+    if ran:
+        parts.append(_lens_line(ran, found))
+    parts.append(findings_file.CLEAN if not found else "\n".join(_line(f, *decided[f.id]) for f in found))
+    return "\n\n".join(parts) + "\n"
 
 
 def _verdict(value: str) -> str:
@@ -218,13 +228,14 @@ def apply(args: argparse.Namespace) -> int:
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
     refuse_stub(args.issue, story.body)
-    known = {path.stem for path in lenses_dir().glob("*.md")}
-    found = findings_file.findings(read_draft(args.findings), known)
+    lenses = _lens_files()
+    ran = _selected(lenses, story.body, named_lenses(story.body))
+    found = findings_file.findings(read_draft(args.findings), set(lenses))
     decided: dict[str, tuple[str, str]] = {}
     if found:
         if args.verdicts is None or args.decisions is None:
             raise Refusal("the findings need the skeptic's verdicts and the person's decisions; pass both files")
         found = findings_file.judged(found, read_draft(args.verdicts))
         decided = findings_file.decisions(read_draft(args.decisions), found)
-    print(issue.comment(repo, args.issue, comment_body(verdict, found, decided)))
+    print(issue.comment(repo, args.issue, comment_body(verdict, ran, found, decided)))
     return 0

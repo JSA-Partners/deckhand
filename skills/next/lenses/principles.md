@@ -16,4 +16,4 @@ Ask whether the story delivers one outcome or several: a body that names two thi
 or a plan whose tasks serve different criteria, is more than one story. Say so as a finding named
 "more than one story" with the split you would make, one line per story.
 
-Nothing found is a valid result. Say so in one line.
+Nothing found is a valid result. Write no line for this lens; the brief records it as clean.

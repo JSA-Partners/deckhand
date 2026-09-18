@@ -13,6 +13,6 @@ A finding names the value, where it enters, the shape it should have at that poi
 
 Evidence is the interface line or plan step, or the `file:line` of the boundary in the code.
 
-Nothing found is a valid result. Say so in one line.
+Nothing found is a valid result. Write no line for this lens; the brief records it as clean.
 
 Source: Alexis King, "Parse, don't validate" (2019).

@@ -271,6 +271,8 @@ def test_apply_posts_the_verdict_and_every_finding_with_its_decision(fake_gh, gh
     assert _posted(copy) == (
         "Review: Sound; two things to tighten.\n"
         "\n"
+        "Lenses: coverage (clean), pen-test (clean), principles (clean), red-team (clean), unknowns\n"
+        "\n"
         "- chaos.1, P2, accepted: A retried job writes the grant twice. Scope In names one write.\n"
         "- unknowns.1, P3, declined, rejected by the skeptic: The store method is undefined. Notes names the file. "
         "The skeptic is right.\n"
@@ -376,7 +378,10 @@ def test_a_wrapped_verdict_is_posted_on_one_line(fake_gh, tmp_path):
     result = _apply(tmp_path, verdict="a\n  b", env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
-    assert _posted(copy).startswith("Review: a b\n\n- chaos.1")
+    assert _posted(copy).startswith(
+        "Review: a b\n\nLenses: coverage (clean), pen-test (clean), principles (clean), red-team (clean), "
+        "unknowns\n\n- chaos.1"
+    )
 
 
 def test_apply_refuses_a_blank_verdict(fake_gh, gh_calls, tmp_path):
@@ -385,6 +390,25 @@ def test_apply_refuses_a_blank_verdict(fake_gh, gh_calls, tmp_path):
     assert result.returncode == 1
     assert result.stderr == "deckhand review apply: --verdict needs a sentence on the story as a whole\n"
     assert _writes(gh_calls) == []
+
+
+def test_a_lens_that_ran_and_found_nothing_is_recorded_as_clean(fake_gh, tmp_path):
+    """The lenses selected for issue 248 are coverage, pen-test, principles, red-team, unknowns
+    (see test_context_selects_always_and_signal_lenses); pen-test speaks here and the rest stay
+    silent, so the posted comment must still name every one of them, the silent ones marked clean.
+    """
+    copy = tmp_path / "comment.md"
+    findings = "pen-test.1 | P2 | PENDING | A guest token reaches another org's export | Scope In names the filter\n"
+    verdicts = "pen-test.1 | CONFIRMED\n"
+    decisions = "pen-test.1 | accepted\n"
+
+    result = _apply(
+        tmp_path, findings=findings, verdicts=verdicts, decisions=decisions, env={"GH_BODY_FILE_COPY": str(copy)}
+    )
+
+    assert result.returncode == 0, result.stderr
+    posted = _posted(copy)
+    assert "Lenses: coverage (clean), pen-test, principles (clean), red-team (clean), unknowns (clean)\n" in posted
 
 
 def test_a_clean_pass_needs_neither_verdicts_nor_decisions(fake_gh, tmp_path):
@@ -397,7 +421,13 @@ def test_a_clean_pass_needs_neither_verdicts_nor_decisions(fake_gh, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert _posted(copy) == "Review: Sound.\n\nNothing found.\n"
+    assert _posted(copy) == (
+        "Review: Sound.\n"
+        "\n"
+        "Lenses: coverage (clean), pen-test (clean), principles (clean), red-team (clean), unknowns (clean)\n"
+        "\n"
+        "Nothing found.\n"
+    )
     assert result.stdout.splitlines() == [COMMENT_URL]
 
 
@@ -435,7 +465,13 @@ def test_apply_reads_past_a_byte_order_mark(fake_gh, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert _posted(copy) == "Review: Sound.\n\nNothing found.\n"
+    assert _posted(copy) == (
+        "Review: Sound.\n"
+        "\n"
+        "Lenses: coverage (clean), pen-test (clean), principles (clean), red-team (clean), unknowns (clean)\n"
+        "\n"
+        "Nothing found.\n"
+    )
 
 
 # --- the findings -------------------------------------------------------------
