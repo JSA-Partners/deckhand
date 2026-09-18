@@ -130,6 +130,12 @@ After that, ask it anything: what is blocked, what a session is up to, what to p
 to the board only, to put the backlog in build order, add a blocker a story gained late, or move a
 story back to the column its log says it belongs in.
 
+Ask it for a forecast and it gives a stakeholder two numbers for everything left on the board: a
+floor, from the critical path through the blockers and the sessions you run, and a commitment that
+is deliberately pessimistic. Both are measured rather than estimated, from how long finished stories
+actually took, so the numbers get better as the board fills and the forecast says how thin its
+history still is.
+
 | Command | What it does |
 | --- | --- |
 | `/deckhand:setup` | Links the repository to a GitHub Project and fixes the board's fields |
