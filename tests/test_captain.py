@@ -26,6 +26,27 @@ def fleet_env(fake_gh, tmp_path, monkeypatch):
     return tmp_path
 
 
+def _project_fields_file(tmp_path, name, nodes):
+    path = tmp_path / name
+    path.write_text(json.dumps({"data": {"organization": {"projectV2": {"fields": {"nodes": nodes}}}}}))
+    return str(path)
+
+
+def _project_fields(tmp_path, name, status=None, kind=None, drop=()) -> dict[str, str]:
+    """The project-fields fixture with Status or Kind options replaced or a field dropped, as env."""
+    data = json.loads((FIXTURES / "project-fields.json").read_text(encoding="utf-8"))
+    nodes = []
+    for node in data["data"]["organization"]["projectV2"]["fields"]["nodes"]:
+        if node["name"] in drop:
+            continue
+        if node["name"] == "Status" and status is not None:
+            node = {**node, "options": status}
+        if node["name"] == "Kind" and kind is not None:
+            node = {**node, "options": kind}
+        nodes.append(node)
+    return {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, name, nodes)}
+
+
 def test_a_context_prints_the_four_blocks(fleet_env, capsys):
     assert cli.main(["captain", "context"]) == 0
     out = capsys.readouterr().out
@@ -226,3 +247,30 @@ def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
     row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("| word |"))
     assert "new the test refactor" in row
     assert len(row) < 110
+
+
+def test_the_anomalies_say_when_setup_is_owed(fleet_env, monkeypatch, capsys, tmp_path):
+    """After an update nothing told a person the board's shape had moved, so they ran setup blindly."""
+    for name, value in _project_fields(tmp_path, "no-kind.json", drop=("Kind",)).items():
+        monkeypatch.setenv(name, value)
+
+    assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
+
+    out = capsys.readouterr().out
+    assert "/deckhand:setup" in out
+
+
+def test_a_board_that_is_current_says_nothing_about_setup(fleet_env, capsys):
+    """A row that appears when nothing is owed is noise, and the block is read on every rerun."""
+    assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
+
+    assert "/deckhand:setup" not in capsys.readouterr().out
+
+
+def test_a_field_that_could_not_be_read_is_not_reported_as_owed(fleet_env, monkeypatch, capsys, tmp_path):
+    """Unreadable is not the same as missing, and sending a person to setup over a failed read is wrong."""
+    monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(tmp_path / "does-not-exist.json"))
+
+    assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
+
+    assert "/deckhand:setup" not in capsys.readouterr().out

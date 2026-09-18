@@ -15,7 +15,7 @@ import math
 import os
 import statistics
 
-from deckhand import board, config, fields, fleet, forecast, gh, issue, sessions
+from deckhand import board, checklist, config, fields, fleet, forecast, gh, issue, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -24,6 +24,7 @@ from deckhand.step import (
     issue_number,
     issue_ref,
     open_issue,
+    reason,
     ref_label,
     settings_or_error,
     step,
@@ -111,14 +112,27 @@ def _session_rows(pulses: list[sessions.Pulse]) -> list[str]:
     return rows
 
 
-def _anomaly_rows(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
+def _setup_rows(settings: Settings, repo: str) -> list[str]:
+    """A row per thing the board still needs, so an update does not leave a person guessing.
+
+    An item that could not be read is not reported: unreadable is not the same as missing, and
+    sending a person to setup over a failed read would cost them a run for nothing.
+    """
+    try:
+        fields, unread = gh.project_fields(settings), None
+    except Exception as error:
+        fields, unread = None, reason(error)
+    owed = [item for item in checklist.checklist(settings, repo, fields, unread) if item.left and not item.unknown]
+    return [f"| - | {_name(repo)} | {item.name}: {item.left} | run /deckhand:setup |" for item in owed]
+
+
+def _anomaly_rows(settings: Settings, read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
     found = fleet.anomalies(read.stories, read.blockers, read.behind, pulses, read.missing)
-    if not found:
+    rows = [f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |" for item in found]
+    rows += _setup_rows(settings, gh.repo_slug())
+    if not rows:
         return ["  nothing out of place"]
-    rows = ["| # | Repo | What | Fix |", "| --- | --- | --- | --- |"]
-    for item in found:
-        rows.append(f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |")
-    return rows
+    return ["| # | Repo | What | Fix |", "| --- | --- | --- | --- |", *rows]
 
 
 BLOCKS = ("fleet", "order", "sessions", "anomalies")
@@ -228,7 +242,7 @@ def context(args: argparse.Namespace) -> int:
             block("## Sessions", lambda: _session_rows(pulses))
             print()
         if "anomalies" in wanted:
-            block("## Anomalies", lambda: _anomaly_rows(read, pulses))
+            block("## Anomalies", lambda: _anomaly_rows(settings, read, pulses))
             print()
         if "forecast" in wanted:
             sessions_count = args.sessions if args.sessions is not None else max(len(pulses), 1)
