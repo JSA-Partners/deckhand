@@ -33,6 +33,7 @@ repository's session, confirm it in one question, write the split file, and run 
 line is a story for this repository). Dispatch one deckhand:author agent per stub on the
 line it printed, all at once, then run `... next context N` for each and carry on from that file's
 Review section. Park any other feature the conversation produced with `... new apply --park <file> --title "<name>"`,
-with `--repo owner/name` for another repository and `--blocks N` for the story here waiting on it.
+with `--repo owner/name` for another repository, `--blocks N` for the story here waiting on it, and
+`--after REF` for a story the feature itself waits on.
 
 If a command refuses, fix the rule it names and run it again.

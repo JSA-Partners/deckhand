@@ -205,6 +205,14 @@ def _context(lines: list[str]) -> list[str]:
     return lines[index + 1 :]
 
 
+def test_context_without_an_issue_names_the_captain(fake_gh):
+    """A session that has just finished a story has no number in hand and no route to the board."""
+    result = run_deckhand("next", "context")
+
+    assert result.returncode == 0, result.stderr
+    assert "captain" in result.stdout
+
+
 def test_a_draft_story_is_reviewed_with_the_review_context(fake_gh, repo, tmp_path):
     story = _logged(tmp_path, "drafted.json", _entry("Drafted: from a brainstorm", "2026-09-01T10:00:00Z"))
 

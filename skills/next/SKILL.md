@@ -29,8 +29,8 @@ amended past the last reviewed commit or pushed by hand.
 
 Talk to the person as to a colleague from another project, in plain words, an analogy only when
 they ask. Say one line when something will take
-more than a moment. Ask only when a decision is theirs or you are unsure, with a recommendation every
-time. When the run ends because the story waits on something outside this session, say where it is,
+more than a moment. Recommend every time you ask.
+When the run ends because the story waits on something outside this session, say where it is,
 the one link worth opening, and what happens next, in two or three sentences. Never show what a
 command printed; read it and say what matters. A failure is one sentence on what could not be done.
 
@@ -89,7 +89,7 @@ deckhand:commit, nothing pushed. A change that serves the
 criteria as written: build it and run `log $issue "Deviation: <what and why>"`. A change that
 alters what the story delivers: say so in one sentence with the diff's size and a recommendation,
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
-amend step. Ask when unsure. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
+amend step. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
 commits cover. When the briefing lists `Blocked by:`, say the story waits on them and ask whether
 to build the parts that do not depend on them, recommending that; the pull request opens when
@@ -137,3 +137,4 @@ On a merged story with items left, walk them one at a time, doing what can be do
 for what is theirs, logging `After the merge: <item>` as each is done, or deferred with where it went, so the story
 closes. When nothing is left, say the story is finished and name the next story the briefing gave; when the briefing says the worktree is
 here, add that its folder goes away on the next run from the clone.
+With no story in hand, `/deckhand:captain` says what to pick up next across every repository.

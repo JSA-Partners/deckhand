@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from deckhand import board, config, fields, gh, git, issue, log, sections, stub, worktree
-from deckhand.step import MAIN, branch_for, local_branch, reason, ref_label, step, trunk
+from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
 CONTEXT_OF = {
@@ -290,9 +290,16 @@ def _worktree(name: str, branch: str | None) -> tuple[str | None, str | None]:
         return f"Worktree: unavailable ({reason(error)})", None
 
 
-@step("next")
+def _configure_context(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("issue", type=issue_number, nargs="?", default=None, help="the issue number")
+
+
+@step("next", issue_bound=False, configure_context=_configure_context)
 def context(args: argparse.Namespace) -> int:
     """Print the step the story is due, why, its title, the log's tail, and the context that step needs."""
+    if args.issue is None:
+        print("No story named. Run /deckhand:captain for the board, the build order, and what to pick up.")
+        return 0
     number = args.issue
     reader = Reader()
     repo = reader.read("repository", gh.repo_slug)
