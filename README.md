@@ -94,9 +94,9 @@ claude plugin update deckhand@jsapartners
 ```
 
 Then restart every running Claude Code session, because a session keeps the version it started
-with, and run `/deckhand:setup` again in each repository. Setup fixes what a new release changed on
-the board and says setup is complete when nothing did. Stories in flight are safe: their state lives
-in their issues.
+with. It tells you when it is behind. Nothing else is owed by default: `/deckhand:captain` says if
+the board needs setup run again or a story sits in the wrong column. Stories in flight are safe:
+their state lives in their issues.
 
 ## Usage
 
