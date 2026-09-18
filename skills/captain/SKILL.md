@@ -14,7 +14,7 @@ stands in two or three sentences, leading with what to run next and in which rep
 
 Every later question in this session reruns `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
 rather than answering from what was printed before, because sessions move while a conversation sits.
-Asking about one session is `captain context --session <letter>`, and it is the only read worth
+Asking about one session is `captain context --session <id>`, and it is the only read worth
 paying for on its own.
 
 When the anomalies block has a row whose fix is a Status or adding an item, offer

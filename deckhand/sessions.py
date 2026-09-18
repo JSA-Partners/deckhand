@@ -21,8 +21,8 @@ CHUNK = 262_144
 CAP = 4_194_304
 FREE = "free"
 DEFAULT_ROOT = Path.home() / ".claude" / "projects"
-LETTERS = "abcdefghijklmnopqrstuvwxyz"
 DEEP_LINES = 12
+ID = 4  # characters of the session id; four is unique across a day of transcripts and still readable
 _SAID = 400
 
 _COMMAND = re.compile(r"<command-name>/deckhand:([a-z]+)</command-name>")
@@ -31,6 +31,9 @@ _BRANCH_NUMBER = re.compile(r"^[a-z]+-([0-9]+)-")
 # A whole word, because `new` takes a path as readily as a number and `.../04-registry-split.md`
 # holds digits that are not a story.
 _NUMBER = re.compile(r"^[0-9]+$")
+# The path a session resolves once and then holds in a shell variable, so the version is read from
+# anywhere in a command rather than from the call itself.
+_VERSION = re.compile(r"/deckhand/(\d+\.\d+\.\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,7 @@ class Pulse:
     waiting: bool
     started: float
     path: Path
+    version: str = ""
 
 
 def _record(line: bytes) -> dict | None:
@@ -106,6 +110,17 @@ def _answered(record: dict) -> bool:
     return record.get("type") in {"user", "assistant"} and not _spoke(record)
 
 
+def _ran(record: dict) -> str:
+    """Every Bash command this record asked for; `_text` reads only prose and misses them."""
+    content = (record.get("message") or {}).get("content")
+    parts = content if isinstance(content, list) else []
+    return " ".join(
+        str((part.get("input") or {}).get("command") or "")
+        for part in parts
+        if isinstance(part, dict) and part.get("type") == "tool_use" and part.get("name") == "Bash"
+    )
+
+
 def _repo_of(cwd: str, repos: dict[str, str]) -> str | None:
     """The repository whose name is a component of `cwd`; a worktree lives under its own clone."""
     parts = Path(cwd).parts
@@ -116,6 +131,7 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
     """The one line this session is worth, or None when it is not working in a board repository."""
     cwd = branch = ""
     verb = args = ""
+    version = ""
     cost = 0.0
     started = 0.0
     waiting: bool | None = None
@@ -133,6 +149,9 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
                 verb = found.group(1)
                 said = _ARGS.search(text)
                 args = said.group(1).strip() if said is not None else ""
+        if not version:
+            seen = _VERSION.search(_ran(record))
+            version = seen.group(1) if seen is not None else ""
         if waiting is None:
             if _spoke(record):
                 waiting = True
@@ -160,6 +179,7 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
         waiting=bool(waiting),
         started=started,
         path=path,
+        version=version,
     )
 
 
@@ -176,18 +196,12 @@ def root() -> Path:
     return Path(os.environ.get("DECKHAND_SESSIONS") or DEFAULT_ROOT)
 
 
-def _label(index: int) -> str:
-    """`a` to `z`, then `aa`; a letter is how a person names a session back to the captain."""
-    letters = ""
-    index += 1
-    while index:
-        index, remainder = divmod(index - 1, len(LETTERS))
-        letters = LETTERS[remainder] + letters
-    return letters
-
-
 def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
-    """Every session working in one of `repos` and touched within `since` hours, oldest start first."""
+    """Every session working in one of `repos` and touched within `since` hours, oldest start first.
+
+    The id is the head of the session's own id rather than its position, so it names the same
+    session in every read and a session leaving the window renames nothing.
+    """
     cutoff = time.time() - since * 3600
     found = []
     for path in sorted(root().glob("*/*.jsonl")):
@@ -197,7 +211,7 @@ def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
         if beat is not None:
             found.append(beat)
     found.sort(key=lambda beat: (beat.started, beat.session))
-    return [replace(beat, label=_label(index)) for index, beat in enumerate(found)]
+    return [replace(beat, label=beat.session[:ID]) for beat in found]
 
 
 def deep(path: Path, limit: int = DEEP_LINES) -> Deep:

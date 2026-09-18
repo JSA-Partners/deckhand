@@ -31,6 +31,11 @@ DONE = "Done"
 
 _PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
+# deckhand cannot tell a closed session from an idle one: no transcript records an end and no
+# process holds the file open. An hour is longer than any gap a working session shows and far
+# shorter than the window the table lists over, so it is the line between the two.
+ACTIVE = 3600.0
+
 
 @dataclass(frozen=True)
 class Story:
@@ -260,7 +265,7 @@ def anomalies(
     waiting = _waiting(blockers)
     on: dict[str, list[str]] = {}
     for beat in pulses:
-        if beat.story != sessions.FREE:
+        if beat.story != sessions.FREE and beat.idle < ACTIVE:
             on.setdefault(beat.story, []).append(beat.label)
     out: list[Anomaly] = []
     for story in found:

@@ -110,7 +110,26 @@ def test_a_session_whose_last_word_was_a_tool_result_is_not_waiting(tmp_path):
     assert sessions.pulse(_transcript(tmp_path, extra=extra), REPOS, now=0.0).waiting is False
 
 
-def test_sessions_are_lettered_by_when_they_started(tmp_path, monkeypatch):
+def test_a_version_is_read_from_a_bash_command_anywhere_in_the_session(tmp_path):
+    """The path is resolved once and kept in a shell variable, so the version is read from anywhere."""
+    command = 'D=/home/me/.claude/plugins/cache/acme/deckhand/3.2.1; "$D/bin/deckhand" next context 5'
+    extra = [
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": command}}]},
+        }
+    ]
+    pulse = sessions.pulse(_transcript(tmp_path, extra=extra), REPOS, now=0.0)
+    assert pulse.version == "3.2.1"
+
+
+def test_a_session_that_never_called_deckhand_reports_no_version(tmp_path):
+    """Blank means no versioned call was seen, which is not the same as current."""
+    pulse = sessions.pulse(_transcript(tmp_path), REPOS, now=0.0)
+    assert pulse.version == ""
+
+
+def test_sessions_come_back_oldest_start_first(tmp_path, monkeypatch):
     root = tmp_path / "projects"
     for name, start in (("old.jsonl", 1_000_000), ("new.jsonl", 2_000_000)):
         _write(
@@ -122,7 +141,33 @@ def test_sessions_are_lettered_by_when_they_started(tmp_path, monkeypatch):
         )
     monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
     found = sessions.discover(REPOS, since=999, exclude="")
-    assert [(pulse.label, pulse.session) for pulse in found] == [("a", "old"), ("b", "new")]
+    assert [(pulse.label, pulse.session) for pulse in found] == [("old", "old"), ("new", "new")]
+
+
+def test_a_session_keeps_its_id_when_another_leaves_the_window(tmp_path, monkeypatch):
+    """A label was a position, so a session ageing out renamed every session after it."""
+    root = tmp_path / "projects"
+    first = _write(
+        root / "acme" / "aaaaaaaa-0000-0000-0000-000000000000.jsonl",
+        [
+            {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+            {"type": "cost-state", "totalCostUSD": 1.0, "startTime": 1_000_000 * 1000},
+        ],
+    )
+    _write(
+        root / "acme" / "bbbbbbbb-0000-0000-0000-000000000000.jsonl",
+        [
+            {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+            {"type": "cost-state", "totalCostUSD": 1.0, "startTime": 2_000_000 * 1000},
+        ],
+    )
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(root))
+    both = sessions.discover(REPOS, since=999, exclude="")
+    assert [pulse.label for pulse in both] == ["aaaa", "bbbb"]
+
+    os.utime(first, (0, 0))
+    without_first = sessions.discover(REPOS, since=24, exclude="")
+    assert [pulse.label for pulse in without_first] == ["bbbb"]
 
 
 def test_the_captains_own_session_is_not_in_the_fleet(tmp_path, monkeypatch):

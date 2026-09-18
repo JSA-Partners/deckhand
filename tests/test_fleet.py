@@ -116,14 +116,14 @@ def test_a_cycle_leaves_everyone_placed():
     assert sorted(row.story.number for row in ranked) == [13, 253, 257, 258]
 
 
-def _pulse(story: str, label: str = "a", repo: str = "acme/widgets"):
+def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float = 0.0):
     return sessions.Pulse(
         label=label,
         session=label,
         repo=repo,
         story=story,
         command="next",
-        idle=60.0,
+        idle=idle,
         cost=1.0,
         waiting=False,
         started=1.0,
@@ -150,6 +150,20 @@ def test_a_story_two_sessions_share_is_reported():
     found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
     entry = next(item for item in found if item.number == 117)
     assert entry.what == "sessions a and b are both on it"
+
+
+def test_a_long_idle_session_is_not_counted_as_a_duplicate():
+    """A closed window keeps its row until it ages out; it must not ask for a second closing."""
+    pulses = [_pulse("117", "a", idle=60.0), _pulse("117", "b", idle=3 * 3600.0)]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    assert not [item for item in found if item.number == 117 and "both on it" in item.what]
+
+
+def test_two_recently_active_sessions_are_still_a_duplicate():
+    """The rule earns its place only while it still fires for the case it was written for."""
+    pulses = [_pulse("117", "a", idle=60.0), _pulse("117", "b", idle=120.0)]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    assert [item for item in found if item.number == 117 and "both on it" in item.what]
 
 
 def test_a_pull_request_behind_main_names_the_command():

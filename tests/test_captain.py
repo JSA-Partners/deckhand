@@ -76,13 +76,13 @@ def test_a_named_session_prints_its_last_prompt_and_its_last_word(fleet_env, cap
             {"type": "assistant", "message": {"content": [{"type": "text", "text": "Which kind is it?"}]}},
         ],
     )
-    assert cli.main(["captain", "context", "--session", "a"]) == 0
+    assert cli.main(["captain", "context", "--session", "one"]) == 0
     out = capsys.readouterr().out
     assert "Last prompt: proceed" in out
     assert "Which kind is it?" in out
 
 
-def test_a_session_letter_nobody_has_says_so(fleet_env, capsys):
+def test_a_session_id_nobody_has_says_so(fleet_env, capsys):
     assert cli.main(["captain", "context", "--session", "z"]) == 0
     assert "no session z" in capsys.readouterr().out
 
@@ -127,6 +127,6 @@ def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
         ],
     )
     cli.main(["captain", "context"])
-    row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("| a |"))
+    row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("| word |"))
     assert "new the test refactor" in row
     assert len(row) < 110

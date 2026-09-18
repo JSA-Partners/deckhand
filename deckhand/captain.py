@@ -85,13 +85,14 @@ def _session_rows(pulses: list[sessions.Pulse]) -> list[str]:
     if not pulses:
         return ["  none"]
     rows = [
-        "| id | Repo | Story | Last command | Idle | Cost | Waiting |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| id | Repo | Story | Last command | Idle | Cost | Waiting | Version |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for beat in pulses:
         rows.append(
             f"| {beat.label} | {_name(beat.repo)} | {beat.story} | {_short(beat.command)} | "
-            f"{_since(beat.idle)} | ${beat.cost:.2f} | {'yes' if beat.waiting else 'no'} |"
+            f"{_since(beat.idle)} | ${beat.cost:.2f} | {'yes' if beat.waiting else 'no'} | "
+            f"{beat.version or '-'} |"
         )
     return rows
 
@@ -107,7 +108,7 @@ def _anomaly_rows(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--session", metavar="ID", help="read one session properly, by the letter it was given")
+    parser.add_argument("--session", metavar="ID", help="read one session properly, by the id in the table")
     parser.add_argument("--since", type=float, default=WINDOW, help="how many hours back to look for sessions")
 
 
