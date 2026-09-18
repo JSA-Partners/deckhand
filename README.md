@@ -50,8 +50,8 @@ project, carrying what the session learned, and can hold this story until it lan
 
 `/deckhand:captain` watches the whole project rather than one story: every story and its column,
 every session working on one, the order to build the backlog in, and anything the board holds that no
-step could have written. It reads, and the only things it writes are that order and a status the
-board got wrong.
+step could have written. It reads, and the only things it writes are that order, a status the board
+got wrong, and a blocker a story gained after it boarded.
 
 `/deckhand:commit` writes a conventional commit for the staged changes and `/deckhand:document`
 records what a branch taught in `docs/claude/`. Both are there when you want them on their own.
