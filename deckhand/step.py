@@ -167,6 +167,28 @@ def blockers_block(repo: str, number: int) -> list[str]:
     return [f"  {ref_label(where, blocker, repo)}  {title}" for where, blocker, title in found] or ["  none"]
 
 
+# What gh says when the issue is not there, as opposed to a network, auth, or rate limit failure.
+_NOT_FOUND = re.compile(r"not found|could not (find|resolve)|no issue", re.IGNORECASE)
+
+
+def open_issue(repo: str, number: int, here: str) -> None:
+    """Refuse unless issue `number` of `repo` exists and is open; a blocker that is neither blocks nothing.
+
+    Only the sibling read: a blocker's comments are none of a caller's business, and its state is
+    the half of that read a caller of this helper acts on.
+    """
+    label = ref_label(repo, number, here)
+    try:
+        state = issue.sibling(repo, number)[0]
+    except gh.GhError as error:
+        said = reason(error)
+        if _NOT_FOUND.search(said):
+            raise Refusal(f"{label} does not exist") from error
+        raise Refusal(f"{label} cannot be read: {said}") from error
+    if state.upper() != "OPEN":
+        raise Refusal(f"{label} is closed")
+
+
 def resolved_settings() -> Settings:
     """The project every write goes to, resolved before the first write, so a missing link refuses.
 

@@ -165,6 +165,14 @@ def add_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> None:
             raise
 
 
+def remove_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> None:
+    """Drop the record that `number` is blocked by `blocked_by`; the API takes the blocker's id."""
+    gh.split_repo(repo)
+    blocker_repo, blocker = blocked_by
+    blocker_id = gh.issue_id(blocker_repo, blocker)
+    gh.run("api", "-X", "DELETE", f"repos/{repo}/issues/{number}/dependencies/blocked_by/{blocker_id}")
+
+
 def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
     """`(repository, number, title)` of every open issue blocking `number`; the repository may be another."""
     gh.split_repo(repo)

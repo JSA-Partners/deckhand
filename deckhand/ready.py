@@ -34,6 +34,7 @@ from deckhand.step import (
     blockers_block,
     indented,
     issue_ref,
+    open_issue,
     reason,
     ref_label,
     refuse_stub,
@@ -53,8 +54,6 @@ TABLE_HEADER = "| # | Repo | Title | Estimate | Actual | Tasks | Note |"
 TABLE_RULE = "| --- | --- | --- | --- | --- | --- | --- |"
 
 _TASK_HEADING = re.compile(r"^### Task [0-9]+", re.MULTILINE)
-# What gh says when the issue is not there, as opposed to a network, auth, or rate limit failure.
-_NOT_FOUND = re.compile(r"not found|could not (find|resolve)|no issue", re.IGNORECASE)
 
 
 def settle_seconds() -> float:
@@ -181,24 +180,6 @@ def _reviewed(story: issue.Issue, number: int) -> None:
         raise Refusal(f"{RULE_REVIEWED} Run /deckhand:next {number}.")
 
 
-def _open_issue(repo: str, number: int, here: str) -> None:
-    """Refuse unless issue `number` of `repo` exists and is open; a blocker that is neither blocks nothing.
-
-    Only the sibling read: a blocker's comments are none of this step's business, and its state is
-    the half of that read this step acts on.
-    """
-    label = ref_label(repo, number, here)
-    try:
-        state = issue.sibling(repo, number)[0]
-    except gh.GhError as error:
-        said = reason(error)
-        if _NOT_FOUND.search(said):
-            raise Refusal(f"{label} does not exist") from error
-        raise Refusal(f"{label} cannot be read: {said}") from error
-    if state.upper() != "OPEN":
-        raise Refusal(f"{label} is closed")
-
-
 def _hold_status(settings: Settings, repo: str, number: int, status: str) -> None:
     """Read Status back after the board's automation has had its moment, and put it right once.
 
@@ -257,7 +238,7 @@ def apply(args: argparse.Namespace) -> int:
     if (repo, args.issue) in blockers:
         raise Refusal(f"#{args.issue} cannot block itself")
     for where, number in blockers:
-        _open_issue(where, number, repo)
+        open_issue(where, number, repo)
     for where, number in blockers:
         issue.add_dependency(repo, args.issue, (where, number))
         print(f"Blocked by {ref_label(where, number, repo)}")

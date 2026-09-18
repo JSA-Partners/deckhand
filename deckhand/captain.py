@@ -1,10 +1,11 @@
 """The captain: one reading of every story, every working session, the build order, and what slipped.
 
 `context` prints four blocks and never fails, because it is what an open session reruns every time a
-person asks where things stand. `apply` writes two things and no more: the order onto the board, and
-a Status the board holds that the story's log does not allow. Everything else it finds is reported
-with the command that would fix it, because every other write is a step's, and a step is reached
-through `next`.
+person asks where things stand; `--only` prints one of them alone. `apply` writes three things and no
+more: the order onto the board, a Status the board holds that the story's log does not allow, and a
+blocker added to or dropped from a boarded story. Everything else it finds is reported with the
+command that would fix it, because every other write is a step's, and a step is reached through
+`next`.
 """
 
 from __future__ import annotations
@@ -12,9 +13,20 @@ from __future__ import annotations
 import argparse
 import os
 
-from deckhand import board, config, fields, fleet, gh, sessions
+from deckhand import board, config, fields, fleet, gh, issue, sessions
 from deckhand.config import Settings
-from deckhand.step import Refusal, block, indented, settings_or_error, step, usable
+from deckhand.step import (
+    Refusal,
+    block,
+    indented,
+    issue_number,
+    issue_ref,
+    open_issue,
+    ref_label,
+    settings_or_error,
+    step,
+    usable,
+)
 
 WINDOW = 24.0
 # `new` takes a whole idea as its argument, and the table is read across, not down.
@@ -107,9 +119,13 @@ def _anomaly_rows(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
     return rows
 
 
+BLOCKS = ("fleet", "order", "sessions", "anomalies")
+
+
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", metavar="ID", help="read one session properly, by the id in the table")
     parser.add_argument("--since", type=float, default=WINDOW, help="how many hours back to look for sessions")
+    parser.add_argument("--only", choices=BLOCKS, help="print one block instead of all four")
 
 
 def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
@@ -140,21 +156,29 @@ def context(args: argparse.Namespace) -> int:
         pulses = _pulses(read, args.since)
         if args.session:
             return _one_session(pulses, args.session)
+        wanted = (args.only,) if args.only else BLOCKS
         print(f"Project: {settings.owner} #{settings.project}")
         print()
-        block("## Fleet", lambda: _fleet_rows(read))
-        print()
-        block("## Order", lambda: [*_order_rows(read), "", _next_line(read, pulses)])
-        print()
-        block("## Sessions", lambda: _session_rows(pulses))
-        print()
-        block("## Anomalies", lambda: _anomaly_rows(read, pulses))
+        if "fleet" in wanted:
+            block("## Fleet", lambda: _fleet_rows(read))
+            print()
+        if "order" in wanted:
+            block("## Order", lambda: [*_order_rows(read), "", _next_line(read, pulses)])
+            print()
+        if "sessions" in wanted:
+            block("## Sessions", lambda: _session_rows(pulses))
+            print()
+        if "anomalies" in wanted:
+            block("## Anomalies", lambda: _anomaly_rows(read, pulses))
     return 0
 
 
 def _configure_apply(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--order", action="store_true", help="write the build order onto the board")
     parser.add_argument("--repair", action="store_true", help="set every Status the board holds that its log forbids")
+    parser.add_argument("--block", type=issue_number, metavar="N", help="the boarded story that gains a blocker")
+    parser.add_argument("--unblock", type=issue_number, metavar="N", help="the boarded story that loses one")
+    parser.add_argument("--by", metavar="REF", help="the blocker, owner/name#M or M for this repository")
 
 
 def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
@@ -193,15 +217,49 @@ def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
     return len(wrong) + len(read.missing)
 
 
+def _ref(by: str, repo: str) -> tuple[str, int]:
+    try:
+        return issue_ref(by, repo)
+    except ValueError as error:
+        raise Refusal(str(error)) from error
+
+
+def _block_writes(repo: str, number: int, by: str) -> None:
+    where, blocker = _ref(by, repo)
+    if (where, blocker) == (repo, number):
+        raise Refusal(f"#{number} cannot block itself")
+    open_issue(where, blocker, repo)
+    issue.add_dependency(repo, number, (where, blocker))
+    print(f"#{number} blocked by {ref_label(where, blocker, repo)}")
+
+
+def _unblock_writes(repo: str, number: int, by: str) -> None:
+    where, blocker = _ref(by, repo)
+    if (where, blocker) == (repo, number):
+        raise Refusal(f"#{number} cannot block itself")
+    open_issue(where, blocker, repo)
+    issue.remove_dependency(repo, number, (where, blocker))
+    print(f"#{number} no longer blocked by {ref_label(where, blocker, repo)}")
+
+
 @step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
-    """Write the build order onto the board, or set a Status the board holds that its log forbids."""
-    if not args.order and not args.repair:
-        raise Refusal("say what to write: --order, --repair, or both")
-    settings = config.load()
-    read = fleet.read(settings)
-    if args.order:
-        _order_writes(settings, read)
-    if args.repair:
-        _repair_writes(settings, read)
+    """Write the build order, set a Status the log allows, or add or drop a blocker on a boarded story."""
+    if args.block is not None and args.unblock is not None:
+        raise Refusal("--block and --unblock are one at a time, not both")
+    if (args.block is not None or args.unblock is not None) and not args.by:
+        raise Refusal("--block and --unblock each need --by, naming the blocker")
+    if not args.order and not args.repair and args.block is None and args.unblock is None:
+        raise Refusal("say what to write: --order, --repair, --block, or --unblock")
+    if args.block is not None:
+        _block_writes(gh.repo_slug(), args.block, args.by)
+    if args.unblock is not None:
+        _unblock_writes(gh.repo_slug(), args.unblock, args.by)
+    if args.order or args.repair:
+        settings = config.load()
+        read = fleet.read(settings)
+        if args.order:
+            _order_writes(settings, read)
+        if args.repair:
+            _repair_writes(settings, read)
     return 0
