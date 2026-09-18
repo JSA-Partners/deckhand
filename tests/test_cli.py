@@ -220,3 +220,15 @@ def test_a_step_run_without_its_verb_names_the_command(fake_gh, repo):
 
     assert result.returncode == 2
     assert "deckhand next context 4" in result.stderr
+
+
+def test_no_module_is_over_the_size_rule():
+    """CLAUDE.md caps a module at 400 lines, and nothing else enforces it."""
+    limit = 400
+    lengths = {
+        path.name: len(path.read_text(encoding="utf-8").splitlines())
+        for path in sorted((ROOT / "deckhand").glob("*.py"))
+    }
+    over = {name: count for name, count in lengths.items() if count > limit}
+
+    assert not over, f"over {limit} lines: {over}"
