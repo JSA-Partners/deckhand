@@ -91,9 +91,8 @@ alters what the story delivers: say so in one sentence with the diff's size and 
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
 amend step. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
-commits cover. When the briefing lists `Blocked by:`, say the story waits on them and ask whether
-to build the parts that do not depend on them, recommending that; the pull request opens when
-they close.
+commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what
+does not depend on it, then stop rather than watch. The captain picks it up when the blocker clears.
 
 ## Branch review
 

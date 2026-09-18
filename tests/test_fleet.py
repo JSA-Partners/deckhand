@@ -64,6 +64,12 @@ def test_a_blocker_in_another_repository_is_named_in_full():
     assert fleet.note(_story(257), blockers, behind=False) == "waits on acme/gadgets#13"
 
 
+def test_an_in_progress_story_that_waits_says_so_whatever_its_column():
+    """Built, rebased and reviewed still means waiting when the blocker has not merged."""
+    blockers = [("acme/widgets", 253, "Seed the role matrix")]
+    assert fleet.note(_story(117), blockers, behind=False) == "waits on #253"
+
+
 def test_a_pull_request_behind_main_is_the_note():
     assert fleet.note(_story(117), [], behind=True) == "pull request behind main"
 

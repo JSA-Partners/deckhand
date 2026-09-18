@@ -142,6 +142,10 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
     """The one thing worth saying about this story beyond its column."""
     if not touched(story):
         return "not a deckhand story"
+    if blockers:
+        # a story already built, rebased and reviewed still waits on an unmerged blocker; the column alone hides it
+        named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
+        return f"waits on {named}"
     if story.status == "In Progress":
         if behind:
             return "pull request behind main"
@@ -150,9 +154,6 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         if log.last(story.issue, "Reviewed:") is not None:
             return "reviewed, no pull request"
         return "building"
-    if blockers:
-        named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
-        return f"waits on {named}"
     if story.status == "Backlog":
         return "ready"
     if story.status == DONE and story.closed:
