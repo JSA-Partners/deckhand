@@ -115,8 +115,7 @@ and need no pass, because docs/claude is Claude's alone.
 From the finish context (above, or run it), write the summary it names: one or two paragraphs in
 the third person, never "I" or "we", saying what the branch changed and what it means for a reader,
 in the shape of the repository's recent merged pull requests. The story's "so that" clause has the why. Read them the title and that summary, and on yes run
-`finish apply $issue <summary> --actual P --check "<cmd>"`, Actual in the estimate's units and the size the
-work turned out to be, the check commands from CLAUDE.md or the detected list, adding
+`finish apply $issue <summary> --check "<cmd>"`, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
 theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. On the merge row,
 say which checks are still running when the briefing names them, and make the same offer. On the

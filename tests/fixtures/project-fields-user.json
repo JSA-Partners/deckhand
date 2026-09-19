@@ -60,11 +60,6 @@
               "dataType": "NUMBER"
             },
             {
-              "id": "PVTF_ACTUAL",
-              "name": "Actual",
-              "dataType": "NUMBER"
-            },
-            {
               "id": "PVTSSF_PRIORITY",
               "name": "Priority",
               "dataType": "SINGLE_SELECT"

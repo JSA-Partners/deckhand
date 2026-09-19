@@ -160,7 +160,7 @@ def test_context_reports_the_repository_the_links_and_the_fields(repo, fake_gh, 
     assert "2  Widgets" in out
     assert "Archive" not in out  # closed projects are filtered out
     assert "Project override: none (the linked project is used)" in out
-    assert "Fields:\n  Kind: present\n  Story Points: present\n  Actual: present\n" in out
+    assert "Fields:\n  Kind: present\n  Story Points: present\n" in out
 
 
 def test_context_reports_a_missing_field(repo, fake_gh, tmp_path, monkeypatch):
@@ -171,7 +171,7 @@ def test_context_reports_a_missing_field(repo, fake_gh, tmp_path, monkeypatch):
     assert result.returncode == 0
     assert "  Kind: present" in result.stdout
     assert "  Story Points: missing" in result.stdout
-    assert "  Actual: missing" in result.stdout
+    assert "Actual" not in result.stdout
 
 
 def test_context_reports_a_field_of_the_wrong_type(repo, fake_gh, tmp_path, monkeypatch):
@@ -331,7 +331,7 @@ def test_context_reports_the_board_view_fields_that_are_off(repo, fake_gh, tmp_p
 
     result = run_deckhand("setup", "context", cwd=repo, env=env)
 
-    assert "  Board view fields: on the Board view turn on Kind, Story Points, Actual, Assignees, Repository" in (
+    assert "  Board view fields: on the Board view turn on Kind, Story Points, Assignees, Repository" in (
         _checklist(result)
     )
 
@@ -679,7 +679,6 @@ def test_apply_creates_only_missing_fields_and_prints_the_checklist(repo, fake_g
     assert len(created) == 1
     assert "--name Story Points" in created[0]
     assert "Kind: already present" in result.stdout
-    assert "Actual: already present" in result.stdout
     assert "1. Status options:" in result.stdout
 
 
@@ -769,7 +768,7 @@ def test_apply_names_the_click_for_the_board_view(repo, fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert (
-        "  1. Board view fields: on the Board view turn on Kind, Story Points, Actual, Assignees, Repository. "
+        "  1. Board view fields: on the Board view turn on Kind, Story Points, Assignees, Repository. "
         "Board view > view menu > Fields."
     ) in result.stdout.splitlines()
 
@@ -831,8 +830,8 @@ def test_apply_creates_no_date_fields(repo, fake_gh, gh_calls, tmp_path, monkeyp
 
     assert result.returncode == 0, result.stderr
     created = [c for c in gh_calls() if c.startswith("project field-create") or "createProjectV2Field" in c]
-    assert len(created) == 3
-    for gone in ("Started", "Finished", "Active Days"):
+    assert len(created) == 2
+    for gone in ("Started", "Finished", "Active Days", "Actual"):
         assert not any(gone in c for c in created), gone
         assert gone not in result.stdout
 
@@ -885,7 +884,6 @@ def test_apply_deletes_nothing_when_the_project_has_only_the_fields_the_process_
         {"id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT"},
         {"id": "PVTSSF_KIND", "name": "Kind", "dataType": "SINGLE_SELECT"},
         {"id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER"},
-        {"id": "PVTF_ACTUAL", "name": "Actual", "dataType": "NUMBER"},
     ]
     env = {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, "no-extras.json", nodes)}
 
@@ -894,6 +892,22 @@ def test_apply_deletes_nothing_when_the_project_has_only_the_fields_the_process_
     assert result.returncode == 0, result.stderr
     assert _deletes(gh_calls) == []
     assert "deleted field" not in result.stdout
+
+
+def test_apply_deletes_the_actual_field_it_no_longer_reads(repo, fake_gh, gh_calls, tmp_path):
+    """Actual was the process's own field until the forecast measured hours; setup now removes it."""
+    nodes = [
+        {"id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTSSF_KIND", "name": "Kind", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER"},
+        {"id": "PVTF_ACTUAL", "name": "Actual", "dataType": "NUMBER"},
+    ]
+    env = {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, "old.json", nodes)}
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert _deletes(gh_calls) == ["project field-delete --id PVTF_ACTUAL"]
 
 
 def test_apply_never_deletes_a_built_in_whose_name_looks_deletable(repo, fake_gh, gh_calls, tmp_path):

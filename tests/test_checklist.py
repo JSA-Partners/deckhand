@@ -132,7 +132,7 @@ def test_board_view_left_names_what_it_shows(fake_gh, settings, tmp_path, monkey
 
     item = _item(checklist.checklist(settings, REPO, _fields()), "Board view fields")
 
-    assert item.left == "on the Board view turn on Kind, Story Points, Actual, Assignees, Repository"
+    assert item.left == "on the Board view turn on Kind, Story Points, Assignees, Repository"
 
 
 def test_board_view_is_done_in_any_order(fake_gh, settings, tmp_path, monkeypatch):
@@ -140,7 +140,7 @@ def test_board_view_is_done_in_any_order(fake_gh, settings, tmp_path, monkeypatc
     _views(
         tmp_path,
         "shuffled.json",
-        {"Board": ["Repository", "Title", "Actual", "Status", "Assignees", "Kind", "Story Points"]},
+        {"Board": ["Repository", "Title", "Status", "Assignees", "Kind", "Story Points"]},
         monkeypatch,
     )
 

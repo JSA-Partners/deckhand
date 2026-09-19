@@ -47,11 +47,11 @@ from deckhand.step import (
 # cent note was printed past five stories in one evening, so the gate is here where scope is judged.
 BOARDING_LIMIT = 50_000
 
-FIELDS = ("Kind", "Story Points", "Actual")
+FIELDS = ("Kind", "Story Points")
 LIMIT = 20
 SETTLE = 2.0
-TABLE_HEADER = "| # | Repo | Title | Estimate | Actual | Tasks | Note |"
-TABLE_RULE = "| --- | --- | --- | --- | --- | --- | --- |"
+TABLE_HEADER = "| # | Repo | Title | Estimate | Tasks |"
+TABLE_RULE = "| --- | --- | --- | --- | --- |"
 
 _TASK_HEADING = re.compile(r"^### Task [0-9]+", re.MULTILINE)
 
@@ -85,18 +85,14 @@ def analogy_rows(nodes: list[dict[str, Any]], limit: int) -> list[str]:
         if not content or board.field_value(node, "Status", "name") != "Done":
             continue
         points = board.field_value(node, "Story Points", "number")
-        actual = board.field_value(node, "Actual", "number")
-        done.append((content, points, actual))
+        done.append((content, points))
     done.sort(key=lambda item: item[0].get("closedAt") or "", reverse=True)
     rows = []
-    for content, points, actual in done[:limit]:
+    for content, points in done[:limit]:
         title = (content.get("title") or "").replace("|", "\\|")
         repo = ((content.get("repository") or {}).get("nameWithOwner") or "/").partition("/")[2]
         tasks = len(_TASK_HEADING.findall(content.get("body") or ""))
-        note = "uncalibrated" if actual is None else ""
-        rows.append(
-            f"| {content.get('number')} | {repo} | {title} | {_fmt(points)} | {_fmt(actual)} | {tasks} | {note} |"
-        )
+        rows.append(f"| {content.get('number')} | {repo} | {title} | {_fmt(points)} | {tasks} |")
     return rows
 
 

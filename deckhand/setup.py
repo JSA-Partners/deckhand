@@ -25,7 +25,6 @@ from deckhand.step import Refusal, reason, step
 PROJECT_FIELDS: list[tuple[str, str]] = [
     ("Kind", "SINGLE_SELECT"),
     ("Story Points", "NUMBER"),
-    ("Actual", "NUMBER"),
 ]
 
 # What `gh project field-list` reports as `type` for each `field-create --data-type`.

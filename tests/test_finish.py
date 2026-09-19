@@ -27,7 +27,6 @@ PENDING = (
     "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
     "--single-select-option-id opt_pending"
 )
-ACTUAL = "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTF_ACTUAL --number 3"
 BLOCKING = json.dumps(
     [
         {"number": 4, "state": "open"},
@@ -150,7 +149,7 @@ def _summary_file(repo: Path, text: str = SUMMARY) -> str:
 
 def _apply(repo: Path, *extra: str, env: dict[str, str] | None = None, summary: str = SUMMARY):
     """Apply with HEAD reviewed unless an issue in `env` says otherwise, from a written summary."""
-    args = [_summary_file(repo, summary), "--actual", "3", *extra]
+    args = [_summary_file(repo, summary), *extra]
     if "--check" not in args:
         args += ["--check", "true"]
     reviewed = _reviewed_issue(repo.parent, _sha(repo, "HEAD"))
@@ -289,7 +288,7 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
 
 
 def test_apply_refuses_without_a_check(fake_gh, gh_calls, repo, origin, branch):
-    result = _finish("apply", repo, "--actual", "3")
+    result = _finish("apply", repo)
 
     assert result.returncode != 0
     assert "--check" in result.stderr
@@ -297,13 +296,13 @@ def test_apply_refuses_without_a_check(fake_gh, gh_calls, repo, origin, branch):
     assert BRANCH not in _branches(origin)
 
 
-def test_apply_refuses_a_bad_actual(fake_gh, gh_calls, repo, origin, branch):
-    result = _apply(repo, "--actual", "three")
+def test_apply_no_longer_takes_an_actual(fake_gh, gh_calls, repo, origin, branch):
+    """The forecast measures hours from the log, so nothing reads a typed actual any more."""
+    result = _apply(repo, "--actual", "3")
 
-    assert result.returncode == 1
-    assert result.stderr == "deckhand finish apply: actual must be a non-negative integer, got 'three'\n"
+    assert result.returncode == 2
+    assert "unrecognized arguments: --actual 3" in result.stderr
     assert _writes(gh_calls) == []
-    assert BRANCH not in _branches(origin)
 
 
 def test_apply_refuses_a_head_that_is_not_the_reviewed_commit(fake_gh, gh_calls, repo, origin, branch, tmp_path):
@@ -575,12 +574,11 @@ def test_apply_pushes_then_opens_the_pull_request_and_logs_it(fake_gh, gh_calls,
     result = _apply(repo, env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-5:] == [
+    assert result.stdout.splitlines()[-4:] == [
         "Pushed",
         f"Opened {PR_URL}",
         "Logged Pull request",
         "Status=Pending Review",
-        "Actual=3",
     ]
     assert _sha(origin, BRANCH) == head
     assert copy.read_text(encoding="utf-8").endswith(f"--- issue comment\nPull request: {PR_URL}")
@@ -596,7 +594,6 @@ def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo,
         f"Opened {PR_URL}",
         "Logged Pull request",
         "Status=Pending Review",
-        "Actual=3",
     ]
     calls = [call for call in gh_calls() if "item-edit" in call or call.startswith(("issue", "pr "))]
     assert [" ".join(call.split()[:2]) for call in calls] == [
@@ -605,11 +602,10 @@ def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo,
         "pr create",
         "issue comment",
         "project item-edit",
-        "project item-edit",
     ]
     assert calls[1] == PR_LIST
     assert calls[2].startswith("pr create ")
-    assert calls[4:] == [PENDING, ACTUAL]
+    assert calls[4:] == [PENDING]
 
 
 def test_apply_ends_on_the_fields_and_reads_nothing_more(fake_gh, gh_calls, repo, origin, branch):
@@ -617,7 +613,7 @@ def test_apply_ends_on_the_fields_and_reads_nothing_more(fake_gh, gh_calls, repo
     result = _apply(repo, env={"GH_BLOCKING": BLOCKING})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Actual=3"
+    assert result.stdout.splitlines()[-1] == "Status=Pending Review"
     assert "Next:" not in result.stdout
     assert [call for call in gh_calls() if "/dependencies/blocking" in call] == []
 
@@ -664,10 +660,9 @@ def test_apply_reuses_a_pull_request_the_branch_already_has(fake_gh, gh_calls, r
         "Assigned @me",
         "Logged Pull request",
         "Status=Pending Review",
-        "Actual=3",
     ]
     assert [call for call in gh_calls() if call.startswith("pr create")] == []
-    assert [call for call in gh_calls() if "item-edit" in call] == [PENDING, ACTUAL]
+    assert [call for call in gh_calls() if "item-edit" in call] == [PENDING]
 
 
 def test_apply_assigns_the_pull_request_it_reuses(fake_gh, gh_calls, repo, origin, branch):
@@ -687,7 +682,7 @@ def test_apply_works_in_a_clone_that_has_no_local_main(fake_gh, gh_calls, repo, 
 
     assert result.returncode == 0, result.stderr
     assert f"Opened {PR_URL}" in result.stdout
-    assert [call for call in gh_calls() if "item-edit" in call] == [PENDING, ACTUAL]
+    assert [call for call in gh_calls() if "item-edit" in call] == [PENDING]
 
 
 def test_apply_reports_what_the_hook_said_when_the_push_is_refused(fake_gh, gh_calls, repo, origin, branch):
@@ -755,7 +750,7 @@ def test_apply_accepts_a_merge_of_main_on_the_reviewed_commit(fake_gh, gh_calls,
     assert _sha(repo, "HEAD") != reviewed
 
     env = _reviewed_issue(repo.parent, reviewed)
-    result = _finish("apply", repo, _summary_file(repo), "--actual", "3", "--check", "true", env=env)
+    result = _finish("apply", repo, _summary_file(repo), "--check", "true", env=env)
 
     assert result.returncode == 0, result.stderr
     assert "Pushed" in result.stdout.splitlines()
@@ -769,7 +764,7 @@ def test_apply_refuses_a_merge_whose_other_side_is_not_main(fake_gh, gh_calls, r
     _git(repo, "merge", "-q", "--no-edit", "side")
 
     env = _reviewed_issue(repo.parent, reviewed)
-    result = _finish("apply", repo, _summary_file(repo), "--actual", "3", "--check", "true", env=env)
+    result = _finish("apply", repo, _summary_file(repo), "--check", "true", env=env)
 
     assert result.returncode == 1
     assert "is not the last reviewed commit" in result.stderr

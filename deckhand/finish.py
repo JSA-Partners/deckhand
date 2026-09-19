@@ -13,7 +13,7 @@ pull request opens only when HEAD is the commit the last `Reviewed:` entry names
 clean, the branch contains main, every subject is a conventional commit that names no story
 number, the docs audit is clean, and every check the caller named exits 0. Only then does it push
 the branch, which reaches origin here and nowhere earlier, open the pull request assigned to
-whoever ran the step, log `Pull request:` on the issue, and record Pending Review and Actual, so
+whoever ran the step, log `Pull request:` on the issue, and record Pending Review, so
 what merges is what was reviewed.
 
 Both verbs work against `origin/main`, never the local branch of that name: a story branches from
@@ -195,12 +195,6 @@ def context(args: argparse.Namespace) -> int:
 # --- apply ------------------------------------------------------------------
 
 
-def _actual(value: str) -> int:
-    if not (value.isascii() and value.isdigit()):
-        raise Refusal(f"actual must be a non-negative integer, got {value!r}")
-    return int(value)
-
-
 def _branch() -> str:
     """The branch being finished; the pull request needs a head, so a detached HEAD is a refusal."""
     name = refuse_git("branch", "--show-current")
@@ -211,7 +205,6 @@ def _branch() -> str:
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("file", type=Path, help="the summary of what the branch changed")
-    parser.add_argument("--actual", required=True, help="the points the story actually took")
     parser.add_argument(
         "--check",
         required=True,
@@ -225,7 +218,6 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 @step("finish", _configure)
 def apply(args: argparse.Namespace) -> int:
     """Gate a story branch, then push it, open its pull request, and log the pull request."""
-    actual = _actual(args.actual)
     breaking = _breaking(args.breaking)
     settings = config.load()
     repo = gh.repo_slug()
@@ -278,5 +270,4 @@ def apply(args: argparse.Namespace) -> int:
     issue.comment(repo, args.issue, log.checked(f"Pull request: {url}"))
     print("Logged Pull request")
     print(fields.set_field(settings, repo, args.issue, "Status", "Pending Review"))
-    print(fields.set_field(settings, repo, args.issue, "Actual", str(actual)))
     return 0

@@ -30,7 +30,6 @@
                 { "id": "opt_perf", "name": "perf", "color": "ORANGE" }
               ] },
             { "id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER" },
-            { "id": "PVTF_ACTUAL", "name": "Actual", "dataType": "NUMBER" },
             { "id": "PVTSSF_PRIORITY", "name": "Priority", "dataType": "SINGLE_SELECT" }
           ]
         }

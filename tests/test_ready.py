@@ -12,8 +12,8 @@ REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 NO_WAIT = {"DECKHAND_SETTLE": "0"}
 ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
-HEADER = "| # | Repo | Title | Estimate | Actual | Tasks | Note |"
-RULE = "| --- | --- | --- | --- | --- | --- | --- |"
+HEADER = "| # | Repo | Title | Estimate | Tasks |"
+RULE = "| --- | --- | --- | --- | --- |"
 ITEM_ADD = "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/248 --format json"
 EDITS = [
     "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_KIND "
@@ -87,7 +87,7 @@ def _writes(gh_calls) -> list[str]:
 # --- the analogy table ------------------------------------------------------
 
 
-def test_the_table_lists_done_stories_newest_first_with_estimate_actual_tasks(fake_gh):
+def test_the_table_lists_done_stories_newest_first_with_estimate_and_tasks(fake_gh):
     result = run_deckhand("ready", "context", "248")
 
     assert result.returncode == 0, result.stderr
@@ -95,9 +95,9 @@ def test_the_table_lists_done_stories_newest_first_with_estimate_actual_tasks(fa
     assert lines[lines.index(HEADER) :] == [
         HEADER,
         RULE,
-        "| 211 | widgets | Publication tier assignments | 3 | - | 0 | uncalibrated |",
-        "| 210 | widgets | Tag filters on the mention list | 5 | 8 | 2 |  |",
-        "| 96 | gadgets | CSV export of the breakdown chart | 8 | 5 | 1 |  |",
+        "| 211 | widgets | Publication tier assignments | 3 | 0 |",
+        "| 210 | widgets | Tag filters on the mention list | 5 | 2 |",
+        "| 96 | gadgets | CSV export of the breakdown chart | 8 | 1 |",
     ]
 
 
@@ -112,7 +112,7 @@ def test_the_table_queries_a_user_owned_project_under_user(fake_gh, gh_calls, tm
     result = run_deckhand("ready", "context", "248")
 
     assert result.returncode == 0, result.stderr
-    assert "| 211 | widgets | Publication tier assignments | 3 | - | 0 | uncalibrated |" in result.stdout
+    assert "| 211 | widgets | Publication tier assignments | 3 | 0 |" in result.stdout
     (call,) = [c for c in gh_calls() if "projectV2(number" in c]
     assert "user(login:$owner)" in call
     assert "-f owner=mjm -F number=4" in call
@@ -152,7 +152,7 @@ def test_the_table_prints_whole_numbers_without_a_decimal_point(fake_gh, tmp_pat
 
     result = run_deckhand("ready", "context", "248", env=_items_file(tmp_path, "items-float.json", edit))
 
-    assert result.stdout.splitlines()[-1] == ("| 210 | widgets | Tag filters on the mention list | 2.5 | 8 | 2 |  |")
+    assert result.stdout.splitlines()[-1] == ("| 210 | widgets | Tag filters on the mention list | 2.5 | 2 |")
 
 
 def test_the_table_reads_the_items_through_gh_paginate(fake_gh, gh_calls):
@@ -215,7 +215,7 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
     assert lines[6] == "## Story"
     assert lines[7].startswith("As a guest user, I want to see only")
     blockers = lines.index("Blockers:")
-    assert lines[blockers : blockers + 11] == [
+    assert lines[blockers : blockers + 10] == [
         "Blockers:",
         "  #240  Grant store",
         "Could block this story:",
@@ -223,7 +223,6 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
-        "  Actual: unset",
         "Done stories (last 20):",
         HEADER,
         RULE,

@@ -14,7 +14,7 @@ from deckhand.config import Settings
 from deckhand.step import reason
 
 STATUS_OPTIONS = ["Draft", "Backlog", "In Progress", "Pending Review", "Done"]
-BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Actual", "Assignees", "Repository"]
+BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"]
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"
 

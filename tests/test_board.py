@@ -90,6 +90,6 @@ def test_oldest_open_is_none_on_an_empty_board(fake_gh, settings, tmp_path, monk
 
 def test_view_fields_names_the_fields_each_view_shows(fake_gh, settings):
     assert board.view_fields(settings) == {
-        "Board": ["Title", "Status", "Kind", "Story Points", "Actual", "Assignees", "Repository"],
+        "Board": ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"],
         "Table": ["Title", "Assignees", "Status", "Labels"],
     }
