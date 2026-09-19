@@ -277,3 +277,15 @@ def test_an_issue_the_process_never_touched_is_not_judged():
 def test_an_issue_the_process_never_touched_says_so_in_its_row():
     story = fleet.stories(_foreign("Pending Review"))[0]
     assert fleet.note(story, [], behind=False) == "not a deckhand story"
+
+
+def test_a_loop_through_a_draft_names_every_story_on_it():
+    blockers = {
+        ("acme/widgets", 257): [("acme/widgets", 268, "Domains")],
+        ("acme/widgets", 268): [("acme/widgets", 253, "Seed")],
+        ("acme/widgets", 253): [("acme/widgets", 257, "Authorize")],
+    }
+    found = fleet.anomalies(fleet.stories(_nodes()), blockers, behind=set(), pulses=[])
+    entry = next(item for item in found if item.number == 257 and "circle" in item.what)
+    assert entry.what == "blockers run in a circle: #257 -> #268 -> #253 -> #257"
+    assert entry.fix == "captain apply --unblock on one edge"

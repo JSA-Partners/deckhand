@@ -220,6 +220,21 @@ def _waiting(blockers: Blockers) -> dict[Key, set[Key]]:
     return found
 
 
+def _circle(start: Key, blockers: Blockers) -> list[Key]:
+    """The stories on a loop from `start` back to itself through its blockers, or empty."""
+    stack: list[tuple[Key, list[Key]]] = [(start, [start])]
+    seen: set[Key] = set()
+    while stack:
+        node, path = stack.pop()
+        for where, number, _ in blockers.get(node) or []:
+            if (where, number) == start:
+                return [*path, start]
+            if (where, number) not in seen:
+                seen.add((where, number))
+                stack.append(((where, number), [*path, (where, number)]))
+    return []
+
+
 def _topological(held: list[Story], blockers: Blockers, rank: Callable[[Story], tuple[int, int, int]]) -> list[Story]:
     """`held` placed so nothing precedes a blocker that is also in `held`; a cycle falls back to rank."""
     remaining = list(held)
@@ -288,7 +303,6 @@ def anomalies(
     me: str = "",
 ) -> list[Anomaly]:
     """Every disagreement worth a line: a wrong Status, a story off the board, a stall, a cycle."""
-    waiting = _waiting(blockers)
     on: dict[str, list[str]] = {}
     for beat in pulses:
         if beat.story != sessions.FREE and beat.idle < ACTIVE:
@@ -311,10 +325,11 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, f"sessions {named} are both on it", "close one"))
         if story.key in behind:
             out.append(Anomaly(story.number, story.repo, "pull request behind main", f"run next {story.number}"))
-        if story.key in _downstream(story.key, waiting) or story.key in {
-            (where, number) for where, number, _ in blockers.get(story.key) or []
-        }:
-            out.append(Anomaly(story.number, story.repo, "its blockers run in a circle", "none"))
+        loop = _circle(story.key, blockers)
+        if loop:
+            named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
+            fix = "captain apply --unblock on one edge"
+            out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
     return out
