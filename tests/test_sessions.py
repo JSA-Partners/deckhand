@@ -85,17 +85,18 @@ def test_a_session_that_ran_no_deckhand_command_is_free(tmp_path):
 
 
 def test_a_branch_names_the_story_when_no_command_did(tmp_path):
+    """The shape start cuts: `<kind>/<number>-<slug>`, which is the only branch a story ever has."""
     records = [
         {
             "type": "user",
             "timestamp": "2026-09-16T10:00:00Z",
             "cwd": "/Users/x/acme/widgets",
-            "gitBranch": "feat-117-warn",
+            "gitBranch": "chore/127-make-pnpm-test-run",
             "message": {"content": "hi"},
         }
     ]
     path = _write(tmp_path / "projects" / "acme" / "eeee0000.jsonl", records)
-    assert sessions.pulse(path, REPOS, now=0.0).story == "117"
+    assert sessions.pulse(path, REPOS, now=0.0).story == "127"
 
 
 def test_a_session_whose_last_word_was_a_tool_result_is_not_waiting(tmp_path):

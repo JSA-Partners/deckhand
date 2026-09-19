@@ -28,7 +28,7 @@ _SAID = 400
 
 _COMMAND = re.compile(r"<command-name>/deckhand:([a-z]+)</command-name>")
 _ARGS = re.compile(r"<command-args>([^<]*)</command-args>")
-_BRANCH_NUMBER = re.compile(r"^[a-z]+-([0-9]+)-")
+_BRANCH_NUMBER = re.compile(r"^[^/]+/([0-9]+)-")  # <kind>/<number>-<slug>, the shape start cuts
 # A whole word, because `new` takes a path as readily as a number and `.../04-registry-split.md`
 # holds digits that are not a story.
 _NUMBER = re.compile(r"^[0-9]+$")
