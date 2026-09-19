@@ -210,6 +210,16 @@ def test_spill_says_none_for_an_empty_text(fake_gh):
     assert spill("Plan", "248-plan.md", lambda: "\n") == "Plan: none"
 
 
+def test_spill_removes_the_file_an_earlier_run_left(fake_gh, tmp_path):
+    """The line sends the reader to the path, so an empty block cannot leave the last one there."""
+    path = tmp_path / "cache" / "widgets" / "248-plan.md"
+    spill("Plan", "248-plan.md", lambda: "### Task 1\n")
+    assert path.exists()
+
+    assert spill("Plan", "248-plan.md", lambda: "") == "Plan: none"
+    assert not path.exists()
+
+
 def test_spill_costs_one_line_when_it_cannot_be_written(fake_gh, monkeypatch):
     monkeypatch.setenv("DECKHAND_CACHE", "/nowhere/at/all")
 

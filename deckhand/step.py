@@ -150,7 +150,7 @@ def local_branch(number: int) -> str | None:
 
 
 def fits_title(subject: str) -> str:
-    """`subject` when the pull request subject can carry it; the refusal names both lengths.
+    """`subject` when the pull request subject can carry it; the refusal names both lengths, or the kind to drop.
 
     Every command that writes a title runs it, because the title becomes the squash subject on main
     and the moment to hear it is over is when it is written, not when the pull request opens.
@@ -250,13 +250,15 @@ def spill(label: str, name: str, fill: Callable[[], str], repo: str | None = Non
 
     A block long enough to run past what the harness shows costs a rerun of the whole command to
     read, and every rerun reads GitHub again. A file is read once, in as many parts as the reader
-    likes, and a failure costs one line, as `draft_line` does.
+    likes, and a failure costs one line, as `draft_line` does. An empty block takes the earlier
+    run's file with it, because a reader sent to that path would otherwise read a stale block.
     """
     try:
+        path = draft_path(config.load(), repo or gh.repo_slug(), name)
         text = fill().strip("\n")
         if not text:
+            path.unlink(missing_ok=True)
             return f"{label}: none"
-        path = draft_path(config.load(), repo or gh.repo_slug(), name)
         path.write_text(text + "\n", encoding="utf-8")
     except Exception as error:
         return f"{label}: unavailable ({reason(error)})"
