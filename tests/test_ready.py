@@ -105,7 +105,7 @@ def test_the_reference_table_groups_finished_stories_by_points_with_their_hours(
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     start = lines.index("Reference stories:")
-    assert lines[start:] == [
+    assert lines[start : lines.index("## Story")] == [
         "Reference stories:",
         f"  {POINT}",
         HEADER,
@@ -173,20 +173,22 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
     lines = result.stdout.splitlines()
     assert lines[0] == "Rules:"
     assert lines[4] == "Kinds: feat, fix, chore, refactor, docs, perf"
-    assert lines[6] == "## Story"
-    assert lines[7].startswith("As a guest user, I want to see only")
-    blockers = lines.index("Blockers:")
-    assert lines[blockers : blockers + 10] == [
-        "Blockers:",
-        "  #240  Grant store",
-        "Could block this story:",
-        "  #300 Backlog Not done yet",
+    assert lines[6:12] == [
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
         "Reference stories:",
         f"  {POINT}",
         "  none",
+    ]
+    assert lines[12] == "## Story"
+    assert lines[13].startswith("As a guest user, I want to see only")
+    blockers = lines.index("Blockers:")
+    assert lines[blockers : blockers + 4] == [
+        "Blockers:",
+        "  #240  Grant store",
+        "Could block this story:",
+        "  #300 Backlog Not done yet",
     ]
 
 
@@ -205,7 +207,7 @@ def test_context_prints_the_story_the_points_are_estimated_from(fake_gh):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[6] == "## Story"
+    assert lines.index("Reference stories:") < lines.index("## Story")
     assert "### Scope" not in lines
     assert lines.index("## Story") < lines.index("Blockers:")
 
@@ -239,7 +241,7 @@ def test_context_degrades_each_block_on_its_own(fake_gh, tmp_path):
     blockers = lines.index("Blockers:")
     assert lines[blockers + 1] == "  none"
     assert lines[blockers + 3] == "  #300 Backlog Not done yet"
-    assert lines[blockers + 5] == "  unavailable (the field read failed)"
+    assert lines[lines.index("Fields:") + 1] == "  unavailable (the field read failed)"
     assert f"  {POINT}" in lines
 
 
@@ -275,13 +277,13 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
         "",
         "Kinds: feat, fix, chore, refactor, docs, perf",
         "",
+        "Fields:",
+        "Reference stories:",
         "## Story",
         "## Plan",
         "Review:",
         "Blockers:",
         "Could block this story:",
-        "Fields:",
-        "Reference stories:",
     ]
     assert lines.count("  unavailable (nope)") == 7
 

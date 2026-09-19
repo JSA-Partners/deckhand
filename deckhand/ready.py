@@ -137,17 +137,17 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the kinds, the story, the plan, the review, the blockers, the fields, and the reference stories."""
+    """Print the kinds, the fields and reference stories to size by, then the story, plan, review, and blockers."""
     settings = settings_or_error()
     print(_kinds_line(settings))
     print()
+    block("Fields:", lambda: _fields_block(settings, args.issue))
+    block("Reference stories:", lambda: _table_block(settings))
     block("## Story", lambda: _story_lines(args.issue))
     block("## Plan", lambda: _plan_lines(args.issue))
     block("Review:", lambda: _review_lines(args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Could block this story:", lambda: _could_block(settings, args.issue))
-    block("Fields:", lambda: _fields_block(settings, args.issue))
-    block("Reference stories:", lambda: _table_block(settings))
     return 0
 
 
