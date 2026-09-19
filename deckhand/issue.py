@@ -219,6 +219,15 @@ def pull_request(repo: str, branch: str) -> str | None:
     return data[0].get("url") if isinstance(data, list) and data else None
 
 
+def merged_pull_requests(repo: str, limit: int) -> list[tuple[str, str]]:
+    """The title and body of the last `limit` merged pull requests, newest first."""
+    gh.split_repo(repo)
+    data = gh.json_out("pr", "list", "--repo", repo, "--state", "merged", "--limit", str(limit), "--json", "title,body")
+    if not isinstance(data, list):
+        return []
+    return [(item.get("title", ""), item.get("body", "")) for item in data if isinstance(item, dict)]
+
+
 # One field list for every read of a pull request, so a briefing that wants two of them makes one
 # call: `gh.cached` keys on the arguments, and three readers asking for three sets defeated it.
 PR_FIELDS = "state,url,statusCheckRollup,mergeStateStatus"

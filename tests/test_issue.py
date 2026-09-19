@@ -261,6 +261,19 @@ def test_pull_request_survives_an_answer_it_did_not_expect(fake_gh, monkeypatch)
     assert issue.pull_request(REPO, "feat/248-guests") is None
 
 
+def test_merged_pull_requests_reads_titles_and_bodies(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_PR_LIST_BODY", '[{"title": "fix: keep a grant", "body": "Keeps it."}]')
+
+    assert issue.merged_pull_requests(REPO, 3) == [("fix: keep a grant", "Keeps it.")]
+    assert gh_calls() == ["pr list --repo acme/widgets --state merged --limit 3 --json title,body"]
+
+
+def test_merged_pull_requests_survives_an_answer_it_did_not_expect(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_PR_LIST_BODY", '{"title": "no"}')
+
+    assert issue.merged_pull_requests(REPO, 3) == []
+
+
 def test_pull_request_rejects_a_malformed_repo(fake_gh, gh_calls):
     with pytest.raises(gh.GhError):
         issue.pull_request("widgets", "feat/248-guests")

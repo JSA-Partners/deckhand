@@ -177,6 +177,17 @@ def _pr_block(number: int) -> list[str]:
     return lines
 
 
+RECENT = 3
+
+
+def _recent_block() -> list[str]:
+    """The last merged pull requests, whose shape the summary follows."""
+    lines: list[str] = []
+    for title, body in issue.merged_pull_requests(gh.repo_slug(), RECENT):
+        lines += [f"  Title: {title}", *(f"  {line}".rstrip() for line in body.strip("\n").splitlines()), ""]
+    return lines or ["  none"]
+
+
 def context(args: argparse.Namespace) -> int:
     """Print the branch's diff stat, the pull request message, and the checks it would run.
 
@@ -187,6 +198,7 @@ def context(args: argparse.Namespace) -> int:
     block("## Commits", lambda: _commits_block(base))
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))
+    block("## Recent pull requests", _recent_block)
     block("## Checks detected", lambda: indented(checks(Path.cwd()), "none detected"))
     print(draft_line("Summary", f"{args.issue}-summary.md"))
     return 0
