@@ -739,6 +739,20 @@ def test_apply_reports_what_the_hook_said_when_the_push_is_refused(fake_gh, gh_c
     assert not any(call.startswith("pr create") for call in gh_calls())
 
 
+def test_apply_reports_a_hook_that_wrote_to_stdout(fake_gh, gh_calls, repo, origin, branch):
+    """git leaves a pre-push hook's stdout on stdout, and a test suite says most of what it says there."""
+    hook = repo / ".git" / "hooks" / "pre-push"
+    hook.write_text('#!/bin/sh\necho "FAIL deckhand/next_test.go"\necho "make: *** [test] Error 1" >&2\nexit 1\n')
+    hook.chmod(0o755)
+
+    result = _apply(repo)
+
+    assert result.returncode == 1
+    lines = result.stderr.splitlines()
+    assert "FAIL deckhand/next_test.go" in lines
+    assert "make: *** [test] Error 1" in lines
+
+
 def test_apply_puts_the_deviations_in_the_body(fake_gh, gh_calls, repo, origin, branch, tmp_path):
     """What the branch did that the story did not say goes to main with the story."""
     data = json.loads((FIXTURES / "issue-approved.json").read_text(encoding="utf-8"))

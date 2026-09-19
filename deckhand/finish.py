@@ -126,11 +126,12 @@ def _body(number: int, story: issue.Issue, breaking: str | None, summary: str) -
 
 
 def _push(branch: str) -> None:
-    """Push the branch; a refusal carries the tail of what git said, which is where a hook names its reason."""
+    """Push the branch; a refusal carries the tail of both streams, which is where a hook names its reason."""
     try:
         git.run("push", "-u", "origin", branch)
     except git.GitError as error:
-        lines = [line for line in error.stderr.splitlines() if line.strip()]
+        said = error.stdout.splitlines() + error.stderr.splitlines()
+        lines = [line for line in said if line.strip()]
         tail = [line for line in lines[-TAIL:] if line.strip() != str(error)]
         raise Refusal("\n".join([str(error), *tail])) from error
 

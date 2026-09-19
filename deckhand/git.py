@@ -17,11 +17,16 @@ NO_REPO = "not a git repository"
 
 
 class GitError(Exception):
-    """git exited non-zero; the message is the line of its stderr that says why, `stderr` the whole of it."""
+    """git exited non-zero; the message is the line of its stderr that says why, with both streams kept.
 
-    def __init__(self, message: str, stderr: str = "") -> None:
+    A hook runs inside the push and writes wherever it likes, so the output it failed with may be on
+    either stream.
+    """
+
+    def __init__(self, message: str, stderr: str = "", stdout: str = "") -> None:
         super().__init__(message)
         self.stderr = stderr
+        self.stdout = stdout
 
 
 def message(stderr: str) -> str:
@@ -61,10 +66,11 @@ def run(*args: str, cwd: Path | None = None) -> str:
         raise GitError("git is not installed or not on PATH") from error
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
+        stdout = result.stdout.decode("utf-8", errors="replace")
         if NO_REPO in stderr:
             # git names the directory it searched from; what a caller needs is where it ran and that
             # deckhand wanted a repository, because the usual cause is a step run from the cache.
             where = cwd or Path.cwd()
-            raise GitError(f"not inside a git repository: {where}; run deckhand from the clone", stderr)
-        raise GitError(message(stderr) or f"git {' '.join(args)} failed", stderr)
+            raise GitError(f"not inside a git repository: {where}; run deckhand from the clone", stderr, stdout)
+        raise GitError(message(stderr) or f"git {' '.join(args)} failed", stderr, stdout)
     return result.stdout.decode("utf-8", errors="replace").strip("\n")
