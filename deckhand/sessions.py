@@ -21,6 +21,7 @@ CHUNK = 262_144
 CAP = 4_194_304
 FREE = "free"
 DEFAULT_ROOT = Path.home() / ".claude" / "projects"
+DEFAULT_LIVE = Path.home() / ".claude" / "sessions"
 DEEP_LINES = 12
 ID = 4  # characters of the session id; four is unique across a day of transcripts and still readable
 _SAID = 400
@@ -51,6 +52,7 @@ class Pulse:
     started: float
     path: Path
     version: str = ""
+    live: bool = False
 
 
 def _record(line: bytes) -> dict | None:
@@ -211,12 +213,60 @@ def own_cwd(session: str) -> str:
     return ""
 
 
-def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
-    """Every session working in one of `repos` and touched within `since` hours, oldest start first.
+def live_root() -> Path:
+    """Where Claude Code lists its running sessions; `DECKHAND_LIVE` moves it, which is what tests do."""
+    return Path(os.environ.get("DECKHAND_LIVE") or DEFAULT_LIVE)
 
-    The id is the head of the session's own id rather than its position, so it names the same
-    session in every read and a session leaving the window renames nothing.
+
+def _alive(pid: object) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists; it belongs to someone else
+    return True
+
+
+def running() -> dict[str, dict] | None:
+    """Every running session's entry by session id, or None when the list cannot be read.
+
+    Claude Code writes one file per running process and does not document the format, so a folder
+    that is missing or unreadable is reported as unknown rather than as nobody running.
     """
+    if not live_root().is_dir():
+        return None
+    try:
+        paths = list(live_root().glob("*.json"))
+    except OSError:
+        return None
+    found: dict[str, dict] = {}
+    for path in paths:
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(entry, dict) and entry.get("sessionId") and _alive(entry.get("pid")):
+            found[str(entry["sessionId"])] = entry
+    return found
+
+
+def _open(live: dict[str, dict], repos: dict[str, str], exclude: str) -> list[Pulse]:
+    """A pulse for every running session with a transcript in one of `repos`."""
+    found = []
+    for session, entry in live.items():
+        path = next(root().glob(f"*/{session}.jsonl"), None)
+        beat = pulse(path, repos) if path is not None and session != exclude else None
+        if beat is not None:
+            started = float(entry.get("startedAt") or 0) / 1000 or beat.started
+            found.append(replace(beat, live=True, waiting=entry.get("status") == "waiting", started=started))
+    return found
+
+
+def _recent(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
+    """A pulse for every transcript touched within `since` hours, when nothing says which are open."""
     cutoff = time.time() - since * 3600
     found = []
     for path in sorted(root().glob("*/*.jsonl")):
@@ -225,6 +275,18 @@ def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
         beat = pulse(path, repos)
         if beat is not None:
             found.append(beat)
+    return found
+
+
+def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
+    """Every open session working in one of `repos`, oldest start first.
+
+    Open means Claude Code lists its process as running. When that list cannot be read, every
+    transcript touched within `since` hours stands in, none of them known to be live. The id is the
+    head of the session's own id, so it names the same session in every read.
+    """
+    live = running()
+    found = _recent(repos, since, exclude) if live is None else _open(live, repos, exclude)
     found.sort(key=lambda beat: (beat.started, beat.session))
     return [replace(beat, label=beat.session[:ID]) for beat in found]
 

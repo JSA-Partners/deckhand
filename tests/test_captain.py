@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -109,6 +110,27 @@ def test_a_named_session_prints_its_last_prompt_and_its_last_word(fleet_env, cap
     out = capsys.readouterr().out
     assert "Last prompt: proceed" in out
     assert "Which kind is it?" in out
+
+
+def test_an_unreadable_running_list_says_so_above_the_table(fleet_env, capsys):
+    cli.main(["captain", "context", "--only", "sessions"])
+    assert "Running sessions could not be read; these are transcripts from the last 24 hours." in (
+        capsys.readouterr().out
+    )
+
+
+def test_open_sessions_are_listed_without_the_fallback_line(fleet_env, monkeypatch, capsys):
+    live = fleet_env / "live"
+    live.mkdir()
+    (live / "1.json").write_text(json.dumps({"pid": os.getpid(), "sessionId": "one", "status": "busy"}))
+    monkeypatch.setenv("DECKHAND_LIVE", str(live))
+    _session(fleet_env / "sessions", "one", [{"type": "user", "cwd": "/x/widgets", "message": {"content": "hi"}}])
+
+    assert cli.main(["captain", "context", "--only", "sessions"]) == 0
+
+    out = capsys.readouterr().out
+    assert "could not be read" not in out
+    assert "| one |" in out
 
 
 def test_a_session_id_nobody_has_says_so(fleet_env, capsys):

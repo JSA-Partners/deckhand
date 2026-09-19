@@ -256,3 +256,48 @@ def test_a_word_before_the_number_does_not_hide_the_story(tmp_path):
     ]
     path = _write(tmp_path / "projects" / "acme" / "resume.jsonl", records)
     assert sessions.pulse(path, REPOS, now=0.0).story == "248"
+
+
+def _live(root: Path, pid: int, session: str, status: str = "idle", started: int = 1_000_000_000) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    entry = {"pid": pid, "sessionId": session, "status": status, "startedAt": started}
+    (root / f"{pid}.json").write_text(json.dumps(entry), encoding="utf-8")
+
+
+def _two_transcripts(root: Path) -> None:
+    for name in ("alive", "gone"):
+        records = [{"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}}]
+        _write(root / "acme" / f"{name}.jsonl", records)
+
+
+def test_only_a_session_whose_process_runs_is_listed(tmp_path, monkeypatch):
+    _two_transcripts(tmp_path / "projects")
+    _live(tmp_path / "live", os.getpid(), "alive")
+    _live(tmp_path / "live", 999_999, "gone")
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))
+    monkeypatch.setenv("DECKHAND_LIVE", str(tmp_path / "live"))
+
+    found = sessions.discover(REPOS, since=999, exclude="")
+
+    assert [pulse.session for pulse in found] == ["alive"]
+    assert found[0].live is True
+
+
+def test_waiting_comes_from_the_status_claude_code_records(tmp_path, monkeypatch):
+    _two_transcripts(tmp_path / "projects")
+    _live(tmp_path / "live", os.getpid(), "alive", status="waiting")
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))
+    monkeypatch.setenv("DECKHAND_LIVE", str(tmp_path / "live"))
+
+    assert sessions.discover(REPOS, since=999, exclude="")[0].waiting is True
+
+
+def test_without_the_running_list_recent_transcripts_are_listed_and_marked(tmp_path, monkeypatch):
+    _two_transcripts(tmp_path / "projects")
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))
+
+    found = sessions.discover(REPOS, since=999, exclude="")
+
+    assert sorted(pulse.session for pulse in found) == ["alive", "gone"]
+    assert not any(pulse.live for pulse in found)
+    assert sessions.running() is None

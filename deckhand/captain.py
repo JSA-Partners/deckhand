@@ -96,10 +96,15 @@ def _short(command: str) -> str:
     return command if len(command) <= COMMAND else command[: COMMAND - 3].rstrip() + "..."
 
 
-def _session_rows(pulses: list[sessions.Pulse]) -> list[str]:
+UNKNOWN_LIVE = "  Running sessions could not be read; these are transcripts from the last {hours:g} hours."
+
+
+def _session_rows(pulses: list[sessions.Pulse], since: float) -> list[str]:
+    head = [] if sessions.running() is not None else [UNKNOWN_LIVE.format(hours=since), ""]
     if not pulses:
-        return ["  none"]
+        return [*head, "  none"]
     rows = [
+        *head,
         "| id | Repo | Story | Last command | Idle | Cost | Waiting | Version |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
@@ -239,13 +244,17 @@ def context(args: argparse.Namespace) -> int:
             block("## Order", lambda: [*_order_rows(read), "", _next_line(read, pulses)])
             print()
         if "sessions" in wanted:
-            block("## Sessions", lambda: _session_rows(pulses))
+            block("## Sessions", lambda: _session_rows(pulses, args.since))
             print()
         if "anomalies" in wanted:
             block("## Anomalies", lambda: _anomaly_rows(settings, read, pulses))
             print()
         if "forecast" in wanted:
-            sessions_count = args.sessions if args.sessions is not None else max(len(pulses), 1)
+            sessions_count = (
+                args.sessions
+                if args.sessions is not None
+                else max(len([beat for beat in pulses if beat.live]) or len(pulses), 1)
+            )
             block("## Forecast", lambda: _forecast_rows(read, sessions_count))
     return 0
 

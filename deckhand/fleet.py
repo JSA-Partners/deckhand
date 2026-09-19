@@ -31,9 +31,7 @@ DONE = "Done"
 
 _PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
-# deckhand cannot tell a closed session from an idle one: no transcript records an end and no
-# process holds the file open. An hour is longer than any gap a working session shows and far
-# shorter than the window the table lists over, so it is the line between the two.
+# An open session idle longer than this is not counted as working on its story.
 ACTIVE = 3600.0
 
 

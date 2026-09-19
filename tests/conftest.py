@@ -39,6 +39,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         if name.startswith("DECKHAND_"):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    # Claude Code's own list of running sessions; a test that wants one points this at a tmp folder.
+    monkeypatch.setenv("DECKHAND_LIVE", os.devnull + "-deckhand-live")
 
 
 @pytest.fixture(autouse=True)
