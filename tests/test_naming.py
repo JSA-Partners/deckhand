@@ -156,6 +156,23 @@ def test_fits_takes_a_title_of_exactly_the_limit_and_rejects_one_over():
         naming.fits("x" * (limit + 1))
 
 
+def test_fits_refuses_a_title_that_opens_with_a_kind():
+    """finish adds the kind, so a title carrying one doubles it in the branch and the subject."""
+    for subject in ("docs: document the pool", "feat!: add sharing", "fix(store): drop the retry"):
+        with pytest.raises(ValueError, match="a title carries no kind"):
+            naming.fits(subject)
+
+
+def test_fits_keeps_a_colon_that_is_not_a_kind():
+    assert naming.fits("Rate limits: the trusted proxy list") == "Rate limits: the trusted proxy list"
+
+
+def test_pr_title_drops_a_kind_a_title_already_carries(settings):
+    """A title written before the rule heals at finish, without a hand edit on GitHub."""
+    assert naming.pr_title(settings, "docs", "docs: document the pool") == "docs: document the pool"
+    assert naming.pr_title(settings, "feat", "feat!: add sharing", breaking=True) == "feat!: add sharing"
+
+
 # --- pr-body ------------------------------------------------------------
 
 STORY = "As a guest user, I want to see only the collections I was granted."

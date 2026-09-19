@@ -24,6 +24,7 @@ _WANT = re.compile(r"\bI want (.+?), so that\b", re.IGNORECASE)
 _LEADING_TO = re.compile(r"^to\s+", re.IGNORECASE)
 _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _NUMBER_RE = re.compile(r"^[0-9]+$")
+_KIND_PREFIX = re.compile(r"^([a-z]+)(\([^)]*\))?!?:\s*")
 
 
 def slug(title: str) -> str:
@@ -57,6 +58,7 @@ def pr_title(settings: Settings, kind: str, title: str, breaking: bool = False) 
     """
     if kind not in settings.kinds:
         raise ValueError(f"unknown kind {kind!r} (one of: {' '.join(settings.kinds)})")
+    title = _without_kind(title)
     allowed = SUBJECT - len(f"{kind}{BANG}: ")
     if len(title) > allowed:
         raise ValueError(
@@ -98,12 +100,22 @@ def _derived(body: str) -> str:
     return want[0].upper() + want[1:]
 
 
+def _without_kind(subject: str) -> str:
+    """`subject` with a leading `<kind>[(scope)][!]: ` removed, when that kind is one of the settings'."""
+    found = _KIND_PREFIX.match(subject)
+    if found is None or found.group(1) not in config.load().kinds:
+        return subject
+    return subject[found.end() :]
+
+
 def fits(subject: str) -> str:
     """`subject`, or a `ValueError` naming both lengths; nothing is cut, because a title is a sentence.
 
     `finish` builds the pull request subject from this title and refuses one it cannot carry, and
     the moment to hear that is now, while a shorter title is still free to write.
     """
+    if _without_kind(subject) != subject:
+        raise ValueError(f"a title carries no kind; finish adds it: drop the '{subject.split(':')[0]}:'")
     limit = title_limit()
     if len(subject) > limit:
         raise ValueError(
