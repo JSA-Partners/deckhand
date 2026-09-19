@@ -168,13 +168,14 @@ def test_apply_cuts_the_branch_in_its_own_worktree_and_pushes_nothing(fake_gh, g
 
     assert result.returncode == 0, result.stderr
     path = _worktree(repo, BRANCH)
-    assert result.stdout.splitlines()[:5] == [
+    lines = result.stdout.splitlines()
+    assert lines[:4] == [
         f"Branch {BRANCH} created from origin/main",
         "Status=In Progress",
         "Assigned @me",
         "Logged Started",
-        f"Worktree: {path}",
     ]
+    assert lines[-1] == f"Worktree: {path}"
     assert run_git(path, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
     assert run_git(repo, "symbolic-ref", "HEAD").strip() == "refs/heads/main"
     assert run_git(repo, "status", "--porcelain") == ""
@@ -191,11 +192,9 @@ def test_apply_resumes_a_branch_found_by_number_in_a_new_worktree(fake_gh, gh_ca
 
     assert result.returncode == 0, result.stderr
     path = _worktree(repo, "feat/248-old-name")
-    assert result.stdout.splitlines()[:3] == [
-        "Existing branch feat/248-old-name; status unchanged",
-        "Assigned @me",
-        f"Worktree: {path}",
-    ]
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Existing branch feat/248-old-name; status unchanged", "Assigned @me"]
+    assert lines[-1] == f"Worktree: {path}"
     assert run_git(path, "symbolic-ref", "HEAD").strip() == "refs/heads/feat/248-old-name"
     assert run_git(repo, "symbolic-ref", "HEAD").strip() == "refs/heads/main"
     assert _writes(gh_calls) == [ASSIGN]
@@ -208,12 +207,9 @@ def test_apply_logs_the_start_a_failed_run_never_logged(fake_gh, gh_calls, repo,
     result = _start("apply", repo, fieldvalues(tmp_path, "In Progress"), "--note", STARTED[9:])
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:4] == [
-        f"Existing branch {BRANCH}; status unchanged",
-        "Assigned @me",
-        "Logged Started",
-        f"Worktree: {_worktree(repo, BRANCH)}",
-    ]
+    lines = result.stdout.splitlines()
+    assert lines[:3] == [f"Existing branch {BRANCH}; status unchanged", "Assigned @me", "Logged Started"]
+    assert lines[-1] == f"Worktree: {_worktree(repo, BRANCH)}"
     assert _writes(gh_calls) == [ASSIGN, COMMENT]
 
 
@@ -225,13 +221,14 @@ def test_apply_finishes_an_interrupted_start(fake_gh, gh_calls, repo, origin, tm
     result = _start("apply", repo, {"GH_BODY_FILE_COPY": str(copy)}, "--note", STARTED[9:])
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:5] == [
+    lines = result.stdout.splitlines()
+    assert lines[:4] == [
         f"Existing branch {BRANCH}; finishing the interrupted start",
         "Status=In Progress",
         "Assigned @me",
         "Logged Started",
-        f"Worktree: {_worktree(repo, BRANCH)}",
     ]
+    assert lines[-1] == f"Worktree: {_worktree(repo, BRANCH)}"
     assert run_git(_worktree(repo, BRANCH), "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
     assert _writes(gh_calls) == [IN_PROGRESS, ASSIGN, COMMENT]
     assert copy.read_text(encoding="utf-8").count("Started:") == 1
@@ -301,7 +298,8 @@ def test_apply_prints_plan_commits_and_drift(fake_gh, repo, origin, tmp_path):
         "## Commits",
         f"  {sha} feat: store method",
     ]
-    assert lines[lines.index("## Plan drift") :] == ["## Plan drift", *DRIFT, *NO_REVIEW]
+    assert lines[lines.index("## Plan drift") : -1] == ["## Plan drift", *DRIFT, *NO_REVIEW]
+    assert lines[-1].startswith("Worktree: ")
 
 
 # --- context ----------------------------------------------------------------

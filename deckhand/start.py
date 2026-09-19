@@ -237,7 +237,8 @@ def apply(args: argparse.Namespace) -> int:
     if owed:
         issue.comment(repo, args.issue, log.checked(f"Started: {note}"))
         print("Logged Started")
+    _report(story, args.issue)
+    # Last, because a session trims long output from the top and the path is what it needs next.
     if made is not None:
         print(f"Worktree: {made}")
-    _report(story, args.issue)
     return 0
