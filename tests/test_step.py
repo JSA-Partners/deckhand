@@ -22,6 +22,7 @@ from deckhand.step import (
     read_draft,
     ref_label,
     refuse_git,
+    spill,
     step,
 )
 from tests.conftest import ROOT, run_git
@@ -195,6 +196,24 @@ def test_draft_path_makes_the_parents_but_not_the_file(tmp_path: Path):
     assert path == tmp_path / "cache" / "widgets" / "5" / "draft.md"
     assert path.parent.is_dir()
     assert not path.exists()
+
+
+def test_spill_writes_the_text_and_names_it_with_its_length(fake_gh, tmp_path):
+    line = spill("Plan", "248-plan.md", lambda: "### Task 1\n\n- [ ] step\n")
+
+    path = tmp_path / "cache" / "widgets" / "248-plan.md"
+    assert line == f"Plan: {path} (3 lines)"
+    assert path.read_text(encoding="utf-8") == "### Task 1\n\n- [ ] step\n"
+
+
+def test_spill_says_none_for_an_empty_text(fake_gh):
+    assert spill("Plan", "248-plan.md", lambda: "\n") == "Plan: none"
+
+
+def test_spill_costs_one_line_when_it_cannot_be_written(fake_gh, monkeypatch):
+    monkeypatch.setenv("DECKHAND_CACHE", "/nowhere/at/all")
+
+    assert spill("Plan", "248-plan.md", lambda: "x").startswith("Plan: unavailable (")
 
 
 def test_context_swallows_a_refusal_too(demo, capsys):

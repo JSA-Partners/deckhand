@@ -245,6 +245,25 @@ def draft_line(label: str, name: str, repo: str | None = None) -> str:
         return f"{label}: unavailable ({reason(error)})"
 
 
+def spill(label: str, name: str, fill: Callable[[], str], repo: str | None = None) -> str:
+    """`<label>: <path> (<n> lines)`, with `fill()` written there instead of printed.
+
+    A block long enough to run past what the harness shows costs a rerun of the whole command to
+    read, and every rerun reads GitHub again. A file is read once, in as many parts as the reader
+    likes, and a failure costs one line, as `draft_line` does.
+    """
+    try:
+        text = fill().strip("\n")
+        if not text:
+            return f"{label}: none"
+        path = draft_path(config.load(), repo or gh.repo_slug(), name)
+        path.write_text(text + "\n", encoding="utf-8")
+    except Exception as error:
+        return f"{label}: unavailable ({reason(error)})"
+    count = len(text.splitlines())
+    return f"{label}: {path} ({count} line{'' if count == 1 else 's'})"
+
+
 def read_draft(path: Path) -> str:
     """The text of the file the model drafted; one it cannot hand over is a refusal, not a traceback.
 
