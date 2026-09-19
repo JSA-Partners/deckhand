@@ -236,7 +236,7 @@ def _context(name: str, number: int) -> None:
     module = importlib.import_module(f"deckhand.{CONTEXT_OF[name]}")
     # The step's own guard is on its command, not its function, so the call gets one here.
     try:
-        module.context(argparse.Namespace(issue=number, source=str(number)))
+        module.context(argparse.Namespace(issue=number, source=str(number), idea=False))
     except Exception as error:
         print(f"  unavailable ({reason(error)})")
 

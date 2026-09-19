@@ -19,15 +19,8 @@ STORIES_HEADING = "## Stories"
 
 
 def skeleton() -> str:
-    """The empty shape a split or park file starts from; the headings a stub body is read by."""
-    return "\n\n".join(
-        [
-            STUB_HEADING,
-            "<what the feature needs, in full>",
-            STORIES_HEADING,
-            "1. [owner/name: ]<title> | <one sentence> (after 1)",
-        ]
-    )
+    """The empty shape a park file takes: the requirements alone, because a park has no stories yet."""
+    return "\n\n".join([STUB_HEADING, "<what the feature needs, in full>"])
 
 
 _BULLET = re.compile(r"^-\s+(.*)$")

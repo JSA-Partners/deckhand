@@ -47,6 +47,12 @@ DEPENDS_HEADING = "## Depends on"
 SPLIT_NOTE = "If this is more than one story, write the split file instead."
 DRAFTED = "Drafted: the story and its plan, from the request."
 STUB_DRAFTED = "Drafted: the story and its plan, from the stub."
+IDEA_ONLY = "#{number} is an issue; /deckhand:next {number} carries it"
+PARKED = (
+    "This is a parked feature. One outcome: deckhand:author writes the draft into it with "
+    "new apply --stub {number} <draft>. Several: write the split file and run "
+    "new apply --split <file> --from {number}."
+)
 
 # One line per rule `lint.lint` enforces, in plain words. A line that says something may be empty is
 # a permission; every other line is a rule a body can break, and `tests/test_new.py` pins that.
@@ -113,18 +119,19 @@ def _rules() -> int:
     return 0
 
 
-def _tail(name: str, split: str | None = None) -> int:
+def _tail(name: str, split: str | None = None, park: bool = False) -> int:
     """Where the draft goes, the shape it takes, and the rules it has to meet.
 
     `split` names the split file to offer after the rules, for a starting point that may yet turn
-    out to be a whole feature; a stub is already one story of one, so it is offered nothing.
+    out to be a whole feature; `park` shows the park shape, for a request that may shed one.
     """
     print(draft_line("Draft", name))
     print()
     print(skeleton())
     print()
-    block("Stub and park shape:", lambda: indented(stub.skeleton().splitlines()))
-    print()
+    if park:
+        block("Park shape:", lambda: indented(stub.skeleton().splitlines()))
+        print()
     _rules()
     if split is not None:
         print()
@@ -150,7 +157,7 @@ def _request_context(source: str) -> int:
             print()
         print(text)
     print()
-    return _tail(DRAFT, SPLIT)
+    return _tail(DRAFT, SPLIT, park=True)
 
 
 def _state(repo: str, number: int) -> str:
@@ -176,17 +183,14 @@ def _entry_line(repo: str, position: int, entry: stub.Entry, own: int) -> str:
 
 
 def _parked_context(number: int, requirements: str) -> int:
-    """A feature nobody has split yet: its requirements, and the one command that splits them."""
+    """A feature nobody has split yet: its requirements, the draft for one outcome, the split for several."""
     print(f"## Parked feature #{number}")
     print()
     print(requirements)
     print()
-    _split_block(_split_name(number))
+    _tail(_draft_name(number), _split_name(number))
     print()
-    print(
-        "This is a parked feature: settle its requirements, then write the split file and run "
-        f"new apply --split <file> --from {number}."
-    )
+    print(PARKED.format(number=number))
     return 0
 
 
@@ -222,8 +226,11 @@ def context(args: argparse.Namespace) -> int:
     """Print the starting point, then where the draft goes, its shape, and the rules it must meet."""
     source = (args.source or "").strip()
     if not source:  # the skill passes its argument quoted, so an empty one arrives as a blank word
-        return _tail(DRAFT, SPLIT)
+        return _tail(DRAFT, SPLIT, park=True)
     if source.isascii() and source.isdigit():
+        if args.idea:  # the new skill starts from an idea; an issue that exists is next's to carry
+            print(IDEA_ONLY.format(number=source))
+            return 0
         return _issue_context(int(source))
     return _request_context(source)
 
@@ -327,6 +334,7 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         help="an issue number when all digits; else a file when one exists, else the request (./57 names a file)",
     )
+    parser.add_argument("--idea", action="store_true", help="the source is an idea; an issue number is next's")
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:

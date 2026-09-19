@@ -231,6 +231,9 @@ def test_the_new_skill_runs_the_brainstorm_aimed_at_a_story():
     assert "superpowers:brainstorming" in body
     assert "superpowers:writing-plans" in body
     assert "Draft" in body
+    assert 'new context --idea "$source"' in body
+    assert "--stub" not in body
+    assert "--from" not in body
 
 
 # --- agents ------------------------------------------------------------------
@@ -284,12 +287,12 @@ def test_the_author_runs_the_deckhand_its_message_hands_it():
     assert [name for name in _INVOCATION.findall(body) if name in _surface()] == []
 
 
-def test_the_new_skill_says_how_a_parked_feature_becomes_a_story():
-    """Four sessions read the command's help to find this out; the skill says it now."""
-    _, body = _split((ROOT / "skills" / "new" / "SKILL.md").read_text(encoding="utf-8"))
+def test_the_next_skill_says_how_a_parked_feature_becomes_a_story():
+    """Sessions read the command's help to find this out; the settle step says it now."""
+    _, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
 
     flat = " ".join(body.split())  # a phrase may wrap across lines in the file
-    for phrase in ("new apply --stub", "--from $source", "the whole issue"):
+    for phrase in ("deckhand:author as for a stub", "new apply --split <file> --from $issue"):
         assert phrase in flat, phrase
 
 

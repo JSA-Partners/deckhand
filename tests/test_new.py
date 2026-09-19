@@ -123,16 +123,33 @@ def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
     assert any("Notes" in rule for rule in rules)
 
 
-def test_context_prints_the_stub_and_park_shape(fake_gh, tmp_path):
-    """The shape arrived as a refusal because nothing stated it where the file is written."""
+def test_context_prints_the_park_shape_without_stories(fake_gh, tmp_path):
+    """A park with a Stories section is refused, so the shape a request is shown has none."""
     source = tmp_path / "source.md"
     source.write_text("A feature worth parking.\n", encoding="utf-8")
 
     result = run_deckhand("new", "context", str(source))
 
     assert result.returncode == 0, result.stderr
-    assert "## Requirements" in result.stdout
-    assert "## Stories" in result.stdout
+    lines = result.stdout.splitlines()
+    shape = lines.index("Park shape:")
+    assert lines[shape : shape + 4] == ["Park shape:", "  ## Requirements", "  <what the feature needs, in full>", ""]
+    assert "Stub and park shape:" not in lines
+
+
+def test_context_for_an_idea_sends_an_issue_number_to_next(fake_gh, gh_calls):
+    result = run_deckhand("new", "context", "--idea", "268")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "#268 is an issue; /deckhand:next 268 carries it\n"
+    assert not [call for call in gh_calls() if call.startswith("issue view")]
+
+
+def test_context_for_an_idea_still_reads_a_request(fake_gh):
+    result = run_deckhand("new", "context", "--idea", "let people export their data")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:3] == ["## Requirements", "", "let people export their data"]
 
 
 def test_context_still_prints_when_the_repository_is_unknown(no_real_gh, tmp_path):
@@ -446,17 +463,22 @@ def test_context_on_a_stub_survives_an_unreachable_sibling(fake_gh):
     assert "Rules:" in lines
 
 
-def test_context_on_a_parked_feature_says_to_split_it(fake_gh, tmp_path):
+def test_context_on_a_parked_feature_offers_the_draft_and_the_split(fake_gh, tmp_path):
+    """The author writes one outcome from this context, so it carries the draft as well as the split."""
     result = run_deckhand("new", "context", "60", env=PARKED)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[0] == "## Parked feature #60"
     assert "Guests should be able to share a collection with another guest, without an admin in the loop." in lines
+    assert f"Draft: {tmp_path / 'cache' / 'widgets' / '60-story.md'}" in lines
+    assert "Rules:" in lines
     assert f"Split file: {tmp_path / 'cache' / 'widgets' / '60-split.md'}" in lines
     assert _split_skeleton(lines)
+    assert "Park shape:" not in lines
     assert lines[-1] == (
-        "This is a parked feature: settle its requirements, then write the split file and run "
+        "This is a parked feature. One outcome: deckhand:author writes the draft into it with "
+        "new apply --stub 60 <draft>. Several: write the split file and run "
         "new apply --split <file> --from 60."
     )
 
