@@ -1,11 +1,11 @@
 """The ready step: a reviewed story moves to Backlog with its kind, its points, and its blockers.
 
-`context` prints the rules `apply` holds, the story and where its plan was written, the Review: entry
-that is the gate, the open blockers, the other open stories a blocker could be chosen from, the fields as the
-board has them, and the reference stories the estimate is compared against. The plan is what the points are
-estimated against, and the review is read here rather than by a separate `gh` call. Each block
-degrades to one line of its own, so a lookup that fails never costs the model the rest of the
-prompt.
+`context` prints the rules `apply` holds, the story and where its plan was written, the Review:
+entry that is the gate, the open blockers, the other open stories a blocker could be chosen from,
+the fields as the board has them, and the reference stories the estimate is compared against. The
+plan is what the points are estimated against, and the review is read here rather than by a separate
+`gh` call. Each block degrades to one line of its own, so a lookup that fails never costs the model
+the rest of the prompt.
 
 `apply` validates the kind, the points, the review, and every blocker before it writes anything,
 then records the dependencies and sets the fields, printing one line per write. A story is already

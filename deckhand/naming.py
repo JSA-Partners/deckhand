@@ -109,7 +109,7 @@ def _without_kind(subject: str) -> str:
 
 
 def fits(subject: str) -> str:
-    """`subject`, or a `ValueError` naming both lengths; nothing is cut, because a title is a sentence.
+    """`subject`, or a `ValueError` naming both lengths or the kind to drop; nothing here is cut.
 
     `finish` builds the pull request subject from this title and refuses one it cannot carry, and
     the moment to hear that is now, while a shorter title is still free to write.

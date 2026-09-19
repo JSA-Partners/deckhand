@@ -1,10 +1,10 @@
 """The start step: a story in Backlog gets its branch, and the model gets the plan to implement.
 
 `context` prints where the branch is, the open blockers, the story and its scope, where the plan was
-written, what is already committed on the branch, the plan references that no longer resolve, and what landed on
-`origin/main` since the latest review, and writes nothing to GitHub. The story and the scope are there
-because the skill reads the plan against the repository before it branches, and a story that no
-longer holds is the one case that sends it back to review.
+written, what is already committed on the branch, the plan references that no longer resolve, and
+what landed on `origin/main` since the latest review, and writes nothing to GitHub. The story and
+the scope are there because the skill reads the plan against the repository before it branches, and
+a story that no longer holds is the one case that sends it back to review.
 
 `apply` refuses a story that is blocked or off the board, then cuts the branch from a freshly
 fetched `origin/main` in the story's own worktree under the clone's `.claude/worktrees/`, sets In
