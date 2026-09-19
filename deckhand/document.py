@@ -12,7 +12,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from deckhand.step import step
+from deckhand import git
+from deckhand.step import step, trunk
 
 DEFAULT_DIR = "docs/claude"
 
@@ -24,6 +25,7 @@ HEADING = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 FENCE = re.compile(r"^[ \t]*([`~]{3,})[^\n]*\n.*?(?:^[ \t]*\1[`~]*[ \t]*$\n?|\Z)", re.MULTILINE | re.DOTALL)
 BROKEN, DUPLICATE, STALE = "broken", "duplicate", "stale"
 ELSEWHERE = "a file in another repository is a link"
+BRANCH_HEADING = "Docs naming a file this branch changed:"
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
@@ -76,6 +78,29 @@ def _name(path: Path) -> str:
     return str(path.relative_to(Path.cwd()))
 
 
+def _changed_on_branch() -> set[Path]:
+    """Every file this branch changed since it left main; none on main, or where git cannot say."""
+    try:
+        base = git.run("merge-base", "HEAD", trunk())
+        names = git.run("diff", "--name-only", "--relative", f"{base}..HEAD").splitlines()
+    except git.GitError:
+        return set()
+    return {(Path.cwd() / name).resolve() for name in names if name}
+
+
+def _branch_lines(docs: list[Path]) -> list[str]:
+    """Each doc naming a file this branch changed, with those names, for the session to judge."""
+    changed = _changed_on_branch()
+    if not changed:
+        return []
+    lines = []
+    for doc in docs:
+        refs = [ref for ref, target in _references(doc, _text(doc)) if target and target.resolve() in changed]
+        if refs:
+            lines.append(f"  {_name(doc)}: {', '.join(f'`{ref}`' for ref in refs)}")
+    return lines
+
+
 def _audit(dir_arg: str) -> int:
     if not (Path.cwd() / dir_arg).is_dir():
         print(f"No docs directory at {dir_arg}.")
@@ -88,6 +113,12 @@ def _audit(dir_arg: str) -> int:
             print(f"{_name(f)}:")
             for _, text in items:
                 print(f"  {text}")
+    branch = _branch_lines(list(found))
+    if branch:
+        print()
+        print(BRANCH_HEADING)
+        for line in branch:
+            print(line)
     return 0
 
 

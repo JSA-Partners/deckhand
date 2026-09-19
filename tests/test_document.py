@@ -252,3 +252,30 @@ def test_audit_never_exits_non_zero_when_git_is_unavailable(repo, monkeypatch):
     exit_code = cli.main(["document", "context"])
 
     assert exit_code == 0
+
+
+def test_context_lists_the_docs_naming_a_file_this_branch_changed(repo):
+    lib = repo / "lib"
+    lib.mkdir()
+    (lib / "thing.py").write_text("x = 1\n")
+    (lib / "other.py").write_text("y = 1\n")
+    docs = repo / "docs" / "claude"
+    docs.mkdir(parents=True)
+    (docs / "a.md").write_text("See `lib/thing.py`.\n")
+    (docs / "b.md").write_text("See `lib/other.py`.\n")
+    _commit(repo, "add docs and lib")
+    subprocess.run(["git", "checkout", "-qb", "feature"], cwd=repo, check=True)
+    (lib / "thing.py").write_text("x = 2\n")
+    _commit(repo, "change thing on the branch")
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=repo, check=True)
+    (lib / "other.py").write_text("y = 2\n")
+    _commit(repo, "change other on main")
+    subprocess.run(["git", "checkout", "-q", "feature"], cwd=repo, check=True)
+
+    result = run_deckhand("document", "context", cwd=repo)
+
+    assert result.returncode == 0
+    lines = result.stdout.splitlines()
+    start = lines.index("Docs naming a file this branch changed:")
+    assert lines[start - 1] == ""
+    assert lines[start + 1 :] == ["  docs/claude/a.md: `lib/thing.py`"]
