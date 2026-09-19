@@ -99,6 +99,33 @@ def test_audit_finds_a_broken_reference_whatever_the_extension(repo):
     assert "broken reference: `internal/store/collection.rs`" in result.stdout
 
 
+def test_audit_accepts_a_path_that_is_the_whole_text_of_a_link(repo):
+    """The message recommends making a file elsewhere a link, and following it has to clear the finding."""
+    docs = repo / "docs" / "claude"
+    docs.mkdir(parents=True)
+    (docs / "linked.md").write_text("See [`docker/compose.yaml`](https://github.com/acme/ops/blob/main/x).\n")
+    _commit(repo, "add linked doc")
+
+    result = run_deckhand("document", "context", cwd=repo)
+
+    assert result.returncode == 0
+    assert "broken reference" not in result.stdout
+
+
+def test_audit_accepts_a_path_this_repository_ignores(repo):
+    """A git-ignored directory is in the clone and not in the worktree; it is not another repository's."""
+    (repo / ".gitignore").write_text("state.d/\n")
+    docs = repo / "docs" / "claude"
+    docs.mkdir(parents=True)
+    (docs / "state.md").write_text("The lock lives in `state.d/lock.json`.\n")
+    _commit(repo, "add state doc")
+
+    result = run_deckhand("document", "context", cwd=repo)
+
+    assert result.returncode == 0
+    assert "broken reference" not in result.stdout
+
+
 def test_audit_checks_a_bare_name_that_exists_and_ignores_one_that_does_not(repo):
     docs = repo / "docs" / "claude"
     docs.mkdir(parents=True)

@@ -127,15 +127,31 @@ def _references(doc: Path, text: str) -> list[tuple[str, Path | None]]:
 
     A directory separator makes a token a path whether the file is there or not, so `src/gone.rs` is
     reported. A bare name is ambiguous, and `1.2.3`, `github.com`, and `gone.rs` are indistinguishable
-    from here, so one counts only when a file of that name is actually there.
+    from here, so one counts only when a file of that name is actually there. A token that is the
+    whole text of a link points somewhere on purpose, and a path this repository ignores is in the
+    clone and out of the worktree, so neither is broken.
     """
     found = []
-    for token in REFERENCE.findall(text):
+    for match in REFERENCE.finditer(text):
+        if text[max(match.start() - 1, 0) : match.start()] == "[" and text[match.end() : match.end() + 2] == "](":
+            continue
+        token = match.group(1)
         path_part = token.split(":", 1)[0]
         target = _resolve(doc, path_part)
+        if target is None and _ignored(path_part):
+            continue
         if target is not None or "/" in path_part:
             found.append((token, target))
     return found
+
+
+def _ignored(path_part: str) -> bool:
+    """Whether this repository ignores `path_part`; a git that cannot answer says no."""
+    try:
+        git.run("check-ignore", "-q", "--no-index", path_part)
+    except git.GitError:
+        return False
+    return True
 
 
 def _resolve(doc: Path, path_part: str) -> Path | None:
