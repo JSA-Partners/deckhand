@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import worktree
 from tests.conftest import FIXTURES, fieldvalues, run_deckhand, run_git
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
@@ -182,6 +183,21 @@ def test_apply_cuts_the_branch_in_its_own_worktree_and_pushes_nothing(fake_gh, g
     assert _branches(origin) == ["main"]
     assert _writes(gh_calls) == [IN_PROGRESS, ASSIGN, COMMENT]
     assert copy.read_text(encoding="utf-8").endswith(f"--- issue comment\n{STARTED}")
+
+
+def test_apply_copies_the_ignored_files_into_a_new_worktree(fake_gh, repo, origin, tmp_path):
+    """The first test run in a fresh worktree was the pre-push hook, which failed on a missing .env."""
+    (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+    run_git(repo, "add", ".gitignore")
+    run_git(repo, "commit", "-qm", "ignore the environment file")
+    (repo / ".worktreeinclude").write_text(".env\n", encoding="utf-8")
+    (repo / ".env").write_text("DATABASE_URL=x\n", encoding="utf-8")
+
+    result = _start("apply", repo, fieldvalues(tmp_path, "Backlog"), "--note", "checked")
+
+    assert result.returncode == 0, result.stderr
+    assert "Copied .env" in result.stdout
+    assert (worktree.path_for(BRANCH) / ".env").read_text(encoding="utf-8") == "DATABASE_URL=x\n"
 
 
 def test_apply_resumes_a_branch_found_by_number_in_a_new_worktree(fake_gh, gh_calls, repo, origin, tmp_path):

@@ -63,11 +63,21 @@ def _branch_name(settings: Settings, kind: str | None, title: str, number: int) 
 
 
 def _worktree(branch: str, new: bool) -> Path:
-    """The story's worktree, or the refusal carrying git's one line about why it could not be made."""
+    """The story's worktree, or the refusal carrying git's one line about why it could not be made.
+
+    The ignored files it needs are copied after it exists, and a copy that fails costs a line rather
+    than the start: the worktree is made, and the story is In Progress either way.
+    """
     try:
-        return worktree.add(branch, new=new)
+        path = worktree.add(branch, new=new)
     except git.GitError as error:
         raise Refusal(str(error)) from error
+    try:
+        for name in worktree.include(path):
+            print(f"Copied {name}")
+    except (git.GitError, OSError) as error:
+        print(f"Copied nothing from {worktree.INCLUDE} ({reason(error)})")
+    return path
 
 
 def _start_branch(branch: str) -> Path:

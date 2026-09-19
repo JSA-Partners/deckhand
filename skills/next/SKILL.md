@@ -21,9 +21,10 @@ and run it again; when you cannot, say so in one sentence. When the briefing or 
 `Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
 else; in a worktree entered for the first time, run the repository's setup commands from its
 CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
-baseline; when setup or a test there fails for a file the clone has and git ignores, copy it from
-the clone once and say so. Done and stop have nothing to run: say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook; nothing is
-amended past the last reviewed commit or pushed by hand.
+baseline; start copies the ignored files `.worktreeinclude` names; when setup or a test fails for
+another the clone has, copy it once and say it belongs there. Done and stop have nothing to run:
+say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook;
+nothing is amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
 

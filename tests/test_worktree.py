@@ -122,6 +122,41 @@ def test_add_fails_in_gits_words_when_the_branch_exists(repo, origin):
         worktree.add(BRANCH, new=True)
 
 
+# --- include ------------------------------------------------------------------
+
+
+def test_include_copies_the_ignored_files_the_file_names(repo):
+    """Claude Code copies these into the worktrees it makes; a worktree made here copies the same ones."""
+    (repo / ".gitignore").write_text(".env\nlocal/\nbuild/\n", encoding="utf-8")
+    (repo / "tracked.txt").write_text("t\n", encoding="utf-8")
+    run_git(repo, "add", ".gitignore", "tracked.txt")
+    run_git(repo, "commit", "-qm", "ignore some files")
+    (repo / ".worktreeinclude").write_text(".env\nlocal/\ntracked.txt\ndraft.txt\n", encoding="utf-8")
+    (repo / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    (repo / "local").mkdir()
+    (repo / "local" / "config.json").write_text("{}\n", encoding="utf-8")
+    (repo / "draft.txt").write_text("named but not ignored\n", encoding="utf-8")
+    (repo / "build").mkdir()
+    (repo / "build" / "out.js").write_text("ignored but not named\n", encoding="utf-8")
+    (repo / "notes.txt").write_text("untracked and not ignored\n", encoding="utf-8")
+    path = _add(repo, BRANCH, "-b", BRANCH)
+
+    copied = worktree.include(path)
+
+    assert sorted(copied) == [".env", "local/config.json"]
+    assert (path / ".env").read_text(encoding="utf-8") == "SECRET=1\n"
+    assert (path / "local" / "config.json").exists()
+    assert not (path / "draft.txt").exists()
+    assert not (path / "build").exists()
+    assert not (path / "notes.txt").exists()
+
+
+def test_include_copies_nothing_without_the_file(repo):
+    path = _add(repo, BRANCH, "-b", BRANCH)
+
+    assert worktree.include(path) == []
+
+
 REPO = "acme/widgets"
 
 

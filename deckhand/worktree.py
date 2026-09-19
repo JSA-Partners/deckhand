@@ -10,6 +10,7 @@ are removed by the first run that can do it from outside the worktree.
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
 from deckhand import git, issue
@@ -17,6 +18,7 @@ from deckhand.step import ORIGIN_MAIN, reason
 
 WORKTREES = Path(".claude") / "worktrees"
 EXCLUDE = f"{WORKTREES.as_posix()}/"
+INCLUDE = ".worktreeinclude"
 STORY_BRANCH = re.compile(r"^[^/]+/(\d+)-")  # <kind>/<number>-<slug>, the shape start cuts
 
 
@@ -86,6 +88,35 @@ def add(branch: str, new: bool) -> Path:
     args = ["-b", branch, ORIGIN_MAIN] if new else [branch]
     git.run("worktree", "add", str(path), *args)
     return path
+
+
+def include(path: Path) -> list[str]:
+    """Copy into the worktree at `path` every file the clone's `.worktreeinclude` names and git ignores.
+
+    Claude Code reads this file for the worktrees it makes itself, and a worktree made with git gets
+    none of it, so the same rule is applied here: a file both matched and ignored, never a tracked
+    one. git does the matching, `--exclude-from` for the patterns and `check-ignore` for the rule
+    that the file is ignored in the first place.
+    """
+    root = clone_root()
+    if not (root / INCLUDE).is_file():
+        return []
+    listed = [
+        name
+        for name in git.run("ls-files", "--others", f"--exclude-from={INCLUDE}", "--ignored", cwd=root).splitlines()
+        if name.strip()
+    ]
+    if not listed:
+        return []
+    try:
+        ignored = [name for name in git.run("check-ignore", *listed, cwd=root).splitlines() if name.strip()]
+    except git.GitError:
+        return []  # exit 1 is "none of them is ignored", which is an answer and not a failure
+    for name in ignored:
+        target = path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / name, target)
+    return ignored
 
 
 def remove(branch: str, path: Path) -> None:
