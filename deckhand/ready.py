@@ -2,7 +2,7 @@
 
 `context` prints the rules `apply` holds, the story and its plan, the Review: entry that is the
 gate, the open blockers, the other open stories a blocker could be chosen from, the fields as the
-board has them, and the analogy table the estimate comes from. The plan is what the points are
+board has them, and the reference stories the estimate is compared against. The plan is what the points are
 estimated against, and the review is read here rather than by a separate `gh` call. Each block
 degrades to one line of its own, so a lookup that fails never costs the model the rest of the
 prompt.
@@ -21,13 +21,10 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import time
-from typing import Any
 
-from deckhand import board, config, fields, gh, issue, log, sections
+from deckhand import board, config, fields, fleet, forecast, gh, issue, log, sections
 from deckhand.config import Settings
-from deckhand.fields import format_number
 from deckhand.step import (
     Refusal,
     block,
@@ -48,12 +45,10 @@ from deckhand.step import (
 BOARDING_LIMIT = 50_000
 
 FIELDS = ("Kind", "Story Points")
-LIMIT = 20
+REFERENCES = 3  # per point value: enough to compare against, few enough to read
 SETTLE = 2.0
-TABLE_HEADER = "| # | Repo | Title | Estimate | Tasks |"
+TABLE_HEADER = "| Pts | # | Repo | Title | Hours |"
 TABLE_RULE = "| --- | --- | --- | --- | --- |"
-
-_TASK_HEADING = re.compile(r"^### Task [0-9]+", re.MULTILINE)
 
 
 def settle_seconds() -> float:
@@ -70,29 +65,24 @@ def settle_seconds() -> float:
     return seconds if seconds > 0 else 0.0
 
 
-# --- the analogy table ------------------------------------------------------
+# --- the reference stories -------------------------------------------------
 
 
-def _fmt(value: Any) -> str:
-    return "-" if value is None else format_number(value)
-
-
-def analogy_rows(nodes: list[dict[str, Any]], limit: int) -> list[str]:
-    """Table rows for the most recently closed Done stories among the board's item `nodes`."""
-    done = []
-    for node in nodes:
-        content = node.get("content")
-        if not content or board.field_value(node, "Status", "name") != "Done":
-            continue
-        points = board.field_value(node, "Story Points", "number")
-        done.append((content, points))
-    done.sort(key=lambda item: item[0].get("closedAt") or "", reverse=True)
+def reference_rows(stories: list[fleet.Story]) -> list[str]:
+    """The most recent finished stories of each point value, with the hours each took."""
+    measured = []
+    for story in stories:
+        took = forecast.hours(story) if story.closed and story.points is not None else None
+        if took is not None:
+            opened = log.last(story.issue, "Pull request:")
+            measured.append((opened.created_at if opened else "", story, took))
+    measured.sort(key=lambda row: row[0], reverse=True)
     rows = []
-    for content, points in done[:limit]:
-        title = (content.get("title") or "").replace("|", "\\|")
-        repo = ((content.get("repository") or {}).get("nameWithOwner") or "/").partition("/")[2]
-        tasks = len(_TASK_HEADING.findall(content.get("body") or ""))
-        rows.append(f"| {content.get('number')} | {repo} | {title} | {_fmt(points)} | {tasks} |")
+    for points in sorted({story.points for _, story, _ in measured}):
+        for _, story, took in [row for row in measured if row[1].points == points][:REFERENCES]:
+            repo = story.repo.partition("/")[2] or story.repo
+            title = story.title.replace("|", "\\|")
+            rows.append(f"| {points} | {story.number} | {repo} | {title} | {took:.1f} |")
     return rows
 
 
@@ -130,8 +120,8 @@ def _fields_block(settings: Settings | Exception, number: int) -> list[str]:
 
 
 def _table_block(settings: Settings | Exception) -> list[str]:
-    rows = analogy_rows(board.items(usable(settings)), LIMIT)
-    return [TABLE_HEADER, TABLE_RULE, *rows] if rows else ["  none"]
+    rows = reference_rows(fleet.load(usable(settings)))
+    return [f"  {forecast.POINT}", *([TABLE_HEADER, TABLE_RULE, *rows] if rows else ["  none"])]
 
 
 def _could_block(settings: Settings | Exception, number: int) -> list[str]:
@@ -147,7 +137,7 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the kinds, the story, the plan, the review, the blockers, the fields, and the Done stories."""
+    """Print the kinds, the story, the plan, the review, the blockers, the fields, and the reference stories."""
     settings = settings_or_error()
     print(_kinds_line(settings))
     print()
@@ -157,7 +147,7 @@ def context(args: argparse.Namespace) -> int:
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Could block this story:", lambda: _could_block(settings, args.issue))
     block("Fields:", lambda: _fields_block(settings, args.issue))
-    block(f"Done stories (last {LIMIT}):", lambda: _table_block(settings))
+    block("Reference stories:", lambda: _table_block(settings))
     return 0
 
 

@@ -112,6 +112,11 @@ def _nodes(settings: Settings) -> list[dict]:
     return found
 
 
+def load(settings: Settings) -> list[Story]:
+    """Every story on the project with its log, and nothing else read."""
+    return stories(_nodes(settings))
+
+
 def allowed(story: Story) -> tuple[str, ...]:
     """The board Statuses this story's log allows, canonical one first.
 

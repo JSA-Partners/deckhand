@@ -12,7 +12,8 @@ REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 NO_WAIT = {"DECKHAND_SETTLE": "0"}
 ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
-HEADER = "| # | Repo | Title | Estimate | Tasks |"
+POINT = "A point groups stories that take about as long as each other. It is not hours."
+HEADER = "| Pts | # | Repo | Title | Hours |"
 RULE = "| --- | --- | --- | --- | --- |"
 ITEM_ADD = "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/248 --format json"
 EDITS = [
@@ -84,25 +85,63 @@ def _writes(gh_calls) -> list[str]:
     return [c for c in gh_calls() if "item-add" in c or "item-edit" in c or "-X POST" in c]
 
 
-# --- the analogy table ------------------------------------------------------
+# --- the reference stories -------------------------------------------------
 
 
-def test_the_table_lists_done_stories_newest_first_with_estimate_and_tasks(fake_gh):
-    result = run_deckhand("ready", "context", "248")
+def _forecast_items(tmp_path: Path, name: str, edit) -> dict[str, str]:
+    """The fleet fixture with finished, measured stories, with `edit` applied to its nodes."""
+    items = json.loads((FIXTURES / "captain-forecast.json").read_text(encoding="utf-8"))
+    edit(items["data"]["organization"]["projectV2"]["items"]["nodes"])
+    path = tmp_path / name
+    path.write_text(json.dumps(items), encoding="utf-8")
+    return {"GH_PROJECT_ITEMS_FILE": str(path)}
+
+
+def test_the_reference_table_groups_finished_stories_by_points_with_their_hours(fake_gh):
+    env = {"GH_PROJECT_ITEMS_FILE": str(FIXTURES / "captain-forecast.json")}
+
+    result = run_deckhand("ready", "context", "248", env=env)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[lines.index(HEADER) :] == [
+    start = lines.index("Reference stories:")
+    assert lines[start:] == [
+        "Reference stories:",
+        f"  {POINT}",
         HEADER,
         RULE,
-        "| 211 | widgets | Publication tier assignments | 3 | 0 |",
-        "| 210 | widgets | Tag filters on the mention list | 5 | 2 |",
-        "| 96 | gadgets | CSV export of the breakdown chart | 8 | 1 |",
+        "| 1 | 501 | widgets | Warm the widget cache | 4.0 |",
+        "| 1 | 500 | widgets | Seed the widget cache | 2.0 |",
+        "| 2 | 502 | widgets | Evict the widget cache | 10.0 |",
     ]
 
 
-def test_the_table_queries_a_user_owned_project_under_user(fake_gh, gh_calls, tmp_path, monkeypatch):
-    items = json.loads((FIXTURES / "graphql-project-items.json").read_text(encoding="utf-8"))
+def test_the_reference_table_keeps_three_per_point_value(fake_gh, tmp_path):
+    def edit(nodes):
+        done = nodes[1]
+        for n in range(3):
+            copy = json.loads(json.dumps(done))
+            copy["content"]["number"] = 600 + n
+            nodes.append(copy)
+
+    result = run_deckhand("ready", "context", "248", env=_forecast_items(tmp_path, "many.json", edit))
+
+    assert result.returncode == 0, result.stderr
+    ones = [line for line in result.stdout.splitlines() if line.startswith("| 1 |")]
+    assert len(ones) == ready.REFERENCES
+
+
+def test_the_reference_table_escapes_pipes_in_titles(fake_gh, tmp_path):
+    def edit(nodes):
+        nodes[1]["content"]["title"] = "A | B"
+
+    result = run_deckhand("ready", "context", "248", env=_forecast_items(tmp_path, "pipe.json", edit))
+
+    assert "A \\| B" in result.stdout
+
+
+def test_the_reference_table_queries_a_user_owned_project_under_user(fake_gh, gh_calls, tmp_path, monkeypatch):
+    items = json.loads((FIXTURES / "captain-forecast.json").read_text(encoding="utf-8"))
     items["data"] = {"user": items["data"].pop("organization")}
     page = tmp_path / "user-items.json"
     page.write_text(json.dumps(items), encoding="utf-8")
@@ -112,94 +151,16 @@ def test_the_table_queries_a_user_owned_project_under_user(fake_gh, gh_calls, tm
     result = run_deckhand("ready", "context", "248")
 
     assert result.returncode == 0, result.stderr
-    assert "| 211 | widgets | Publication tier assignments | 3 | 0 |" in result.stdout
-    (call,) = [c for c in gh_calls() if "projectV2(number" in c]
-    assert "user(login:$owner)" in call
-    assert "-f owner=mjm -F number=4" in call
-    assert "organization(login" not in call
+    assert "| 2 | 502 | widgets | Evict the widget cache | 10.0 |" in result.stdout
+    assert all("user(login:$owner)" in c for c in gh_calls() if "projectV2(number" in c)
 
 
-def test_the_table_escapes_pipes_in_titles(fake_gh, tmp_path):
-    def edit(nodes):
-        nodes[0]["content"]["title"] = "A | B"
-        del nodes[1:]
+def test_no_measured_story_says_none_under_the_definition(fake_gh):
+    result = run_deckhand("ready", "context", "248")
 
-    result = run_deckhand("ready", "context", "248", env=_items_file(tmp_path, "items-pipe.json", edit))
-
-    assert result.returncode == 0, result.stderr
-    row = result.stdout.splitlines()[-1]
-    assert "A \\| B" in row
-
-
-def test_the_table_tolerates_a_null_repository_name(fake_gh, tmp_path):
-    def edit(nodes):
-        nodes[0]["content"]["repository"]["nameWithOwner"] = None
-        del nodes[1:]
-
-    result = run_deckhand("ready", "context", "248", env=_items_file(tmp_path, "items-null-repo.json", edit))
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1].startswith("| 210 |  | ")
-
-
-def test_the_table_prints_whole_numbers_without_a_decimal_point(fake_gh, tmp_path):
-    def edit(nodes):
-        del nodes[1:]
-        for value in nodes[0]["fieldValues"]["nodes"]:
-            if "number" in value:
-                value["number"] = float(value["number"])
-        nodes[0]["fieldValues"]["nodes"][1]["number"] = 2.5
-
-    result = run_deckhand("ready", "context", "248", env=_items_file(tmp_path, "items-float.json", edit))
-
-    assert result.stdout.splitlines()[-1] == ("| 210 | widgets | Tag filters on the mention list | 2.5 | 2 |")
-
-
-def test_the_table_reads_the_items_through_gh_paginate(fake_gh, gh_calls):
-    run_deckhand("ready", "context", "248")
-
-    (call,) = [c for c in gh_calls() if c.startswith("api graphql") and "projectV2(number" in c]
-    assert "--paginate" in call and "--slurp" in call
-
-
-def test_the_table_reads_every_page(fake_gh, tmp_path):
-    items = json.loads((FIXTURES / "graphql-project-items.json").read_text(encoding="utf-8"))
-    nodes = items["data"]["organization"]["projectV2"]["items"]["nodes"]
-    pages = []
-    for i, chunk in enumerate((nodes[:2], nodes[2:])):
-        page = json.loads(json.dumps(items))
-        page["data"]["organization"]["projectV2"]["items"]["nodes"] = chunk
-        page["data"]["organization"]["projectV2"]["items"]["pageInfo"] = {"hasNextPage": i == 0, "endCursor": "c1"}
-        path = tmp_path / f"page{i}.json"
-        path.write_text(json.dumps(page), encoding="utf-8")
-        pages.append(str(path))
-
-    result = run_deckhand("ready", "context", "248", env={"GH_PAGES": ":".join(pages)})
-
-    assert result.returncode == 0, result.stderr
-    rows = [line for line in result.stdout.splitlines() if line.startswith("| ") and line != HEADER]
-    assert [row.split(" | ")[0] for row in rows[1:]] == ["| 211", "| 210", "| 96"]
-
-
-def test_the_table_stops_at_the_limit():
-    nodes = [
-        {
-            "content": {
-                "number": n,
-                "closedAt": f"2026-08-{n:02d}T00:00:00Z",
-                "title": f"S{n}",
-                "body": "",
-                "repository": {"nameWithOwner": "acme/widgets"},
-            },
-            "fieldValues": {"nodes": [{"name": "Done", "field": {"name": "Status"}}]},
-        }
-        for n in range(1, 26)
-    ]
-
-    rows = ready.analogy_rows(nodes, ready.LIMIT)
-
-    assert len(rows) == ready.LIMIT
-    assert rows[0].startswith("| 25 |")
+    lines = result.stdout.splitlines()
+    start = lines.index("Reference stories:")
+    assert lines[start : start + 3] == ["Reference stories:", f"  {POINT}", "  none"]
 
 
 # --- context ----------------------------------------------------------------
@@ -223,9 +184,9 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
-        "Done stories (last 20):",
-        HEADER,
-        RULE,
+        "Reference stories:",
+        f"  {POINT}",
+        "  none",
     ]
 
 
@@ -279,7 +240,7 @@ def test_context_degrades_each_block_on_its_own(fake_gh, tmp_path):
     assert lines[blockers + 1] == "  none"
     assert lines[blockers + 3] == "  #300 Backlog Not done yet"
     assert lines[blockers + 5] == "  unavailable (the field read failed)"
-    assert HEADER in lines
+    assert f"  {POINT}" in lines
 
 
 def test_context_prints_the_plan_and_the_review_the_step_holds(fake_gh):
@@ -320,7 +281,7 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
         "Blockers:",
         "Could block this story:",
         "Fields:",
-        "Done stories (last 20):",
+        "Reference stories:",
     ]
     assert lines.count("  unavailable (nope)") == 7
 

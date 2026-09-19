@@ -151,3 +151,13 @@ def test_a_band_with_no_samples_falls_back_to_the_pool():
     found = forecast.simulate([story], {}, 1, samples, runs=20, seed=3)
 
     assert found == {50: 5.0, 85: 5.0, 95: 5.0, 100: 5.0}
+
+
+def test_hours_measures_one_finished_story():
+    story = _story(1, 1, True, ("Started:", "2026-09-01T00:00:00Z"), ("Pull request:", "2026-09-01T03:00:00Z"))
+
+    assert forecast.hours(story) == 3.0
+
+
+def test_hours_is_none_without_both_entries():
+    assert forecast.hours(_story(2, 1, True, ("Pull request:", "2026-09-01T01:00:00Z"))) is None

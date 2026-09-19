@@ -18,24 +18,29 @@ from datetime import datetime
 from deckhand import fleet, log
 
 PERCENTILES = (50, 85, 95, 100)
+POINT = "A point groups stories that take about as long as each other. It is not hours."
 
 
 def _stamp(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
+def hours(story: fleet.Story) -> float | None:
+    """Hours from the latest `Started:` to the latest `Pull request:`, or None without both."""
+    started = log.last(story.issue, "Started:")
+    opened = log.last(story.issue, "Pull request:")
+    if started is None or opened is None:
+        return None
+    return (_stamp(opened.created_at) - _stamp(started.created_at)).total_seconds() / 3600
+
+
 def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
     """Hours from `Started:` to `Pull request:` for every closed story, banded by points."""
     found: dict[int | None, list[float]] = {}
     for story in stories:
-        if not story.closed:
-            continue
-        started = log.last(story.issue, "Started:")
-        opened = log.last(story.issue, "Pull request:")
-        if started is None or opened is None:
-            continue
-        hours = (_stamp(opened.created_at) - _stamp(started.created_at)).total_seconds() / 3600
-        found.setdefault(story.points, []).append(hours)
+        took = hours(story) if story.closed else None
+        if took is not None:
+            found.setdefault(story.points, []).append(took)
     return {points: sorted(found[points]) for points in sorted(found, key=lambda p: (p is None, p))}
 
 
