@@ -138,9 +138,9 @@ def _references(doc: Path, text: str) -> list[tuple[str, Path | None]]:
         token = match.group(1)
         path_part = token.split(":", 1)[0]
         target = _resolve(doc, path_part)
-        if target is None and _ignored(path_part):
-            continue
         if target is not None or "/" in path_part:
+            if target is None and _ignored(path_part):
+                continue
             found.append((token, target))
     return found
 
