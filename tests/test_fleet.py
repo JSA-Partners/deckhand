@@ -156,6 +156,13 @@ def test_a_story_in_flight_with_nobody_on_it_is_reported_and_not_fixed():
     assert entry.fix == "none"
 
 
+def test_a_story_held_by_a_blocker_is_not_reported_as_abandoned():
+    """A branch that must not merge yet is meant to have no session on it; its row already says so."""
+    blockers = {**BLOCKERS, ("acme/widgets", 120): [("acme/widgets", 253, "Seed the role matrix")]}
+    found = fleet.anomalies(fleet.stories(_nodes()), blockers, behind=set(), pulses=[])
+    assert [item for item in found if item.number == 120 and "no session open" in item.what] == []
+
+
 def test_a_story_two_sessions_share_is_reported():
     pulses = [_pulse("117", "a"), _pulse("117", "b")]
     found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)

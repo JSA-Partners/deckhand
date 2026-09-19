@@ -107,8 +107,9 @@ amend step. A decision that changes an issue in another repository before it sta
 `amend context N --repo owner/name`, edit its draft, run
 `amend apply N <draft> --repo owner/name --note "<why>"`, and name it in the Deviation. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
-commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what
-does not depend on it, then stop rather than watch. The captain picks it up when the blocker clears.
+commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what does not
+depend on it, then stop. A branch that is built but must not merge before another story: run
+`captain apply --block $issue --by M`, run `log $issue "Noted: <why>"`, and stop.
 
 ## Branch review
 

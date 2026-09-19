@@ -320,7 +320,7 @@ def anomalies(
             )
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
-        if story.status == "In Progress" and not labels and mine:
+        if story.status == "In Progress" and not labels and mine and not blockers.get(story.key):
             out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
         if len(labels) > 1:
             named = " and ".join(labels)
