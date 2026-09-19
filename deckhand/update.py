@@ -22,6 +22,7 @@ CONFLICT = (
     "GitHub could not merge main into the branch; merge origin/main in the worktree, resolve, "
     "commit, log a Deviation, and finish again"
 )
+LOCAL_CONFLICT = "main conflicts with the branch; resolve it in the worktree, commit, and log a Deviation"
 
 
 def _open_pull_request(repo: str, number: int) -> str | None:
@@ -42,9 +43,12 @@ def _merge_into(branch: str, path: Path) -> None:
     """Merge the trunk into the branch where it is checked out; a conflict is the caller's to resolve."""
     git.run("fetch", "origin", "main", cwd=path)
     try:
-        git.run("merge", "--no-edit", trunk(), cwd=path)
+        said = git.run("merge", "--no-edit", trunk(), cwd=path)
     except git.GitError as error:
-        raise Refusal(CONFLICT) from error
+        raise Refusal(LOCAL_CONFLICT) from error
+    if "Already up to date" in said:
+        print(f"{branch} already has {trunk()}")
+        return
     print(f"Merged {trunk()} into {branch}")
 
 

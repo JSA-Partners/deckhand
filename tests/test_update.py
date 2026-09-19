@@ -127,3 +127,29 @@ def test_apply_keeps_the_reviewed_commit_reachable_after_the_merge(fake_gh, gh_c
     assert result.returncode == 0, result.stderr
     ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", reviewed, "HEAD"], cwd=repo, check=False)
     assert ancestor.returncode == 0
+
+
+def test_apply_says_a_branch_already_current_is_current(fake_gh, gh_calls, repo, origin, branch):
+    """The build runs this after every task, so a no-op must say so rather than claim a merge."""
+    reviewed = _sha(repo, "HEAD")
+
+    result = run_deckhand("update", "apply", "248", cwd=repo, env=_building_story(repo.parent, reviewed))
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [f"{branch} already has origin/main"]
+
+
+def test_apply_names_the_worktree_on_a_local_conflict(fake_gh, gh_calls, repo, origin, branch):
+    reviewed = _sha(repo, "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "story.py", "x = 2\n", "feat: other story")
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "checkout", "-q", branch)
+
+    result = run_deckhand("update", "apply", "248", cwd=repo, env=_building_story(repo.parent, reviewed))
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand update apply: main conflicts with the branch; resolve it in the worktree, commit, "
+        "and log a Deviation\n"
+    )
