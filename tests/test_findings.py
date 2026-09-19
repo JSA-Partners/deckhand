@@ -66,6 +66,32 @@ def test_four_fields_instead_of_five_is_refused():
     assert str(refused.value).startswith("line 1: expected ")
 
 
+def test_every_malformed_findings_line_is_named_in_one_refusal():
+    """Nine lines written four fields wide cost nine refusals; the repair needs them all at once."""
+    text = (
+        "chaos.1 | P2 | PENDING | a claim with no evidence\n"
+        "chaos.2 | P1 | PENDING | another claim folded in\n"
+        "chaos.3 | P2 | PENDING | A claim | store.go:14\n"
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert str(refused.value).splitlines() == [
+        "line 1: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>; found 4 fields",
+        "line 2: found 4 fields",
+    ]
+
+
+def test_a_semantic_fault_is_collected_with_the_malformed_lines():
+    text = "chaos.1 | P2 | PENDING | A claim | store.go:14\nvibes.1 | P2 | PENDING | A claim | store.go:14\n"
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert str(refused.value) == "line 2: no lens named 'vibes'"
+
+
 def test_a_verdicts_file_passed_as_findings_names_the_shape_it_reads_as():
     text = "chaos.1 | CONFIRMED\n"
 

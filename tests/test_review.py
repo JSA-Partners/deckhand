@@ -354,7 +354,7 @@ def test_apply_refuses_a_decision_with_a_pipe_in_its_reason(fake_gh, gh_calls, t
 
     assert result.returncode == 1
     assert result.stderr == (
-        "deckhand review apply: line 1: expected <lens>.<n> | accepted|declined|changed [| <reason>]\n"
+        "deckhand review apply: line 1: expected <lens>.<n> | accepted|declined|changed [| <reason>]; found 4 fields\n"
     )
     assert _writes(gh_calls) == []
 
@@ -484,7 +484,8 @@ def test_apply_refuses_a_malformed_line_and_writes_nothing(fake_gh, gh_calls, tm
 
     assert result.returncode == 1
     assert result.stderr == (
-        "deckhand review apply: line 2: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>\n"
+        "deckhand review apply: line 2: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>; "
+        "found 1 field\n"
     )
     assert result.stdout == ""
     assert _writes(gh_calls) == []

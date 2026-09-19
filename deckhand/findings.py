@@ -111,11 +111,26 @@ def _reads_as(text: str, passed: str) -> str | None:
     return None
 
 
-def _refusal(number: int, expected: str, text: str, passed: str) -> Refusal:
-    """The format refusal for one line, saying which of the three shapes the whole file reads as."""
+def _fault(number: int, line: str, expected: str, first: bool, *wanted: int) -> str:
+    """One line's fault: the expected shape on the first, and the field count when that is what is wrong."""
+    count = len(_fields(line, *wanted))
+    counted = "" if count in wanted else f"found {count} field{'' if count == 1 else 's'}"
+    if first:
+        return f"line {number}: {expected}" + (f"; {counted}" if counted else "")
+    return f"line {number}: {counted or 'not in that format'}"
+
+
+def _refuse(faults: list[str], text: str, passed: str) -> None:
+    """One refusal carrying every fault, with the shape the whole file reads as when it reads as one.
+
+    A file written the wrong width is wrong the same way on every line, and refusing the first alone
+    costs a run for each of the rest.
+    """
+    if not faults:
+        return
     found = _reads_as(text, passed)
     hint = f"; that file reads as {found}, and the order is findings, verdicts, decisions" if found else ""
-    return Refusal(f"line {number}: {expected}{hint}")
+    raise Refusal("\n".join([faults[0] + hint, *faults[1:]]))
 
 
 def _by_finding(
@@ -128,18 +143,22 @@ def _by_finding(
     """
     ids = {finding.id for finding in found}
     read: dict[str, tuple[str, str]] = {}
+    faults: list[str] = []
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         parsed = parse(line)
         if parsed is None:
-            raise _refusal(number, expected, text, f"{noun}s")
+            faults.append(_fault(number, line, expected, not faults, 2, 3))
+            continue
         ref, word, why = parsed
         if ref not in ids:
-            raise Refusal(f"line {number}: {ref} is not a finding")
-        if ref in read:
-            raise Refusal(f"line {number}: {ref} already has a {noun}")
-        read[ref] = (word, why)
+            faults.append(f"line {number}: {ref} is not a finding")
+        elif ref in read:
+            faults.append(f"line {number}: {ref} already has a {noun}")
+        else:
+            read[ref] = (word, why)
+    _refuse(faults, text, f"{noun}s")
     missing = [finding.id for finding in found if finding.id not in read]
     if missing:
         raise Refusal(f"no {noun} for {', '.join(missing)}")
@@ -168,18 +187,21 @@ def findings(text: str, known: set[str]) -> list[Finding]:
         return []
     parsed: list[Finding] = []
     seen: set[str] = set()
+    faults: list[str] = []
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         found = _parse(line)
         if found is None:
-            raise _refusal(number, _EXPECTED, text, "findings")
-        if found.lens not in known:
-            raise Refusal(f"line {number}: no lens named '{found.lens}'")
-        if found.id in seen:
-            raise Refusal(f"line {number}: {found.id} is already the id of an earlier finding")
-        seen.add(found.id)
-        parsed.append(found)
+            faults.append(_fault(number, line, _EXPECTED, not faults, 5))
+        elif found.lens not in known:
+            faults.append(f"line {number}: no lens named '{found.lens}'")
+        elif found.id in seen:
+            faults.append(f"line {number}: {found.id} is already the id of an earlier finding")
+        else:
+            seen.add(found.id)
+            parsed.append(found)
+    _refuse(faults, text, "findings")
     if not parsed:
         raise Refusal(f"the findings file is empty; write the findings, or exactly `{CLEAN}`")
     return parsed
