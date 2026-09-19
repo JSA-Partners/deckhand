@@ -113,7 +113,7 @@ def _head(read: fleet.Fleet, repo: str) -> str | None:
 
 
 def _next_line(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> str:
-    """The top-ranked story of each repository, and whether a session is open there to run it."""
+    """Each repository's top-ranked story in the ranked order, and whether a session is open to run it."""
     free = {beat.repo for beat in pulses if beat.story == sessions.FREE}
     seen: dict[str, str] = {}
     waiting: set[str] = set()
@@ -129,7 +129,7 @@ def _next_line(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> str:
         head = _head(read, repo)
         if head is not None:
             seen[repo] = f"{_name(repo)}: {head}"
-    return "Next per repository: " + (", ".join(seen[repo] for repo in sorted(seen)) if seen else "nothing ready")
+    return "Next per repository: " + (", ".join(seen.values()) if seen else "nothing ready")
 
 
 def _thousands(count: int) -> str:

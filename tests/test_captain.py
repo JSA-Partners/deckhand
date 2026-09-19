@@ -77,6 +77,21 @@ def test_the_order_names_what_to_run_per_repository(fleet_env, capsys):
     assert "Next per repository:" in capsys.readouterr().out
 
 
+def test_the_next_line_keeps_the_ranked_order_of_the_repositories():
+    """The urgent repository leads, so the line cannot be sorted by the repository's own name."""
+    found = list(fleet.stories(_nodes()))
+    read = fleet.Fleet(
+        stories=found,
+        blockers={story.key: list(story.blocked_by) for story in found if story.status != "Done"},
+        behind=set(),
+        missing=[],
+    )
+
+    assert captain._next_line(read, []) == (
+        "Next per repository: widgets 253 (no session open), gadgets 258 (no session open)"
+    )
+
+
 def test_the_next_line_names_the_draft_a_blocked_repository_waits_on():
     """A Draft is not in the order table, so the Next line is the only place its chain can be seen."""
     found = {story.number: story for story in fleet.stories(_nodes())}
