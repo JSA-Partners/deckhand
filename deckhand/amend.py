@@ -1,7 +1,7 @@
 """The amend step: the decisions of a review, or a discovery, reach the story they belong to.
 
 `context` prints the board's column, because it says which moment of the story this is and whether
-the body can still change, the body to edit, and the latest `Review:` entry in full, because the
+the body can still change, where the body to edit was written, and the latest `Review:` entry in full, because the
 decisions recorded in it are what the amend applies; the decisions were made in the session, and
 nothing a person wrote on GitHub is read. `apply` has two modes, and they are the same decision the
 process has always made about a discovery: `--note` keeps the work in this story, and `--new-issue`
@@ -39,12 +39,12 @@ from deckhand.step import (
     read_draft,
     reason,
     resolved_settings,
+    spill,
     step,
     usable,
 )
 
 DRAFT_RULE = "Write the whole edited body to the draft; keep every section heading."
-BODY_HEADING = "## Body"
 REVIEW_HEADING = "## Latest review"
 SPLIT_DRAFTED = "Drafted: the story and its plan, split from this one."
 
@@ -108,15 +108,6 @@ def _status_line(repo: str | Exception, number: int) -> str:
     return f"Status: {status or 'off the board'}"
 
 
-def _body_lines(story: issue.Issue | Exception) -> list[str]:
-    """The body to edit, under its own heading, so nothing above it reads as part of the story.
-
-    The plan comes out of its fold here: the fold is how the body is written to GitHub, and a draft
-    that copied it back would be editing the wrapper as if it were the story's own text.
-    """
-    return sections.bare(usable(story).body).strip("\n").splitlines()
-
-
 def _review_lines(story: issue.Issue | Exception) -> list[str]:
     """The latest `Review:` entry in full, or `  none`; its decisions are what the amend applies."""
     entry = log.last(usable(story), "Review:")
@@ -124,7 +115,7 @@ def _review_lines(story: issue.Issue | Exception) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the title, the column, the body to edit, the latest review, and where the draft goes."""
+    """Print the title, the column, where the body was written, the latest review, and where the draft goes."""
     try:
         repo: str | Exception = _repo(args.repo)
     except Exception as error:
@@ -134,7 +125,7 @@ def context(args: argparse.Namespace) -> int:
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
     print(_status_line(repo, args.issue))
     print()
-    block(BODY_HEADING, lambda: _body_lines(story))
+    print(spill("Body", f"{args.issue}-story.md", lambda: sections.bare(usable(story).body), args.repo))
     print()
     if not a_stub:  # a stub's shape is the body above, and its stories are not the draft's to change
         block("Shape:", lambda: indented(skeleton().splitlines()))

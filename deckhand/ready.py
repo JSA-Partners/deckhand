@@ -1,7 +1,7 @@
 """The ready step: a reviewed story moves to Backlog with its kind, its points, and its blockers.
 
-`context` prints the rules `apply` holds, the story and its plan, the Review: entry that is the
-gate, the open blockers, the other open stories a blocker could be chosen from, the fields as the
+`context` prints the rules `apply` holds, the story and where its plan was written, the Review: entry
+that is the gate, the open blockers, the other open stories a blocker could be chosen from, the fields as the
 board has them, and the reference stories the estimate is compared against. The plan is what the points are
 estimated against, and the review is read here rather than by a separate `gh` call. Each block
 degrades to one line of its own, so a lookup that fails never costs the model the rest of the
@@ -36,6 +36,7 @@ from deckhand.step import (
     ref_label,
     refuse_stub,
     settings_or_error,
+    spill,
     step,
     usable,
 )
@@ -102,12 +103,6 @@ def _story_lines(number: int) -> list[str]:
     return sections.get(issue.view(gh.repo_slug(), number).body, "Story", "").strip("\n").splitlines()
 
 
-def _plan_lines(number: int) -> list[str]:
-    """The Plan section, which is the work the points are estimated against."""
-    body = issue.view(gh.repo_slug(), number).body
-    return indented(sections.get(body, "Plan", "").strip("\n").splitlines(), "no plan")
-
-
 def _review_lines(number: int) -> list[str]:
     """The latest Review: entry, which is the gate this step holds."""
     entry = log.last(issue.view(gh.repo_slug(), number), "Review:")
@@ -137,14 +132,23 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the kinds, the fields and reference stories to size by, then the story, plan, review, and blockers."""
+    """Print the kinds, the fields and reference stories to size by, then the story, plan, review, and blockers.
+
+    The plan is written to a file and named, because a long one runs past what the reader sees at once.
+    """
     settings = settings_or_error()
     print(_kinds_line(settings))
     print()
     block("Fields:", lambda: _fields_block(settings, args.issue))
     block("Reference stories:", lambda: _table_block(settings))
     block("## Story", lambda: _story_lines(args.issue))
-    block("## Plan", lambda: _plan_lines(args.issue))
+    print(
+        spill(
+            "Plan",
+            f"{args.issue}-plan.md",
+            lambda: sections.get(issue.view(gh.repo_slug(), args.issue).body, "Plan", ""),
+        )
+    )
     block("Review:", lambda: _review_lines(args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Could block this story:", lambda: _could_block(settings, args.issue))

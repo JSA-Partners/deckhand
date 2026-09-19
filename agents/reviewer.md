@@ -8,9 +8,10 @@ tools: Read, Grep, Glob
 
 # Reviewer
 
-The message holds a story body and a reviewer brief: one `###` section per lens, saying what to
-attack and what counts as evidence. Apply every lens in the brief. The working directory is the
-repository the story belongs to, so open the files a lens asks about.
+The message holds the path to a story body and a reviewer brief; read that file first. The brief is
+one `###` section per lens, saying what to attack and what counts as evidence. Apply every lens in
+the brief. The working directory is the repository the story belongs to, so open the files a lens
+asks about.
 
 Report findings only as lines of this form, nothing else:
 

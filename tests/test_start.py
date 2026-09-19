@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import worktree
-from tests.conftest import FIXTURES, fieldvalues, run_deckhand, run_git
+from tests.conftest import FIXTURES, fieldvalues, run_deckhand, run_git, spilled
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
@@ -258,7 +258,8 @@ def test_apply_works_in_place_when_the_branch_is_checked_out_here(fake_gh, gh_ca
     result = _start("apply", repo, env, "--note", "resumed")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:3] == [f"Existing branch {BRANCH}; status unchanged", "Assigned @me", "## Plan"]
+    assert result.stdout.splitlines()[:2] == [f"Existing branch {BRANCH}; status unchanged", "Assigned @me"]
+    assert result.stdout.splitlines()[2].startswith("Plan: ")
     assert "Worktree:" not in result.stdout
     assert run_git(repo, "symbolic-ref", "HEAD").strip() == f"refs/heads/{BRANCH}"
     assert run_git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
@@ -309,7 +310,7 @@ def test_apply_prints_plan_commits_and_drift(fake_gh, repo, origin, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[lines.index("## Plan") + 1] == "# Guest Collections Implementation Plan"
+    assert spilled(result.stdout, "Plan").splitlines()[0] == "# Guest Collections Implementation Plan"
     assert lines[lines.index("## Commits") : lines.index("## Plan drift")] == [
         "## Commits",
         f"  {sha} feat: store method",
@@ -331,11 +332,11 @@ def test_context_prints_branch_blockers_plan_commits_and_drift(fake_gh, gh_calls
     assert [line for line in lines if line.startswith("## ")] == [
         "## Story",
         "## Scope",
-        "## Plan",
         "## Commits",
         "## Plan drift",
         LANDED,
     ]
+    assert [line for line in lines if line.startswith("Plan: ")]
     assert lines[lines.index("## Story") + 1].startswith("  As a guest user, I want")
     assert lines[lines.index("## Scope") + 1] == "  #### In"
     assert lines[lines.index("## Commits") : lines.index("## Plan drift")] == ["## Commits", "  none"]
@@ -455,12 +456,14 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
     assert result.stderr == ""
     lines = result.stdout.splitlines()
     assert lines[0].startswith("Branch: unavailable (")
+    plan = next(line for line in lines if line.startswith("Plan: "))
+    assert plan.startswith("Plan: unavailable (")
     assert [line for line in lines if not line.startswith("  ")] == [
         lines[0],
         "Blockers:",
         "## Story",
         "## Scope",
-        "## Plan",
+        plan,
         "## Commits",
         "## Plan drift",
         LANDED,

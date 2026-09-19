@@ -227,7 +227,7 @@ def test_a_draft_story_is_reviewed_with_the_review_context(fake_gh, repo, tmp_pa
 
     lines = _briefing(result, "review", "Not reviewed.")
     assert lines[5] == "  2026-09-01 Drafted: from a brainstorm"
-    assert _context(lines)[0] == "### Story"
+    assert _context(lines)[0].startswith("Body: ")
 
 
 def test_an_undated_entry_says_so(fake_gh, repo, tmp_path):
@@ -309,9 +309,8 @@ def test_an_amend_after_the_review_is_reconsidered_with_the_amend_context(fake_g
 
     lines = _briefing(result, "reconsider", "Amended since the review.")
     context = _context(lines)
-    assert "## Body" in context
+    assert any(line.startswith("Body: ") for line in context)
     assert "## Latest review" in context
-    assert "### Story" in context
     assert not [line for line in context if "unavailable" in line]
     assert any(line.startswith("Draft: ") for line in context)
 
@@ -356,7 +355,7 @@ def test_a_backlog_story_is_checked_with_the_start_context(fake_gh, repo, tmp_pa
 
     lines = _briefing(result, "check", "On the board; check the plan against the code, then build.")
     context = _context(lines)
-    assert "## Plan" in context
+    assert any(line.startswith("Plan: ") for line in context)
     assert "## Landed on main since the review" in context
 
 
@@ -364,7 +363,7 @@ def test_in_progress_with_an_empty_branch_builds(fake_gh, repo, empty_branch, tm
     result = _next(repo, env=fieldvalues(tmp_path, "In Progress"))
 
     lines = _briefing(result, "build", "Started, nothing built yet.")
-    assert "## Plan" in _context(lines)
+    assert any(line.startswith("Plan: ") for line in _context(lines))
 
 
 def test_in_progress_with_the_branch_elsewhere_builds_and_says_where_it_is_not(fake_gh, repo, origin, tmp_path):

@@ -16,7 +16,8 @@ If no number was given, ask which story. Say where the story is in two sentences
 above, then run the step it names and carry on to the next step in the same conversation until a
 decision is the person's, or until you are unsure what they want, and ask. Every command below
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
-did not print, run `<step> context $issue`. When a command refuses, fix the rule it names
+did not print, run `<step> context $issue`. A `Plan:` or `Body:` line names a file holding that
+text: read the file rather than run the context again. When a command refuses, fix the rule it names
 and run it again; when you cannot, say so in one sentence. When the briefing or a command prints a
 `Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
 else; in a worktree entered for the first time, run the repository's setup commands from its
@@ -55,10 +56,10 @@ author per stub it prints, all at once, then carry on to each one's review.
 ## Review
 
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
-agent with the body and the brief and write its lines as they are to the findings file. If it found
-something, run the deckhand:skeptic agent with those lines and the body and write its lines to the
-verdicts file. Then speak: a verdict on the story as a whole, sound, needs amending, flawed, or more than one
-story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
+agent with the body file's path and the brief and write its lines as they are to the findings file.
+If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
+write its lines to the verdicts file. Then speak: a verdict on the story as a whole, sound, needs
+amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
 story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, blocked
 as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
@@ -69,8 +70,8 @@ the findings file alone with `--verdict`. Then amend from the accepted findings.
 
 ## Amend
 
-From the amend context (above, or run it), edit the body into the draft it names, keeping every heading, with
-superpowers:writing-plans for a plan rewrite, and run
+From the amend context (above, or run it), copy the body file it names to the draft it names and
+edit that, keeping every heading, with superpowers:writing-plans for a plan rewrite, and run
 `amend apply $issue <draft> --note "<what changed and why>"`, the note saying what changed and
 why and never where it came from, with `--title "<new title>"` when the Story no longer matches
 it. If the amend changed what the story delivers, recommend reviewing

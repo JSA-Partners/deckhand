@@ -1,7 +1,7 @@
 """The start step: a story in Backlog gets its branch, and the model gets the plan to implement.
 
-`context` prints where the branch is, the open blockers, the story and its scope, the plan, what is
-already committed on the branch, the plan references that no longer resolve, and what landed on
+`context` prints where the branch is, the open blockers, the story and its scope, where the plan was
+written, what is already committed on the branch, the plan references that no longer resolve, and what landed on
 `origin/main` since the latest review, and writes nothing to GitHub. The story and the scope are there
 because the skill reads the plan against the repository before it branches, and a story that no
 longer holds is the one case that sends it back to review.
@@ -42,6 +42,7 @@ from deckhand.step import (
     refuse_git,
     refuse_stub,
     settings_or_error,
+    spill,
     step,
     trunk,
     usable,
@@ -129,12 +130,12 @@ def _landed_block(story: issue.Issue | Exception) -> list[str]:
 
 
 def _report(story: issue.Issue | Exception, number: int) -> None:
-    """Print the plan, the commits on the branch, the stale references, and what landed on main."""
+    """Print where the plan was written, the commits on the branch, the stale references, and what landed."""
 
     def plan_text() -> str:
         return sections.get(usable(story).body, "Plan").strip("\n")
 
-    block("## Plan", lambda: plan_text().splitlines() or ["  none"])
+    print(spill("Plan", f"{number}-plan.md", plan_text))
     block("## Commits", lambda: _commits_block(number))
     block("## Plan drift", lambda: _drift_block(plan_text()))
     block("## Landed on main since the review", lambda: _landed_block(story))

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from deckhand import ready
-from tests.conftest import FIXTURES, ROOT, run_deckhand
+from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
@@ -250,7 +250,7 @@ def test_context_prints_the_plan_and_the_review_the_step_holds(fake_gh):
     result = run_deckhand("ready", "context", "248", env=REVIEWED)
 
     assert result.returncode == 0, result.stderr
-    assert "### Task 1: Store method" in result.stdout
+    assert "### Task 1: Store method" in spilled(result.stdout, "Plan")
     assert "Review: sound" in result.stdout
     assert "A story boards only with a Review: entry in its log." in result.stdout
 
@@ -280,12 +280,12 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
         "Fields:",
         "Reference stories:",
         "## Story",
-        "## Plan",
+        "Plan: unavailable (nope)",
         "Review:",
         "Blockers:",
         "Could block this story:",
     ]
-    assert lines.count("  unavailable (nope)") == 7
+    assert lines.count("  unavailable (nope)") == 6
 
 
 # --- apply ------------------------------------------------------------------

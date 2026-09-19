@@ -1,13 +1,13 @@
 """The review step: one pass over a planned story with every lens that applies, then the skeptic.
 
-`context` prints the story body and a reviewer brief, which is the text of every lens the body
-selects, so one reviewer agent carries them all. `apply` reads the reviewer's findings, the
-skeptic's verdicts, and the decisions the person made in the session as the three files the
-session wrote, joins them itself, validates every line before it writes anything, and posts one
-`Review:` log entry: the verdict on the story as a whole, which lenses the same selection ran with
-the silent ones marked clean, then every finding on a line with the person's decision beside it and
-the skeptic's rejection marked. Neither agent's lines are retyped on the way, so a format only one
-of them keeps cannot cost a finding.
+`context` writes the story body to a file and names it, then prints a reviewer brief, which is the
+text of every lens the body selects, so one reviewer agent carries them all. `apply` reads the
+reviewer's findings, the skeptic's verdicts, and the decisions the person made in the session as the
+three files the session wrote, joins them itself, validates every line before it writes anything,
+and posts one `Review:` log entry: the verdict on the story as a whole, which lenses the same
+selection ran with the silent ones marked clean, then every finding on a line with the person's
+decision beside it and the skeptic's rejection marked. Neither agent's lines are retyped on the way,
+so a format only one of them keeps cannot cost a finding.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from deckhand import findings as findings_file
 from deckhand import gh, issue, sections
-from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, reason, refuse_stub, step
+from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, refuse_stub, spill, step, usable
 
 BRIEF_HEADING = "## Reviewer brief"
 FINDING_FORMAT = (
@@ -133,23 +133,16 @@ def named_lenses(body: str) -> list[str]:
 # --- context ----------------------------------------------------------------
 
 
-def _body(number: int) -> tuple[str, str]:
-    """`(the block to print, the text to select lenses from)`; the text is empty when the read fails.
-
-    The plan sits in a collapsed block on GitHub; the reviewer is handed it bare, as the story reads.
-    """
-    try:
-        body = issue.view(gh.repo_slug(), number).body
-    except Exception as error:  # the brief is still worth printing without the story
-        return f"Body: unavailable ({reason(error)})", ""
-    return sections.bare(body).strip("\n"), body
-
-
 def context(args: argparse.Namespace) -> int:
-    """Print the story, the text of every lens that applies to it, and where the findings go."""
-    block, text = _body(args.issue)
+    """Print where the story body was written, the text of every lens that applies, and where the findings go."""
+    story: issue.Issue | Exception
+    try:
+        story = issue.view(gh.repo_slug(), args.issue)
+    except Exception as error:  # the brief is still worth printing without the story
+        story = error
+    text = "" if isinstance(story, Exception) else story.body
+    print(spill("Body", f"{args.issue}-story.md", lambda: sections.bare(usable(story).body)))
     lenses = _lens_files()
-    print(block)
     print()
     print(BRIEF_HEADING)
     for name in _selected(lenses, text, named_lenses(text)):

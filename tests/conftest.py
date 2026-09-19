@@ -165,3 +165,9 @@ def run_deckhand(
         cwd=cwd,
         env={**os.environ, **env} if env is not None else None,
     )
+
+
+def spilled(stdout: str, label: str) -> str:
+    """The text a context wrote to the file its `<label>: <path> (<n> lines)` line names."""
+    line = next(found for found in stdout.splitlines() if found.startswith(f"{label}: "))
+    return Path(line.removeprefix(f"{label}: ").rsplit(" (", 1)[0]).read_text(encoding="utf-8")

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import review, sections
-from tests.conftest import FIXTURES, ROOT, run_deckhand
+from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 ISSUE = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
@@ -150,7 +150,7 @@ def test_context_selects_always_and_signal_lenses(fake_gh):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "### Story"
+    assert lines[0].startswith("Body: ")
     assert review.BRIEF_HEADING in lines
     headings = [line for line in lines if line.startswith("### ") and line[4:] in {p.stem for p in _lens_files()}]
     assert headings == ["### coverage", "### pen-test", "### principles", "### red-team", "### unknowns"]
@@ -223,9 +223,10 @@ def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
     result = run_deckhand("review", "context", "248", env=_issue_file(tmp_path, folded))
 
     assert result.returncode == 0, result.stderr
-    assert "<details>" not in result.stdout
-    assert "</details>" not in result.stdout
-    assert "### Task 1: Store method" in result.stdout
+    body = spilled(result.stdout, "Body")
+    assert "<details>" not in body
+    assert "</details>" not in body
+    assert "### Task 1: Store method" in body
 
 
 # --- apply ------------------------------------------------------------------

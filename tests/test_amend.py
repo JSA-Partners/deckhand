@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import naming, sections, stub
-from tests.conftest import FIXTURES, ROOT, run_deckhand
+from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
 PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
@@ -101,8 +101,9 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     title = lines.index(f"Title: {REVIEW['title']}")
-    assert lines[title : title + 4] == [f"Title: {REVIEW['title']}", "Status: Backlog", "", "## Body"]
-    assert lines[title + 4] == "### Story"
+    assert lines[title : title + 3] == [f"Title: {REVIEW['title']}", "Status: Backlog", ""]
+    assert lines[title + 3].startswith("Body: ")
+    assert spilled(result.stdout, "Body").splitlines()[0] == "### Story"
     assert "## Latest review" in lines
     assert lines[lines.index("## Latest review") - 1] == ""
     assert lines[lines.index("## Latest review") + 1].startswith("Review: ")
@@ -130,8 +131,9 @@ def test_context_prints_the_body_without_the_fold(fake_gh, tmp_path):
     result = run_deckhand("amend", "context", "248", env=env)
 
     assert result.returncode == 0, result.stderr
-    assert "<details>" not in result.stdout
-    assert "### Task 1: Store method" in result.stdout
+    body = spilled(result.stdout, "Body")
+    assert "<details>" not in body
+    assert "### Task 1: Store method" in body
 
 
 def test_context_says_when_a_story_is_off_the_board(fake_gh, tmp_path):
@@ -175,7 +177,7 @@ def test_context_never_fails(fake_gh, tmp_path):
     out = result.stdout
     assert "Title: unavailable (nope)" in out
     assert "Status: unavailable (nope)" in out
-    assert "## Body\n  unavailable (nope)" in out
+    assert "Body: unavailable (nope)" in out
     assert "## Latest review\n  unavailable (nope)" in out
     assert "Draft: unavailable (nope)" in out
 
@@ -288,7 +290,8 @@ def test_context_on_a_stub_elsewhere_prints_its_body_and_the_stub_rule(fake_gh, 
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert "Guests should be able to share a collection with another guest, without an admin in the loop." in lines
+    body = spilled(result.stdout, "Body").splitlines()
+    assert "Guests should be able to share a collection with another guest, without an admin in the loop." in body
     assert "Shape:" not in lines
     assert lines[-2] == f"Draft: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
     assert lines[-1] == STUB_RULE
