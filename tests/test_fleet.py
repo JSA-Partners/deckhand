@@ -130,7 +130,7 @@ def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float
         story=story,
         command="next",
         idle=idle,
-        cost=1.0,
+        tokens=1000,
         waiting=False,
         started=1.0,
         path=Path("x.jsonl"),

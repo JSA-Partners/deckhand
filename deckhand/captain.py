@@ -92,6 +92,10 @@ def _next_line(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> str:
     return "Next per repository: " + (", ".join(seen.values()) if seen else "nothing ready")
 
 
+def _thousands(count: int) -> str:
+    return f"{count / 1000:.0f}k" if count >= 1000 else str(count)
+
+
 def _short(command: str) -> str:
     return command if len(command) <= COMMAND else command[: COMMAND - 3].rstrip() + "..."
 
@@ -105,13 +109,13 @@ def _session_rows(pulses: list[sessions.Pulse], since: float) -> list[str]:
         return [*head, "  none"]
     rows = [
         *head,
-        "| id | Repo | Story | Last command | Idle | Cost | Waiting | Version |",
+        "| id | Repo | Story | Last command | Idle | Tokens | Waiting | Version |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for beat in pulses:
         rows.append(
             f"| {beat.label} | {_name(beat.repo)} | {beat.story} | {_short(beat.command)} | "
-            f"{_since(beat.idle)} | ${beat.cost:.2f} | {'yes' if beat.waiting else 'no'} | "
+            f"{_since(beat.idle)} | {_thousands(beat.tokens)} | {'yes' if beat.waiting else 'no'} | "
             f"{beat.version or '-'} |"
         )
     return rows
@@ -217,7 +221,8 @@ def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
         print(f"no session {label}; run captain context for the ones there are")
         return 0
     read = sessions.deep(beat.path)
-    print(f"Session {beat.label}: {beat.repo} story {beat.story}, idle {_since(beat.idle)}, cost ${beat.cost:.2f}")
+    spent = _thousands(beat.tokens)
+    print(f"Session {beat.label}: {beat.repo} story {beat.story}, idle {_since(beat.idle)}, {spent} tokens")
     print(f"Last prompt: {read.prompt or 'none'}")
     print()
     print("Since then:")

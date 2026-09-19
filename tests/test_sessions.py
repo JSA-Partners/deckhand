@@ -55,10 +55,9 @@ def _transcript(tmp_path: Path, **kwargs) -> Path:
     return _write(tmp_path / "projects" / "acme" / "abcd1234.jsonl", records + kwargs.get("extra", []))
 
 
-def test_a_pulse_names_the_repository_the_story_and_the_cost(tmp_path):
+def test_a_pulse_names_the_repository_and_the_story(tmp_path):
     pulse = sessions.pulse(_transcript(tmp_path), REPOS, now=0.0)
     assert (pulse.repo, pulse.story, pulse.command) == ("acme/widgets", "253", "next 253")
-    assert pulse.cost == 12.4
     assert pulse.waiting is True
 
 
@@ -82,7 +81,7 @@ def test_a_session_that_ran_no_deckhand_command_is_free(tmp_path):
     ]
     path = _write(tmp_path / "projects" / "acme" / "ffff0000.jsonl", records)
     pulse = sessions.pulse(path, REPOS, now=0.0)
-    assert (pulse.story, pulse.command, pulse.cost) == (sessions.FREE, "-", 0.0)
+    assert (pulse.story, pulse.command, pulse.tokens) == (sessions.FREE, "-", 0)
 
 
 def test_a_branch_names_the_story_when_no_command_did(tmp_path):
@@ -301,3 +300,26 @@ def test_without_the_running_list_recent_transcripts_are_listed_and_marked(tmp_p
     assert sorted(pulse.session for pulse in found) == ["alive", "gone"]
     assert not any(pulse.live for pulse in found)
     assert sessions.running() is None
+
+
+def _said(message_id: str, **usage: int) -> dict:
+    return {"type": "assistant", "message": {"id": message_id, "usage": usage, "content": []}}
+
+
+def test_tokens_count_each_message_once_and_leave_out_cache_reads(tmp_path):
+    usage = {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 100,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 9000,
+    }
+    path = _write(tmp_path / "s.jsonl", [_said("m1", **usage), _said("m1", **usage), _said("m2", **usage)])
+
+    assert sessions.tokens(path) == 230
+
+
+def test_tokens_include_the_sessions_subagents(tmp_path):
+    path = _write(tmp_path / "s.jsonl", [_said("m1", output_tokens=5)])
+    _write(tmp_path / "s" / "subagents" / "agent-a.jsonl", [_said("a1", output_tokens=7)])
+
+    assert sessions.tokens(path) == 12

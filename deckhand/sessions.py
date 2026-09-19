@@ -47,7 +47,7 @@ class Pulse:
     story: str
     command: str
     idle: float
-    cost: float
+    tokens: int
     waiting: bool
     started: float
     path: Path
@@ -123,6 +123,38 @@ def _ran(record: dict) -> str:
     )
 
 
+# What a plan's limits are spent on; cache reads are cheap and would swamp everything else.
+_SPENT = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
+
+
+def _spent(path: Path) -> dict[str, int]:
+    """Tokens per message id in one transcript; a message is written once per content block."""
+    found: dict[str, int] = {}
+    try:
+        handle = path.open("rb")
+    except OSError:
+        return found
+    with handle:
+        for line in handle:
+            if b'"usage"' not in line:
+                continue
+            record = _record(line) or {}
+            message = record.get("message")
+            usage = message.get("usage") if isinstance(message, dict) else None
+            if record.get("type") == "assistant" and isinstance(usage, dict):
+                key = str(message.get("id") or len(found))
+                found[key] = sum(int(usage.get(name) or 0) for name in _SPENT)
+    return found
+
+
+def tokens(path: Path) -> int:
+    """Tokens this session and its subagents spent, cache reads left out."""
+    total = sum(_spent(path).values())
+    for agent in sorted(path.with_suffix("").glob("subagents/*.jsonl")):
+        total += sum(_spent(agent).values())
+    return total
+
+
 def _repo_of(cwd: str, repos: dict[str, str]) -> str | None:
     """The repository whose name is a component of `cwd`; a worktree lives under its own clone."""
     parts = Path(cwd).parts
@@ -134,7 +166,6 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
     cwd = branch = ""
     verb = args = ""
     version = ""
-    cost = 0.0
     started = 0.0
     waiting: bool | None = None
     for record in records_back(path):
@@ -142,7 +173,6 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
             cwd = str(record["cwd"])
             branch = str(record.get("gitBranch") or "")
         if not started and record.get("type") == "cost-state":
-            cost = float(record.get("totalCostUSD") or 0.0)
             started = float(record.get("startTime") or 0) / 1000
         if not verb:
             text = _text(record)
@@ -177,7 +207,7 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
         story=story,
         command=f"{verb} {args}".strip() if verb else "-",
         idle=max(clock - path.stat().st_mtime, 0.0),
-        cost=cost,
+        tokens=tokens(path),
         waiting=bool(waiting),
         started=started,
         path=path,
