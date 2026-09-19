@@ -323,3 +323,34 @@ def test_tokens_include_the_sessions_subagents(tmp_path):
     _write(tmp_path / "s" / "subagents" / "agent-a.jsonl", [_said("a1", output_tokens=7)])
 
     assert sessions.tokens(path) == 12
+
+
+def test_a_deep_read_shows_a_question_and_its_answer(tmp_path):
+    """A question with options is a tool call, not text, so it was invisible to the captain."""
+    question = {"question": "Split or fold?", "options": [{"label": "Split"}, {"label": "Fold"}]}
+    asked = {
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [question]}}]
+        },
+    }
+    answered = {
+        "type": "user",
+        "message": {"content": [{"type": "tool_result", "tool_use_id": "q1", "content": "Fold"}]},
+    }
+    path = _write(tmp_path / "s.jsonl", [asked, answered])
+
+    assert sessions.deep(path, limit=5).lines == ["asked: Split or fold? [Split, Fold]", "answered: Fold"]
+
+
+def test_a_deep_read_shows_a_question_still_waiting(tmp_path):
+    question = {"question": "Board it?", "options": [{"label": "Yes"}, {"label": "Not yet"}]}
+    asked = {
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "id": "q2", "name": "AskUserQuestion", "input": {"questions": [question]}}]
+        },
+    }
+    path = _write(tmp_path / "s.jsonl", [asked])
+
+    assert sessions.deep(path, limit=5).lines == ["asked: Board it? [Yes, Not yet]"]

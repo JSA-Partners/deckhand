@@ -321,17 +321,60 @@ def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
     return [replace(beat, label=beat.session[:ID]) for beat in found]
 
 
+def _questions(record: dict) -> tuple[str, set[str]]:
+    """The questions the assistant asked with options in this record, and the ids of those calls."""
+    content = (record.get("message") or {}).get("content")
+    parts = content if isinstance(content, list) else []
+    said: list[str] = []
+    ids: set[str] = set()
+    for part in parts:
+        if isinstance(part, dict) and part.get("type") == "tool_use" and part.get("name") == "AskUserQuestion":
+            ids.add(str(part.get("id") or ""))
+            for question in (part.get("input") or {}).get("questions") or []:
+                labels = ", ".join(str(option.get("label") or "") for option in question.get("options") or [])
+                said.append(f"{question.get('question') or ''} [{labels}]")
+    return " ".join(said), ids
+
+
+def _answer(record: dict, asked: set[str]) -> str:
+    """The person's answer to one of the `asked` calls, when this record carries it."""
+    content = (record.get("message") or {}).get("content")
+    parts = content if isinstance(content, list) else []
+    for part in parts:
+        if isinstance(part, dict) and part.get("type") == "tool_result" and part.get("tool_use_id") in asked:
+            body = part.get("content")
+            if isinstance(body, str):
+                return body
+            return " ".join(str(block.get("text") or "") for block in body or [] if isinstance(block, dict))
+    return ""
+
+
 def deep(path: Path, limit: int = DEEP_LINES) -> Deep:
-    """The tail of one transcript: the last prompt a person typed, and what has been said since."""
+    """The tail of one transcript: the last prompt a person typed, and what has been said since.
+
+    A question asked with options is a tool call rather than text, so it and its answer are read
+    from the calls; tool traffic carries no text, which is why more records are read than lines kept.
+    """
     prompt = ""
-    lines: list[str] = []
+    records: list[dict] = []
     for record in records_back(path):
         if not prompt and record.get("type") == "last-prompt":
             prompt = " ".join(str(record.get("lastPrompt") or "").split())
-        if len(lines) < limit:
-            said = " ".join(_text(record).split())
-            if said:
-                lines.append(f"{record.get('type')}: {said[:_SAID]}")
-        if prompt and len(lines) >= limit:
+        records.append(record)
+        if prompt and len(records) >= limit * 4:
             break
-    return Deep(prompt=prompt, lines=list(reversed(lines)))
+    lines: list[str] = []
+    asked: set[str] = set()
+    for record in reversed(records):
+        question, ids = _questions(record)
+        asked |= ids
+        answer = " ".join(_answer(record, asked).split())
+        said = " ".join(_text(record).split())
+        for line in (
+            f"asked: {question}" if question else "",
+            f"answered: {answer}" if answer else "",
+            f"{record.get('type')}: {said}" if said else "",
+        ):
+            if line:
+                lines.append(line[:_SAID])
+    return Deep(prompt=prompt, lines=lines[-limit:])
