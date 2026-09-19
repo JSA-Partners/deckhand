@@ -293,7 +293,7 @@ def test_apply_refuses_a_stub(fake_gh, gh_calls):
     result = run_deckhand("ready", "apply", "57", "--kind", "feat", "--points", "3", env=STUB)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: #57 is a stub; run /deckhand:new 57 first\n"
+    assert result.stderr == "deckhand ready apply: #57 is a stub; run /deckhand:next 57 first\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
 

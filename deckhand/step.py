@@ -115,13 +115,13 @@ def refuse_git(*args: str) -> str:
 
 
 def refuse_stub(number: int, body: str) -> None:
-    """Refuse an issue that is still a stub; every step but `new` works on a story, and this is not one.
+    """Refuse an issue that is still a stub; every step but `new` and `amend` works on a story.
 
     The first thing an issue-bound step does with a body it has just read, so nothing downstream has
     to wonder whether the sections it wants are missing because the story is a stub.
     """
     if stub.is_stub(body):
-        raise Refusal(f"#{number} is a stub; run /deckhand:new {number} first")
+        raise Refusal(f"#{number} is a stub; run /deckhand:next {number} first")
 
 
 def branch_for(settings: Settings, kind: str | None, title: str, number: int) -> str:

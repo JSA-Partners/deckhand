@@ -102,7 +102,7 @@ def test_apply_refuses_a_stub(fake_gh, gh_calls, repo, origin):
     result = run_deckhand("start", "apply", "57", "--note", "x", cwd=repo, env=STUB)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand start apply: #57 is a stub; run /deckhand:new 57 first\n"
+    assert result.stderr == "deckhand start apply: #57 is a stub; run /deckhand:next 57 first\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
     assert _branches(repo) == ["main"]

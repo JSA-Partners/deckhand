@@ -450,7 +450,7 @@ def test_apply_refuses_a_stub(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("review", "apply", "57", str(path), "--verdict", "Sound.", env=STUB)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand review apply: #57 is a stub; run /deckhand:new 57 first\n"
+    assert result.stderr == "deckhand review apply: #57 is a stub; run /deckhand:next 57 first\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
 
