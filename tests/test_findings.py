@@ -83,13 +83,27 @@ def test_every_malformed_findings_line_is_named_in_one_refusal():
     ]
 
 
-def test_a_semantic_fault_is_collected_with_the_malformed_lines():
+def test_an_unknown_lens_is_refused_by_the_line_that_carries_it():
     text = "chaos.1 | P2 | PENDING | A claim | store.go:14\nvibes.1 | P2 | PENDING | A claim | store.go:14\n"
 
     with pytest.raises(Refusal) as refused:
         findings.findings(text, KNOWN)
 
     assert str(refused.value) == "line 2: no lens named 'vibes'"
+
+
+def test_the_expected_shape_rides_on_the_first_malformed_line_whatever_came_before_it():
+    """A file whose first fault is semantic still has to be told the shape the rest was meant to take."""
+    text = "vibes.1 | P2 | PENDING | A claim | store.go:14\nchaos.2 | P1 | PENDING | a claim with no evidence\n"
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert str(refused.value).splitlines() == [
+        "line 1: no lens named 'vibes'",
+        "line 2: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>; found 4 fields",
+    ]
+    assert str(refused.value).count("expected ") == 1
 
 
 def test_a_verdicts_file_passed_as_findings_names_the_shape_it_reads_as():

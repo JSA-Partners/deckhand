@@ -112,7 +112,11 @@ def _reads_as(text: str, passed: str) -> str | None:
 
 
 def _fault(number: int, line: str, expected: str, first: bool, *wanted: int) -> str:
-    """One line's fault: the expected shape on the first, and the field count when that is what is wrong."""
+    """One line's fault: the expected shape on the first of them, and the field count when that is what is wrong.
+
+    `first` is the first line whose shape is wrong, not the first fault of any kind, because a file
+    whose earlier faults are all semantic still has to be told the shape it was meant to be written in.
+    """
     count = len(_fields(line, *wanted))
     counted = "" if count in wanted else f"found {count} field{'' if count == 1 else 's'}"
     if first:
@@ -144,12 +148,14 @@ def _by_finding(
     ids = {finding.id for finding in found}
     read: dict[str, tuple[str, str]] = {}
     faults: list[str] = []
+    shaped = False
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         parsed = parse(line)
         if parsed is None:
-            faults.append(_fault(number, line, expected, not faults, 2, 3))
+            faults.append(_fault(number, line, expected, not shaped, 2, 3))
+            shaped = True
             continue
         ref, word, why = parsed
         if ref not in ids:
@@ -188,12 +194,14 @@ def findings(text: str, known: set[str]) -> list[Finding]:
     parsed: list[Finding] = []
     seen: set[str] = set()
     faults: list[str] = []
+    shaped = False
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         found = _parse(line)
         if found is None:
-            faults.append(_fault(number, line, _EXPECTED, not faults, 5))
+            faults.append(_fault(number, line, _EXPECTED, not shaped, 5))
+            shaped = True
         elif found.lens not in known:
             faults.append(f"line {number}: no lens named '{found.lens}'")
         elif found.id in seen:
