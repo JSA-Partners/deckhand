@@ -76,6 +76,7 @@ def facts(**changes) -> Facts:
         ({"status": "In Progress", "branch": BRANCH}, "build", f"Branch {BRANCH} is not in this clone."),
         ({"status": "In Progress"}, "build", "No branch in this clone."),
         ({"status": "Backlog"}, "check", "On the board; check the plan against the code, then build."),
+        ({"status": "Backlog", "blockers": ("#240  Grant store",)}, "wait", "Waits on #240."),
         ({"status": "Draft", "drafted": False}, "write", "#248 is a stub."),
         ({"status": None, "drafted": False}, "write", "#248 is a stub."),
         (
@@ -799,11 +800,15 @@ def test_the_briefing_names_open_blockers_on_the_resume_row(fake_gh, repo, origi
     assert lines[4:6] == ["Blocked by:", "  acme/gadgets#9  Endpoint"]
 
 
-def test_the_briefing_names_no_blockers_on_a_backlog_row(fake_gh, repo, tmp_path):
+def test_a_blocked_backlog_story_waits_and_is_given_no_plan(fake_gh, repo, tmp_path):
+    """The session stops at once: reading a plan it cannot build costs a briefing for nothing."""
     result = _next(repo, env={**fieldvalues(tmp_path, "Backlog"), "GH_BLOCKED_BY": ELSEWHERE})
 
-    _briefing(result, "check", "On the board; check the plan against the code, then build.")
-    assert "Blocked by:" not in result.stdout
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Step: wait", "Waits on acme/gadgets#9."]
+    assert lines[4:7] == ["Blocked by:", "  acme/gadgets#9  Endpoint", "Log:"]
+    assert "## Context" not in result.stdout
 
 
 def test_a_context_reads_each_fact_once(fake_gh, gh_calls, repo, tmp_path):

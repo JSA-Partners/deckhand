@@ -86,6 +86,9 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
         return "build", where
     if f.status == "In Progress":
         return "build", "Started, nothing built yet."
+    if f.status == "Backlog" and f.blockers:
+        named = ", ".join(blocker.split("  ")[0] for blocker in f.blockers)
+        return "wait", f"Waits on {named}."
     if f.status == "Backlog":
         return "check", "On the board; check the plan against the code, then build."
     # Pending Review and Done are the board's own columns, and nothing here reboards a story out of
@@ -323,7 +326,7 @@ def context(args: argparse.Namespace) -> int:
         print(f"Issue: {story.url}")
     if line:
         print(line)
-    if name in ("build", "resume") and facts.blockers:
+    if name in ("wait", "build", "resume") and facts.blockers:
         print("Blocked by:")
         for blocker in facts.blockers:
             print(f"  {blocker}")

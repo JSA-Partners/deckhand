@@ -86,6 +86,11 @@ boards with them as blockers rather than waiting unboarded.
 Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
+## Wait
+
+The story waits on what the briefing lists: say what it waits on in one sentence and stop. The
+captain picks it up when that closes.
+
 ## Check and build
 
 From the start context (above, or run it), compare the plan with the code and with what landed on
