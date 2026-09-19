@@ -1,6 +1,6 @@
 ---
 name: author
-description: "Writes one stub into a story with its plan; dispatched by /deckhand:new after a split."
+description: "Writes one stub into a story with its plan; dispatched by /deckhand:next for a stub or a settled parked feature, and after a split."
 model: opus
 effort: high
 tools: Bash, Read, Grep, Glob, Write, Skill

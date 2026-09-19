@@ -29,6 +29,7 @@ from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, 
 CONTEXT_OF = {
     "fix": "start",
     "write": "new",
+    "settle": "new",
     "review": "review",
     "reconsider": "amend",
     "board": "ready",
@@ -57,6 +58,7 @@ class Facts(NamedTuple):
     pull_requested: bool  # a `Pull request:` entry, so a closed story is a merged one
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
+    parked: bool = False  # a stub with no stories yet: a feature to settle before anything is written
 
 
 def decide(number: int, f: Facts) -> tuple[str, str]:
@@ -90,6 +92,8 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
     # one: the pull request row above is the only way back in.
     if f.status not in (None, "Draft"):
         return "stop", f"#{number} is {f.status} with no open pull request; nothing decided."
+    if not f.drafted and f.parked:
+        return "settle", f"#{number} is a parked feature; settle its requirements."
     if not f.drafted:
         return "write", f"#{number} is a stub."
     if not f.reviewed:
@@ -208,6 +212,7 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         pull_requested=story is not None and log.last(story, "Pull request:") is not None,
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
+        parked=story is not None and stub.is_stub(story.body) and not stub.read(story.body)[1],
     )
 
 

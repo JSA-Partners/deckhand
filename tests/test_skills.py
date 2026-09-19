@@ -36,8 +36,8 @@ TYPED = {"setup", "new", "next", "captain"}
 STEPS = ("amend", "finish", "ready", "review", "start")
 
 # The word limit is one per skill file: `next` carries what five skills carried plus the worktree
-# rule, and `new` runs a whole brainstorm; everything else stays short.
-WORD_LIMITS = {"next": 1600, "new": 380}
+# rule and the settle step, and `new` runs a whole brainstorm; everything else stays short.
+WORD_LIMITS = {"next": 1750, "new": 380}
 DEFAULT_WORD_LIMIT = 200
 
 GRANT = 'Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *)'
@@ -194,6 +194,7 @@ def test_the_next_skill_speaks_and_asks_with_a_recommendation():
     _, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
     for heading in (
         "## Speaking",
+        "## Settle",
         "## Review",
         "## Board",
         "## Fix",

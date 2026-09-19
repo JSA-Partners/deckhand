@@ -19,6 +19,7 @@ ISSUE_URL = f"https://github.com/{REPO}/issues/248"
 TITLE = "Title: Guest users see only their granted collections"
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
+PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
 # Two projects linked to the repository: the one failure that costs the board and nothing else.
 NO_BOARD = {"GH_LINKED_PROJECTS": str(FIXTURES / "linked-two.json")}
 REVIEW = "Review: sound\n\n- chaos.1, P2, accepted: A claim."
@@ -77,6 +78,11 @@ def facts(**changes) -> Facts:
         ({"status": "Backlog"}, "check", "On the board; check the plan against the code, then build."),
         ({"status": "Draft", "drafted": False}, "write", "#248 is a stub."),
         ({"status": None, "drafted": False}, "write", "#248 is a stub."),
+        (
+            {"status": "Draft", "drafted": False, "parked": True},
+            "settle",
+            "#248 is a parked feature; settle its requirements.",
+        ),
         ({"status": "Draft"}, "review", "Not reviewed."),
         ({"status": None}, "review", "Not reviewed."),
         (
@@ -267,6 +273,15 @@ def test_a_stub_is_written_with_the_new_context(fake_gh, repo, tmp_path):
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Step: write", "#57 is a stub."]
     assert "## Stub #57" in _context(lines)
+
+
+def test_a_parked_feature_is_settled_with_the_new_context(fake_gh, repo, tmp_path):
+    result = _next(repo, "60", env={**PARKED, **fieldvalues(tmp_path, "Draft")})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Step: settle", "#60 is a parked feature; settle its requirements."]
+    assert "## Parked feature #60" in _context(lines)
 
 
 def test_a_drafted_entry_on_a_stub_body_is_still_a_stub(fake_gh, repo, tmp_path):

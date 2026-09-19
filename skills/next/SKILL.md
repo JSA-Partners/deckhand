@@ -43,6 +43,14 @@ give it or explain any line on request.
 A stub: dispatch the deckhand:author agent with the number and the path to deckhand, say in a
 sentence what it wrote, and carry on to the review.
 
+## Settle
+
+A parked feature: settle its requirements with them from the context above, as new does. One
+outcome: dispatch deckhand:author as for a stub. Several: propose the split as one bullet per story
+in dependency order, each opening with `owner/name:` when it belongs elsewhere, confirm it in one
+question, write the split file, run `new apply --split <file> --from $issue`, and dispatch one
+author per stub it prints, all at once, then carry on to each one's review.
+
 ## Review
 
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
