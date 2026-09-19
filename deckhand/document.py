@@ -22,6 +22,8 @@ REFERENCE = re.compile(r"`([\w./-]+\.[\w-]+(?::\d+)?)`")
 HEADING = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 # A fenced code block, possibly indented (inside a list item) or never closed (runs to the end of the file).
 FENCE = re.compile(r"^[ \t]*([`~]{3,})[^\n]*\n.*?(?:^[ \t]*\1[`~]*[ \t]*$\n?|\Z)", re.MULTILINE | re.DOTALL)
+BROKEN, DUPLICATE, STALE = "broken", "duplicate", "stale"
+ELSEWHERE = "a file in another repository is a link"
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
@@ -34,28 +36,23 @@ def context(args: argparse.Namespace) -> int:
     return _audit(args.dir)
 
 
-def _audit(dir_arg: str) -> int:
+def findings(dir_arg: str) -> dict[Path, list[tuple[str, str]]]:
+    """Every doc under `dir_arg` with its findings as `(kind, text)`; no directory means no docs."""
     root = Path.cwd() / dir_arg
-    if not root.is_dir():
-        print(f"No docs directory at {dir_arg}.")
-        return 0
-
-    files = sorted(p for p in root.rglob("*.md") if p.is_file())
-    findings: dict[Path, list[str]] = {f: [] for f in files}
+    files = sorted(p for p in root.rglob("*.md") if p.is_file()) if root.is_dir() else []
+    found: dict[Path, list[tuple[str, str]]] = {f: [] for f in files}
     headings: dict[str, list[Path]] = {}
     dates: dict[Path, datetime | None] = {}  # one `git log` per path per run
 
     for f in files:
-        text = FENCE.sub("", f.read_text(encoding="utf-8", errors="replace"))
+        text = _text(f)
         for match in HEADING.finditer(text):
             headings.setdefault(match.group(1).strip(), []).append(f)
         for ref, target in _references(f, text):
             if target is None:
-                findings[f].append(f"broken reference: `{ref}`")
-            else:
-                stale = _stale(f, target, ref, dates)
-                if stale:
-                    findings[f].append(stale)
+                found[f].append((BROKEN, f"broken reference: `{ref}` ({ELSEWHERE})"))
+            elif stale := _stale(f, target, ref, dates):
+                found[f].append((STALE, stale))
 
     for heading, locations in headings.items():
         if len(locations) < 2:
@@ -63,22 +60,34 @@ def _audit(dir_arg: str) -> int:
         for f in sorted(set(locations)):
             others = sorted(set(locations) - {f})
             if others:
-                names = ", ".join(str(o.relative_to(Path.cwd())) for o in others)
-                findings[f].append(f'duplicate heading "{heading}" also in {names}')
+                names = ", ".join(_name(o) for o in others)
+                found[f].append((DUPLICATE, f'duplicate heading "{heading}" also in {names}'))
             else:
-                findings[f].append(f'duplicate heading "{heading}" repeated in {f.relative_to(Path.cwd())}')
+                found[f].append((DUPLICATE, f'duplicate heading "{heading}" repeated in {_name(f)}'))
+    return found
 
-    if not any(findings.values()):
-        print("Nothing stale.")
+
+def _text(doc: Path) -> str:
+    """The doc without its fenced code, where a path is an example rather than a reference."""
+    return FENCE.sub("", doc.read_text(encoding="utf-8", errors="replace"))
+
+
+def _name(path: Path) -> str:
+    return str(path.relative_to(Path.cwd()))
+
+
+def _audit(dir_arg: str) -> int:
+    if not (Path.cwd() / dir_arg).is_dir():
+        print(f"No docs directory at {dir_arg}.")
         return 0
-
-    for f in files:
-        items = findings[f]
-        if not items:
-            continue
-        print(f"{f.relative_to(Path.cwd())}:")
-        for item in items:
-            print(f"  {item}")
+    found = findings(dir_arg)
+    if not any(found.values()):
+        print("Nothing stale.")
+    for f, items in found.items():
+        if items:
+            print(f"{_name(f)}:")
+            for _, text in items:
+                print(f"  {text}")
     return 0
 
 

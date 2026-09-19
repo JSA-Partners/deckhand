@@ -84,6 +84,7 @@ def test_audit_finds_a_broken_reference(repo):
     assert result.returncode == 0
     assert "docs/claude/broken.md:" in result.stdout
     assert "broken reference: `lib/missing.py`" in result.stdout
+    assert "broken reference: `lib/missing.py` (a file in another repository is a link)" in result.stdout
 
 
 def test_audit_finds_a_broken_reference_whatever_the_extension(repo):

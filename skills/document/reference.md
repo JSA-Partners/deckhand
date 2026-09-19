@@ -46,6 +46,7 @@ Every file follows the same shape:
 - **No date headers** -- content is organized by concept, not chronology
 - **Integrate, do not append** -- new learnings merge into the relevant section
 - **Cross-reference** -- link between reference files with relative paths (`[patterns.md](./patterns.md)`)
+- **Another repository** -- link a file there by its URL; a backticked path is read as one in this repository
 
 ## Content Patterns
 

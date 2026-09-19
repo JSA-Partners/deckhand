@@ -7,10 +7,9 @@ in is readable in one place: `finish.apply`.
 
 from __future__ import annotations
 
-import contextlib
-import io
 import re
 import subprocess
+from pathlib import Path
 
 from deckhand import config, document, git, issue, log
 from deckhand.step import MAIN, ORIGIN_MAIN, TAIL, Refusal, indented, refuse_git
@@ -147,15 +146,18 @@ def conventional_commits() -> None:
             raise Refusal(f"commit {short}: {fault}")
 
 
+AUDIT_FAILED = "docs audit found broken references or duplicate headings; run /deckhand:document audit"
+
+
 def docs_audit() -> None:
-    """Refuse when the docs audit lists anything: a finding is always indented under its file."""
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        document._audit(document.DEFAULT_DIR)  # it always returns 0; what it printed is the answer
-    said = output.getvalue().splitlines()
-    if not any(line.startswith("  ") for line in said):
-        return
-    raise Refusal("\n".join(["docs audit found stale files; run /deckhand:document audit", *indented(said)]))
+    """Refuse on a broken reference or a duplicate heading; a doc behind what it cites is the document step's call."""
+    lines: list[str] = []
+    for doc, items in document.findings(document.DEFAULT_DIR).items():
+        facts = [text for kind, text in items if kind != document.STALE]
+        if facts:
+            lines += [f"{doc.relative_to(Path.cwd())}:", *(f"  {text}" for text in facts)]
+    if lines:
+        raise Refusal("\n".join([AUDIT_FAILED, *indented(lines)]))
 
 
 def check(command: str) -> None:

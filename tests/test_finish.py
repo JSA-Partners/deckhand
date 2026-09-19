@@ -497,7 +497,7 @@ def test_apply_refuses_a_failing_check(fake_gh, gh_calls, repo, origin, branch):
     assert BRANCH not in _branches(origin)
 
 
-def test_apply_refuses_a_stale_docs_audit_before_it_runs_a_check(fake_gh, gh_calls, repo, origin, branch):
+def test_apply_refuses_a_broken_docs_reference_before_it_runs_a_check(fake_gh, gh_calls, repo, origin, branch):
     (repo / "docs" / "claude").mkdir(parents=True)
     (repo / "docs" / "claude" / "grants.md").write_text("# Grants\n\nThe filter lives in `store/gone.py`.\n")
     _git(repo, "add", "docs")
@@ -507,7 +507,9 @@ def test_apply_refuses_a_stale_docs_audit_before_it_runs_a_check(fake_gh, gh_cal
 
     assert result.returncode == 1
     lines = result.stderr.splitlines()
-    assert lines[0] == "deckhand finish apply: docs audit found stale files; run /deckhand:document audit"
+    assert lines[0] == (
+        "deckhand finish apply: docs audit found broken references or duplicate headings; run /deckhand:document audit"
+    )
     assert any("broken reference: `store/gone.py`" in line for line in lines[1:])
     assert result.stdout == ""  # the checks are the slow gate, so they run last
     assert _writes(gh_calls) == []
