@@ -243,7 +243,7 @@
               "fieldValues": {
                 "nodes": [
                   {
-                    "name": "In Progress",
+                    "name": "Pending Review",
                     "field": {
                       "name": "Status"
                     }

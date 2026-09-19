@@ -145,6 +145,8 @@ def allowed(story: Story) -> tuple[str, ...]:
     """
     if story.closed:
         return (DONE,)
+    if log.last(story.issue, "Pull request:") is not None:
+        return ("Pending Review",)
     if log.last(story.issue, "Started:") is not None:
         return ("In Progress",)
     if log.last(story.issue, "Review:") is not None:
@@ -170,7 +172,7 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         # a story already built, rebased and reviewed still waits on an unmerged blocker; the column alone hides it
         named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
         return f"waits on {named}"
-    if story.status == "In Progress":
+    if story.status in ("In Progress", "Pending Review"):
         if behind:
             return "pull request behind main"
         if log.last(story.issue, "Pull request:") is not None:
@@ -373,7 +375,7 @@ def read(settings: Settings) -> Fleet:
     }
     behind: set[Key] = set()
     for story in found:
-        if story.status != "In Progress":
+        if story.status not in ("In Progress", "Pending Review"):
             continue
         entry = log.last(story.issue, "Pull request:")
         url = _PR_URL.search(entry.text) if entry is not None else None

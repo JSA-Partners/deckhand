@@ -39,7 +39,12 @@ def _story(number: int):
 
 
 def test_a_started_story_can_only_be_in_progress():
-    assert fleet.allowed(_story(117)) == ("In Progress",)
+    assert fleet.allowed(_story(120)) == ("In Progress",)
+
+
+def test_a_story_with_a_pull_request_is_pending_review():
+    """finish writes Pending Review, and nothing moves a story back out of it."""
+    assert fleet.allowed(_story(117)) == ("Pending Review",)
 
 
 def test_a_reviewed_story_may_still_be_waiting_to_be_boarded():
@@ -67,7 +72,7 @@ def test_a_blocker_in_another_repository_is_named_in_full():
 def test_an_in_progress_story_that_waits_says_so_whatever_its_column():
     """Built, rebased and reviewed still means waiting when the blocker has not merged."""
     blockers = [("acme/widgets", 253, "Seed the role matrix")]
-    assert fleet.note(_story(117), blockers, behind=False) == "waits on #253"
+    assert fleet.note(_story(120), blockers, behind=False) == "waits on #253"
 
 
 def test_a_pull_request_behind_main_is_the_note():
@@ -146,7 +151,7 @@ def test_a_done_story_whose_issue_is_open_is_an_anomaly():
 
 def test_a_story_in_flight_with_nobody_on_it_is_reported_and_not_fixed():
     found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[])
-    entry = next(item for item in found if item.number == 117)
+    entry = next(item for item in found if item.number == 120)
     assert entry.what == "In Progress, no session open"
     assert entry.fix == "none"
 
@@ -188,8 +193,13 @@ def test_a_drafted_issue_that_never_reached_the_board_is_an_anomaly():
 
 def test_a_fleet_that_agrees_with_its_logs_has_no_status_anomaly():
     kept = [story for story in fleet.stories(_nodes()) if story.number != 268]
-    found = fleet.anomalies(kept, BLOCKERS, behind=set(), pulses=[_pulse("117")])
+    found = fleet.anomalies(kept, BLOCKERS, behind=set(), pulses=[_pulse("117"), _pulse("120")])
     assert [item.number for item in found] == []
+
+
+def test_a_finished_story_is_no_anomaly_and_needs_no_repair():
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[_pulse("120")])
+    assert [item.number for item in found if item.number == 117] == []
 
 
 def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, settings, monkeypatch):
@@ -197,7 +207,7 @@ def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, set
     monkeypatch.setenv("GH_PR_STATE", "OPEN")
     monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
     read = fleet.read(settings)
-    assert [story.number for story in read.stories] == [253, 257, 258, 13, 117, 268]
+    assert [story.number for story in read.stories] == [253, 257, 258, 13, 117, 268, 120]
     assert read.blockers[("acme/widgets", 257)] == [("acme/widgets", 253, "Seed")]
     assert read.behind == {("acme/widgets", 117)}
     assert read.missing == []
@@ -218,12 +228,12 @@ def test_a_row_carries_its_assignees():
 
 def test_a_teammates_story_in_flight_is_not_the_readers_anomaly():
     found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[], me="ariav")
-    assert not [item for item in found if item.number == 117 and "no session open" in item.what]
+    assert not [item for item in found if item.number == 120 and "no session open" in item.what]
 
 
 def test_the_readers_own_story_in_flight_is_still_reported():
     found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[], me="mjm")
-    assert [item for item in found if item.number == 117 and "no session open" in item.what]
+    assert [item for item in found if item.number == 120 and "no session open" in item.what]
 
 
 def test_an_open_issue_with_a_log_and_no_board_item_is_missing(fake_gh, settings, tmp_path, monkeypatch):

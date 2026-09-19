@@ -286,7 +286,7 @@
               "fieldValues": {
                 "nodes": [
                   {
-                    "name": "In Progress",
+                    "name": "Pending Review",
                     "field": {
                       "name": "Status"
                     }
@@ -335,6 +335,70 @@
                     "name": "Done",
                     "field": {
                       "name": "Status"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_120",
+              "content": {
+                "number": 120,
+                "title": "Rotate the signing key",
+                "url": "https://github.com/acme/widgets/issues/120",
+                "state": "OPEN",
+                "closedAt": null,
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Drafted: from a request",
+                      "createdAt": "2026-09-10T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Review: no findings",
+                      "createdAt": "2026-09-11T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Started: on feat-117-warn",
+                      "createdAt": "2026-09-12T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "mjm"
+                    }
+                  ]
+                },
+                "blockedBy": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "In Progress",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
                     }
                   }
                 ]
