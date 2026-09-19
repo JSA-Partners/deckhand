@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from deckhand import captain, cli
+from deckhand import captain, cli, fleet
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -20,6 +21,11 @@ def fleet_env(fake_gh, tmp_path, monkeypatch):
     monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "sessions"))
     (tmp_path / "sessions").mkdir()
     return tmp_path
+
+
+def _nodes() -> list[dict]:
+    data = json.loads((FIXTURES / "captain-items.json").read_text(encoding="utf-8"))
+    return data["data"]["organization"]["projectV2"]["items"]["nodes"]
 
 
 def _project_fields_file(tmp_path, name, nodes):
@@ -69,6 +75,20 @@ def test_the_fleet_says_who_holds_each_story(fleet_env, capsys):
 def test_the_order_names_what_to_run_per_repository(fleet_env, capsys):
     cli.main(["captain", "context"])
     assert "Next per repository:" in capsys.readouterr().out
+
+
+def test_the_next_line_names_the_draft_a_blocked_repository_waits_on():
+    """A Draft is not in the order table, so the Next line is the only place its chain can be seen."""
+    found = {story.number: story for story in fleet.stories(_nodes())}
+    draft = replace(found[268], status="Draft")
+    read = fleet.Fleet(
+        stories=[found[257], draft],
+        blockers={found[257].key: [("acme/widgets", 268, "Domains")], draft.key: []},
+        behind=set(),
+        missing=[],
+    )
+
+    assert captain._next_line(read, []) == "Next per repository: widgets: #268 is Draft, unblocking 1 story"
 
 
 def test_no_sessions_is_a_line_and_not_a_missing_block(fleet_env, capsys):

@@ -199,7 +199,7 @@ class Ranked:
     why: str
 
 
-def _downstream(start: Key, waiting: dict[Key, set[Key]]) -> set[Key]:
+def downstream(start: Key, waiting: dict[Key, set[Key]]) -> set[Key]:
     """Every story that transitively waits on `start`; a cycle counts each member once and stops."""
     found: set[Key] = set()
     stack = list(waiting.get(start, ()))
@@ -213,7 +213,7 @@ def _downstream(start: Key, waiting: dict[Key, set[Key]]) -> set[Key]:
     return found
 
 
-def _waiting(blockers: Blockers) -> dict[Key, set[Key]]:
+def waiting(blockers: Blockers) -> dict[Key, set[Key]]:
     """The blockers map turned around: who is waiting on each story."""
     found: dict[Key, set[Key]] = {}
     for key, holds in blockers.items():
@@ -269,11 +269,11 @@ def order(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
     neighbours, so the story that frees the longest chain leads. Equal weight breaks toward fewer
     points, so a cheap unblocker goes first, and equal again breaks by number so two runs agree.
     """
-    waiting = _waiting(blockers)
+    waits = waiting(blockers)
     points = {story.key: story.points or 0 for story in backlog}
     ready = [story for story in backlog if not blockers.get(story.key)]
     held = [story for story in backlog if blockers.get(story.key)]
-    weights = {story.key: _downstream(story.key, waiting) for story in backlog}
+    weights = {story.key: downstream(story.key, waits) for story in backlog}
 
     def rank(story: Story) -> tuple[int, int, int]:
         below = weights[story.key]
