@@ -71,9 +71,9 @@ and run `amend apply $issue <draft> --new-issue "<title>"`; work that must land 
 
 ## Board
 
-From the ready context (above, or run it), tell the story plainly, propose kind and points from
-the done stories that most resemble it, and ask one question: board it, review it again, or not
-yet. Points measure the size of the work, never the calendar. A story whose plan waits on other stories
+From the ready context (above, or run it), tell the story plainly, propose kind, and points by naming
+the reference story it is most like and why, and ask one question: board it, review it again, or not
+yet. A story whose plan waits on other stories
 boards with them as blockers rather than waiting unboarded.
 Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
@@ -85,7 +85,8 @@ main since the review; say what you found and recommend build, amend, or review 
 `start apply $issue --note "<the check's conclusion>"`; it prints the story's worktree, where the
 build runs. Then superpowers:subagent-driven-development on the plan, using the least
 powerful model that can do the task, one commit per task with
-deckhand:commit, nothing pushed. A change that serves the
+deckhand:commit, nothing pushed; after each commit run `update apply $issue`, and on a conflict
+resolve it, commit, and log a Deviation. A change that serves the
 criteria as written: build it and run `log $issue "Deviation: <what and why>"`. A change that
 alters what the story delivers: say so in one sentence with the diff's size and a recommendation,
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
