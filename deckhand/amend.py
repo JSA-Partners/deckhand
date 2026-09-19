@@ -1,11 +1,12 @@
 """The amend step: the decisions of a review, or a discovery, reach the story they belong to.
 
 `context` prints the board's column, because it says which moment of the story this is and whether
-the body can still change, where the body to edit was written, and the latest `Review:` entry in full, because the
-decisions recorded in it are what the amend applies; the decisions were made in the session, and
-nothing a person wrote on GitHub is read. `apply` has two modes, and they are the same decision the
-process has always made about a discovery: `--note` keeps the work in this story, and `--new-issue`
-gives it its own story, blocked by this one, which is what the split step used to do.
+the body can still change, where the body to edit was written, and the latest `Review:` entry in
+full, because the decisions recorded in it are what the amend applies; the decisions were made in
+the session, and nothing a person wrote on GitHub is read. `apply` has two modes, and they are the
+same decision the process has always made about a discovery: `--note` keeps the work in this story,
+and `--new-issue` gives it its own story, blocked by this one, which is what the split step used to
+do.
 
 The body mode never rewrites more than the model drafted: the draft's section headings have to match
 the ones the issue carries, so a body that lost a section is a refusal rather than a silent deletion.
@@ -125,7 +126,7 @@ def context(args: argparse.Namespace) -> int:
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
     print(_status_line(repo, args.issue))
     print()
-    print(spill("Body", f"{args.issue}-story.md", lambda: sections.bare(usable(story).body), args.repo))
+    print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body), args.repo))
     print()
     if not a_stub:  # a stub's shape is the body above, and its stories are not the draft's to change
         block("Shape:", lambda: indented(skeleton().splitlines()))

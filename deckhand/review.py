@@ -141,7 +141,7 @@ def context(args: argparse.Namespace) -> int:
     except Exception as error:  # the brief is still worth printing without the story
         story = error
     text = "" if isinstance(story, Exception) else story.body
-    print(spill("Body", f"{args.issue}-story.md", lambda: sections.bare(usable(story).body)))
+    print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body)))
     lenses = _lens_files()
     print()
     print(BRIEF_HEADING)

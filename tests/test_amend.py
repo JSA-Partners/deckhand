@@ -114,6 +114,19 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
     assert lines[-1] == "Write the whole edited body to the draft; keep every section heading."
 
 
+def test_context_leaves_an_unapplied_new_draft_alone(fake_gh, tmp_path):
+    """`new` drafts a story at `<n>-story.md`, so the body this context spills goes somewhere else."""
+    draft = tmp_path / "cache" / "widgets" / "248-story.md"
+    draft.parent.mkdir(parents=True)
+    draft.write_text("### Story\n\nthe draft nobody has applied yet\n", encoding="utf-8")
+
+    result = run_deckhand("amend", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    assert draft.read_text(encoding="utf-8") == "### Story\n\nthe draft nobody has applied yet\n"
+    assert f"Body: {tmp_path / 'cache' / 'widgets' / '248-issue.md'}" in result.stdout
+
+
 def test_context_prints_the_body_rules_and_the_shape(fake_gh):
     """One validator guards new and amend, and only new told the writer what it wanted."""
     result = run_deckhand("amend", "context", "248", env=REVIEWED)
