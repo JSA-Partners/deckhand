@@ -311,7 +311,25 @@ def test_apply_refuses_points_that_are_not_a_whole_number(fake_gh, gh_calls):
     result = _apply("--kind", "feat", "--points", "-3")
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: points must be a non-negative integer, got '-3'\n"
+    assert result.stderr == "deckhand ready apply: points must be a whole number, got '-3'\n"
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_more_than_three_points(fake_gh, gh_calls):
+    result = _apply("--kind", "feat", "--points", "4")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand ready apply: more than 3 points is more than one story; split it with the Review section's split\n"
+    )
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_zero_points(fake_gh, gh_calls):
+    result = _apply("--kind", "feat", "--points", "0")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand ready apply: points start at 1\n"
     assert _writes(gh_calls) == []
 
 

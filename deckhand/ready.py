@@ -154,10 +154,20 @@ def context(args: argparse.Namespace) -> int:
 # --- apply ------------------------------------------------------------------
 
 
+MOST_POINTS = 3  # the largest single outcome; anything bigger is several stories
+
+
 def _points(value: str) -> int:
     if not (value.isascii() and value.isdigit()):
-        raise Refusal(f"points must be a non-negative integer, got {value!r}")
-    return int(value)
+        raise Refusal(f"points must be a whole number, got {value!r}")
+    points = int(value)
+    if points < 1:
+        raise Refusal("points start at 1")
+    if points > MOST_POINTS:
+        raise Refusal(
+            f"more than {MOST_POINTS} points is more than one story; split it with the Review section's split"
+        )
+    return points
 
 
 def _reviewed(story: issue.Issue, number: int) -> None:
@@ -193,7 +203,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--oversized", metavar="WHY", help="board a body over the size gate, saying why it is one story"
     )
-    parser.add_argument("--points", required=True, help="the story points, a non-negative integer")
+    parser.add_argument("--points", required=True, help="the story points, 1 to 3")
     parser.add_argument(
         "--blocked-by",
         action="append",
