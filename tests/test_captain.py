@@ -298,3 +298,17 @@ def test_a_field_that_could_not_be_read_is_not_reported_as_owed(fleet_env, monke
     assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
 
     assert "/deckhand:setup" not in capsys.readouterr().out
+
+
+def test_the_forecast_says_where_its_parallelism_came_from(fleet_env, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+    cli.main(["captain", "context", "--only", "forecast", "--sessions", "3"])
+    out = capsys.readouterr().out
+    assert "3 at once, given" in out
+    assert "A point groups stories that take about as long as each other. It is not hours." in out
+
+
+def test_thin_history_forecasts_across_the_open_sessions(fleet_env, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+    cli.main(["captain", "context", "--only", "forecast"])
+    assert "1 at once, open sessions" in capsys.readouterr().out

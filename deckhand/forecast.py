@@ -34,6 +34,33 @@ def hours(story: fleet.Story) -> float | None:
     return (_stamp(opened.created_at) - _stamp(started.created_at)).total_seconds() / 3600
 
 
+OVERLAPPING = 5  # finished stories that ran beside another, below which a median is noise
+
+
+def _span(story: fleet.Story) -> tuple[datetime, datetime] | None:
+    started = log.last(story.issue, "Started:")
+    opened = log.last(story.issue, "Pull request:")
+    if not story.closed or started is None or opened is None:
+        return None
+    return _stamp(started.created_at), _stamp(opened.created_at)
+
+
+def concurrency(stories: list[fleet.Story]) -> int | None:
+    """How many stories were in progress at once: the median count at every finished story's start.
+
+    Measured from the log rather than from the sessions a machine can see, so a teammate's work
+    counts; too few overlapping stories says nothing, and the caller falls back.
+    """
+    spans = [span for span in (_span(story) for story in stories) if span is not None]
+    overlapped = sum(
+        1 for i, (a, b) in enumerate(spans) if any(j != i and c < b and a < d for j, (c, d) in enumerate(spans))
+    )
+    if overlapped < OVERLAPPING:
+        return None
+    counts = [sum(1 for start, end in spans if start <= at < end) for at, _ in spans]
+    return max(1, round(statistics.median(counts)))
+
+
 def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
     """Hours from `Started:` to `Pull request:` for every closed story, banded by points."""
     found: dict[int | None, list[float]] = {}

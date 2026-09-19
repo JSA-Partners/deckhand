@@ -155,9 +155,7 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", metavar="ID", help="read one session properly, by the id in the table")
     parser.add_argument("--since", type=float, default=WINDOW, help="how many hours back to look for sessions")
     parser.add_argument("--only", choices=(*BLOCKS, *ON_REQUEST), help="print one block instead of all four")
-    parser.add_argument(
-        "--sessions", type=int, help="sessions to forecast across; defaults to the ones the fleet currently sees"
-    )
+    parser.add_argument("--sessions", type=int, help="stories to forecast at once; defaults to what history shows")
 
 
 def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
@@ -172,16 +170,25 @@ def _forecast_row(label: str, hours: float, note: str) -> str:
     return f"  {label:<12}{_days(hours):>3} days   {note}"
 
 
-def _forecast_rows(read: fleet.Fleet, sessions_count: int) -> list[str]:
+def _parallel(given: int | None, read: fleet.Fleet, pulses: list[sessions.Pulse]) -> tuple[int, str]:
+    """How many stories the forecast runs at once, and where that number came from."""
+    if given is not None:
+        return given, "given"
+    measured = forecast.concurrency(read.stories)
+    if measured is not None:
+        return measured, "measured"
+    return max(len([beat for beat in pulses if beat.live]), 1), "open sessions"
+
+
+def _forecast_rows(read: fleet.Fleet, parallel: int, source: str) -> list[str]:
     """The floor, the commitment, and the control that pools points away, over what is not yet Done."""
     left = [story for story in read.stories if not story.closed]
     if not left:
         return ["  nothing left to forecast"]
 
     points = sum(story.points or 0 for story in left)
-    session_word = "session" if sessions_count == 1 else "sessions"
     story_word = "story" if len(left) == 1 else "stories"
-    header = f"  {len(left)} {story_word}, {points} points, {sessions_count} {session_word}"
+    header = f"  {len(left)} {story_word}, {points} points, {parallel} at once, {source}"
 
     history = forecast.durations(read.stories)
     if not history:
@@ -193,9 +200,9 @@ def _forecast_rows(read: fleet.Fleet, sessions_count: int) -> list[str]:
     worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
     medians = {band: statistics.median(hours) for band, hours in history.items()}
 
-    floor_hours = forecast.floor(left, read.blockers, sessions_count, medians)
-    banded = forecast.simulate(left, read.blockers, sessions_count, history)
-    unbanded = forecast.simulate(left, read.blockers, sessions_count, {None: pooled})
+    floor_hours = forecast.floor(left, read.blockers, parallel, medians)
+    banded = forecast.simulate(left, read.blockers, parallel, history)
+    unbanded = forecast.simulate(left, read.blockers, parallel, {None: pooled})
     commitment_note = ("worst run" if thin else "85th percentile") + ", banded by points"
 
     rows = [
@@ -212,7 +219,7 @@ def _forecast_rows(read: fleet.Fleet, sessions_count: int) -> list[str]:
     ]
     if thin:
         rows.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
-    return rows
+    return [*rows, "", f"  {forecast.POINT}"]
 
 
 def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
@@ -256,12 +263,8 @@ def context(args: argparse.Namespace) -> int:
             block("## Anomalies", lambda: _anomaly_rows(settings, read, pulses))
             print()
         if "forecast" in wanted:
-            sessions_count = (
-                args.sessions
-                if args.sessions is not None
-                else max(len([beat for beat in pulses if beat.live]) or len(pulses), 1)
-            )
-            block("## Forecast", lambda: _forecast_rows(read, sessions_count))
+            parallel, source = _parallel(args.sessions, read, pulses)
+            block("## Forecast", lambda: _forecast_rows(read, parallel, source))
     return 0
 
 

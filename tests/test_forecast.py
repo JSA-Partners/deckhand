@@ -161,3 +161,27 @@ def test_hours_measures_one_finished_story():
 
 def test_hours_is_none_without_both_entries():
     assert forecast.hours(_story(2, 1, True, ("Pull request:", "2026-09-01T01:00:00Z"))) is None
+
+
+def _ran(number: int, start: str, end: str) -> fleet.Story:
+    return _story(number, 1, True, ("Started:", start), ("Pull request:", end))
+
+
+def test_concurrency_is_the_median_count_in_progress_at_each_start():
+    stories = [
+        _ran(1, "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z"),
+        _ran(2, "2026-09-01T01:00:00Z", "2026-09-01T10:00:00Z"),
+        _ran(3, "2026-09-01T02:00:00Z", "2026-09-01T10:00:00Z"),
+        _ran(4, "2026-09-02T00:00:00Z", "2026-09-02T10:00:00Z"),
+        _ran(5, "2026-09-02T01:00:00Z", "2026-09-02T10:00:00Z"),
+    ]
+    # at each start 1, 2, 3, 1 and 2 stories are in progress; the median is 2
+    assert forecast.concurrency(stories) == 2
+
+
+def test_concurrency_is_unknown_under_five_overlapping_stories():
+    stories = [
+        _ran(1, "2026-09-01T00:00:00Z", "2026-09-01T01:00:00Z"),
+        _ran(2, "2026-09-02T00:00:00Z", "2026-09-02T01:00:00Z"),
+    ]
+    assert forecast.concurrency(stories) is None
