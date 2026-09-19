@@ -1003,15 +1003,30 @@ def test_apply_park_refuses_a_heading_with_no_text(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls()) == []
 
 
-def test_apply_park_refuses_a_file_without_the_heading(fake_gh, gh_calls, tmp_path):
-    path = _park_file(tmp_path, "Guests should be able to share a collection.\n")
+def test_apply_park_takes_a_file_without_the_heading(fake_gh, gh_calls, tmp_path):
+    """The heading is deckhand's own wrapper, so a file of plain requirements is parked as it is."""
+    copy = tmp_path / "body-copy.md"
+    text = "Guests should be able to share a collection.\n"
+    path = _park_file(tmp_path, text)
 
-    result = run_deckhand("new", "apply", "--park", str(path))
+    result = run_deckhand("new", "apply", "--park", str(path), env={"GH_BODY_FILE_COPY": str(copy)})
 
-    assert result.returncode == 1
-    assert result.stderr.strip() == "deckhand new apply: a parked feature starts with ## Requirements"
-    assert result.stdout == ""
-    assert _writes(gh_calls()) == []
+    assert result.returncode == 0, result.stderr
+    (_, body), *_ = _bodies(copy)
+    assert stub.read(body) == ("Guests should be able to share a collection.", [])
+
+
+def test_apply_park_takes_the_heading_its_own_context_prints(fake_gh, gh_calls, tmp_path):
+    """`new context` prints a parked feature under `## Parked feature #N`, and sessions copy it."""
+    copy = tmp_path / "body-copy.md"
+    text = "## Parked feature #61\n\nGuests should be able to share a collection.\n"
+    path = _park_file(tmp_path, text)
+
+    result = run_deckhand("new", "apply", "--park", str(path), env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    (_, body), *_ = _bodies(copy)
+    assert stub.read(body) == ("Guests should be able to share a collection.", [])
 
 
 def test_apply_sweeps_the_worktrees_of_closed_stories_from_the_clone(fake_gh, gh_calls, repo, tmp_path):

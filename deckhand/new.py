@@ -184,7 +184,7 @@ def _entry_line(repo: str, position: int, entry: stub.Entry, own: int) -> str:
 
 def _parked_context(number: int, requirements: str) -> int:
     """A feature nobody has split yet: its requirements, the draft for one outcome, the split for several."""
-    print(f"## Parked feature #{number}")
+    print(f"{park.PARKED_HEADING} #{number}")
     print()
     print(requirements)
     print()

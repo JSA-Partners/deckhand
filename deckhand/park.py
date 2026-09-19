@@ -13,6 +13,8 @@ from deckhand import board, fields, gh, issue, log, stub
 from deckhand.config import Settings
 from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 
+PARKED_HEADING = "## Parked feature"
+
 
 def board_draft(settings: Settings, repo: str, number: int, url: str, note: str | None) -> None:
     """Put the issue on the board as Draft, then log that it was written when `note` is given.
@@ -65,6 +67,20 @@ def _ref(value: str, repo: str) -> tuple[str, int]:
         raise Refusal(str(error)) from error
 
 
+def as_stub(text: str) -> str:
+    """`text` as a stub body: a file that carries no requirements heading is the requirements itself.
+
+    `new context` prints a parked feature under its own `## Parked feature #N`, which is the heading
+    a session copies, so that one is replaced rather than kept inside the requirements.
+    """
+    if stub.is_stub(text):
+        return text
+    lines = text.lstrip("\n").splitlines()
+    if lines and lines[0].strip().startswith(PARKED_HEADING):
+        lines = lines[1:]
+    return "\n".join([stub.STUB_HEADING, "", *lines]).strip("\n") + "\n"
+
+
 def feature(
     settings: Settings,
     repo: str,
@@ -81,8 +97,7 @@ def feature(
     origin alone, for a review that parked a finding nobody waits on. `after` is a story the feature
     itself waits on, for a split that parks a chain of them.
     """
-    if not stub.is_stub(text):
-        raise Refusal(f"a parked feature starts with {stub.STUB_HEADING}")
+    text = as_stub(text)
     requirements = stub.read(text)[0]
     if not requirements.strip():
         raise Refusal(f"{stub.STUB_HEADING} has no text")
