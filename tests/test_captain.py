@@ -16,12 +16,7 @@ REPO = "acme/widgets"
 
 @pytest.fixture
 def fleet_env(fake_gh, tmp_path, monkeypatch):
-    blocked = tmp_path / "blocked.json"
-    blocked.write_text(
-        json.dumps({"257": [{"number": 253, "state": "open", "title": "Seed", "repository": {"full_name": REPO}}]})
-    )
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
-    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(blocked))
     monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "sessions"))
     (tmp_path / "sessions").mkdir()
     return tmp_path
@@ -62,6 +57,13 @@ def test_the_fleet_names_every_story_that_is_not_done(fleet_env, capsys):
     out = capsys.readouterr().out
     assert "| 253 |" in out
     assert "Seed the role matrix" in out
+
+
+def test_the_fleet_says_who_holds_each_story(fleet_env, capsys):
+    cli.main(["captain", "context", "--only", "fleet"])
+    rows = {line.split(" | ")[0]: line for line in capsys.readouterr().out.splitlines() if line.startswith("| ")}
+    assert " | mjm | " in rows["| 117"]
+    assert " | - | " in rows["| 253"]
 
 
 def test_the_order_names_what_to_run_per_repository(fleet_env, capsys):

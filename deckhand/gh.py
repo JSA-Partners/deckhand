@@ -79,6 +79,14 @@ def _parse_json(text: str) -> Any:
         raise GhError("gh returned no parseable JSON") from error
 
 
+def login() -> str:
+    """The login gh is authenticated as, or empty when it cannot say."""
+    try:
+        return run("api", "user", "--jq", ".login").strip()
+    except GhError:
+        return ""
+
+
 def json_out(*args: str, stdin: str | None = None) -> Any:
     return _parse_json(run(*args, stdin=stdin))
 

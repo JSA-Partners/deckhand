@@ -36,6 +36,12 @@
                       }
                     }
                   ]
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "blockedBy": {
+                  "nodes": []
                 }
               },
               "fieldValues": {
@@ -80,6 +86,21 @@
                       "createdAt": "2026-09-11T00:00:00Z",
                       "author": {
                         "login": "mjm"
+                      }
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "blockedBy": {
+                  "nodes": [
+                    {
+                      "number": 253,
+                      "state": "OPEN",
+                      "title": "Seed",
+                      "repository": {
+                        "nameWithOwner": "acme/widgets"
                       }
                     }
                   ]
@@ -130,6 +151,12 @@
                       }
                     }
                   ]
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "blockedBy": {
+                  "nodes": []
                 }
               },
               "fieldValues": {
@@ -177,6 +204,12 @@
                       }
                     }
                   ]
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "blockedBy": {
+                  "nodes": []
                 }
               },
               "fieldValues": {
@@ -238,6 +271,16 @@
                       }
                     }
                   ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "mjm"
+                    }
+                  ]
+                },
+                "blockedBy": {
+                  "nodes": []
                 }
               },
               "fieldValues": {
@@ -278,6 +321,12 @@
                       }
                     }
                   ]
+                },
+                "assignees": {
+                  "nodes": []
+                },
+                "blockedBy": {
+                  "nodes": []
                 }
               },
               "fieldValues": {

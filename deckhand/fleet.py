@@ -20,6 +20,8 @@ ITEMS_QUERY = (
     "projectV2(number:$number){ items(first:50, after:$endCursor){ "
     "pageInfo{ hasNextPage endCursor } nodes{ id "
     "content{ ... on Issue{ number title url state closedAt repository{ nameWithOwner } "
+    "assignees(first:10){ nodes{ login } } "
+    "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
     "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
     "fieldValues(first:20){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
@@ -47,6 +49,8 @@ class Story:
     closed: bool
     item: str
     issue: issue.Issue
+    assignees: tuple[str, ...] = ()
+    blocked_by: tuple[tuple[str, int, str], ...] = ()
 
     @property
     def key(self) -> tuple[str, int]:
@@ -77,6 +81,19 @@ def _issue(content: dict) -> issue.Issue:
     )
 
 
+def _open_blockers(content: dict) -> tuple[tuple[str, int, str], ...]:
+    """`(repository, number, title)` of every open issue blocking this one, as the query returned it."""
+    return tuple(
+        (
+            (node.get("repository") or {}).get("nameWithOwner") or "",
+            int(node["number"]),
+            " ".join((node.get("title") or "").split()),
+        )
+        for node in (content.get("blockedBy") or {}).get("nodes") or []
+        if node.get("state") == "OPEN" and "number" in node
+    )
+
+
 def stories(nodes: list[dict]) -> list[Story]:
     """One row per item that is an issue, in the order the project gave them."""
     found = []
@@ -94,6 +111,10 @@ def stories(nodes: list[dict]) -> list[Story]:
                 closed=bool(content.get("closedAt")),
                 item=node.get("id") or "",
                 issue=_issue(content),
+                assignees=tuple(
+                    str(person.get("login") or "") for person in (content.get("assignees") or {}).get("nodes") or []
+                ),
+                blocked_by=_open_blockers(content),
             )
         )
     return found
@@ -264,6 +285,7 @@ def anomalies(
     behind: set[Key],
     pulses: list,
     missing: list[tuple[str, int, str]] | None = None,
+    me: str = "",
 ) -> list[Anomaly]:
     """Every disagreement worth a line: a wrong Status, a story off the board, a stall, a cycle."""
     waiting = _waiting(blockers)
@@ -281,7 +303,8 @@ def anomalies(
                 Anomaly(story.number, story.repo, f"{story.status}, but the log allows {may[0]}", f"Status {may[0]}")
             )
         labels = on.get(str(story.number)) or []
-        if story.status == "In Progress" and not labels:
+        mine = not me or not story.assignees or me in story.assignees
+        if story.status == "In Progress" and not labels and mine:
             out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
         if len(labels) > 1:
             named = " and ".join(labels)
@@ -305,6 +328,7 @@ class Fleet:
     blockers: Blockers
     behind: set[Key]
     missing: list[tuple[str, int, str]]
+    me: str = ""
 
 
 def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
@@ -327,12 +351,11 @@ def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
 
 
 def read(settings: Settings) -> Fleet:
-    """The whole fleet: one query, a blockers read per Backlog story, a merge state per open pull request."""
+    """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request."""
     found = stories(_nodes(settings))
-    blockers: Blockers = {}
-    for story in found:
-        if story.status == "Backlog":
-            blockers[story.key] = issue.blockers(story.repo, story.number)
+    blockers: Blockers = {
+        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != DONE
+    }
     behind: set[Key] = set()
     for story in found:
         if story.status != "In Progress":
@@ -347,4 +370,4 @@ def read(settings: Settings) -> Fleet:
             continue  # a pull request gh cannot read says nothing about main; the row stands without it
         if state in issue.BEHIND:
             behind.add(story.key)
-    return Fleet(stories=found, blockers=blockers, behind=behind, missing=_missing(found))
+    return Fleet(stories=found, blockers=blockers, behind=behind, missing=_missing(found), me=gh.login())

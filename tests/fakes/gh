@@ -268,6 +268,8 @@ elif argv and argv[0] == "api":
         respond(
             '{"message":"Updating pull request branch.","url":"https://api.github.com/repos/acme/widgets/pulls/1000"}'
         )
+    if path == "user":
+        respond(os.environ.get("GH_USER", '{"login": "mjm"}'))
     if "/issues/" in path:
         respond('{"id":5099965156,"number":246,"title":"T","state":"open"}')
     if path == f"repos/{repo}":

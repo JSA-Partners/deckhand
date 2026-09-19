@@ -54,14 +54,15 @@ def _since(seconds: float) -> str:
 
 
 def _fleet_rows(read: fleet.Fleet) -> list[str]:
-    rows = ["| # | Repo | Title | Status | Pts | Note |", "| --- | --- | --- | --- | --- | --- |"]
+    rows = ["| # | Repo | Title | Status | Pts | Who | Note |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for story in read.stories:
         if story.status == fleet.DONE and story.closed:
             continue
         note = fleet.note(story, read.blockers.get(story.key) or [], story.key in read.behind)
         points = "-" if story.points is None else str(story.points)
         title = story.title.replace("|", "\\|")
-        rows.append(f"| {story.number} | {_name(story.repo)} | {title} | {story.status} | {points} | {note} |")
+        who = ", ".join(story.assignees) or "-"
+        rows.append(f"| {story.number} | {_name(story.repo)} | {title} | {story.status} | {points} | {who} | {note} |")
     return rows if len(rows) > 2 else ["  nothing on the board"]
 
 
@@ -136,7 +137,7 @@ def _setup_rows(settings: Settings, repo: str) -> list[str]:
 
 
 def _anomaly_rows(settings: Settings, read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
-    found = fleet.anomalies(read.stories, read.blockers, read.behind, pulses, read.missing)
+    found = fleet.anomalies(read.stories, read.blockers, read.behind, pulses, read.missing, read.me)
     rows = [f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |" for item in found]
     rows += _setup_rows(settings, gh.repo_slug())
     if not rows:

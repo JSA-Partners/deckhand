@@ -192,15 +192,8 @@ def test_a_fleet_that_agrees_with_its_logs_has_no_status_anomaly():
     assert [item.number for item in found] == []
 
 
-def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, settings, tmp_path, monkeypatch):
-    blocked = tmp_path / "blocked.json"
-    blocked.write_text(
-        json.dumps(
-            {"257": [{"number": 253, "state": "open", "title": "Seed", "repository": {"full_name": "acme/widgets"}}]}
-        )
-    )
+def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, settings, monkeypatch):
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
-    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(blocked))
     monkeypatch.setenv("GH_PR_STATE", "OPEN")
     monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
     read = fleet.read(settings)
@@ -208,6 +201,29 @@ def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, set
     assert read.blockers[("acme/widgets", 257)] == [("acme/widgets", 253, "Seed")]
     assert read.behind == {("acme/widgets", 117)}
     assert read.missing == []
+    assert read.me == "mjm"
+
+
+def test_a_read_asks_for_no_blockers_one_story_at_a_time(fake_gh, gh_calls, settings, monkeypatch):
+    """Blockers come with the board query, so a draft's edges are read too and nothing else is."""
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    fleet.read(settings)
+    assert not [call for call in gh_calls() if "/dependencies/blocked_by" in call]
+
+
+def test_a_row_carries_its_assignees():
+    assert _story(117).assignees == ("mjm",)
+    assert _story(253).assignees == ()
+
+
+def test_a_teammates_story_in_flight_is_not_the_readers_anomaly():
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[], me="ariav")
+    assert not [item for item in found if item.number == 117 and "no session open" in item.what]
+
+
+def test_the_readers_own_story_in_flight_is_still_reported():
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[], me="mjm")
+    assert [item for item in found if item.number == 117 and "no session open" in item.what]
 
 
 def test_an_open_issue_with_a_log_and_no_board_item_is_missing(fake_gh, settings, tmp_path, monkeypatch):
