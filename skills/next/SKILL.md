@@ -98,7 +98,9 @@ resolve it, commit, and log a Deviation. A change that serves the
 criteria as written: build it and run `log $issue "Deviation: <what and why>"`. A change that
 alters what the story delivers: say so in one sentence with the diff's size and a recommendation,
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
-amend step. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
+amend step. A decision that changes an issue in another repository before it starts: run
+`amend context N --repo owner/name`, edit its draft, run
+`amend apply N <draft> --repo owner/name --note "<why>"`, and name it in the Deviation. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
 commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what
 does not depend on it, then stop rather than watch. The captain picks it up when the blocker clears.

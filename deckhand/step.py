@@ -232,14 +232,15 @@ def draft_path(settings: Settings, repo: str, name: str) -> Path:
     return path
 
 
-def draft_line(label: str, name: str) -> str:
+def draft_line(label: str, name: str, repo: str | None = None) -> str:
     """`<label>: <path>`, or `<label>: unavailable (<reason>)` when the path will not resolve.
 
     A context prints this before it prints anything the model has to write, and a repository or a
-    cache that will not resolve costs one line, never the whole prompt.
+    cache that will not resolve costs one line, never the whole prompt. `repo` is the repository
+    the draft belongs to when it is not this one.
     """
     try:
-        return f"{label}: {draft_path(config.load(), gh.repo_slug(), name)}"
+        return f"{label}: {draft_path(config.load(), repo or gh.repo_slug(), name)}"
     except Exception as error:
         return f"{label}: unavailable ({reason(error)})"
 

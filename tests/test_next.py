@@ -310,6 +310,9 @@ def test_an_amend_after_the_review_is_reconsidered_with_the_amend_context(fake_g
     context = _context(lines)
     assert "## Body" in context
     assert "## Latest review" in context
+    assert "### Story" in context
+    assert not [line for line in context if "unavailable" in line]
+    assert any(line.startswith("Draft: ") for line in context)
 
 
 def test_an_amend_answered_by_a_later_review_is_boarded(fake_gh, repo, tmp_path):

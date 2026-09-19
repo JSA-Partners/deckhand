@@ -15,6 +15,10 @@ Done: a discovery during execution is a `Deviation:` entry or a new issue, never
 The record is the issue's own log, not a block inside the story: every amend posts one `Amended:`
 entry, so the body the draft carries reaches GitHub as it was drafted and the log reads in the order
 it was written. A split boards the new story as Draft and logs `Drafted:` there and `Split:` here.
+
+A stub takes `--note` too: its Requirements change and its Stories list comes back as it was, since
+stories change only through a split. `--repo` reaches an issue in another repository, for a build
+whose decision changed an issue there that has not started.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, fields, gh, issue, lint, log, sections
+from deckhand import config, fields, gh, issue, lint, log, sections, stub
 from deckhand.new import RULES as BODY_RULES
 from deckhand.new import skeleton
 from deckhand.park import board_draft
@@ -34,7 +38,6 @@ from deckhand.step import (
     indented,
     read_draft,
     reason,
-    refuse_stub,
     resolved_settings,
     step,
     usable,
@@ -47,6 +50,9 @@ SPLIT_DRAFTED = "Drafted: the story and its plan, split from this one."
 
 FROZEN = "the story is frozen once it starts; log a Deviation, or open a new issue with --new-issue"
 STARTED = ("In Progress", "Pending Review", "Done")
+STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
+STORIES_CHANGED = "the Stories list changed; a stub's stories change only through a split"
+ELSEWHERE = "--new-issue opens its story in this repository; --repo is only for --note"
 
 
 def _draft_name(number: int) -> str:
@@ -67,25 +73,36 @@ def _status(repo: str, number: int) -> str | None:
         return None
 
 
+def _repo(flag: str | None) -> str:
+    """The repository the issue is in: the one `--repo` names, else this one."""
+    if flag is None:
+        return gh.repo_slug()
+    try:
+        gh.split_repo(flag)
+    except gh.GhError as error:
+        raise Refusal(str(error)) from error
+    return flag
+
+
 # --- context ----------------------------------------------------------------
 
 
-def _story(number: int) -> issue.Issue | Exception:
+def _story(repo: str | Exception, number: int) -> issue.Issue | Exception:
     """The issue, or the failure to read it; the body and the review share the one lookup."""
     try:
-        return issue.view(gh.repo_slug(), number)
+        return issue.view(usable(repo), number)
     except Exception as error:
         return error
 
 
-def _status_line(number: int) -> str:
+def _status_line(repo: str | Exception, number: int) -> str:
     """The board's column, which is the moment the story is at and whether its body is frozen.
 
     One read, and never a failure: a context that cannot reach the board still has a body to edit,
     and the freeze is enforced by `apply`, which reads the board again before it writes.
     """
     try:
-        status = fields.get_field(config.load(), gh.repo_slug(), number, "Status")
+        status = fields.get_field(config.load(), usable(repo), number, "Status")
     except Exception as error:
         return f"Status: unavailable ({reason(error)})"
     return f"Status: {status or 'off the board'}"
@@ -108,18 +125,24 @@ def _review_lines(story: issue.Issue | Exception) -> list[str]:
 
 def context(args: argparse.Namespace) -> int:
     """Print the title, the column, the body to edit, the latest review, and where the draft goes."""
-    story = _story(args.issue)
+    try:
+        repo: str | Exception = _repo(args.repo)
+    except Exception as error:
+        repo = error
+    story = _story(repo, args.issue)
+    a_stub = not isinstance(story, Exception) and stub.is_stub(story.body)
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
-    print(_status_line(args.issue))
+    print(_status_line(repo, args.issue))
     print()
     block(BODY_HEADING, lambda: _body_lines(story))
     print()
-    block("Shape:", lambda: indented(skeleton().splitlines()))
-    print()
+    if not a_stub:  # a stub's shape is the body above, and its stories are not the draft's to change
+        block("Shape:", lambda: indented(skeleton().splitlines()))
+        print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
     print()
-    print(draft_line("Draft", _draft_name(args.issue)))
-    print(DRAFT_RULE)
+    print(draft_line("Draft", _draft_name(args.issue), args.repo))
+    print(STUB_RULE if a_stub else DRAFT_RULE)
     return 0
 
 
@@ -142,22 +165,16 @@ def _title(flag: str | None, story: issue.Issue) -> str | None:
     return fits_title(title)
 
 
-def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
-    """Put the drafted body and title on the issue and log the amend, unless the story is frozen.
-
-    The body is the draft as it was written: what changed and why goes on the issue's own log, where
-    a later step reads it, and never into the story the draft is a rewrite of. The title is checked
-    here against the subject the pull request will carry, because a title is written far more often
-    than a pull request is opened and the refusal belongs at the write.
-    """
+def _note(note: str) -> str:
+    """The note as one line; a blank one says nothing about what changed, so it is refused."""
     note = " ".join(note.split())
     if not note:
         raise Refusal("--note needs a line saying what changed and why")
-    title = _title(title_flag, story)
-    _same_headings(draft, story.body)
-    body = lint.checked(draft)
-    if _status(repo, number) in STARTED:
-        raise Refusal(FROZEN)
+    return note
+
+
+def _write(repo: str, number: int, body: str, title: str | None, note: str, story: issue.Issue) -> None:
+    """Put the body and title on the issue and log the amend, printing each write as it lands."""
     issue.update_body(repo, number, body)
     # Flushed as it is printed: the body is already on GitHub, and a comment that fails below has to
     # leave the edit where the user can see it rather than in a buffer that never reaches the screen.
@@ -167,8 +184,40 @@ def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None
         print(f"Title: {title}", flush=True)
     issue.comment(repo, number, log.checked(f"Amended: {note}"))
     print("Logged Amended")
+
+
+def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
+    """Put the drafted body and title on the issue and log the amend, unless the story is frozen.
+
+    The body is the draft as it was written: what changed and why goes on the issue's own log, where
+    a later step reads it, and never into the story the draft is a rewrite of. The title is checked
+    here against the subject the pull request will carry, because a title is written far more often
+    than a pull request is opened and the refusal belongs at the write.
+    """
+    note = _note(note)
+    title = _title(title_flag, story)
+    _same_headings(draft, story.body)
+    body = lint.checked(draft)
+    if _status(repo, number) in STARTED:
+        raise Refusal(FROZEN)
+    _write(repo, number, body, title, note, story)
     if (room := lint.headroom(body)) is not None:
         print(room)
+    return 0
+
+
+def _amend_stub(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
+    """Rewrite a stub's requirements; its stories come back as they were, because a split owns them."""
+    note = _note(note)
+    title = _title(title_flag, story)
+    if not stub.is_stub(draft):
+        raise Refusal(f"a stub starts with {stub.STUB_HEADING}")
+    requirements, entries = stub.read(draft)
+    if not requirements.strip():
+        raise Refusal(f"{stub.STUB_HEADING} has no text")
+    if entries != stub.read(story.body)[1]:
+        raise Refusal(STORIES_CHANGED)
+    _write(repo, number, stub.render(requirements, entries), title, note, story)
     return 0
 
 
@@ -208,6 +257,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     mode.add_argument("--note", help="one line saying what changed and why")
     mode.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
     parser.add_argument("--title", help="with --note: the story's new title")
+    parser.add_argument("--repo", metavar="OWNER/NAME", help="with --note: the issue's repository, when not this one")
     parser.add_argument(
         "--before",
         action="store_true",
@@ -217,15 +267,24 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(usage=parser)
 
 
-@step("amend", _configure, rules=BODY_RULES)
+def _configure_context(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--repo", metavar="OWNER/NAME", help="the issue's repository, when not this one")
+
+
+@step("amend", _configure, rules=BODY_RULES, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
-    """Amend a story from the drafted body, or split the draft out as its own blocked story."""
+    """Amend a story or a stub from the drafted body, or split the draft out as its own blocked story."""
     if args.before and args.new_issue is None:
         args.usage.error("--before is only for --new-issue")
-    repo = gh.repo_slug()
+    if args.repo is not None and args.new_issue is not None:
+        raise Refusal(ELSEWHERE)
+    repo = _repo(args.repo)
     story = issue.view(repo, args.issue)
-    refuse_stub(args.issue, story.body)
     draft = read_draft(args.file)
+    if stub.is_stub(story.body):
+        if args.new_issue is not None:
+            raise Refusal(f"#{args.issue} is a stub; amend it with --note")
+        return _amend_stub(repo, args.issue, draft, args.note, args.title, story)
     if args.new_issue is not None:
         if args.title is not None:
             raise Refusal("--title goes with --note; --new-issue carries its title as its argument")

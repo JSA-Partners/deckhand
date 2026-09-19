@@ -6,10 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import naming, sections
+from deckhand import naming, sections, stub
 from tests.conftest import FIXTURES, ROOT, run_deckhand
 
 STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
+PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
+PARKED_BODY = json.loads((FIXTURES / "stub-parked.json").read_text(encoding="utf-8"))["body"]
+STUB_BODY = json.loads((FIXTURES / "stub.json").read_text(encoding="utf-8"))["body"]
+STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
 ISSUE = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
 REVIEW = json.loads((FIXTURES / "issue-reviewed.json").read_text(encoding="utf-8"))
@@ -179,13 +183,115 @@ def test_context_never_fails(fake_gh, tmp_path):
 # --- apply, the story's own body ---------------------------------------------
 
 
-def test_apply_refuses_a_stub(fake_gh, gh_calls, tmp_path):
+def test_apply_refuses_a_story_body_for_a_stub(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("amend", "apply", "57", _draft(tmp_path), "--note", NOTE, env=STUB)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand amend apply: #57 is a stub; run /deckhand:next 57 first\n"
+    assert result.stderr == "deckhand amend apply: a stub starts with ## Requirements\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
+
+
+def test_apply_amends_a_stubs_requirements_and_keeps_its_stories(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "body-copy.md"
+    edited = STUB_BODY.replace("they were granted.", "they were granted, and nothing else.")
+
+    result = run_deckhand(
+        "amend", "apply", "57", _draft(tmp_path, edited), "--note", NOTE, env={**STUB, "GH_BODY_FILE_COPY": str(copy)}
+    )
+
+    assert result.returncode == 0, result.stderr
+    requirements, entries = stub.read(STUB_BODY)
+    assert _bodies(copy)["edit"] == stub.render(requirements.replace("granted.", "granted, and nothing else."), entries)
+    assert _writes(gh_calls) == ["issue edit 57 --repo acme/widgets", "issue comment 57 --repo acme/widgets"]
+
+
+def test_apply_amends_a_stub_in_another_repository(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "body-copy.md"
+    edited = PARKED_BODY.replace("without an admin in the loop", "with the owner's approval")
+
+    result = run_deckhand(
+        "amend",
+        "apply",
+        "60",
+        _draft(tmp_path, edited),
+        "--note",
+        NOTE,
+        "--repo",
+        "acme/gadgets",
+        env={**PARKED, "GH_BODY_FILE_COPY": str(copy)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["Updated #60 https://github.com/acme/widgets/issues/60", "Logged Amended"]
+    assert _bodies(copy)["edit"] == stub.render(
+        "Guests should be able to share a collection with another guest, with the owner's approval.", []
+    )
+    assert _bodies(copy)["comment"] == f"Amended: {NOTE}"
+    assert any(call.startswith("issue view 60 --repo acme/gadgets") for call in gh_calls())
+    assert _writes(gh_calls) == ["issue edit 60 --repo acme/gadgets", "issue comment 60 --repo acme/gadgets"]
+
+
+def test_apply_refuses_a_stub_whose_stories_changed(fake_gh, gh_calls, tmp_path):
+    edited = STUB_BODY.replace("Filter by grant.", "Filter by role.")
+
+    result = run_deckhand("amend", "apply", "57", _draft(tmp_path, edited), "--note", NOTE, env=STUB)
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: the Stories list changed; a stub's stories change only through a split\n"
+    )
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_started_story_in_another_repository(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand(
+        "amend",
+        "apply",
+        "248",
+        _draft(tmp_path, BODY),
+        "--note",
+        NOTE,
+        "--repo",
+        "acme/gadgets",
+        env=_status_reads(tmp_path, "In Progress"),
+    )
+
+    assert result.returncode == 1
+    assert result.stderr == FROZEN
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_new_issue_with_repo_is_refused(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--new-issue", TITLE, "--repo", "acme/gadgets")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: --new-issue opens its story in this repository; --repo is only for --note\n"
+    )
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_malformed_repo(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, "--repo", "gadgets")
+
+    assert result.returncode == 1
+    assert result.stderr == "deckhand amend apply: expected OWNER/REPO, got 'gadgets'\n"
+    assert _writes(gh_calls) == []
+
+
+def test_context_on_a_stub_elsewhere_prints_its_body_and_the_stub_rule(fake_gh, tmp_path):
+    result = run_deckhand("amend", "context", "60", "--repo", "acme/gadgets", env=PARKED)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "Guests should be able to share a collection with another guest, without an admin in the loop." in lines
+    assert "Shape:" not in lines
+    assert lines[-2] == f"Draft: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
+    assert lines[-1] == STUB_RULE
 
 
 def test_apply_refuses_changed_headings(fake_gh, gh_calls, tmp_path):
