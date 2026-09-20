@@ -63,8 +63,10 @@ amending, flawed, or more than one story, and why; a flawed story is rewritten a
 story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, blocked
 as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
-ones, each as a sentence on the problem and one on what accepting it would do. Take the decisions in
-conversation, write them to the decisions file, and run
+ones, each as a sentence on the problem and one on what accepting it would do. Decide the clear ones
+with the skeptic: accept a confirmed finding that improves the story, decline what it rejected, say
+each in a sentence, and ask only where one changes what the story delivers. Write them to the
+decisions file and run
 `review apply $issue <findings> <verdicts> <decisions> --verdict "<sentence>"`; on a clean pass,
 the findings file alone with `--verdict`. Then amend from the accepted findings.
 
@@ -117,8 +119,9 @@ depend on it, then stop. A branch that is built but must not merge before anothe
 
 When the plan is done, run one superpowers code-review subagent over `origin/main..HEAD` with the
 story, plan, and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
-line. Fix P1 and P2 through deckhand:commit and keep the P3s. Then say what the review found and
-fixed in a sentence, list the P3s one line each for them to take or leave, and give them
+line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
+idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
+and what you fixed, name only a finding you are unsure of, with a recommendation, and give them
 `cd "<the worktree>" && tuicr -r origin/main..HEAD` as a plain message for a terminal of their own;
 they paste the export or say there are no comments. On comments: fix every
 one, commit with deckhand:commit, run the same review over
@@ -136,7 +139,8 @@ the third person, never "I" or "we", saying what the branch changed and what it 
 in the shape of the recent pull requests it prints. The story's "so that" clause has the why. Read them the title and that summary, and on yes run
 `finish apply $issue <summary> --check "<cmd>"`, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
-theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. On the merge row,
+theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. Take no word for the
+state: when they come back, run `next context $issue` and act on what it says. On the merge row,
 say which checks are still running when the briefing names them, and make the same offer. On the
 update row, run `update apply $issue`, say main moved on and the checks run again, and carry on;
 when it refuses for a conflict, do what it says and log a Deviation.
@@ -152,6 +156,6 @@ request section again: finish pushes and keeps the pull request.
 
 On a merged story with items left, walk them one at a time, doing what can be done here and asking
 for what is theirs, logging `After the merge: <item>` as each is done, or deferred with where it went, so the story
-closes. When nothing is left, say the story is finished and name the next story the briefing gave; when the briefing says the worktree is
-here, add that its folder goes away on the next run from the clone.
+closes. When nothing is left, say the story is finished and name the next story the briefing gave.
+Read the briefing's `Clear:` line out either way, so they hear what is owed without asking.
 With no story in hand, `/deckhand:captain` says what to pick up next across every repository.
