@@ -251,6 +251,34 @@ def _after(story: issue.Issue) -> None:
         print(f"  - {item}")
 
 
+def _clear(story: issue.Issue) -> None:
+    """What the story still owes before this session is closed, printed on the rows where it is merged.
+
+    The question after a merge is whether anything is left, and three facts answer it: the items no
+    `After the merge:` entry has logged, work in the checkout that is not committed, and whether the
+    session stands in a worktree that the next run from the clone removes.
+    """
+    owed = []
+    left = len(_after_merge_left(story))
+    if left:
+        items = "item" if left == 1 else "items"
+        owed.append(f"{left} after-the-merge {items} left")
+    here = None
+    try:
+        here = git.run("rev-parse", "--show-toplevel")
+        if git.run("status", "--porcelain").strip():
+            owed.append(f"uncommitted changes in {here}")
+    except Exception as error:
+        owed.append(f"the checkout could not be read ({reason(error)})")
+    print(f"Clear: {', '.join(owed) if owed else 'nothing owed'}")
+    try:
+        inside = not worktree.from_clone()
+    except Exception:
+        inside = False  # not a repository: the run's own lines say so, and this note would add nothing
+    if inside and here:
+        print(f"  this session stands in the worktree {here}; its folder goes on the next run from the clone")
+
+
 def _next_story(repo: str, number: int) -> None:
     """The oldest open story of the repository on the board, which is the one to take up next."""
     try:
@@ -335,6 +363,9 @@ def context(args: argparse.Namespace) -> int:
         _context(name, number)
     elif name == "after" and story:
         _after(story)
+        _clear(story)
     elif name == "done" and repo:
+        if story:
+            _clear(story)
         _next_story(repo, number)
     return 0

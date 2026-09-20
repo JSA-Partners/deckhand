@@ -510,6 +510,7 @@ def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, rep
         "  2026-09-06 After the merge: proved the script on main",
         "Left:",
         "  - Revoke the token",
+        "Clear: 1 after-the-merge item left",
     ]
 
 
@@ -530,8 +531,32 @@ def test_a_merged_story_with_every_item_logged_is_done(fake_gh, repo, tmp_path):
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done"), **_board(tmp_path)})
 
     lines = _briefing(result, "done", "#248 is closed.")
-    assert lines[-1] == "Next story: none"
+    assert lines[-2:] == ["Clear: nothing owed", "Next story: none"]
     assert "Left:" not in lines
+
+
+def test_a_done_story_names_work_the_checkout_would_lose(fake_gh, repo, tmp_path):
+    """The question after a merge is whether the session can go, and unsaved work is the answer to it."""
+    (repo / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
+    story = _story(tmp_path, "closed.json", state="CLOSED")
+
+    result = _next(repo, env={**story, **_board(tmp_path)})
+
+    lines = _briefing(result, "done", "#248 is closed.")
+    assert f"Clear: uncommitted changes in {repo.resolve()}" in lines
+
+
+def test_a_session_in_a_worktree_hears_that_its_folder_goes(fake_gh, repo, tmp_path):
+    other = _worktree(repo, "feat/900-somewhere")
+    story = _story(tmp_path, "closed.json", state="CLOSED")
+
+    result = run_deckhand("next", "context", "248", cwd=other, env={**story, **_board(tmp_path)})
+
+    lines = _briefing(result, "done", "#248 is closed.")
+    assert "Clear: nothing owed" in lines
+    assert f"  this session stands in the worktree {other.resolve()}; its folder goes on the next run" in " ".join(
+        lines
+    )
 
 
 def test_a_closed_story_with_items_left_and_no_pull_request_is_done(fake_gh, repo, tmp_path):
@@ -562,7 +587,7 @@ def test_done_names_the_oldest_open_story_on_the_board(fake_gh, repo, tmp_path):
     result = _next(repo, env=env)
 
     lines = _briefing(result, "done", "#248 is closed.")
-    assert lines[5:] == ["  none", "Next story: #4 Four"]
+    assert lines[5:] == ["  none", "Clear: nothing owed", "Next story: #4 Four"]
 
 
 def test_done_with_an_empty_board_says_so(fake_gh, repo, tmp_path):
