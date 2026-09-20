@@ -42,6 +42,7 @@ def facts(**changes) -> Facts:
         pending_checks=0,
         behind=False,
         pull_requested=False,
+        merged=False,
         after_merge_left=0,
         unavailable=(),
     )
@@ -71,6 +72,11 @@ def facts(**changes) -> Facts:
         ({"unavailable": ("board",)}, "stop", "Cannot read board; nothing decided."),
         ({"unavailable": ("board", "branch")}, "stop", "Cannot read board, branch; nothing decided."),
         ({"pull_request": PR_URL}, "merge", f"Pull request open: {PR_URL}"),
+        (
+            {"merged": True, "status": "Pending Review"},
+            "stop",
+            "#248 has a merged pull request and an open issue; close the issue on GitHub.",
+        ),
         ({"status": "In Progress", "branch": BRANCH, "commits": 2}, "resume", f"Branch {BRANCH} has 2 commits."),
         ({"status": "In Progress", "branch": BRANCH, "commits": 0}, "build", "Started, nothing built yet."),
         ({"status": "In Progress", "branch": BRANCH}, "build", f"Branch {BRANCH} is not in this clone."),
@@ -481,9 +487,19 @@ def test_the_pull_request_is_read_from_the_log_when_the_branch_is_elsewhere(fake
     assert not any(call.startswith("pr list") for call in gh_calls())
 
 
-def test_a_pull_request_the_log_names_that_is_no_longer_open_is_not_one(fake_gh, repo, tmp_path):
+def test_a_merged_pull_request_with_an_open_issue_says_to_close_it(fake_gh, repo, tmp_path):
+    """The squash landed and the Closes footer did not fire, so the story is nobody's until it closes."""
     story = _logged(tmp_path, "merged-pr.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
     env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "MERGED"}
+
+    result = _next(repo, env=env)
+
+    _briefing(result, "stop", "#248 has a merged pull request and an open issue; close the issue on GitHub.")
+
+
+def test_a_pull_request_closed_without_merging_is_not_one(fake_gh, repo, tmp_path):
+    story = _logged(tmp_path, "closed-pr.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
+    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "CLOSED"}
 
     result = _next(repo, env=env)
 

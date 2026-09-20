@@ -324,6 +324,13 @@ def test_pull_request_state_is_none_once_it_is_not_open(fake_gh, monkeypatch, st
     assert issue.pull_request_state(REPO, PR_URL) is None
 
 
+@pytest.mark.parametrize(("state", "answer"), [("MERGED", True), ("CLOSED", False), ("OPEN", False)])
+def test_merged_is_true_only_once_the_pull_request_has_merged(fake_gh, monkeypatch, state, answer):
+    monkeypatch.setenv("GH_PR_STATE", state)
+
+    assert issue.merged(REPO, PR_URL) is answer
+
+
 def test_pull_request_state_fails_when_the_pull_request_cannot_be_read(fake_gh):
     with pytest.raises(gh.GhError):
         issue.pull_request_state(REPO, PR_URL)

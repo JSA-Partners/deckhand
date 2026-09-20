@@ -269,6 +269,13 @@ def merge_state(repo: str, url: str) -> str:
     return str(data.get("mergeStateStatus") or "").upper() if isinstance(data, dict) else ""
 
 
+def merged(repo: str, url: str) -> bool:
+    """Whether GitHub says the pull request at `url` merged, as opposed to closed or still open."""
+    gh.split_repo(repo)
+    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
+    return isinstance(data, dict) and str(data.get("state") or "").upper() == "MERGED"
+
+
 def pull_request_state(repo: str, url: str) -> str | None:
     """`url` while the pull request there is open, else None; a URL gh cannot read is an error.
 
