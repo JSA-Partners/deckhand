@@ -14,6 +14,7 @@ PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
 PARKED_BODY = json.loads((FIXTURES / "stub-parked.json").read_text(encoding="utf-8"))["body"]
 STUB_BODY = json.loads((FIXTURES / "stub.json").read_text(encoding="utf-8"))["body"]
 STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
+DRAFT_RULE = "Write the whole edited body to the draft; keep every section heading."
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
 ISSUE = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
 REVIEW = json.loads((FIXTURES / "issue-reviewed.json").read_text(encoding="utf-8"))
@@ -110,8 +111,9 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
     review = REVIEW["comments"][-1]["body"].strip("\n").splitlines()
     assert lines[lines.index("## Latest review") + 1 :][: len(review)] == review
     assert "## Feedback" not in lines
-    assert lines[-2] == f"Draft: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
-    assert lines[-1] == "Write the whole edited body to the draft; keep every section heading."
+    assert lines[-3] == f"Draft: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
+    assert lines[-2] == "Write the whole edited body to the draft; keep every section heading."
+    assert lines[-1] == 'Apply: deckhand amend apply 248 <draft> --note "<why>"'
 
 
 def test_context_leaves_an_unapplied_new_draft_alone(fake_gh, tmp_path):
@@ -306,8 +308,9 @@ def test_context_on_a_stub_elsewhere_prints_its_body_and_the_stub_rule(fake_gh, 
     body = spilled(result.stdout, "Body").splitlines()
     assert "Guests should be able to share a collection with another guest, without an admin in the loop." in body
     assert "Shape:" not in lines
-    assert lines[-2] == f"Draft: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
-    assert lines[-1] == STUB_RULE
+    assert lines[-3] == f"Draft: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
+    assert lines[-2] == STUB_RULE
+    assert lines[-1] == 'Apply: deckhand amend apply 60 <draft> --note "<why>"'
 
 
 def test_apply_refuses_changed_headings(fake_gh, gh_calls, tmp_path):
@@ -753,3 +756,89 @@ def test_before_without_new_issue_is_a_usage_error(fake_gh, tmp_path):
 
     assert result.returncode == 2
     assert "--before is only for --new-issue" in result.stderr
+
+
+# --- the freeze says so before a body is drafted ------------------------------
+
+
+def test_context_on_a_started_story_says_frozen_and_prints_no_draft_line(fake_gh, tmp_path):
+    result = run_deckhand("amend", "context", "248", env=_status_reads(tmp_path, "In Progress"))
+
+    assert result.returncode == 0
+    assert "The body is frozen once the story starts." in result.stdout
+    assert "Deviation:" in result.stdout
+    assert "Draft:" not in result.stdout
+    assert DRAFT_RULE not in result.stdout
+
+
+def test_context_on_a_started_story_names_the_title_only_apply(fake_gh, tmp_path):
+    result = run_deckhand("amend", "context", "248", env=_status_reads(tmp_path, "In Progress"))
+
+    assert 'Apply: deckhand amend apply 248 --title "<title>" --note "<why>"' in result.stdout
+
+
+def test_context_on_a_backlog_story_still_prints_the_draft_line_and_rule(fake_gh, tmp_path):
+    result = run_deckhand("amend", "context", "248", env=_status_reads(tmp_path, "Backlog"))
+
+    assert result.returncode == 0
+    assert "Draft:" in result.stdout
+    assert DRAFT_RULE in result.stdout
+    assert "The body is frozen once the story starts." not in result.stdout
+
+
+def test_a_title_only_apply_changes_the_title_on_a_started_story(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand(
+        "amend", "apply", "248", "--title", TITLE, "--note", NOTE, env=_status_reads(tmp_path, "In Progress")
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"Title: {TITLE}" in result.stdout
+    assert result.stdout.splitlines()[-1] == "Logged Amended"
+    assert _writes(gh_calls) == [
+        f"issue edit 248 --repo acme/widgets --title {TITLE}",
+        "issue comment 248 --repo acme/widgets",
+    ]
+
+
+def test_a_title_only_apply_needs_a_note(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", "--title", TITLE, env=_status_reads(tmp_path, "In Progress"))
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_a_title_only_apply_refuses_a_title_the_subject_cannot_carry(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand(
+        "amend", "apply", "248", "--title", "x" * 200, "--note", NOTE, env=_status_reads(tmp_path, "In Progress")
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_apply_with_neither_a_file_nor_a_title_is_refused(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", "--note", NOTE, env=_status_reads(tmp_path, "Backlog"))
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert _writes(gh_calls) == []
+
+
+def test_a_draft_file_on_a_started_story_is_still_frozen(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand(
+        "amend",
+        "apply",
+        "248",
+        _draft(tmp_path, BODY),
+        "--title",
+        TITLE,
+        "--note",
+        NOTE,
+        env=_status_reads(tmp_path, "In Progress"),
+    )
+
+    assert result.returncode == 1
+    assert result.stderr == FROZEN
+    assert _writes(gh_calls) == []

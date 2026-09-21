@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, fields, gh, issue, lint, log, sections, stub
+from deckhand import config, fields, gh, invoke, issue, lint, log, sections, stub
 from deckhand.new import RULES as BODY_RULES
 from deckhand.new import skeleton
 from deckhand.park import board_draft
@@ -50,6 +50,12 @@ REVIEW_HEADING = "## Latest review"
 SPLIT_DRAFTED = "Drafted: the story and its plan, split from this one."
 
 FROZEN = "the story is frozen once it starts; log a Deviation, or open a new issue with --new-issue"
+FROZEN_CONTEXT = (
+    "The body is frozen once the story starts.\n"
+    "  A discovery goes in a Deviation: entry.\n"
+    "  Work of its own goes in a new issue.\n"
+    "  Only the title can still change."
+)
 STARTED = ("In Progress", "Pending Review", "Done")
 STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
 STORIES_CHANGED = "the Stories list changed; a stub's stories change only through a split"
@@ -123,11 +129,19 @@ def context(args: argparse.Namespace) -> int:
         repo = error
     story = _story(repo, args.issue)
     a_stub = not isinstance(story, Exception) and stub.is_stub(story.body)
+    status = _status_line(repo, args.issue)
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
-    print(_status_line(repo, args.issue))
+    print(status)
     print()
     print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body), args.repo))
     print()
+    if status.removeprefix("Status: ") in STARTED:
+        print(FROZEN_CONTEXT)
+        print()
+        block(REVIEW_HEADING, lambda: _review_lines(story))
+        print()
+        print(invoke.apply_line("amend", str(args.issue), '--title "<title>"', '--note "<why>"'))
+        return 0
     if not a_stub:  # a stub's shape is the body above, and its stories are not the draft's to change
         block("Shape:", lambda: indented(skeleton().splitlines()))
         print()
@@ -135,6 +149,7 @@ def context(args: argparse.Namespace) -> int:
     print()
     print(draft_line("Draft", _draft_name(args.issue), args.repo))
     print(STUB_RULE if a_stub else DRAFT_RULE)
+    print(invoke.apply_line("amend", str(args.issue), "<draft>", '--note "<why>"'))
     return 0
 
 
@@ -176,6 +191,23 @@ def _write(repo: str, number: int, body: str, title: str | None, note: str, stor
         print(f"Title: {title}", flush=True)
     issue.comment(repo, number, log.checked(f"Amended: {note}"))
     print("Logged Amended")
+
+
+def _retitle(repo: str, number: int, note: str, title_flag: str | None, story: issue.Issue) -> int:
+    """Change the title alone, at any Status: the freeze guards the body, and a title is not the body.
+
+    `finish` builds the pull request subject from this title, so a wrong one has to be fixable while
+    the story runs; the subject check is the same one every title deckhand writes goes through.
+    """
+    note = _note(note)
+    title = _title(title_flag, story)
+    if title is None:
+        raise Refusal("--title needs a title that differs from the story's")
+    issue.set_title(repo, number, title)
+    print(f"Title: {title}", flush=True)
+    issue.comment(repo, number, log.checked(f"Amended: {note}"))
+    print("Logged Amended")
+    return 0
 
 
 def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
@@ -244,11 +276,11 @@ def _new_issue(repo: str, number: int, draft: str, title: str, before: bool) -> 
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("file", type=Path, help="the drafted body")
+    parser.add_argument("file", type=Path, nargs="?", help="the drafted body; omit it to change the title alone")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--note", help="one line saying what changed and why")
     mode.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
-    parser.add_argument("--title", help="with --note: the story's new title")
+    parser.add_argument("--title", help="with --note: the story's new title, alone when no draft is given")
     parser.add_argument("--repo", metavar="OWNER/NAME", help="with --note: the issue's repository, when not this one")
     parser.add_argument(
         "--before",
@@ -272,6 +304,12 @@ def apply(args: argparse.Namespace) -> int:
         raise Refusal(ELSEWHERE)
     repo = _repo(args.repo)
     story = issue.view(repo, args.issue)
+    if args.file is None:
+        if args.new_issue is not None:
+            args.usage.error("--new-issue needs the draft to open as the new story")
+        if args.title is None:
+            args.usage.error("give a draft file, or --title to change the title alone")
+        return _retitle(repo, args.issue, args.note, args.title, story)
     draft = read_draft(args.file)
     if stub.is_stub(story.body):
         if args.new_issue is not None:
