@@ -7,6 +7,7 @@ as. Nothing here touches GitHub: it is text in, data or `Refusal` out.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -21,6 +22,7 @@ DECISIONS = ("accepted", "declined", "changed")
 _EXPECTED = f"expected <lens>.<n> | P1|P2|P3 | {PENDING} | <claim> | <evidence>"
 _EXPECTED_VERDICT = "expected <lens>.<n> | CONFIRMED, or <lens>.<n> | REJECTED | <reason>"
 _EXPECTED_DECISION = "expected <lens>.<n> | accepted|declined|changed [| <reason>]"
+_CODE_SPAN = re.compile(r"(?P<ticks>`+).*?(?P=ticks)")
 
 
 @dataclass(frozen=True)
@@ -48,17 +50,41 @@ def _id(ref: str) -> tuple[str, int] | None:
     return lens, int(ordinal)
 
 
+def _masked(line: str) -> str:
+    """`line` with every backtick span blanked, so a pipe inside code is never a separator.
+
+    The blanks are the same length as what they replace, so an index found in the masked line is the
+    same index in the original. An unclosed run matches nothing and masks nothing, which leaves a
+    malformed line refused rather than swallowing the rest of the row.
+    """
+    return _CODE_SPAN.sub(lambda span: "\x00" * len(span.group(0)), line)
+
+
+def _split_at(line: str, masked: str, separator: str) -> list[str]:
+    """`line` cut where `masked` holds `separator`, so a separator inside a code span never cuts."""
+    out: list[str] = []
+    start, index = 0, masked.find(separator)
+    while index != -1:
+        out.append(line[start:index].strip())
+        start = index + len(separator)
+        index = masked.find(separator, start)
+    out.append(line[start:].strip())
+    return out
+
+
 def _fields(line: str, *wanted: int) -> list[str]:
     """The line's fields: `" | "` when that gives one of `wanted`, else the bare `"|"`.
 
-    A claim may hold a pipe, a regex alternation for one, and splitting on the bare character takes
-    half the claim into the next field and refuses a line the brief permitted. The bare split stays
-    as the fallback, so a line written without the spaces around its separators still reads.
+    A claim or an evidence may hold a pipe, in a regex alternation or a shell pipeline, and a split
+    on the bare character takes half the column into the next one. Code spans are masked before
+    either split, and the bare split stays as the fallback so a line written without the spaces
+    around its separators still reads.
     """
-    spaced = [part.strip() for part in line.split(" | ")]
+    masked = _masked(line)
+    spaced = _split_at(line, masked, " | ")
     if len(spaced) in wanted:
         return spaced
-    return [part.strip() for part in line.split("|")]
+    return _split_at(line, masked, "|")
 
 
 def _parse(line: str) -> Finding | None:

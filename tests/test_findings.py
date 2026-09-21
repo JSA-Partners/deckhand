@@ -129,3 +129,33 @@ def test_a_rejected_verdict_with_no_reason_is_refused():
 
 def test_clean_as_the_whole_findings_file_is_accepted():
     assert findings.findings(f"{findings.CLEAN}\n", KNOWN) == []
+
+
+def test_a_spaced_pipe_inside_backticks_parses():
+    """A shell pipeline is the natural way to write evidence, and its pipe is not a separator."""
+    line = "chaos.2 | P2 | PENDING | A retried job writes the grant twice | `jq '.results | length'` at store.go:14"
+
+    found = findings._parse(line)
+
+    assert found is not None
+    assert found.claim == "A retried job writes the grant twice"
+    assert found.evidence == "`jq '.results | length'` at store.go:14"
+
+
+def test_a_doubled_backtick_run_masks_its_pipe():
+    line = "chaos.1 | P2 | PENDING | counts ``a | b`` once | `jq '.x | .y'` at c.ts:41"
+
+    found = findings._parse(line)
+
+    assert found is not None
+    assert found.claim == "counts ``a | b`` once"
+    assert found.evidence == "`jq '.x | .y'` at c.ts:41"
+
+
+def test_an_unclosed_backtick_masks_nothing_and_the_line_is_refused():
+    text = "chaos.1 | P2 | PENDING | an unclosed `tick | span | store.go:1\n"
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert str(refused.value).startswith("line 1: expected ")
