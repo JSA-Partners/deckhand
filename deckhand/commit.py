@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from deckhand import git
+from deckhand import git, invoke
 from deckhand.step import step
 
 COMMITLINT_FILES = [
@@ -33,6 +33,7 @@ _CONVENTIONAL_SUBJECT = re.compile(r"^[0-9a-f]+ [a-z]+(\([^)]*\))?!?: .+$")
 _SCOPED_SUBJECT = re.compile(r"^[0-9a-f]+ [a-z]+\(")
 _COMMITLINT_RULE = re.compile(r"config-conventional|type-enum[^\]]*\]")
 DIFF_LIMIT = 600
+STAGE_RULE = "Stage only the files this commit is about; a shared checkout is never staged with -A."
 
 
 def _fence(diff: str) -> str:
@@ -138,6 +139,23 @@ def _infer_scope(staged: list[str]) -> str:
     return f"(none, files span {' and '.join(non_empty)})"
 
 
+def _porcelain_paths(status: str) -> list[str]:
+    """The path each porcelain line names, a rename taking its destination.
+
+    Porcelain is two status characters and a space before the path, and quotes a path holding a
+    character it cannot print raw; the quotes come off here so the stage line can quote it itself.
+    """
+    paths = []
+    for line in status.splitlines():
+        if not line:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        paths.append(path.strip('"'))
+    return paths
+
+
 def commit_context(cwd: Path) -> str:
     """The full commit context report for the repository at `cwd`."""
     staged = [line for line in git.run("diff", "--cached", "--name-only", cwd=cwd).splitlines() if line]
@@ -145,6 +163,9 @@ def commit_context(cwd: Path) -> str:
         status = git.run("status", "--porcelain", cwd=cwd)
         lines = ["Nothing is staged.", "", "Unstaged or untracked:"]
         lines += [f"- {line}" for line in status.splitlines() if line]
+        stage = invoke.stage_line(_porcelain_paths(status))
+        if stage:
+            lines += ["", stage, "", STAGE_RULE]
         return "\n".join(lines) + "\n"
 
     stat = git.run("diff", "--cached", "--stat", cwd=cwd)

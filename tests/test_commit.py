@@ -195,3 +195,38 @@ def test_commit_context_never_fails_under_an_os_error(repo, monkeypatch, capsys)
     assert capsys.readouterr().out == (
         "(deckhand commit context failed: disk on fire. Say what could not be read and stop.)\n"
     )
+
+
+def test_nothing_staged_carries_the_stage_line(history_repo):
+    (history_repo / "internal" / "auth" / "b.go").write_text("b\n")
+
+    result = run_deckhand("commit", "context", cwd=history_repo)
+
+    assert "Stage: git add -- internal/auth/b.go" in result.stdout
+    assert "never staged with -A" in result.stdout
+
+
+def test_the_stage_line_quotes_a_path_with_a_space(history_repo):
+    (history_repo / "internal" / "auth" / "a file.go").write_text("x\n")
+
+    result = run_deckhand("commit", "context", cwd=history_repo)
+
+    assert "'internal/auth/a file.go'" in result.stdout
+
+
+def test_a_staged_context_has_no_stage_line(history_repo):
+    (history_repo / "internal" / "auth" / "b.go").write_text("b\n")
+    subprocess.run(["git", "add", "internal/auth/b.go"], cwd=history_repo, check=True)
+
+    result = run_deckhand("commit", "context", cwd=history_repo)
+
+    assert "Stage: git add" not in result.stdout
+
+
+def test_porcelain_paths_takes_a_renames_destination():
+    """A rename only reaches porcelain from the index, but the format documents it, so it is read."""
+    assert commit._porcelain_paths("R  old.go -> new.go\n M other.go\n") == ["new.go", "other.go"]
+
+
+def test_porcelain_paths_unquotes_a_quoted_path():
+    assert commit._porcelain_paths('?? "a file.go"\n') == ["a file.go"]
