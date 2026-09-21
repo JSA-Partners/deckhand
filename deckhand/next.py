@@ -349,6 +349,8 @@ def context(args: argparse.Namespace) -> int:
     repo = reader.read("repository", gh.repo_slug)
     if repo:
         _sweep(repo, number)
+    for line in worktree.catch_up():
+        print(line)
     story = reader.read("issue", lambda: issue.view(repo, number)) if repo else None
     facts = _facts(repo, number, story, reader)
     for note in reader.notes:

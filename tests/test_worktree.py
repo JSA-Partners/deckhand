@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 from deckhand import git, worktree
-from tests.conftest import FIXTURES, run_git
+from tests.conftest import FIXTURES, advance_origin, run_git
 
 BRANCH = "feat/248-guest-users-see-only"
 
@@ -272,3 +272,88 @@ def test_the_sweep_leaves_a_story_it_cannot_read_and_says_so(fake_gh, repo, orig
 
     assert line.startswith(f"Left worktree {unread}: ")
     assert unread.exists()
+
+
+# --- the clone catches up -------------------------------------------------------
+
+
+def _main(repo) -> str:
+    return run_git(repo, "rev-parse", "main").strip()
+
+
+def test_a_current_clone_catches_up_silently(repo, origin):
+    assert worktree.catch_up() == []
+
+
+def test_a_clone_behind_fast_forwards_and_says_how_far(repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=2)
+
+    assert worktree.catch_up() == ["Caught up: main moved 2 commits to origin/main."]
+    assert _main(repo) == run_git(repo, "rev-parse", "origin/main").strip()
+    assert (repo / "landed1").exists()
+
+
+def test_one_commit_is_said_in_the_singular(repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=1)
+
+    assert worktree.catch_up() == ["Caught up: main moved 1 commit to origin/main."]
+
+
+def test_a_diverged_main_is_refused_and_left_where_it_was(repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=1)
+    (repo / "mine").write_text("x\n")
+    run_git(repo, "add", "mine")
+    run_git(repo, "commit", "-qm", "feat: mine")
+    before = _main(repo)
+
+    (line,) = worktree.catch_up()
+
+    assert line.startswith("Main is 1 commit behind origin/main and could not catch up, so files read here are stale: ")
+    assert "fast-forward" in line
+    assert _main(repo) == before
+
+
+def test_an_uncommitted_change_the_merge_would_overwrite_is_refused_and_kept(repo, origin, tmp_path):
+    other = tmp_path / "other-f"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
+    run_git(other, "config", "user.email", "t@t")
+    run_git(other, "config", "user.name", "t")
+    (other / "f").write_text("theirs\n")
+    run_git(other, "commit", "-qam", "feat: theirs")
+    run_git(other, "push", "-q", "origin", "main")
+    (repo / "f").write_text("mine, uncommitted\n")
+
+    (line,) = worktree.catch_up()
+
+    assert line.startswith("Main is 1 commit behind origin/main and could not catch up, so files read here are stale: ")
+    assert "would be overwritten" in line
+    assert (repo / "f").read_text() == "mine, uncommitted\n"
+
+
+def test_a_clone_on_a_branch_is_left_alone_silently(repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=1)
+    run_git(repo, "checkout", "-q", "-b", BRANCH)
+
+    assert worktree.catch_up() == []
+    assert run_git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() == BRANCH
+
+
+def test_a_clone_with_no_origin_is_silent(repo):
+    assert worktree.catch_up() == []
+
+
+def test_a_failed_fetch_still_catches_up_to_the_ref_already_held(repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=1)
+    run_git(repo, "fetch", "-q", "origin", "main")
+    run_git(repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    assert worktree.catch_up() == ["Caught up: main moved 1 commit to origin/main."]
+
+
+def test_a_session_in_a_linked_worktree_catches_the_clone_up(repo, origin, tmp_path, monkeypatch):
+    other = _add(repo, BRANCH, "-b", BRANCH)
+    advance_origin(origin, tmp_path, count=1)
+    monkeypatch.chdir(other)
+
+    assert worktree.catch_up() == ["Caught up: main moved 1 commit to origin/main."]
+    assert (repo / "landed0").exists()

@@ -211,6 +211,8 @@ def _issue_context(number: int) -> int:
 
 def context(args: argparse.Namespace) -> int:
     """Print the starting point, then where the draft goes, its shape, and the rules it must meet."""
+    for line in worktree.catch_up():
+        print(line)
     source = (args.source or "").strip()
     if not source:  # the skill passes its argument quoted, so an empty one arrives as a blank word
         return _tail(DRAFT, SPLIT, park=True)

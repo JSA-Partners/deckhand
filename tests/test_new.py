@@ -3,6 +3,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import pytest
 from deckhand import lint, log, naming, new, sections, step, stub
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
-from tests.conftest import FIXTURES, ROOT, run_deckhand, run_git
+from tests.conftest import FIXTURES, ROOT, advance_origin, run_deckhand, run_git
 
 VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
@@ -1190,3 +1191,22 @@ def test_park_refuses_a_first_line_too_long_for_a_title(fake_gh, gh_calls, tmp_p
     assert result.returncode == 1
     assert "give the issue a shorter title with --title" in result.stderr
     assert _writes(gh_calls()) == []
+
+
+@pytest.fixture
+def origin(repo, tmp_path):
+    """A bare origin holding main, so there is an origin/main for the clone to fall behind."""
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], check=True)
+    run_git(repo, "remote", "add", "origin", str(bare))
+    run_git(repo, "push", "-q", "-u", "origin", "main")
+    return bare
+
+
+def test_new_catches_a_stale_clone_up_before_anything_is_read(fake_gh, repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=1)
+
+    result = run_deckhand("new", "context", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Caught up: main moved 1 commit to origin/main."

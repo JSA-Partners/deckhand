@@ -10,7 +10,7 @@ import pytest
 
 from deckhand import issue
 from deckhand.next import Facts, decide
-from tests.conftest import FIXTURES, fieldvalues, run_deckhand, run_git
+from tests.conftest import FIXTURES, advance_origin, fieldvalues, run_deckhand, run_git
 
 BRANCH = "feat/248-x"
 PR_URL = "https://github.com/acme/widgets/pull/1000"
@@ -869,3 +869,14 @@ def test_a_briefing_reads_the_pull_request_once(fake_gh, gh_calls, repo, tmp_pat
     _next(repo, env=env)
 
     assert len([c for c in gh_calls() if c.startswith("pr view")]) == 1
+
+
+def test_next_catches_a_stale_clone_up_before_it_briefs(fake_gh, repo, origin, tmp_path):
+    advance_origin(origin, tmp_path, count=1)
+
+    result = _next(repo)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "Caught up: main moved 1 commit to origin/main."
+    assert lines[1].startswith("Step: ")

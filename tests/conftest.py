@@ -171,3 +171,16 @@ def spilled(stdout: str, label: str) -> str:
     """The text a context wrote to the file its `<label>: <path> (<n> lines)` line names."""
     line = next(found for found in stdout.splitlines() if found.startswith(f"{label}: "))
     return Path(line.removeprefix(f"{label}: ").rsplit(" (", 1)[0]).read_text(encoding="utf-8")
+
+
+def advance_origin(origin: Path, tmp_path: Path, count: int = 1, name: str = "landed") -> None:
+    """Push `count` commits to `origin` from a second clone, so another clone's main falls behind."""
+    other = tmp_path / f"other-{name}"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
+    run_git(other, "config", "user.email", "t@t")
+    run_git(other, "config", "user.name", "t")
+    for index in range(count):
+        (other / f"{name}{index}").write_text(f"{index}\n")
+        run_git(other, "add", f"{name}{index}")
+        run_git(other, "commit", "-qm", f"feat: {name} {index}")
+    run_git(other, "push", "-q", "origin", "main")

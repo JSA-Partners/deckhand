@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 
 from deckhand import git, issue
-from deckhand.step import ORIGIN_MAIN, reason
+from deckhand.step import MAIN, ORIGIN_MAIN, reason
 
 WORKTREES = Path(".claude") / "worktrees"
 EXCLUDE = f"{WORKTREES.as_posix()}/"
@@ -162,3 +162,40 @@ def sweep(repo: str, exclude: int | None = None) -> list[str]:
         except Exception as error:
             lines.append(f"Left worktree {path}: {reason(error)}")
     return lines
+
+
+def catch_up() -> list[str]:
+    """Fast-forward the clone's main to origin's, so what a session reads in the clone has landed.
+
+    Every range is read against origin/main, but files are read from the clone's working tree, which
+    nothing else moves, so a clone left behind drafts stories against code that has since changed.
+    `--ff-only` refuses a main that has diverged and a merge that would overwrite an uncommitted
+    change, so nothing is lost. A fetch that fails is swallowed, as `next` swallows its own, since
+    the ref the clone already holds still answers. Only a catch-up or a refusal is worth a line.
+    """
+    try:
+        root = clone_root()
+        if git.run("rev-parse", "--abbrev-ref", "HEAD", cwd=root) != MAIN:
+            return []
+    except git.GitError:
+        return []
+    try:
+        git.run("fetch", "origin", MAIN, cwd=root)
+    except git.GitError:
+        pass
+    try:
+        behind = int(git.run("rev-list", "--count", f"{MAIN}..{ORIGIN_MAIN}", cwd=root))
+    except git.GitError:
+        return []  # no origin/main to be behind
+    if not behind:
+        return []
+    commits = f"{behind} commit{'' if behind == 1 else 's'}"
+    try:
+        git.run("merge", "--ff-only", ORIGIN_MAIN, cwd=root)
+    except git.GitError as error:
+        # git's reason goes last, as the sweep puts it, so git's own full stop ends the line.
+        return [
+            f"Main is {commits} behind {ORIGIN_MAIN} and could not catch up, "
+            f"so files read here are stale: {reason(error)}"
+        ]
+    return [f"Caught up: {MAIN} moved {commits} to {ORIGIN_MAIN}."]
