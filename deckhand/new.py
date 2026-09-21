@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from deckhand import gh, issue, lint, log, naming, park, sections, stub, worktree
-from deckhand.config import BODY_LIMIT
+from deckhand.lint import RULES
 from deckhand.step import (
     Refusal,
     block,
@@ -54,19 +54,6 @@ PARKED = (
     "new apply --split <file> --from {number}."
 )
 
-# One line per rule `lint.lint` enforces, in plain words. A line that says something may be empty is
-# a permission; every other line is a rule a body can break, and `tests/test_new.py` pins that.
-RULES = [
-    "The body holds Story, Scope, Acceptance Criteria, Plan, and Notes, once each and in that order.",
-    f"The body is at most {BODY_LIMIT} characters.",
-    "Story is one sentence: As a <role>, I want <outcome>, so that <reason>.",
-    "Scope has '#### In' bullets and then '#### Out' bullets, and Out is never empty, because Out is "
-    "the fence scope creep is measured against.",
-    "Every Acceptance Criteria bullet is one Given, When, Then sentence about behaviour, with no CI, "
-    "test, or pull request lines, and nothing that belongs in Scope Out.",
-    "Plan holds at least a '### Task 1' block.",
-    "Notes may be empty.",
-]
 # The one rule the body cannot break, because it is about the title rather than the text: `title`
 # is what enforces it, and the limit is the configured kinds', so the line is written when printed.
 TITLE_RULE = (

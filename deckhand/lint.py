@@ -31,6 +31,20 @@ _TASK_ONE = re.compile(r"^### Task 1", re.MULTILINE)
 _SUB_BULLET_LINE = re.compile(r"^\s+\S")
 _SUB_BULLET_LEADING_WS = re.compile(r"^\s+")
 
+# One line per rule `lint` enforces, in plain words. A line that says something may be empty is a
+# permission; every other line is a rule a body can break, and `tests/test_new.py` pins that.
+RULES = [
+    "The body holds Story, Scope, Acceptance Criteria, Plan, and Notes, once each and in that order.",
+    f"The body is at most {BODY_LIMIT} characters.",
+    "Story is one sentence: As a <role>, I want <outcome>, so that <reason>.",
+    "Scope has '#### In' bullets and then '#### Out' bullets, and Out is never empty, because Out is "
+    "the fence scope creep is measured against.",
+    "Every Acceptance Criteria bullet is one Given, When, Then sentence about behaviour, with no CI, "
+    "test, or pull request lines, and nothing that belongs in Scope Out.",
+    "Plan holds at least a '### Task 1' block.",
+    "Notes may be empty.",
+]
+
 
 def checked(body: str) -> str:
     """`body` as it is written, or a refusal naming every rule it breaks.

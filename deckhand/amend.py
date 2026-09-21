@@ -28,7 +28,7 @@ import argparse
 from pathlib import Path
 
 from deckhand import config, fields, gh, invoke, issue, lint, log, sections, stub
-from deckhand.new import RULES as BODY_RULES
+from deckhand.lint import RULES as BODY_RULES
 from deckhand.new import skeleton
 from deckhand.park import board_draft
 from deckhand.step import (
