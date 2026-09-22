@@ -130,6 +130,7 @@ def context(args: argparse.Namespace) -> int:
     story = _story(repo, args.issue)
     a_stub = not isinstance(story, Exception) and stub.is_stub(story.body)
     status = _status_line(repo, args.issue)
+    elsewhere = ("--repo", args.repo) if args.repo else ()
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
     print(status)
     print()
@@ -140,7 +141,7 @@ def context(args: argparse.Namespace) -> int:
         print()
         block(REVIEW_HEADING, lambda: _review_lines(story))
         print()
-        print(invoke.apply_line("amend", str(args.issue), '--title "<title>"', '--note "<why>"'))
+        print(invoke.apply_line("amend", str(args.issue), '--title "<title>"', *elsewhere, '--note "<why>"'))
         return 0
     if not a_stub:  # a stub's shape is the body above, and its stories are not the draft's to change
         block("Shape:", lambda: indented(skeleton().splitlines()))
@@ -149,7 +150,7 @@ def context(args: argparse.Namespace) -> int:
     print()
     print(draft_line("Draft", _draft_name(args.issue), args.repo))
     print(STUB_RULE if a_stub else DRAFT_RULE)
-    print(invoke.apply_line("amend", str(args.issue), "<draft>", '--note "<why>"'))
+    print(invoke.apply_line("amend", str(args.issue), "<draft>", *elsewhere, '--note "<why>"'))
     return 0
 
 

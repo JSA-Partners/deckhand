@@ -310,7 +310,7 @@ def test_context_on_a_stub_elsewhere_prints_its_body_and_the_stub_rule(fake_gh, 
     assert "Shape:" not in lines
     assert lines[-3] == f"Draft: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
     assert lines[-2] == STUB_RULE
-    assert lines[-1] == 'Apply: deckhand amend apply 60 <draft> --note "<why>"'
+    assert lines[-1] == 'Apply: deckhand amend apply 60 <draft> --repo acme/gadgets --note "<why>"'
 
 
 def test_apply_refuses_changed_headings(fake_gh, gh_calls, tmp_path):
@@ -842,3 +842,15 @@ def test_a_draft_file_on_a_started_story_is_still_frozen(fake_gh, gh_calls, tmp_
     assert result.returncode == 1
     assert result.stderr == FROZEN
     assert _writes(gh_calls) == []
+
+
+def test_a_started_story_in_another_repository_names_the_retitle_there(fake_gh, tmp_path):
+    """A cross-repository retitle was done by hand once; the line has to carry the repository."""
+    result = run_deckhand(
+        "amend", "context", "15", "--repo", "acme/gadgets", env=_status_reads(tmp_path, "In Progress")
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == (
+        'Apply: deckhand amend apply 15 --title "<title>" --repo acme/gadgets --note "<why>"'
+    )
