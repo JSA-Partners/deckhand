@@ -23,7 +23,7 @@ import argparse
 import os
 import time
 
-from deckhand import board, config, fields, fleet, forecast, gh, issue, log, sections
+from deckhand import board, config, fields, fleet, forecast, gh, invoke, issue, log, sections
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -152,6 +152,8 @@ def context(args: argparse.Namespace) -> int:
     block("Review:", lambda: _review_lines(args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Could block this story:", lambda: _could_block(settings, args.issue))
+    print()
+    print(invoke.apply_line("ready", str(args.issue), "--kind <kind>", "--points <1-3>"))
     return 0
 
 

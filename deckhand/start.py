@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, drift, fields, gh, git, issue, log, sections, worktree
+from deckhand import config, drift, fields, gh, git, invoke, issue, log, sections, worktree
 from deckhand.config import Settings
 from deckhand.step import (
     MAIN,
@@ -191,6 +191,8 @@ def context(args: argparse.Namespace) -> int:
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     _agreement(story)
     _report(story, args.issue)
+    print()
+    print(invoke.apply_line("start", str(args.issue), '--note "<what the check concluded>"'))
     return 0
 
 

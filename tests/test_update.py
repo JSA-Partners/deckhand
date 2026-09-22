@@ -69,7 +69,7 @@ def test_context_names_the_pull_request(fake_gh, tmp_path):
     result = run_deckhand("update", "context", "248", env=_story(tmp_path))
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout == f"Pull request: {PR_URL}\n"
+    assert result.stdout == f"Pull request: {PR_URL}\nApply: deckhand update apply 248\n"
 
 
 def test_apply_asks_github_to_update_the_branch(fake_gh, gh_calls, tmp_path):
@@ -153,3 +153,9 @@ def test_apply_names_the_worktree_on_a_local_conflict(fake_gh, gh_calls, repo, o
         "deckhand update apply: main conflicts with the branch; resolve it in the worktree, commit, "
         "and log a Deviation\n"
     )
+
+
+def test_context_names_the_apply(fake_gh, tmp_path):
+    result = run_deckhand("update", "context", "248", env=_story(tmp_path))
+
+    assert result.stdout.splitlines()[-1] == "Apply: deckhand update apply 248"

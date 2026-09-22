@@ -284,6 +284,8 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
         "Review:",
         "Blockers:",
         "Could block this story:",
+        "",
+        "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>",
     ]
     assert lines.count("  unavailable (nope)") == 6
 
@@ -588,3 +590,9 @@ def test_a_body_under_the_ceiling_boards_untouched(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "Logged Noted" not in result.stdout
+
+
+def test_context_names_the_apply(fake_gh):
+    result = run_deckhand("ready", "context", "248")
+
+    assert result.stdout.splitlines()[-1] == "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>"

@@ -134,7 +134,13 @@ def test_context_prints_the_park_shape_without_stories(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     shape = lines.index("Park shape:")
-    assert lines[shape : shape + 4] == ["Park shape:", "  ## Requirements", "  <what the feature needs, in full>", ""]
+    assert lines[shape : shape + 5] == [
+        "Park shape:",
+        "  ## Requirements",
+        "  <what the feature needs, in full>",
+        '  Apply: deckhand new apply <draft> --park --title "<title>"',
+        "",
+    ]
     assert "Stub and park shape:" not in lines
 
 
@@ -1210,3 +1216,21 @@ def test_new_catches_a_stale_clone_up_before_anything_is_read(fake_gh, repo, ori
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[0] == "Caught up: main moved 1 commit to origin/main."
+
+
+def test_a_new_request_names_the_draft_split_and_park_applies(fake_gh):
+    result = run_deckhand("new", "context")
+
+    lines = result.stdout.splitlines()
+    assert lines[-1] == "Apply: deckhand new apply <draft>"
+    assert "Apply: deckhand new apply <split> --split" in lines
+    assert '  Apply: deckhand new apply <draft> --park --title "<title>"' in lines
+
+
+def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):
+    result = run_deckhand("new", "context", "248", env=STUB)
+
+    lines = result.stdout.splitlines()
+    assert lines[-1] == "Apply: deckhand new apply <draft> --stub 248"
+    assert "Park shape:" in lines
+    assert '  Apply: deckhand new apply <draft> --park --from 248 --title "<title>"' in lines

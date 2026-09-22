@@ -29,7 +29,7 @@ import json
 import re
 from pathlib import Path
 
-from deckhand import config, fields, gates, gh, git, issue, log, naming
+from deckhand import config, fields, gates, gh, git, invoke, issue, log, naming
 from deckhand.config import Settings
 from deckhand.step import (
     MAIN,
@@ -200,8 +200,11 @@ def context(args: argparse.Namespace) -> int:
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))
     block("## Recent pull requests", _recent_block)
-    block("## Checks detected", lambda: indented(checks(Path.cwd()), "none detected"))
+    detected = checks(Path.cwd())
+    block("## Checks detected", lambda: indented(detected, "none detected"))
     print(draft_line("Summary", f"{args.issue}-summary.md"))
+    flags = [f'--check "{command}"' for command in detected] or ['--check "<cmd>"']
+    print(invoke.apply_line("finish", str(args.issue), "<summary>", *flags))
     return 0
 
 

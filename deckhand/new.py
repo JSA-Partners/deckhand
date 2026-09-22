@@ -22,7 +22,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import gh, issue, lint, log, naming, park, sections, stub, worktree
+from deckhand import gh, invoke, issue, lint, log, naming, park, sections, stub, worktree
 from deckhand.lint import RULES
 from deckhand.step import (
     Refusal,
@@ -106,24 +106,30 @@ def _rules() -> int:
     return 0
 
 
-def _tail(name: str, split: str | None = None, park: bool = False) -> int:
-    """Where the draft goes, the shape it takes, and the rules it has to meet.
+def _tail(name: str, split: str | None = None, park: bool = False, number: int | None = None) -> int:
+    """Where the draft goes, the shape it takes, the rules it has to meet, and what to run.
 
     `split` names the split file to offer after the rules, for a starting point that may yet turn
-    out to be a whole feature; `park` shows the park shape, for a request that may shed one.
+    out to be a whole feature; `park` shows the park shape, for a request that may shed one. `number`
+    is the stub being written, which the draft goes into rather than opening an issue of its own.
     """
+    source = ("--from", str(number)) if number else ()
     print(draft_line("Draft", name))
     print()
     print(skeleton())
     print()
     if park:
-        block("Park shape:", lambda: indented(stub.skeleton().splitlines()))
+        parking = invoke.apply_line("new", "<draft>", "--park", *source, '--title "<title>"')
+        block("Park shape:", lambda: indented([*stub.skeleton().splitlines(), parking]))
         print()
     _rules()
     if split is not None:
         print()
         print(SPLIT_NOTE)
         _split_block(split)
+        print(invoke.apply_line("new", "<split>", "--split", *source))
+    print()
+    print(invoke.apply_line("new", "<draft>", *(("--stub", str(number)) if number else ())))
     return 0
 
 
@@ -175,7 +181,7 @@ def _parked_context(number: int, requirements: str) -> int:
     print()
     print(requirements)
     print()
-    _tail(_draft_name(number), _split_name(number))
+    _tail(_draft_name(number), _split_name(number), number=number)
     print()
     print(PARKED.format(number=number))
     return 0
@@ -190,7 +196,7 @@ def _issue_context(number: int) -> int:
         failure = error  # `error` is unbound once the except block ends, and the block reads it
         block(f"## Stub #{number}", lambda: usable(failure))
         print()
-        return _tail(_draft_name(number))
+        return _tail(_draft_name(number), park=True, number=number)
     if not stub.is_stub(story.body):
         print(f"#{number} is already a story; run /deckhand:next {number}")
         print()
@@ -206,7 +212,7 @@ def _issue_context(number: int) -> int:
     print()
     block(DEPENDS_HEADING, lambda: blockers_block(repo, number))
     print()
-    return _tail(_draft_name(number))
+    return _tail(_draft_name(number), park=True, number=number)
 
 
 def context(args: argparse.Namespace) -> int:

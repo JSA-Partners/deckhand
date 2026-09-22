@@ -340,7 +340,7 @@ def test_context_prints_branch_blockers_plan_commits_and_drift(fake_gh, gh_calls
     assert lines[lines.index("## Story") + 1].startswith("  As a guest user, I want")
     assert lines[lines.index("## Scope") + 1] == "  #### In"
     assert lines[lines.index("## Commits") : lines.index("## Plan drift")] == ["## Commits", "  none"]
-    assert lines[lines.index("## Plan drift") :] == ["## Plan drift", *DRIFT, *NO_REVIEW]
+    assert lines[lines.index("## Plan drift") : -2] == ["## Plan drift", *DRIFT, *NO_REVIEW]
     assert _branches(repo) == ["main"]
     assert _writes(gh_calls) == []
 
@@ -421,7 +421,7 @@ def test_context_prints_what_landed_on_main_since_the_review(fake_gh, repo, orig
     result = _start("context", repo, REVIEWED)
 
     lines = result.stdout.splitlines()
-    assert lines[lines.index(LANDED) :] == [LANDED, f"  {sha} feat: landed later"]
+    assert lines[lines.index(LANDED) : -2] == [LANDED, f"  {sha} feat: landed later"]
 
 
 def test_context_points_past_thirty_landed_commits(fake_gh, repo, origin):
@@ -432,7 +432,7 @@ def test_context_points_past_thirty_landed_commits(fake_gh, repo, origin):
     result = _start("context", repo, REVIEWED)
 
     lines = result.stdout.splitlines()
-    landed = lines[lines.index(LANDED) + 1 :]
+    landed = lines[lines.index(LANDED) + 1 : -2]
     assert len(landed) == 31
     assert landed[0].endswith(" feat: step 30")
     assert landed[-1] == f"  ... more: git log --since={REVIEW_DATE} origin/main"
@@ -467,6 +467,8 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
         "## Commits",
         "## Plan drift",
         LANDED,
+        "",
+        'Apply: deckhand start apply 248 --note "<what the check concluded>"',
     ]
 
 
@@ -483,3 +485,9 @@ def test_context_prints_a_blocker_in_another_repository_with_its_repository(fake
 
     lines = result.stdout.splitlines()
     assert lines[lines.index("Blockers:") + 1] == "  acme/gadgets#9  Endpoint"
+
+
+def test_context_names_the_apply(fake_gh, repo, origin):
+    result = _start("context", repo)
+
+    assert result.stdout.splitlines()[-1] == 'Apply: deckhand start apply 248 --note "<what the check concluded>"'

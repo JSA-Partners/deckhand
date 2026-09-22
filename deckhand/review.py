@@ -19,7 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from deckhand import findings as findings_file
-from deckhand import gh, issue, sections
+from deckhand import gh, invoke, issue, sections
 from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, refuse_stub, spill, step, usable
 
 BRIEF_HEADING = "## Reviewer brief"
@@ -157,6 +157,12 @@ def context(args: argparse.Namespace) -> int:
     print(draft_line("Verdicts", f"{args.issue}-verdicts.md"))
     print(DECISION_FORMAT)
     print(draft_line("Decisions", f"{args.issue}-decisions.md"))
+    print()
+    print(
+        invoke.apply_line(
+            "review", str(args.issue), "<findings>", "<verdicts>", "<decisions>", '--verdict "<sentence>"'
+        )
+    )
     return 0
 
 

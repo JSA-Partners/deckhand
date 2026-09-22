@@ -179,22 +179,22 @@ def test_context_prints_the_three_formats_and_their_paths(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[-6] == (
+    assert lines[-8] == (
         "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
         "<evidence, citing the section>; or exactly `Nothing found.`"
     )
-    assert lines[-6] == review.FINDING_FORMAT
-    assert lines[-5] == f"Findings: {tmp_path / 'cache' / 'widgets' / '248-findings.md'}"
-    assert lines[-4] == (
+    assert lines[-8] == review.FINDING_FORMAT
+    assert lines[-7] == f"Findings: {tmp_path / 'cache' / 'widgets' / '248-findings.md'}"
+    assert lines[-6] == (
         "Report verdicts as lines, one per finding in the reviewer's order: <lens>.<n> | CONFIRMED, "
         "or <lens>.<n> | REJECTED | <reason>"
     )
-    assert lines[-3] == f"Verdicts: {tmp_path / 'cache' / 'widgets' / '248-verdicts.md'}"
-    assert lines[-2] == (
+    assert lines[-5] == f"Verdicts: {tmp_path / 'cache' / 'widgets' / '248-verdicts.md'}"
+    assert lines[-4] == (
         "Report decisions as lines, one per finding: <lens>.<n> | accepted|declined|changed [| <reason>]"
     )
-    assert lines[-2] == review.DECISION_FORMAT
-    assert lines[-1] == f"Decisions: {tmp_path / 'cache' / 'widgets' / '248-decisions.md'}"
+    assert lines[-4] == review.DECISION_FORMAT
+    assert lines[-3] == f"Decisions: {tmp_path / 'cache' / 'widgets' / '248-decisions.md'}"
     assert not (tmp_path / "cache" / "widgets" / "248-findings.md").exists()
 
 
@@ -209,9 +209,9 @@ def test_context_still_prints_when_the_issue_cannot_be_read(fake_gh, tmp_path):
         "### principles",
         "### unknowns",
     ]
-    assert lines[-6] == review.FINDING_FORMAT
-    assert lines[-4] == review.VERDICT_FORMAT
-    assert lines[-2] == review.DECISION_FORMAT
+    assert lines[-8] == review.FINDING_FORMAT
+    assert lines[-6] == review.VERDICT_FORMAT
+    assert lines[-4] == review.DECISION_FORMAT
 
 
 def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
@@ -623,3 +623,10 @@ def test_a_genuinely_malformed_findings_file_still_gets_the_format(fake_gh, tmp_
     assert result.returncode == 1
     assert "expected <lens>.<n>" in result.stderr
     assert "reads as" not in result.stderr
+
+
+def test_context_names_the_apply(fake_gh):
+    result = run_deckhand("review", "context", "248")
+
+    expected = 'Apply: deckhand review apply 248 <findings> <verdicts> <decisions> --verdict "<sentence>"'
+    assert result.stdout.splitlines()[-1] == expected
