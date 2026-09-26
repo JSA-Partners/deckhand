@@ -25,9 +25,11 @@ def test_version_prints_the_package_version():
 def test_every_version_source_agrees():
     """A release bumps the version wherever it is written; this is the check that keeps them together."""
     manifests = ROOT / ".claude-plugin"
+    manifest = json.loads((ROOT / ".release-please-manifest.json").read_text(encoding="utf-8"))
     versions = {
         "pyproject.toml": tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
         "plugin.json": json.loads((manifests / "plugin.json").read_text(encoding="utf-8"))["version"],
+        "release-please manifest": manifest["."],
     }
     assert all(found == __version__ for found in versions.values()), f"__version__ is {__version__}; {versions}"
 
