@@ -1,9 +1,10 @@
 {
   "fields": [
     {"id": "PVTSSF_STATUS", "name": "Status", "type": "ProjectV2SingleSelectField",
-     "options": [{"id": "opt_draft", "name": "Draft"}, {"id": "opt_backlog", "name": "Backlog"},
+     "options": [{"id": "opt_draft", "name": "Draft"}, {"id": "opt_refinement", "name": "Refinement"},
+                 {"id": "opt_ready", "name": "Ready"}, {"id": "opt_backlog", "name": "Backlog"},
                  {"id": "opt_inprogress", "name": "In Progress"}, {"id": "opt_pending", "name": "Pending Review"},
-                 {"id": "opt_done", "name": "Done"}]},
+                 {"id": "opt_verification", "name": "Verification"}, {"id": "opt_done", "name": "Done"}]},
     {"id": "PVTSSF_KIND", "name": "Kind", "type": "ProjectV2SingleSelectField",
      "options": [{"id": "opt_feat", "name": "feat"}, {"id": "opt_fix", "name": "fix"}, {"id": "opt_chore", "name": "chore"},
                  {"id": "opt_refactor", "name": "refactor"}, {"id": "opt_docs", "name": "docs"}, {"id": "opt_perf", "name": "perf"}]},
