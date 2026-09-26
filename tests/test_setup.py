@@ -37,12 +37,16 @@ SLUG = "repo view --json nameWithOwner"
 LINKED = "api graphql linked-projects"
 FIELDS_QUERY = "api graphql project-fields"
 VIEWS_QUERY = "api graphql project-views"
+WORKFLOWS_QUERY = "api graphql project-workflows"
 KIND_CREATE = "api graphql create-kind"
 KIND_UPDATE = "api graphql update-kind"
 MERGES = "api repos/acme/widgets"
+LABELS = "label list --repo acme/widgets --limit 200 --json name"
+LABEL_CREATE = "label create deckhand --repo acme/widgets --color 5319e7 --description A story deckhand runs"
 
-# Every checklist item is done with the default fixtures; these Status options are the ones a
-# fresh project has, so a test that wants something left to do reads them instead.
+# The fields and the merge settings are done with the default fixtures. The workflows and the marker
+# label are the ones a fresh project has, so a test that wants a finished project reads `_settled`.
+# These Status options are a fresh project's too, for a test that wants something left to do.
 OLD_STATUS = [
     {"id": f"o{i}", "name": name, "color": "GRAY"}
     for i, name in enumerate(["Backlog", "Blocked", "In Progress", "Pending Review", "Done"], start=1)
@@ -68,6 +72,8 @@ def _short(call: str) -> str:
         return KIND_UPDATE
     if "views(" in call:
         return VIEWS_QUERY
+    if "workflows(" in call:
+        return WORKFLOWS_QUERY
     return FIELDS_QUERY if "fields(first" in call else LINKED
 
 
@@ -114,6 +120,20 @@ def _views(tmp_path, name, views: dict[str, list[str]]) -> dict[str, str]:
     path = tmp_path / name
     path.write_text(json.dumps({"data": {"organization": {"projectV2": {"views": {"nodes": nodes}}}}}))
     return {"GH_PROJECT_VIEWS_FILE": str(path)}
+
+
+def _settled(tmp_path) -> dict[str, str]:
+    """Every Status workflow off and the marker label there, as the env that says so.
+
+    These are the two facts the board cannot carry, and a fresh project has neither of them right,
+    so a test about anything else sets them and reads a checklist with nothing left.
+    """
+    data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
+    for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
+        node["enabled"] = node["name"] == "Auto-archive items"
+    path = tmp_path / "workflows-off.json"
+    path.write_text(json.dumps(data))
+    return {"GH_WORKFLOWS_FILE": str(path), "GH_LABELS": json.dumps([{"name": "deckhand"}])}
 
 
 def _merges(tmp_path, name, **changes) -> dict[str, str]:
@@ -290,18 +310,22 @@ def test_context_reports_each_checklist_item(repo, fake_gh, tmp_path):
         "(currently: Backlog, Blocked, In Progress, Pending Review, Done)",
         "  Board view fields: done",
         "  Kind colors: done",
+        "  Workflows: turn off Item added to project, Item closed",
+        "  Label: create deckhand; apply creates it",
         "  Merge settings: done",
     ]
     assert result.stdout.splitlines()[-1] == "superpowers: installed"
 
 
-def test_context_reports_every_checklist_item_as_done_with_a_finished_project(repo, fake_gh):
-    result = run_deckhand("setup", "context", cwd=repo)
+def test_context_reports_every_checklist_item_as_done_with_a_finished_project(repo, fake_gh, tmp_path):
+    result = run_deckhand("setup", "context", cwd=repo, env=_settled(tmp_path))
 
     assert _checklist(result) == [
         "  Status options: done",
         "  Board view fields: done",
         "  Kind colors: done",
+        "  Workflows: done",
+        "  Label: done",
         "  Merge settings: done",
     ]
 
@@ -359,14 +383,17 @@ def test_context_reports_each_item_it_cannot_read(repo, fake_gh, tmp_path):
     env = {
         "GH_PROJECT_FIELDS_FILE": str(tmp_path / "gone-fields.json"),
         "GH_PROJECT_VIEWS_FILE": str(tmp_path / "gone-views.json"),
+        "GH_WORKFLOWS_FILE": str(tmp_path / "gone-workflows.json"),
         "GH_REPO_SETTINGS_FILE": str(tmp_path / "gone-merges.json"),
     }
 
     result = run_deckhand("setup", "context", cwd=repo, env=env)
 
     lines = _checklist(result)
-    assert len(lines) == 4
-    for name, line in zip(["Status options", "Board view fields", "Kind colors", "Merge settings"], lines, strict=True):
+    assert len(lines) == 6
+    # Label is not here: the labels of a repository are read with the one call that always answers.
+    for name in ["Status options", "Board view fields", "Kind colors", "Workflows", "Merge settings"]:
+        line = next(found for found in lines if found.startswith(f"  {name}: "))
         assert line.startswith(f"  {name}: unknown ("), line
 
 
@@ -491,11 +518,15 @@ def test_apply_links_when_given_a_project(repo, fake_gh, gh_calls, tmp_path, mon
         LINKED,
         "project view 5 --owner acme --format json",
         REPO_EDIT,
+        LABELS,
+        LABEL_CREATE,
         "project field-list 5 --owner acme --format json",
         "project field-create 5 --owner acme --name Story Points --data-type NUMBER",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
         VIEWS_QUERY,
+        WORKFLOWS_QUERY,
+        LABELS,
         MERGES,
     ]
     assert "linked acme #5 to acme/widgets" in result.stdout
@@ -520,11 +551,15 @@ def test_apply_accepts_an_explicit_owner(repo, fake_gh, gh_calls):
         LINKED,
         "project view 4 --owner acme --format json",
         REPO_EDIT,
+        LABELS,
+        LABEL_CREATE,
         "project field-list 4 --owner mjm --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
         KIND_UPDATE,
         VIEWS_QUERY,
+        WORKFLOWS_QUERY,
+        LABELS,
         MERGES,
     ]
     assert "linked @me #4 to acme/widgets" in result.stdout
@@ -545,10 +580,14 @@ def test_apply_targets_the_named_project_when_another_is_linked(repo, fake_gh, g
         LINKED,
         "project view 9 --owner acme --format json",
         REPO_EDIT,
+        LABELS,
+        LABEL_CREATE,
         "project field-list 9 --owner acme --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
         VIEWS_QUERY,
+        WORKFLOWS_QUERY,
+        LABELS,
         MERGES,
     ]
 
@@ -563,10 +602,14 @@ def test_apply_skips_the_link_when_the_named_project_is_already_linked(repo, fak
         SLUG,
         LINKED,
         REPO_EDIT,
+        LABELS,
+        LABEL_CREATE,
         "project field-list 7 --owner acme --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
         VIEWS_QUERY,
+        WORKFLOWS_QUERY,
+        LABELS,
         MERGES,
     ]
     assert "linked" not in result.stdout
@@ -580,10 +623,14 @@ def test_apply_without_a_project_uses_the_linked_one(repo, fake_gh, gh_calls):
         SLUG,
         LINKED,
         REPO_EDIT,
+        LABELS,
+        LABEL_CREATE,
         "project field-list 2 --owner acme --format json",
         FIELDS_QUERY,
         "project field-delete --id PVTSSF_PRIORITY",
         VIEWS_QUERY,
+        WORKFLOWS_QUERY,
+        LABELS,
         MERGES,
     ]
     assert "linked" not in result.stdout
@@ -703,7 +750,7 @@ def test_apply_recolors_a_kind_whose_options_are_off(repo, fake_gh, gh_calls, tm
         {"id": "opt_fix", "name": "fix", "color": "BLUE"},
         {"id": "opt_spike", "name": "spike", "color": "PINK"},
     ]
-    env = _project_fields(tmp_path, "kind-off.json", kind=kind)
+    env = {**_project_fields(tmp_path, "kind-off.json", kind=kind), **_settled(tmp_path)}
 
     result = run_deckhand("setup", "apply", cwd=repo, env=env)
 
@@ -736,15 +783,15 @@ def test_apply_leaves_a_kind_whose_options_are_right_alone(repo, fake_gh, gh_cal
     assert "recolored" not in result.stdout
 
 
-def test_apply_ends_with_setup_complete_when_nothing_is_left(repo, fake_gh):
-    result = run_deckhand("setup", "apply", cwd=repo)
+def test_apply_ends_with_setup_complete_when_nothing_is_left(repo, fake_gh, tmp_path):
+    result = run_deckhand("setup", "apply", cwd=repo, env=_settled(tmp_path))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1] == "Setup complete."
 
 
 def test_apply_names_what_is_left_with_the_page_and_the_click(repo, fake_gh, tmp_path):
-    env = _project_fields(tmp_path, "old-status.json", status=OLD_STATUS)
+    env = {**_project_fields(tmp_path, "old-status.json", status=OLD_STATUS), **_settled(tmp_path)}
 
     result = run_deckhand("setup", "apply", cwd=repo, env=env)
 
@@ -786,6 +833,7 @@ def test_apply_names_a_missing_board_view(repo, fake_gh, tmp_path):
 def test_apply_lists_what_it_could_not_read_apart_from_the_work(repo, fake_gh, tmp_path):
     env = {
         **_project_fields(tmp_path, "old-status.json", status=OLD_STATUS),
+        **_settled(tmp_path),
         "GH_PROJECT_VIEWS_FILE": str(tmp_path / "gone-views.json"),
     }
 
@@ -801,7 +849,7 @@ def test_apply_lists_what_it_could_not_read_apart_from_the_work(repo, fake_gh, t
 
 
 def test_apply_lists_only_what_it_could_not_read_when_nothing_else_is_left(repo, fake_gh, tmp_path):
-    env = {"GH_REPO_SETTINGS_FILE": str(tmp_path / "gone-merges.json")}
+    env = {**_settled(tmp_path), "GH_REPO_SETTINGS_FILE": str(tmp_path / "gone-merges.json")}
 
     result = run_deckhand("setup", "apply", cwd=repo, env=env)
 
@@ -865,11 +913,30 @@ def test_apply_names_the_project_it_resolved_before_it_writes(repo, fake_gh):
     assert lines.index("Project: acme #2") < lines.index("merge: squash only, message from the pull request")
 
 
+# --- apply: the marker label --------------------------------------------
+
+
+def test_apply_creates_the_marker_label(repo, fake_gh, gh_calls):
+    result = run_deckhand("setup", "apply", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    assert "label create deckhand --repo" in "\n".join(gh_calls())
+
+
+def test_apply_leaves_an_existing_marker_alone(repo, fake_gh, gh_calls):
+    env = {"GH_LABELS": json.dumps([{"name": "deckhand"}])}
+
+    result = run_deckhand("setup", "apply", cwd=repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "label create" not in "\n".join(gh_calls())
+
+
 # --- apply: the fields the process did not make -------------------------
 
 
-def test_apply_deletes_a_template_field_after_the_creates_and_before_the_checklist(repo, fake_gh, gh_calls):
-    result = run_deckhand("setup", "apply", cwd=repo)
+def test_apply_deletes_a_template_field_after_the_creates_and_before_the_checklist(repo, fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("setup", "apply", cwd=repo, env=_settled(tmp_path))
 
     assert result.returncode == 0, result.stderr
     assert _deletes(gh_calls) == ["project field-delete --id PVTSSF_PRIORITY"]

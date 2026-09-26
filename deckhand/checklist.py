@@ -18,6 +18,14 @@ BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Assignees", "Reposit
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"
 
+# The one label the story state needs: the board cannot say an issue is deckhand's, because it
+# carries issues that are not, and this makes the fleet read one query.
+LABEL = ("deckhand", "5319e7", "A story deckhand runs")
+
+# Built-in project workflows that write what deckhand owns. Auto-archive items is deliberately not
+# here: it is the only built-in that never touches Status.
+WORKFLOWS_OFF = ("Item added to project", "Item closed", "Auto-close issue")
+
 # The repository settings `setup apply` writes, as the REST repository object reports them.
 MERGE_SETTINGS: dict[str, Any] = {
     "allow_squash_merge": True,
@@ -29,8 +37,11 @@ MERGE_SETTINGS: dict[str, Any] = {
 
 UNKNOWN = "unknown ("
 
-# What a person should know before the click, by item; only a Status option's deletion is permanent.
-NOTES = {"Status options": "Deleting an option is permanent."}
+# What a person should know before the click, by item.
+NOTES = {
+    "Status options": "Deleting an option is permanent.",
+    "Workflows": "The API can read these and cannot set them.",
+}
 
 
 class Item(NamedTuple):
@@ -125,6 +136,28 @@ def _kind_item(fields: list[dict[str, Any]] | None, kinds: list[str], unread: st
     return Item("Kind colors", click, ", ".join(off) or None)
 
 
+def _workflows_item(settings: Settings) -> Item:
+    click = "Project > Settings > Workflows"
+    try:
+        found = gh.workflows(settings)
+    except Exception as error:
+        return Item("Workflows", click, f"{UNKNOWN}{reason(error)})")
+    on = [name for name in WORKFLOWS_OFF if found.get(name)]
+    return Item("Workflows", click, f"turn off {', '.join(on)}" if on else None)
+
+
+def _label_item(repo: str | None) -> Item:
+    name, _, _ = LABEL
+    click = "Repository > Issues > Labels"
+    if not repo:
+        return Item("Label", click, f"{UNKNOWN}no repository)")
+    try:
+        found = gh.labels(repo)
+    except Exception as error:
+        return Item("Label", click, f"{UNKNOWN}{reason(error)})")
+    return Item("Label", click, None if name in found else f"create {name}; apply creates it")
+
+
 def _merge_item(repo: str | None) -> Item:
     click = "Repository > Settings > General > Pull Requests"
     if not repo:
@@ -151,12 +184,14 @@ def checklist(
     """Every item, in the order the person meets them; `fields` is the project's, None when unread.
 
     `unread` is why the fields could not be read, so the items built from them can say so; the
-    view and the merge settings are read here and say so themselves.
+    view, the workflows, the label, and the merge settings are read here and say so themselves.
     """
     why = unread or "the project fields were not read"
     return [
         _status_item(fields, why),
         _board_item(settings),
         _kind_item(fields, settings.kinds, why),
+        _workflows_item(settings),
+        _label_item(repo),
         _merge_item(repo),
     ]

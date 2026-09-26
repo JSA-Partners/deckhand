@@ -1,0 +1,17 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "workflows": {
+          "nodes": [
+            { "number": 1, "name": "Item closed", "enabled": true },
+            { "number": 2, "name": "Pull request merged", "enabled": false },
+            { "number": 3, "name": "Auto-close issue", "enabled": false },
+            { "number": 4, "name": "Item added to project", "enabled": true },
+            { "number": 5, "name": "Auto-archive items", "enabled": true }
+          ]
+        }
+      }
+    }
+  }
+}

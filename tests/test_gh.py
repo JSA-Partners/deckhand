@@ -194,6 +194,14 @@ def test_project_fields_is_empty_when_the_owner_root_answers_nothing(fake_gh, tm
     assert gh.project_fields(settings) == []
 
 
+def test_workflows_reads_each_name_and_whether_it_is_enabled(fake_gh, settings):
+    found = gh.workflows(settings)
+
+    assert found["Item closed"] is True
+    assert found["Pull request merged"] is False
+    assert len(found) == 5
+
+
 def test_update_single_select_sends_the_options_as_json_on_stdin(fake_gh, gh_calls, settings):
     options = [{"id": "opt_feat", "name": "feat", "color": "GREEN", "description": ""}]
 

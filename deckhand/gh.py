@@ -24,6 +24,16 @@ FIELDS_QUERY = (
     "... on ProjectV2SingleSelectField{ options{ id name color } } } } } } }"
 )
 
+WORKFLOWS_QUERY = """
+query($owner: String!, $number: Int!) {
+  OWNER_ROOT(login: $owner) {
+    projectV2(number: $number) {
+      workflows(first: 50) { nodes { number name enabled } }
+    }
+  }
+}
+"""
+
 LINKED_QUERY = (
     "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){"
     "projectsV2(first:20){nodes{number title owner{__typename "
@@ -278,6 +288,18 @@ def project_fields(settings: Settings) -> list[dict[str, Any]]:
         for node in nodes
         if node and node.get("id")
     ]
+
+
+def workflows(settings: Settings) -> dict[str, bool]:
+    """Each built-in project workflow by name, and whether it is enabled; the first page of 50.
+
+    The API reads this and cannot set it, so what it feeds is a checklist item, never a write.
+    """
+    query = owner_query(WORKFLOWS_QUERY, settings.owner_type)
+    data = graphql(query, {"owner": settings.owner, "number": settings.project})[0]
+    root = (data.get("data") or {}).get(owner_field(settings.owner_type)) or {}
+    nodes = ((root.get("projectV2") or {}).get("workflows") or {}).get("nodes") or []
+    return {node["name"]: bool(node.get("enabled")) for node in nodes if node and node.get("name")}
 
 
 def create_single_select(settings: Settings, name: str, options: list[dict[str, str]]) -> None:

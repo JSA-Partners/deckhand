@@ -218,6 +218,7 @@ def apply(args: argparse.Namespace) -> int:
     _resolve(settings, repo)
     print(f"Project: {settings.owner} #{settings.project}")
     _set_merges()
+    _create_label(repo)
     _create_fields(settings)
     kept = _recolor_kind(settings, _delete_extra_fields(settings))
     _print_left(checklist.checklist(settings, repo, kept))
@@ -242,6 +243,19 @@ def _print_left(items: list[Item]) -> None:
         for item in unread:
             print(f"  {item.name}: {item.left}")
     print("Run setup again when done; it says what is still left.")
+
+
+def _create_label(repo: str) -> None:
+    """Create the marker label; one that already exists is left alone."""
+    name, color, description = checklist.LABEL
+    try:
+        found = gh.labels(repo)
+    except Exception as error:
+        print(f"Label: unknown ({reason(error)})")
+        return
+    if name not in found:
+        gh.create_label(repo, name, color, description)
+        print(f"Created label {name}")
 
 
 def _target(settings: Settings, repo: str, project: str, owner: str | None) -> None:
