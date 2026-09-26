@@ -56,7 +56,7 @@ author per stub it prints, all at once, then carry on to each one's review.
 ## Review
 
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
-agent with the body file's path and the brief and write its lines as they are to the findings file.
+agent with the body and brief file paths and write its lines as they are to the findings file.
 If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
 write its lines to the verdicts file. Then speak: a verdict on the story as a whole, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a

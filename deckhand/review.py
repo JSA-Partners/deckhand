@@ -1,13 +1,13 @@
 """The review step: one pass over a planned story with every lens that applies, then the skeptic.
 
-`context` writes the story body to a file and names it, then prints a reviewer brief, which is the
-text of every lens the body selects, so one reviewer agent carries them all. `apply` reads the
-reviewer's findings, the skeptic's verdicts, and the decisions the person made in the session as the
-three files the session wrote, joins them itself, validates every line before it writes anything,
-and posts one `Review:` log entry: the verdict on the story as a whole, which lenses the same
-selection ran with the silent ones marked clean, then every finding on a line with the person's
-decision beside it and the skeptic's rejection marked. Neither agent's lines are retyped on the way,
-so a format only one of them keeps cannot cost a finding.
+`context` writes the story body to a file and names it, then does the same with a reviewer brief,
+which is the text of every lens the body selects, so one reviewer agent carries them all. `apply`
+reads the reviewer's findings, the skeptic's verdicts, and the decisions the person made in the
+session as the three files the session wrote, joins them itself, validates every line before it
+writes anything, and posts one `Review:` log entry: the verdict on the story as a whole, which
+lenses the same selection ran with the silent ones marked clean, then every finding on a line with
+the person's decision beside it and the skeptic's rejection marked. Neither agent's lines are
+retyped on the way, so a format only one of them keeps cannot cost a finding.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from deckhand import findings as findings_file
 from deckhand import gh, invoke, issue, sections
 from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, refuse_stub, spill, step, usable
 
-BRIEF_HEADING = "## Reviewer brief"
 FINDING_FORMAT = (
     "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
     f"<evidence, citing the section>; or exactly `{findings_file.CLEAN}`"
@@ -133,23 +132,23 @@ def named_lenses(body: str) -> list[str]:
 # --- context ----------------------------------------------------------------
 
 
+def _brief_text(lenses: dict[str, str], names: list[str]) -> str:
+    """The brief as one block: a `### <lens>` heading and its prose for each lens, in name order."""
+    return "\n\n".join(f"### {name}\n\n{_body_text(lenses[name])}" for name in names)
+
+
 def context(args: argparse.Namespace) -> int:
-    """Print where the story body was written, the text of every lens that applies, and where the findings go."""
+    """Print where the story body and the reviewer brief were written, and where the findings go."""
     story: issue.Issue | Exception
     try:
         story = issue.view(gh.repo_slug(), args.issue)
-    except Exception as error:  # the brief is still worth printing without the story
+    except Exception as error:  # the brief is still worth writing without the story
         story = error
     text = "" if isinstance(story, Exception) else story.body
     print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body)))
     lenses = _lens_files()
-    print()
-    print(BRIEF_HEADING)
-    for name in _selected(lenses, text, named_lenses(text)):
-        print()
-        print(f"### {name}")
-        print()
-        print(_body_text(lenses[name]))
+    selected = _selected(lenses, text, named_lenses(text))
+    print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected)))
     print()
     print(FINDING_FORMAT)
     print(draft_line("Findings", f"{args.issue}-findings.md"))

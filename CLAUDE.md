@@ -9,7 +9,9 @@
   and unfolds it for every reader; `log.py` the prefix table, the `log` command, and reading entries
   back from the issue's comments; `board.py` the project's items and views; `checklist.py` what
   setup verifies; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
-  `issue.py` every issue read and write; `git.py` every git call; `park.py` a parked feature in any repository, boarded and logged; `update.py` GitHub brings a pull request behind main up to date; `worktree.py` every story's
+  `issue.py` every issue read and write; `edges.py` every blocker edge between two stories, added or
+  dropped; `git.py` every git call; `park.py` a parked feature in any repository, boarded and logged;
+  `update.py` GitHub brings a pull request behind main up to date; `worktree.py` every story's
   worktree, where its branch is checked out, and the sweep of merged ones; `drift.py` the plan references
   `start` checks; `next.py` reads the log, the board, and the local branch, picks the step, and
   prints a briefing; `finish.py` opens the pull request only from the commit the last `Reviewed:`

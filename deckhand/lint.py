@@ -28,13 +28,17 @@ _PROCESS_LINE = re.compile(
 )
 _SCOPE_EXCLUSION = re.compile(r"(out of scope|not in scope|is not included)", re.IGNORECASE)
 _TASK_ONE = re.compile(r"^### Task 1", re.MULTILINE)
+_AT_ANY_LEVEL = re.compile(
+    r"^(#{1,6}) (" + "|".join(re.escape(name) for name in sections.SECTIONS) + r")\s*$", re.MULTILINE
+)
 _SUB_BULLET_LINE = re.compile(r"^\s+\S")
 _SUB_BULLET_LEADING_WS = re.compile(r"^\s+")
 
 # One line per rule `lint` enforces, in plain words. A line that says something may be empty is a
 # permission; every other line is a rule a body can break, and `tests/test_new.py` pins that.
 RULES = [
-    "The body holds Story, Scope, Acceptance Criteria, Plan, and Notes, once each and in that order.",
+    "The body holds Story, Scope, Acceptance Criteria, Plan, and Notes as '### ' headings, once "
+    "each and in that order.",
     f"The body is at most {BODY_LIMIT} characters.",
     "Story is one sentence: As a <role>, I want <outcome>, so that <reason>.",
     "Scope has '#### In' bullets and then '#### Out' bullets, and Out is never empty, because Out is "
@@ -53,7 +57,7 @@ def checked(body: str) -> str:
     so the size the limit answers for is the size GitHub is handed, fold and all.
     """
     written = sections.render(*sections.parse(body))
-    problems = lint(written)
+    problems = lint(written, given=body)
     if problems:
         raise Refusal("body: " + "; ".join(problems))
     return written
@@ -89,24 +93,37 @@ def _fold_bullets(text: str) -> list[str]:
     return bullets
 
 
-def lint(text: str) -> list[str]:
+def _too_big(size: int, given: str | None) -> str:
+    """The size message: what the fold made it, what the file was when that differs, and how much to cut."""
+    raw = None if given is None else len(given.replace("\r\n", "\n"))
+    folded = "" if raw is None or raw == size else f" once the Plan is folded (the file is {raw})"
+    return f"body is {size} characters{folded}; the limit is {BODY_LIMIT}; cut {size - BODY_LIMIT}"
+
+
+def lint(text: str, given: str | None = None) -> list[str]:
     """Return the failing rules against `text` (empty means the body is ok).
 
     `\\r\\n` is normalized to `\\n` before the size check, so line-ending style doesn't affect the limit.
+    `given` is the body as it was handed in, before the fold, and only sharpens the size message.
     """
     fail: list[str] = []
 
     text = text.replace("\r\n", "\n")
     size = len(text)
     if size > BODY_LIMIT:
-        fail.append(f"body is {size} characters; the limit is {BODY_LIMIT}")
+        fail.append(_too_big(size, given))
 
     _, parsed = sections.parse(text)
     names = [name for name, _ in parsed]
+    levels = {name: head for head, name in _AT_ANY_LEVEL.findall(text) if head != "###"}
     for name in sections.SECTIONS:
         count = names.count(name)
         if count == 0:
-            fail.append(f"missing section: {name}")
+            wrong = levels.get(name)
+            if wrong:
+                fail.append(f"section {name} is a '{wrong} ' heading; the sections are '### '")
+            else:
+                fail.append(f"missing section: {name}")
         elif count > 1:
             fail.append(f"duplicate section: {name}")
     seen = [name for i, name in enumerate(names) if name not in names[:i]]

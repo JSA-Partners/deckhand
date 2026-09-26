@@ -224,6 +224,20 @@ def test_a_closed_blocker_refuses_and_writes_nothing(fake_gh, gh_calls, monkeypa
     assert not any("dependencies/blocked_by" in call for call in gh_calls())
 
 
+def test_a_cycle_refusal_names_the_reverse_edge_and_the_unblock(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    mapped = tmp_path / "blocked-by.json"
+    edge = {"117": [{"number": 253, "title": "The other story", "state": "open"}]}
+    mapped.write_text(json.dumps(edge), encoding="utf-8")
+    monkeypatch.setenv("GH_DEPENDENCY_FAILS", "1")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "117"]) == 1
+
+    err = capsys.readouterr().err
+    assert "#117 is already blocked by #253" in err
+    assert "captain apply --unblock 117 --by 253" in err
+
+
 def test_block_refuses_without_by(fake_gh, gh_calls, capsys):
     assert cli.main(["captain", "apply", "--block", "253"]) == 1
     assert "--by" in capsys.readouterr().err

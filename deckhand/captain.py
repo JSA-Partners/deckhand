@@ -15,15 +15,13 @@ import math
 import os
 import statistics
 
-from deckhand import board, checklist, config, fields, fleet, forecast, gh, issue, sessions
+from deckhand import board, checklist, config, edges, fields, fleet, forecast, gh, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
     block,
     indented,
     issue_number,
-    issue_ref,
-    open_issue,
     reason,
     ref_label,
     settings_or_error,
@@ -351,31 +349,6 @@ def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
     return len(wrong) + len(read.missing)
 
 
-def _ref(by: str, repo: str) -> tuple[str, int]:
-    try:
-        return issue_ref(by, repo)
-    except ValueError as error:
-        raise Refusal(str(error)) from error
-
-
-def _block_writes(repo: str, number: int, by: str) -> None:
-    where, blocker = _ref(by, repo)
-    if (where, blocker) == (repo, number):
-        raise Refusal(f"#{number} cannot block itself")
-    open_issue(where, blocker, repo)
-    issue.add_dependency(repo, number, (where, blocker))
-    print(f"#{number} blocked by {ref_label(where, blocker, repo)}")
-
-
-def _unblock_writes(repo: str, number: int, by: str) -> None:
-    where, blocker = _ref(by, repo)
-    if (where, blocker) == (repo, number):
-        raise Refusal(f"#{number} cannot block itself")
-    open_issue(where, blocker, repo)
-    issue.remove_dependency(repo, number, (where, blocker))
-    print(f"#{number} no longer blocked by {ref_label(where, blocker, repo)}")
-
-
 @step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
     """Write the build order, set a Status the log allows, or add or drop a blocker on a boarded story."""
@@ -386,9 +359,9 @@ def apply(args: argparse.Namespace) -> int:
     if not args.order and not args.repair and args.block is None and args.unblock is None:
         raise Refusal("say what to write: --order, --repair, --block, or --unblock")
     if args.block is not None:
-        _block_writes(gh.repo_slug(), args.block, args.by)
+        edges.block(gh.repo_slug(), args.block, args.by)
     if args.unblock is not None:
-        _unblock_writes(gh.repo_slug(), args.unblock, args.by)
+        edges.unblock(gh.repo_slug(), args.unblock, args.by)
     if args.order or args.repair:
         settings = config.load()
         read = fleet.read(settings)

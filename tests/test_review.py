@@ -149,19 +149,23 @@ def test_context_selects_always_and_signal_lenses(fake_gh):
     result = run_deckhand("review", "context", "248")
 
     assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines[0].startswith("Body: ")
-    assert review.BRIEF_HEADING in lines
-    headings = [line for line in lines if line.startswith("### ") and line[4:] in {p.stem for p in _lens_files()}]
+    assert result.stdout.splitlines()[0].startswith("Body: ")
+    brief = spilled(result.stdout, "Brief")
+    headings = [line for line in brief.splitlines() if line.startswith("### ")]
     assert headings == ["### coverage", "### pen-test", "### principles", "### red-team", "### unknowns"]
     # the lens prose, with its frontmatter and its own title stripped
-    assert "Read the artifact as a motivated adversary" in result.stdout
-    assert "signals:" not in result.stdout
-    assert "# Red team" not in result.stdout
+    assert "Read the artifact as a motivated adversary" in brief
+    assert "signals:" not in brief
+    assert "# Red team" not in brief
+    # named, not printed
+    assert "### red-team" not in result.stdout
 
 
-def _lens_files():
-    return sorted((ROOT / "skills" / "next" / "lenses").glob("*.md"))
+def test_the_brief_is_written_to_a_file_and_named(fake_gh, tmp_path):
+    result = run_deckhand("review", "context", "248")
+
+    assert result.returncode == 0, result.stderr
+    assert f"Brief: {tmp_path / 'cache' / 'widgets' / '248-brief.md'}" in result.stdout
 
 
 def test_context_adds_a_lens_named_in_notes(fake_gh, tmp_path):
@@ -170,8 +174,9 @@ def test_context_adds_a_lens_named_in_notes(fake_gh, tmp_path):
     result = run_deckhand("review", "context", "248", env=_issue_file(tmp_path, body))
 
     assert result.returncode == 0, result.stderr
-    assert "### chaos" in result.stdout.splitlines()
-    assert "State the steady state the story assumes" in result.stdout
+    brief = spilled(result.stdout, "Brief")
+    assert "### chaos" in brief.splitlines()
+    assert "State the steady state the story assumes" in brief
 
 
 def test_context_prints_the_three_formats_and_their_paths(fake_gh, tmp_path):
@@ -204,7 +209,8 @@ def test_context_still_prints_when_the_issue_cannot_be_read(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[0] == "Body: unavailable (could not find issue 248)"
-    assert [line for line in lines if line.startswith("### ")] == [
+    brief = spilled(result.stdout, "Brief")
+    assert [line for line in brief.splitlines() if line.startswith("### ")] == [
         "### coverage",
         "### principles",
         "### unknowns",
