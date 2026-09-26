@@ -58,9 +58,34 @@ def test_checked_measures_the_body_as_it_is_written():
     assert f"the limit is {BODY_LIMIT}" in str(refused.value)
 
 
+def test_the_size_refusal_names_the_fold_and_what_to_cut():
+    body = VALID + "x" * (BODY_LIMIT - len(VALID))
+    written = sections.render(*sections.parse(body))
+    over = len(written) - BODY_LIMIT
+
+    with pytest.raises(Refusal) as refused:
+        lint.checked(body)
+
+    message = str(refused.value)
+    assert "once the Plan is folded" in message
+    assert f"(the file is {BODY_LIMIT})" in message
+    assert f"cut {over}" in message
+
+
 def test_a_missing_section_reports_only_itself():
     failures = lint.lint(INVALID)
     assert [f for f in failures if "Plan" in f] == ["missing section: Plan"]
+
+
+def test_a_section_at_the_wrong_heading_level_is_named_rather_than_missing():
+    body = VALID.replace("### Story", "## Story")
+    problems = lint.lint(body)
+    assert "section Story is a '## ' heading; the sections are '### '" in problems
+    assert "missing section: Story" not in problems
+
+
+def test_the_rules_state_the_heading_level():
+    assert any("'### '" in rule for rule in lint.RULES)
 
 
 def test_an_empty_body_reports_one_message_per_section():
@@ -149,7 +174,7 @@ def test_a_crlf_body_over_the_limit_reports_the_lf_character_count():
     need = BODY_LIMIT - len(base) + 2
     body = sections.replace(VALID, "Notes", "x" * need)
     assert len(body) == BODY_LIMIT + 1
-    expected = f"body is {BODY_LIMIT + 1} characters; the limit is {BODY_LIMIT}"
+    expected = f"body is {BODY_LIMIT + 1} characters; the limit is {BODY_LIMIT}; cut 1"
     assert expected in lint.lint(body)
     assert expected in lint.lint(body.replace("\n", "\r\n"))
 
