@@ -55,17 +55,18 @@ claude --plugin-dir .        # then /reload-plugins after edits
 
 ## Releases
 
-Every change that reaches `main` and touches what users install (`skills/`, `agents/`, `deckhand/`,
-`bin/`, or the manifests) is a release, and a release is one commit and one tag:
+Nothing is committed to `main`. Every change is a branch and a pull request, squash merged, so the
+pull request title becomes the commit subject and is a conventional subject under 72 characters. A
+change to this repository is not a deckhand story; its design and plan stay in the scratchpad.
 
-1. Bump the version in `pyproject.toml`, `deckhand/__init__.py`, `.claude-plugin/plugin.json`, and
-   both `version` fields of `.claude-plugin/marketplace.json`; semver from the conventional type of
-   what landed (`fix` patch, `feat` minor, `!` or `BREAKING CHANGE` major); `tests/test_cli.py`
-   fails when the five disagree
-2. Commit as `chore(release): X.Y.Z` with no other change in it
-3. `git tag -a vX.Y.Z -m "deckhand X.Y.Z"` on that commit, then push `main` and the tag
+The release is the `chore(release): X.Y.Z` pull request that release-please opens and keeps up to
+date as work merges. It bumps the version in `pyproject.toml`, `deckhand/__init__.py`,
+`.claude-plugin/plugin.json` and `.release-please-manifest.json`, and writes the `CHANGELOG.md`
+entry. Merging it creates the tag and the GitHub Release. The number is computed from the
+conventional types that landed: `fix` a patch, `feat` a minor, `!` or `BREAKING CHANGE` a major. A
+type the changelog hides, such as `ci`, `chore`, `docs` or `test`, releases nothing on its own.
 
-Never leave a user-facing change on `main` untagged; the marketplace installs by tag.
+`tests/test_cli.py` fails when those four disagree.
 
 ## Common Mistakes
 
