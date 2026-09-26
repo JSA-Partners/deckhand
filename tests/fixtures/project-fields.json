@@ -9,9 +9,12 @@
             { "id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT",
               "options": [
                 { "id": "opt_draft", "name": "Draft", "color": "GRAY" },
+                { "id": "opt_refinement", "name": "Refinement", "color": "PURPLE" },
+                { "id": "opt_ready", "name": "Ready", "color": "PINK" },
                 { "id": "opt_backlog", "name": "Backlog", "color": "GRAY" },
                 { "id": "opt_inprogress", "name": "In Progress", "color": "BLUE" },
                 { "id": "opt_pending", "name": "Pending Review", "color": "YELLOW" },
+                { "id": "opt_verification", "name": "Verification", "color": "ORANGE" },
                 { "id": "opt_done", "name": "Done", "color": "GREEN" }
               ] },
             { "id": "PVTF_LABELS", "name": "Labels", "dataType": "LABELS" },

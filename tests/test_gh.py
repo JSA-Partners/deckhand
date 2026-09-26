@@ -194,6 +194,14 @@ def test_project_fields_is_empty_when_the_owner_root_answers_nothing(fake_gh, tm
     assert gh.project_fields(settings) == []
 
 
+def test_workflows_reads_each_name_and_whether_it_is_enabled(fake_gh, settings):
+    found = gh.workflows(settings)
+
+    assert found["Item closed"] is True
+    assert found["Pull request merged"] is False
+    assert len(found) == 5
+
+
 def test_update_single_select_sends_the_options_as_json_on_stdin(fake_gh, gh_calls, settings):
     options = [{"id": "opt_feat", "name": "feat", "color": "GREEN", "description": ""}]
 
@@ -212,6 +220,22 @@ def test_merge_settings_reads_the_repository_object(fake_gh, gh_calls):
     assert data["allow_squash_merge"] is True
     assert data["squash_merge_commit_message"] == "PR_BODY"
     assert gh_calls() == ["api repos/acme/widgets"]
+
+
+def test_labels_lists_the_names(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "bug"}, {"name": "deckhand"}]))
+    assert gh.labels("acme/widgets") == ["bug", "deckhand"]
+
+
+def test_labels_is_empty_when_the_repository_has_none(fake_gh):
+    assert gh.labels("acme/widgets") == []
+
+
+def test_create_label_passes_the_color_and_description(fake_gh, gh_calls):
+    gh.create_label("acme/widgets", "deckhand", "5319e7", "A story deckhand runs")
+    calls = "\n".join(gh_calls())
+    assert "label create deckhand --repo acme/widgets --color 5319e7" in calls
+    assert "A story deckhand runs" in calls
 
 
 def test_field_returns_the_named_field(fake_gh, settings):

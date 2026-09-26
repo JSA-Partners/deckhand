@@ -7,7 +7,7 @@ from deckhand.checklist import Item
 from tests.conftest import FIXTURES
 
 REPO = "acme/widgets"
-NAMES = ["Status options", "Board view fields", "Kind colors", "Merge settings"]
+NAMES = ["Status options", "Board view fields", "Kind colors", "Workflows", "Label", "Merge settings"]
 
 
 def _fields(**changes) -> list[dict]:
@@ -34,6 +34,21 @@ def _merges(tmp_path, name, monkeypatch, **changes) -> None:
     path = tmp_path / name
     path.write_text(json.dumps({**data, **changes}))
     monkeypatch.setenv("GH_REPO_SETTINGS_FILE", str(path))
+
+
+def _settled(tmp_path, monkeypatch) -> None:
+    """Satisfy the two facts the board cannot carry: every Status workflow off and the marker label there.
+
+    A fresh project has those workflows on and no label, which is what the fixtures hold, so a test
+    about a finished project says so.
+    """
+    data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
+    for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
+        node["enabled"] = node["name"] == "Auto-archive items"
+    path = tmp_path / "workflows-off.json"
+    path.write_text(json.dumps(data))
+    monkeypatch.setenv("GH_WORKFLOWS_FILE", str(path))
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "deckhand"}]))
 
 
 def _item(items: list[Item], name: str) -> Item:
@@ -82,11 +97,13 @@ def test_kind_update_carries_every_option_by_id_and_keeps_what_a_person_added():
 # --- the items ----------------------------------------------------------
 
 
-def test_every_item_is_done_with_the_fixtures(fake_gh, settings):
+def test_every_item_is_done_with_a_finished_project(fake_gh, settings, tmp_path, monkeypatch):
+    _settled(tmp_path, monkeypatch)
+
     items = checklist.checklist(settings, REPO, gh.project_fields(settings))
 
     assert [item.name for item in items] == NAMES
-    assert [item.left for item in items] == [None, None, None, None]
+    assert [item.left for item in items] == [None] * len(NAMES)
     assert not any(item.unknown for item in items)
 
 
@@ -97,7 +114,22 @@ def test_each_item_names_its_click(fake_gh, settings):
         "Project > Settings > Status",
         "Board view > view menu > Fields",
         "Project > Settings > Kind",
+        "Project > Settings > Workflows",
+        "Repository > Issues > Labels",
         "Repository > Settings > General > Pull Requests",
+    ]
+
+
+def test_the_status_options_are_the_eight_columns():
+    assert checklist.STATUS_OPTIONS == [
+        "Draft",
+        "Refinement",
+        "Ready",
+        "Backlog",
+        "In Progress",
+        "Pending Review",
+        "Verification",
+        "Done",
     ]
 
 
@@ -108,7 +140,10 @@ def test_status_options_left_names_the_current_ones(fake_gh, settings):
 
     item = _item(checklist.checklist(settings, REPO, _fields(Status=status)), "Status options")
 
-    assert item.left == "set to Draft, Backlog, In Progress, Pending Review, Done (currently: Backlog, Done)"
+    assert item.left == (
+        "set to Draft, Refinement, Ready, Backlog, In Progress, Pending Review, Verification, Done "
+        "(currently: Backlog, Done)"
+    )
 
 
 def test_status_options_left_says_none_when_status_has_no_options(fake_gh, settings):
@@ -196,6 +231,40 @@ def test_kind_colors_left_says_a_kind_of_the_wrong_type(fake_gh, settings):
     item = _item(checklist.checklist(settings, REPO, _fields(Kind={"dataType": "NUMBER"})), "Kind colors")
 
     assert item.left == "Kind is NUMBER, not a single select"
+
+
+def test_the_workflows_item_names_the_ones_still_on(fake_gh, settings):
+    item = _item(checklist.checklist(settings, REPO, []), "Workflows")
+
+    assert item.left == "turn off Item added to project, Item closed"
+
+
+def test_the_workflows_item_ignores_auto_archive(fake_gh, settings):
+    item = _item(checklist.checklist(settings, REPO, []), "Workflows")
+
+    assert "Auto-archive" not in (item.left or "")
+
+
+def test_the_workflows_item_is_unknown_when_they_cannot_be_read(fake_gh, settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("GH_WORKFLOWS_FILE", str(tmp_path / "gone.json"))
+
+    item = _item(checklist.checklist(settings, REPO, []), "Workflows")
+
+    assert item.unknown and item.left.startswith("unknown (")
+
+
+def test_the_label_item_says_when_the_marker_is_missing(fake_gh, settings):
+    item = _item(checklist.checklist(settings, REPO, []), "Label")
+
+    assert item.left == "create deckhand; apply creates it"
+
+
+def test_the_label_item_is_done_when_the_marker_is_there(fake_gh, monkeypatch, settings):
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "deckhand"}]))
+
+    item = _item(checklist.checklist(settings, REPO, []), "Label")
+
+    assert item.left is None
 
 
 def test_merge_settings_left_names_what_is_off(fake_gh, settings, tmp_path, monkeypatch):

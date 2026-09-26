@@ -20,7 +20,23 @@ def fleet_env(fake_gh, tmp_path, monkeypatch):
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
     monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "sessions"))
     (tmp_path / "sessions").mkdir()
+    _settled(tmp_path, monkeypatch)
     return tmp_path
+
+
+def _settled(tmp_path, monkeypatch) -> None:
+    """Satisfy the two setup facts the board cannot carry, so a fleet owes nothing by default.
+
+    A fresh project has the Status workflows on and no marker label, and the anomalies block reports
+    both, which would put a setup row under every fleet a test reads.
+    """
+    data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
+    for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
+        node["enabled"] = node["name"] == "Auto-archive items"
+    path = tmp_path / "workflows-off.json"
+    path.write_text(json.dumps(data))
+    monkeypatch.setenv("GH_WORKFLOWS_FILE", str(path))
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "deckhand"}]))
 
 
 def _nodes() -> list[dict]:
