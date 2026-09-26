@@ -1,6 +1,6 @@
 # deckhand
 
-[![Version](https://img.shields.io/github/v/tag/JSA-Partners/deckhand?sort=semver&label=version)](https://github.com/JSA-Partners/deckhand/tags)
+[![Version](https://img.shields.io/github/v/release/JSA-Partners/deckhand?label=version)](https://github.com/JSA-Partners/deckhand/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/JSA-Partners/deckhand/ci.yaml?branch=main)](https://github.com/JSA-Partners/deckhand/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/github/license/JSA-Partners/deckhand)](LICENSE)
 

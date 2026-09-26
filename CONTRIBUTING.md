@@ -22,13 +22,13 @@ fake `gh` in `tests/fakes/`.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), with no
 trailers; the commit hook lints them. A commit body and a pull request body are paragraphs on their
 own lines, never wrapped.
-Pull requests are squash merged, and the pull request title and body become the commit on `main`, so
-write them as one. Keep a pull request to one change.
+Pull requests are squash merged, and the pull request title and body become the commit on `main`,
+so write them as one: the title is a conventional subject under 72 characters, because the version
+and the release notes are built from it. Keep a pull request to one change.
 
 ## Releases
 
-Every change on `main` that users install is released: the version is bumped in all five places it
-is written, `pyproject.toml`, `deckhand/__init__.py`, `.claude-plugin/plugin.json`, and both
-`version` fields of `.claude-plugin/marketplace.json`, in one `chore(release): X.Y.Z` commit, tagged
-`vX.Y.Z`. Semver follows the conventional type of the change: `fix` is a patch, `feat` a minor, and
-a breaking change a major.
+Releases are prepared by [release-please](https://github.com/googleapis/release-please). It reads
+the conventional commits on `main` and keeps one `chore(release): X.Y.Z` pull request up to date,
+carrying the version bump and the `CHANGELOG.md` entry. Merging that pull request creates the tag
+and the GitHub Release. Nothing is tagged by hand.

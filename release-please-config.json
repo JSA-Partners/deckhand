@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "include-v-in-tag": true,
+  "include-component-in-tag": false,
+  "pull-request-title-pattern": "chore(release): ${version}",
+  "bootstrap-sha": "71d8e5fd5afcee9f6cf5dc190e6aa4375b05f4b4",
+  "packages": {
+    ".": {
+      "package-name": "deckhand",
+      "extra-files": [
+        { "type": "json", "path": ".claude-plugin/plugin.json", "jsonpath": "$.version" },
+        { "type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name==\"deckhand\")].version" }
+      ]
+    }
+  }
+}
