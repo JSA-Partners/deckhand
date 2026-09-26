@@ -5,14 +5,12 @@
     "url": "https://jsapartners.co"
   },
   "metadata": {
-    "description": "Claude Code plugins by JSA+Partners.",
-    "version": "3.12.0"
+    "description": "Claude Code plugins by JSA+Partners."
   },
   "plugins": [
     {
       "name": "deckhand",
       "description": "A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.",
-      "version": "3.12.0",
       "author": {
         "name": "JSA+Partners",
         "url": "https://jsapartners.co"

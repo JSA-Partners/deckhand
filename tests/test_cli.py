@@ -23,16 +23,20 @@ def test_version_prints_the_package_version():
 
 
 def test_every_version_source_agrees():
-    """A release bumps five strings at once; this is the check the release rule in CLAUDE.md relies on."""
+    """A release bumps the version wherever it is written; this is the check that keeps them together."""
     manifests = ROOT / ".claude-plugin"
-    marketplace = json.loads((manifests / "marketplace.json").read_text(encoding="utf-8"))
     versions = {
         "pyproject.toml": tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
         "plugin.json": json.loads((manifests / "plugin.json").read_text(encoding="utf-8"))["version"],
-        "marketplace.json metadata": marketplace["metadata"]["version"],
-        "marketplace.json plugin": marketplace["plugins"][0]["version"],
     }
     assert all(found == __version__ for found in versions.values()), f"__version__ is {__version__}; {versions}"
+
+
+def test_the_marketplace_entry_carries_no_version():
+    """Claude Code reads plugin.json's version; a second copy in the entry is what validate warns about."""
+    marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    assert "version" not in marketplace["metadata"]
+    assert "version" not in marketplace["plugins"][0]
 
 
 def test_unknown_command_is_a_usage_error():
