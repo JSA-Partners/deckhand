@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install the dependencies
-        run: uv sync --locked
+        run: uv sync --frozen
       - name: Tests
         run: uv run pytest -q
       - name: Markdown
