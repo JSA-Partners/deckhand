@@ -198,6 +198,13 @@ elif head == "pr list":
     if os.environ.get("GH_PR_EXISTS"):
         respond(json.dumps([{"url": f"https://github.com/{repo}/pull/1000"}]))
     respond(os.environ.get("GH_PR_LIST_BODY", "[]"))
+elif head == "label list":
+    respond(os.environ.get("GH_LABELS", "[]"))
+elif head == "label create":
+    if os.environ.get("GH_LABEL_CREATE_FAILS"):
+        print("could not create label", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
 elif head == "api graphql":
     if "createProjectV2Field" in joined:
         respond('{"data":{"createProjectV2Field":{}}}')

@@ -309,6 +309,21 @@ def merge_settings(repo: str) -> dict[str, Any]:
     return data
 
 
+def labels(repo: str) -> list[str]:
+    """Every label name in `repo`; the first 200, far past what a repository of stories carries."""
+    split_repo(repo)
+    found = json_out("label", "list", "--repo", repo, "--limit", "200", "--json", "name")
+    if not isinstance(found, list):
+        raise GhError(f"expected a list of labels from gh label list --repo {repo}")
+    return [item["name"] for item in found]
+
+
+def create_label(repo: str, name: str, color: str, description: str) -> None:
+    """Create one label. A label that already exists is the caller's to skip; this does not force."""
+    split_repo(repo)
+    run("label", "create", name, "--repo", repo, "--color", color, "--description", description)
+
+
 def field(settings: Settings, name: str) -> dict[str, Any]:
     for item in field_list(settings):
         if item["name"] == name:

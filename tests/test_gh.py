@@ -214,6 +214,22 @@ def test_merge_settings_reads_the_repository_object(fake_gh, gh_calls):
     assert gh_calls() == ["api repos/acme/widgets"]
 
 
+def test_labels_lists_the_names(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "bug"}, {"name": "deckhand"}]))
+    assert gh.labels("acme/widgets") == ["bug", "deckhand"]
+
+
+def test_labels_is_empty_when_the_repository_has_none(fake_gh):
+    assert gh.labels("acme/widgets") == []
+
+
+def test_create_label_passes_the_color_and_description(fake_gh, gh_calls):
+    gh.create_label("acme/widgets", "deckhand", "5319e7", "A story deckhand runs")
+    calls = "\n".join(gh_calls())
+    assert "label create deckhand --repo acme/widgets --color 5319e7" in calls
+    assert "A story deckhand runs" in calls
+
+
 def test_field_returns_the_named_field(fake_gh, settings):
     result = gh.field(settings, "Story Points")
     assert result["id"] == "PVTF_POINTS"
