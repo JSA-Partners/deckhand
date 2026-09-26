@@ -142,7 +142,12 @@ def _workflows_item(settings: Settings) -> Item:
         found = gh.workflows(settings)
     except Exception as error:
         return Item("Workflows", click, f"{UNKNOWN}{reason(error)})")
-    on = [name for name in WORKFLOWS_OFF if found.get(name)]
+    # The project reports only the workflows it holds a record for, and the interface offers more
+    # than that, so a name it does not report is one this cannot answer for rather than one that is off.
+    unreported = [name for name in WORKFLOWS_OFF if name not in found]
+    if unreported:
+        return Item("Workflows", click, f"{UNKNOWN}the project does not report {', '.join(unreported)})")
+    on = [name for name in WORKFLOWS_OFF if found[name]]
     return Item("Workflows", click, f"turn off {', '.join(on)}" if on else None)
 
 
