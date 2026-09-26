@@ -156,10 +156,8 @@ def _branch(kind: str | None, title: str, number: int) -> tuple[str | None, int 
 
 
 def _after_merge_left(story: issue.Issue) -> list[str]:
-    """The After the merge items no `After the merge:` entry has answered yet, in the plan's order."""
-    items = sections.after_merge(story.body)
-    done = sum(1 for entry in log.entries(story) if entry.prefix == "After the merge:")
-    return items[done:]
+    """The After the merge items whose boxes are still unticked, in the plan's order."""
+    return [text for text, ticked in sections.after_merge_items(story.body) if not ticked]
 
 
 def _pull_request(repo: str, story: issue.Issue, branch: str | None) -> tuple[str | None, bool]:
@@ -262,9 +260,9 @@ def _after(story: issue.Issue) -> None:
 def _clear(story: issue.Issue) -> None:
     """What the story still owes before this session is closed, printed on the rows where it is merged.
 
-    The question after a merge is whether anything is left, and three facts answer it: the items no
-    `After the merge:` entry has logged, work in the checkout that is not committed, and whether the
-    session stands in a worktree that the next run from the clone removes.
+    The question after a merge is whether anything is left, and three facts answer it: the items
+    whose boxes are unticked, work in the checkout that is not committed, and whether the session
+    stands in a worktree that the next run from the clone removes.
     """
     owed = []
     left = len(_after_merge_left(story))
