@@ -239,6 +239,19 @@ def test_the_workflows_item_names_the_ones_still_on(fake_gh, settings):
     assert item.left == "turn off Item added to project, Item closed"
 
 
+def test_the_workflows_item_cannot_answer_for_a_workflow_the_project_omits(fake_gh, settings, monkeypatch, tmp_path):
+    """The interface offers more workflows than the project reports, so an absent one is not an off one."""
+    partial = tmp_path / "partial.json"
+    nodes = [{"number": 5, "name": "Auto-archive items", "enabled": True}]
+    partial.write_text(json.dumps({"data": {"organization": {"projectV2": {"workflows": {"nodes": nodes}}}}}))
+    monkeypatch.setenv("GH_WORKFLOWS_FILE", str(partial))
+
+    item = _item(checklist.checklist(settings, REPO, []), "Workflows")
+
+    assert item.unknown
+    assert "does not report" in item.left
+
+
 def test_the_workflows_item_ignores_auto_archive(fake_gh, settings):
     item = _item(checklist.checklist(settings, REPO, []), "Workflows")
 

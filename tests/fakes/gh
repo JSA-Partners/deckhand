@@ -199,7 +199,8 @@ elif head == "pr list":
         respond(json.dumps([{"url": f"https://github.com/{repo}/pull/1000"}]))
     respond(os.environ.get("GH_PR_LIST_BODY", "[]"))
 elif head == "label list":
-    respond(os.environ.get("GH_LABELS", "[]"))
+    # Real gh prints nothing at all for a repository holding no labels, not an empty list.
+    respond(os.environ.get("GH_LABELS", ""))
 elif head == "label create":
     if os.environ.get("GH_LABEL_CREATE_FAILS"):
         print("could not create label", file=sys.stderr)

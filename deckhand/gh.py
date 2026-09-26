@@ -332,9 +332,16 @@ def merge_settings(repo: str) -> dict[str, Any]:
 
 
 def labels(repo: str) -> list[str]:
-    """Every label name in `repo`; the first 200, far past what a repository of stories carries."""
+    """Every label name in `repo`; the first 200, far past what a repository of stories carries.
+
+    A repository holding no labels prints nothing at all rather than an empty list, so empty output
+    is no labels and not a failure to read them.
+    """
     split_repo(repo)
-    found = json_out("label", "list", "--repo", repo, "--limit", "200", "--json", "name")
+    out = run("label", "list", "--repo", repo, "--limit", "200", "--json", "name").strip()
+    if not out:
+        return []
+    found = _parse_json(out)
     if not isinstance(found, list):
         raise GhError(f"expected a list of labels from gh label list --repo {repo}")
     return [item["name"] for item in found]
