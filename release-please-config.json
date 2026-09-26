@@ -9,8 +9,7 @@
     ".": {
       "package-name": "deckhand",
       "extra-files": [
-        { "type": "json", "path": ".claude-plugin/plugin.json", "jsonpath": "$.version" },
-        { "type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name==\"deckhand\")].version" }
+        { "type": "json", "path": ".claude-plugin/plugin.json", "jsonpath": "$.version" }
       ]
     }
   }
