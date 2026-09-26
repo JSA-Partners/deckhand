@@ -61,12 +61,17 @@ change to this repository is not a deckhand story; its design and plan stay in t
 
 The release is the `chore(release): X.Y.Z` pull request that release-please opens and keeps up to
 date as work merges. It bumps the version in `pyproject.toml`, `deckhand/__init__.py`,
-`.claude-plugin/plugin.json` and `.release-please-manifest.json`, and writes the `CHANGELOG.md`
-entry. Merging it creates the tag and the GitHub Release. The number is computed from the
-conventional types that landed: `fix` a patch, `feat` a minor, `!` or `BREAKING CHANGE` a major. A
-type the changelog hides, such as `ci`, `chore`, `docs` or `test`, releases nothing on its own.
+`.claude-plugin/plugin.json`, `.release-please-manifest.json` and `uv.lock`, and writes the
+`CHANGELOG.md` entry. Merging it creates the tag and the GitHub Release. The number is computed
+from the conventional types that landed: `fix` a patch, `feat` a minor, `!` or `BREAKING CHANGE` a
+major. `uv.lock` records the project's own version, so CI's `uv sync --locked` is what catches a
+release that failed to bump it.
 
-`tests/test_cli.py` fails when those four disagree.
+The changelog hides `refactor`, `chore`, `test`, `build`, `style` and `ci`, so a change of one of
+those types opens no release on its own and ships with the next one. A refactor of what users
+install reaches them when the next fix or feature does.
+
+`tests/test_cli.py` fails when the version strings disagree.
 
 ## Common Mistakes
 

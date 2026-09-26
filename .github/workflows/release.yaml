@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}
+
 permissions:
   contents: write
   issues: write
@@ -13,6 +16,7 @@ jobs:
   release-please:
     name: Prepare the release pull request
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: googleapis/release-please-action@v4
         with:
