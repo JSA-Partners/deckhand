@@ -7,7 +7,9 @@ session as the three files the session wrote, joins them itself, validates every
 writes anything, and posts one `Review:` log entry: the verdict on the story as a whole, which
 lenses the same selection ran with the silent ones marked clean, then every finding on a line with
 the person's decision beside it and the skeptic's rejection marked. Neither agent's lines are
-retyped on the way, so a format only one of them keeps cannot cost a finding.
+retyped on the way, so a format only one of them keeps cannot cost a finding. A story that has
+been reviewed is Ready, whatever the verdict says: the verdict is a sentence, and a review asking
+for changes reaches `amend`, which moves the story back to Refinement itself.
 """
 
 from __future__ import annotations
@@ -18,9 +20,19 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from deckhand import fields, gh, invoke, issue, sections
 from deckhand import findings as findings_file
-from deckhand import gh, invoke, issue, sections
-from deckhand.step import PLUGIN_ROOT, Refusal, draft_line, read_draft, refuse_stub, spill, step, usable
+from deckhand.step import (
+    PLUGIN_ROOT,
+    Refusal,
+    draft_line,
+    read_draft,
+    refuse_stub,
+    resolved_settings,
+    spill,
+    step,
+    usable,
+)
 
 FINDING_FORMAT = (
     "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
@@ -236,4 +248,6 @@ def apply(args: argparse.Namespace) -> int:
         found = findings_file.judged(found, read_draft(args.verdicts))
         decided = findings_file.decisions(read_draft(args.decisions), found)
     print(issue.comment(repo, args.issue, comment_body(verdict, ran, found, decided)))
+    # Every verdict reaches Ready: it is a sentence, not data, and an amend is what moves a story back.
+    print(fields.set_field(resolved_settings(), repo, args.issue, "Status", "Ready"))
     return 0
