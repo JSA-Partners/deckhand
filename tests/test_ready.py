@@ -433,7 +433,7 @@ def test_apply_records_dependencies_checks_the_board_and_sets_the_fields(fake_gh
     assert result.returncode == 0, result.stderr
     assert _calls(gh_calls) == [
         "repo view --json nameWithOwner",
-        "issue view 248 --repo acme/widgets --json number,title,body,url,state,comments",
+        "issue view 248 --repo acme/widgets --json number,title,body,url,state,comments,labels",
         "issue view 240 --repo acme/widgets --json state,body",
         "api repos/acme/widgets/issues/240",
         "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156",

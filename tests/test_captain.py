@@ -44,6 +44,18 @@ def _nodes() -> list[dict]:
     return data["data"]["organization"]["projectV2"]["items"]["nodes"]
 
 
+def _clean_nodes() -> list[dict]:
+    data = json.loads((FIXTURES / "captain-clean.json").read_text(encoding="utf-8"))
+    return data["data"]["organization"]["projectV2"]["items"]["nodes"]
+
+
+def _items(tmp_path, name, nodes) -> dict[str, str]:
+    """The board-items fixture rebuilt from `nodes`, as env."""
+    path = tmp_path / name
+    path.write_text(json.dumps({"data": {"organization": {"projectV2": {"items": {"nodes": nodes}}}}}))
+    return {"GH_PROJECT_ITEMS_FILE": str(path)}
+
+
 def _project_fields_file(tmp_path, name, nodes):
     path = tmp_path / name
     path.write_text(json.dumps({"data": {"organization": {"projectV2": {"fields": {"nodes": nodes}}}}}))
@@ -213,6 +225,58 @@ def test_a_repair_with_nothing_to_repair_refuses(fleet_env, monkeypatch, capsys)
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-clean.json"))
     assert cli.main(["captain", "apply", "--repair"]) == 1
     assert "nothing to repair" in capsys.readouterr().err
+
+
+def _foreign() -> dict:
+    """A board item for an issue the process never wrote to: no log, no marker, and a column of its own."""
+    return {
+        "id": "I_96",
+        "content": {
+            "number": 96,
+            "title": "Client-side CSV export",
+            "url": "https://github.com/acme/widgets/issues/96",
+            "state": "OPEN",
+            "closedAt": None,
+            "repository": {"nameWithOwner": REPO},
+            "labels": {"nodes": []},
+            "comments": {"nodes": []},
+        },
+        "fieldValues": {"nodes": [{"name": "Backlog", "field": {"name": "Status"}}]},
+    }
+
+
+def _without_labels(nodes: list[dict]) -> list[dict]:
+    """The same items with no label on any of them, as a repository nobody has backfilled holds them."""
+    return [{**node, "content": {**node["content"], "labels": {"nodes": []}}} for node in nodes]
+
+
+def test_repair_marks_a_story_the_process_wrote_to(fleet_env, gh_calls, capsys):
+    """The board cannot say an issue is deckhand's, so the label does, and repair puts it right."""
+    assert cli.main(["captain", "apply", "--repair"]) == 0
+
+    assert "issue edit 120 --repo acme/widgets --add-label deckhand" in gh_calls()
+    assert "acme/widgets#120 label deckhand" in capsys.readouterr().out
+
+
+def test_repair_leaves_an_untouched_issue_unmarked(fleet_env, gh_calls, monkeypatch, tmp_path):
+    """An issue the process never wrote to is not deckhand's, whatever column it sits in."""
+    for name, value in _items(tmp_path, "foreign-items.json", [*_nodes(), _foreign()]).items():
+        monkeypatch.setenv(name, value)
+
+    assert cli.main(["captain", "apply", "--repair"]) == 0
+
+    marked = [call for call in gh_calls() if "--add-label" in call]
+    assert marked and not [call for call in marked if " 96 " in call]
+
+
+def test_repair_with_only_the_marker_missing_is_not_nothing_to_repair(fleet_env, monkeypatch, tmp_path, capsys):
+    """The refusal counts the marker too, or a board needing only labels would refuse to be fixed."""
+    for name, value in _items(tmp_path, "unmarked-items.json", _without_labels(_clean_nodes())).items():
+        monkeypatch.setenv(name, value)
+
+    assert cli.main(["captain", "apply", "--repair"]) == 0
+
+    assert "acme/widgets#253 label deckhand" in capsys.readouterr().out
 
 
 def test_blocking_a_boarded_story_records_the_dependency(fake_gh, gh_calls, capsys):

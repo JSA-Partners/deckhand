@@ -14,7 +14,7 @@ from typing import Any
 
 from deckhand import gh
 
-VIEW_FIELDS = "number,title,body,url,state,comments"
+VIEW_FIELDS = "number,title,body,url,state,comments,labels"
 
 _ISSUE_URL = re.compile(r"https://\S+/issues/([0-9]+)(?:#\S+)?")
 
@@ -38,6 +38,7 @@ class Issue:
     url: str
     state: str
     comments: list[Comment]
+    labels: tuple[str, ...] = ()
 
 
 @contextmanager
@@ -79,6 +80,7 @@ def view(repo: str, number: int) -> Issue:
         url=data.get("url") or "",
         state=data.get("state") or "",
         comments=[_comment(raw) for raw in data.get("comments") or []],
+        labels=tuple(str(raw.get("name") or "") for raw in data.get("labels") or []),
     )
 
 
@@ -124,6 +126,15 @@ def assign(repo: str, number: int, login: str = "@me") -> None:
     """
     gh.split_repo(repo)
     gh.run("issue", "edit", str(number), "--repo", repo, "--add-assignee", login)
+
+
+def add_label(repo: str, number: int, name: str) -> None:
+    """Add `name` to the issue's labels, leaving the ones already there alone.
+
+    GitHub takes a label it already holds as a no-op, so a story marked twice costs nothing.
+    """
+    gh.split_repo(repo)
+    gh.run("issue", "edit", str(number), "--repo", repo, "--add-label", name)
 
 
 def close(repo: str, number: int) -> None:

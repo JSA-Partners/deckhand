@@ -1,11 +1,11 @@
 """The captain: one reading of every story, every working session, the build order, and what slipped.
 
 `context` prints four blocks and never fails, because it is what an open session reruns every time a
-person asks where things stand; `--only` prints one of them alone. `apply` writes three things and no
-more: the order onto the board, a Status the board holds that the story's log does not allow, and a
-blocker added to or dropped from a boarded story. Everything else it finds is reported with the
-command that would fix it, because every other write is a step's, and a step is reached through
-`next`.
+person asks where things stand; `--only` prints one of them alone. `apply` writes the board and no
+more: the order onto it, a Status the board holds that the story's log does not allow, the label that
+says a story is this process's business, and a blocker added to or dropped from a boarded story.
+Everything else it finds is reported with the command that would fix it, because every other write is
+a step's, and a step is reached through `next`.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import math
 import os
 import statistics
 
-from deckhand import board, checklist, config, edges, fields, fleet, forecast, gh, sessions
+from deckhand import board, checklist, config, edges, fields, fleet, forecast, gh, issue, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -307,7 +307,7 @@ def context(args: argparse.Namespace) -> int:
 
 def _configure_apply(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--order", action="store_true", help="write the build order onto the board")
-    parser.add_argument("--repair", action="store_true", help="set every Status the board holds that its log forbids")
+    parser.add_argument("--repair", action="store_true", help="put right every Status, label, and item owed")
     parser.add_argument("--block", type=issue_number, metavar="N", help="the boarded story that gains a blocker")
     parser.add_argument("--unblock", type=issue_number, metavar="N", help="the boarded story that loses one")
     parser.add_argument("--by", metavar="REF", help="the blocker, owner/name#M or M for this repository")
@@ -327,26 +327,37 @@ def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
     return len(ranked)
 
 
+def _unmarked(read: fleet.Fleet) -> list[fleet.Story]:
+    """Stories the process has written to whose label does not say so yet."""
+    name, _, _ = checklist.LABEL
+    return [story for story in read.stories if fleet.touched(story) and name not in story.issue.labels]
+
+
 def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
     wrong = [
         (story, fleet.allowed(story)[0])
         for story in read.stories
         if story.status and story.status not in fleet.allowed(story)
     ]
-    if not wrong and not read.missing:
+    unmarked = _unmarked(read)
+    if not wrong and not read.missing and not unmarked:
         raise Refusal(
             f"nothing to repair: every Status of the {len(read.stories)} stories agrees with its log, "
-            "and no drafted issue is off the board"
+            "every story the process wrote to carries the label, and no drafted issue is off the board"
         )
     for story, want in wrong:
         # Several stories may be put right in one run, so the line names which one rather than
         # returning the bare `Status=X` a step prints about the story a person already named.
         fields.set_field(settings, story.repo, story.number, "Status", want)
         print(f"{story.repo}#{story.number} Status {want}")
+    label, _, _ = checklist.LABEL
+    for story in unmarked:
+        issue.add_label(story.repo, story.number, label)
+        print(f"{story.repo}#{story.number} label {label}")
     for repo, number, url in read.missing:
         board.add(settings, url)
         print(f"Added {repo}#{number} to the board")
-    return len(wrong) + len(read.missing)
+    return len(wrong) + len(unmarked) + len(read.missing)
 
 
 @step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)

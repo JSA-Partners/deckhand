@@ -20,6 +20,7 @@ ITEMS_QUERY = (
     "projectV2(number:$number){ items(first:50, after:$endCursor){ "
     "pageInfo{ hasNextPage endCursor } nodes{ id "
     "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
+    "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
     "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
@@ -79,6 +80,7 @@ def _issue(content: dict) -> issue.Issue:
             )
             for raw in comments
         ],
+        labels=tuple(str(node.get("name") or "") for node in (content.get("labels") or {}).get("nodes") or []),
     )
 
 
