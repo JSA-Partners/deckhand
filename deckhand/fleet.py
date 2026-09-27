@@ -188,6 +188,10 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         return "building"
     if story.status == "Backlog":
         return "ready"
+    if story.status == VERIFICATION:
+        left = sum(1 for _, ticked in sections.after_merge_items(story.issue.body) if not ticked)
+        items = "item" if left == 1 else "items"
+        return f"merged, {left} {items} left"
     if story.status == DONE and story.closed:
         return "done"
     return "reviewed, not boarded" if log.last(story.issue, "Review:") is not None else "review not run"

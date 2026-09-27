@@ -155,7 +155,8 @@ request section again: finish pushes and keeps the pull request.
 ## After the merge
 
 On a merged story with items left, walk them one at a time, doing what can be done here and asking
-for what is theirs, logging `After the merge: <item>` as each is done, or deferred with where it went, so the story
-closes. When nothing is left, say the story is finished and name the next story the briefing gave.
+for what is theirs. Run `after apply $issue --item <n>` as each is done, which ticks the box and
+logs `After the merge:`. When nothing is left, say the story is finished and name the next story the
+briefing gave.
 Read the briefing's `Clear:` line out either way, so they hear what is owed without asking.
 With no story in hand, `/deckhand:captain` says what to pick up next across every repository.
