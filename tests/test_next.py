@@ -523,13 +523,13 @@ def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, rep
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done")})
 
     lines = _briefing(result, "after", "#248 is merged; 1 after-the-merge item is left.")
-    assert lines[5:] == [
+    assert lines[5:7] == [
         f"  2026-09-05 Pull request: {PR_URL}",
         "  2026-09-06 After the merge: proved the script on main",
-        "Left:",
-        "  - Revoke the token",
-        "Clear: 1 after-the-merge item left",
     ]
+    assert "  1. [x] Prove the script on main" in lines
+    assert "  2. [ ] Revoke the token" in lines
+    assert lines[-2:] == ["Apply: deckhand after apply 248 --item 2", "Clear: 1 after-the-merge item left"]
 
 
 def test_the_items_left_come_from_the_boxes_without_any_log_entry(fake_gh, repo, tmp_path):
@@ -546,7 +546,11 @@ def test_the_items_left_come_from_the_boxes_without_any_log_entry(fake_gh, repo,
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done")})
 
     lines = _briefing(result, "after", "#248 is merged; 1 after-the-merge item is left.")
-    assert lines[-3:] == ["Left:", "  - Revoke the token", "Clear: 1 after-the-merge item left"]
+    # The boxes are what say an item is done, so the context names the second one with no log entry
+    # about the first anywhere on the issue.
+    assert "  1. [x] Prove the script on main" in lines
+    assert "  2. [ ] Revoke the token" in lines
+    assert lines[-2:] == ["Apply: deckhand after apply 248 --item 2", "Clear: 1 after-the-merge item left"]
 
 
 def test_a_merged_story_with_every_item_ticked_is_done(fake_gh, repo, tmp_path):

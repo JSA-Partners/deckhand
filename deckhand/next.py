@@ -27,6 +27,7 @@ from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, 
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
 CONTEXT_OF = {
+    "after": "after",
     "fix": "start",
     "write": "new",
     "settle": "new",
@@ -250,13 +251,6 @@ def _context(name: str, number: int) -> None:
         print(f"  unavailable ({reason(error)})")
 
 
-def _after(story: issue.Issue) -> None:
-    """The After the merge items still to do, each one a line."""
-    print("Left:")
-    for item in _after_merge_left(story):
-        print(f"  - {item}")
-
-
 def _clear(story: issue.Issue) -> None:
     """What the story still owes before this session is closed, printed on the rows where it is merged.
 
@@ -369,9 +363,10 @@ def context(args: argparse.Namespace) -> int:
     _log_block(story)
     if name in CONTEXT_OF:
         _context(name, number)
-    elif name == "after" and story:
-        _after(story)
-        _clear(story)
+        # The after context lists the items and names the tick, so only what the session still owes
+        # beyond them is added here.
+        if name == "after" and story:
+            _clear(story)
     elif name == "done" and repo:
         if story:
             _clear(story)

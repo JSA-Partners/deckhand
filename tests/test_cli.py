@@ -188,6 +188,7 @@ def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
     commands = next(a for a in cli.build_parser()._actions if getattr(a, "choices", None)).choices
 
     assert {name: _verbs(sub) for name, sub in commands.items()} == {
+        "after": ["apply", "context"],
         "amend": ["apply", "context"],
         "captain": ["apply", "context"],
         "log": [],
