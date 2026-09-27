@@ -1,7 +1,7 @@
 """The fleet: every story on the project, the order to build them in, and what does not add up.
 
 The captain asks the project for its items with a query of its own rather than the shared one,
-because it needs each issue's comments beside its fields: that way every story's log arrives with
+because it needs each issue's body and comments beside its fields: that way every story's log arrives with
 the board in a single paginated read instead of one read per story.
 """
 
@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from deckhand import board, gh, issue, log, sessions, step
+from deckhand import board, gh, issue, log, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -19,7 +19,7 @@ ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
     "projectV2(number:$number){ items(first:50, after:$endCursor){ "
     "pageInfo{ hasNextPage endCursor } nodes{ id "
-    "content{ ... on Issue{ number title url state closedAt repository{ nameWithOwner } "
+    "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
     "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
@@ -30,6 +30,7 @@ ITEMS_QUERY = (
 )
 
 DONE = "Done"
+VERIFICATION = "Verification"
 
 _PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
@@ -67,7 +68,7 @@ def _issue(content: dict) -> issue.Issue:
     return issue.Issue(
         number=content["number"],
         title=content.get("title") or "",
-        body="",
+        body=content.get("body") or "",
         url=content.get("url") or "",
         state=content.get("state") or "",
         comments=[
@@ -142,16 +143,19 @@ def allowed(story: Story) -> tuple[str, ...]:
     Every status is written by a step's apply, so a board holding anything else was moved by
     something that was not a step. Boarding is the one place a person's answer sits between two
     statuses: a reviewed story is Backlog once the question has been answered and Draft until then.
+    A merged story is the other: `after` ticks one box at a time, so Verification and Done are both
+    places to be, and the after-the-merge boxes say which of them the story belongs in.
     """
     if story.closed:
-        return (DONE,)
+        owed = any(not ticked for _, ticked in sections.after_merge_items(story.issue.body))
+        return (VERIFICATION, DONE) if owed else (DONE, VERIFICATION)
     if log.last(story.issue, "Pull request:") is not None:
         return ("Pending Review",)
     if log.last(story.issue, "Started:") is not None:
         return ("In Progress",)
     if log.last(story.issue, "Review:") is not None:
-        return ("Backlog", "Draft")
-    return ("Draft",)
+        return ("Ready", "Backlog", "Draft")
+    return ("Draft", "Refinement")
 
 
 def touched(story: Story) -> bool:

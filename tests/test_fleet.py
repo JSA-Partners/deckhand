@@ -48,11 +48,13 @@ def test_a_story_with_a_pull_request_is_pending_review():
 
 
 def test_a_reviewed_story_may_still_be_waiting_to_be_boarded():
-    assert fleet.allowed(_story(253)) == ("Backlog", "Draft")
+    """Review leaves a story in Ready, so that is what a repair writes: boarding needs a kind and points."""
+    assert fleet.allowed(_story(253)) == ("Ready", "Backlog", "Draft")
 
 
 def test_a_story_with_only_a_draft_entry_is_a_draft():
-    assert fleet.allowed(_story(268)) == ("Draft",)
+    """An amend moves a drafting story to Refinement, so that is a place to be and not an anomaly."""
+    assert fleet.allowed(_story(268)) == ("Draft", "Refinement")
 
 
 def test_a_backlog_story_with_no_blocker_is_ready():
@@ -284,6 +286,56 @@ def _foreign(status: str) -> list[dict]:
             "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
         }
     ]
+
+
+def _closed(status: str, plan: str = "") -> list[dict]:
+    """A board item for a story whose pull request merged, with `plan` as its Plan."""
+    return [
+        {
+            "id": "I_301",
+            "content": {
+                "number": 301,
+                "title": "Filter the grant lookup",
+                "url": "https://github.com/acme/widgets/issues/301",
+                "state": "CLOSED",
+                "closedAt": "2026-09-20T09:00:00Z",
+                "body": f"### Plan\n\n{plan}",
+                "repository": {"nameWithOwner": REPO},
+                "comments": {
+                    "nodes": [
+                        {
+                            "body": "Drafted: from a request",
+                            "createdAt": "2026-09-15T00:00:00Z",
+                            "author": {"login": "mjm"},
+                        }
+                    ]
+                },
+            },
+            "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
+        }
+    ]
+
+
+OWED = "### After the merge\n\n- [ ] Deploy the migration\n"
+
+
+def test_a_closed_story_left_in_pending_review_is_an_anomaly():
+    """Nothing runs when GitHub closes the issue on merge, so a story nobody revisits is caught here."""
+    found = fleet.anomalies(fleet.stories(_closed("Pending Review")), {}, set(), [])
+
+    assert [(item.number, item.fix) for item in found] == [(301, "Status Done")]
+
+
+def test_a_closed_story_with_items_left_wants_verification():
+    """The column a repair writes follows the boxes, not the fact that it is closed."""
+    found = fleet.anomalies(fleet.stories(_closed("Pending Review", OWED)), {}, set(), [])
+
+    assert [(item.number, item.fix) for item in found] == [(301, "Status Verification")]
+
+
+def test_a_closed_story_in_verification_is_no_anomaly():
+    """Items left after the merge is a real place to be, not a fault."""
+    assert fleet.anomalies(fleet.stories(_closed("Verification", OWED)), {}, set(), []) == []
 
 
 def test_an_issue_the_process_never_touched_is_not_judged():
