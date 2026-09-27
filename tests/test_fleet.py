@@ -26,6 +26,13 @@ def test_a_row_carries_the_board_fields_and_the_issue():
     assert [comment.body for comment in found[253].issue.comments][0] == "Drafted: from a request"
 
 
+def test_a_row_carries_the_labels_the_issue_holds():
+    """The board cannot say which of its issues are the process's business, so the read carries the labels."""
+    found = {story.number: story for story in fleet.stories(_nodes())}
+    assert found[253].issue.labels == ("deckhand",)
+    assert found[120].issue.labels == ()
+
+
 def test_a_story_without_points_says_so():
     assert {story.number: story for story in fleet.stories(_nodes())}[268].points is None
 

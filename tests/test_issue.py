@@ -39,7 +39,12 @@ def test_view_parses_comments(fake_gh, gh_calls):
         ("arjan", "2026-09-01T12:00:00Z"),
     ]
     assert result.comments[1].body == "Approved."
-    assert gh_calls() == ["issue view 248 --repo acme/widgets --json number,title,body,url,state,comments"]
+    assert gh_calls() == ["issue view 248 --repo acme/widgets --json number,title,body,url,state,comments,labels"]
+
+
+def test_view_carries_the_labels(fake_gh):
+    """A board holds issues that are not the process's business, and only a label can say which are."""
+    assert issue.view(REPO, 248).labels == ("deckhand",)
 
 
 # --- sibling ----------------------------------------------------------------
