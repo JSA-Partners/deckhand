@@ -24,6 +24,7 @@ _DETAILS_TAG = re.compile(r"<details[^>]*>|</details>")
 # The Plan's closing block: what is owed once the pull request has merged, one `- ` bullet each.
 _AFTER_MERGE = re.compile(r"^### After the merge\s*$", re.MULTILINE)
 _CHECKBOX = re.compile(r"^\[[ xX]\]\s+")
+_TICKED = re.compile(r"^\[[xX]\]\s+")
 
 # `get` has to tell "no default" from a default of None, and None is a default a caller wants.
 _RAISE = object()
@@ -140,15 +141,16 @@ def replace(text: str, name: str, content: str) -> str:
     return render(preamble, parsed)
 
 
-def after_merge(body: str) -> list[str]:
-    """The items of the Plan's closing "After the merge" block, in order; empty without one.
-
-    The block is `- ` bullets, one item each; a checkbox a plan puts in front of one is not part of
-    the item, ticked or not, since the log is where an item is marked done.
-    """
+def after_merge_items(body: str) -> list[tuple[str, bool]]:
+    """Each After the merge item with whether its box is ticked; a bullet with no box is not ticked."""
     plan = get(body, "Plan", "")
     match = _AFTER_MERGE.search(plan)
     if match is None:
         return []
     bullets = [line[2:].strip() for line in plan[match.end() :].splitlines() if line.startswith("- ")]
-    return [_CHECKBOX.sub("", bullet) for bullet in bullets]
+    return [(_CHECKBOX.sub("", bullet), bool(_TICKED.match(bullet))) for bullet in bullets]
+
+
+def after_merge(body: str) -> list[str]:
+    """The items of the Plan's closing "After the merge" block, in order; empty without one."""
+    return [text for text, _ in after_merge_items(body)]

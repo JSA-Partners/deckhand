@@ -284,7 +284,23 @@ def test_apply_posts_the_verdict_and_every_finding_with_its_decision(fake_gh, gh
         "- unknowns.1, P3, declined, rejected by the skeptic: The store method is undefined. Notes names the file. "
         "The skeptic is right.\n"
     )
-    assert result.stdout.splitlines() == [COMMENT_URL]
+    assert result.stdout.splitlines() == [COMMENT_URL, "Status=Ready"]
+
+
+def test_apply_moves_the_story_to_ready(fake_gh, gh_calls, tmp_path):
+    """A review that has run leaves the story waiting on a kind and points."""
+    result = _apply(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "--single-select-option-id opt_ready" in "\n".join(gh_calls())
+
+
+def test_apply_moves_the_story_to_ready_even_when_the_verdict_asks_for_changes(fake_gh, gh_calls, tmp_path):
+    """The verdict is a sentence and is not read; an amend is what moves the story back."""
+    result = _apply(tmp_path, verdict="Needs amending: the mechanism is wrong.")
+
+    assert result.returncode == 0, result.stderr
+    assert "--single-select-option-id opt_ready" in "\n".join(gh_calls())
 
 
 def test_a_changed_decision_carries_its_reason(fake_gh, tmp_path):
@@ -435,7 +451,7 @@ def test_a_clean_pass_needs_neither_verdicts_nor_decisions(fake_gh, tmp_path):
         "\n"
         "Nothing found.\n"
     )
-    assert result.stdout.splitlines() == [COMMENT_URL]
+    assert result.stdout.splitlines() == [COMMENT_URL, "Status=Ready"]
 
 
 def test_apply_refuses_findings_without_verdicts_or_decisions(fake_gh, gh_calls, tmp_path):

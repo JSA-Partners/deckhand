@@ -12,6 +12,8 @@ The body mode never rewrites more than the model drafted: the draft's section he
 the ones the issue carries, so a body that lost a section is a refusal rather than a silent deletion.
 The body freezes once the story starts, which the board says as In Progress, Pending Review, or
 Done: a discovery during execution is a `Deviation:` entry or a new issue, never a rewritten story.
+A story still short of the board reaches Refinement, because an amend of one is somebody working it
+up; a story the board has already approved keeps the column the step that put it there wrote.
 
 The record is the issue's own log, not a block inside the story: every amend posts one `Amended:`
 entry, so the body the draft carries reaches GitHub as it was drafted and the log reads in the order
@@ -57,6 +59,8 @@ FROZEN_CONTEXT = (
     "  Only the title can still change."
 )
 STARTED = ("In Progress", "Pending Review", "Done")
+# An unread column reads the same as none, so writing on either could demote a story that had started.
+WORKED_UP = ("Draft", "Refinement", "Ready")
 STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
 STORIES_CHANGED = "the Stories list changed; a stub's stories change only through a split"
 ELSEWHERE = "--new-issue opens its story in this repository; --repo is only for --note"
@@ -211,6 +215,13 @@ def _retitle(repo: str, number: int, note: str, title_flag: str | None, story: i
     return 0
 
 
+def _refine(repo: str, number: int, status: str | None) -> None:
+    """Write Refinement, which is where a story somebody is still working up belongs."""
+    if status not in WORKED_UP:
+        return
+    print(fields.set_field(resolved_settings(), repo, number, "Status", "Refinement"))
+
+
 def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
     """Put the drafted body and title on the issue and log the amend, unless the story is frozen.
 
@@ -223,9 +234,11 @@ def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None
     title = _title(title_flag, story)
     _same_headings(draft, story.body)
     body = lint.checked(draft)
-    if _status(repo, number) in STARTED:
+    status = _status(repo, number)
+    if status in STARTED:
         raise Refusal(FROZEN)
     _write(repo, number, body, title, note, story)
+    _refine(repo, number, status)
     if (room := lint.headroom(body)) is not None:
         print(room)
     return 0

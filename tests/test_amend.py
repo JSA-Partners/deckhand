@@ -512,6 +512,29 @@ def test_the_freeze_leaves_a_new_issue_alone(fake_gh, gh_calls, tmp_path):
     assert [call for call in gh_calls() if "fieldValues" in call] == []
 
 
+# --- apply, the column --------------------------------------------------------
+
+
+def test_apply_moves_an_unboarded_story_to_refinement(fake_gh, gh_calls, tmp_path):
+    """Amending a story that has not reached the board says somebody is working it up."""
+    result = run_deckhand(
+        "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, "Draft")
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--field-id PVTSSF_STATUS --single-select-option-id opt_refinement" in "\n".join(gh_calls())
+
+
+def test_apply_leaves_the_column_alone_once_the_story_is_boarded(fake_gh, gh_calls, tmp_path):
+    """A boarded story's column belongs to the step that put it there, so an amend must not move it."""
+    result = run_deckhand(
+        "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, "Backlog")
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not any("PVTSSF_STATUS" in call for call in gh_calls())
+
+
 # --- apply, a story of its own ------------------------------------------------
 
 

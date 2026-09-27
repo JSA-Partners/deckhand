@@ -24,6 +24,8 @@ PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
 NO_BOARD = {"GH_LINKED_PROJECTS": str(FIXTURES / "linked-two.json")}
 REVIEW = "Review: sound\n\n- chaos.1, P2, accepted: A claim."
 AFTER_MERGE = "### After the merge\n\n- Prove the script on main\n- Revoke the token\n"
+AFTER_MERGE_ONE_TICKED = "### After the merge\n\n- [x] Prove the script on main\n- [ ] Revoke the token\n"
+AFTER_MERGE_ALL_TICKED = "### After the merge\n\n- [x] Prove the script on main\n- [x] Revoke the token\n"
 
 
 def facts(**changes) -> Facts:
@@ -508,7 +510,7 @@ def test_a_pull_request_closed_without_merging_is_not_one(fake_gh, repo, tmp_pat
 
 def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, repo, tmp_path):
     body = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))["body"]
-    body = body.replace("### Notes", f"{AFTER_MERGE}\n### Notes")
+    body = body.replace("### Notes", f"{AFTER_MERGE_ONE_TICKED}\n### Notes")
     story = _logged(
         tmp_path,
         "merged.json",
@@ -521,25 +523,43 @@ def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, rep
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done")})
 
     lines = _briefing(result, "after", "#248 is merged; 1 after-the-merge item is left.")
-    assert lines[5:] == [
+    assert lines[5:7] == [
         f"  2026-09-05 Pull request: {PR_URL}",
         "  2026-09-06 After the merge: proved the script on main",
-        "Left:",
-        "  - Revoke the token",
-        "Clear: 1 after-the-merge item left",
     ]
+    assert "  1. [x] Prove the script on main" in lines
+    assert "  2. [ ] Revoke the token" in lines
+    assert lines[-2:] == ["Apply: deckhand after apply 248 --item 2", "Clear: 1 after-the-merge item left"]
 
 
-def test_a_merged_story_with_every_item_logged_is_done(fake_gh, repo, tmp_path):
+def test_the_items_left_come_from_the_boxes_without_any_log_entry(fake_gh, repo, tmp_path):
     body = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))["body"]
-    body = body.replace("### Notes", f"{AFTER_MERGE}\n### Notes")
+    body = body.replace("### Notes", f"{AFTER_MERGE_ONE_TICKED}\n### Notes")
+    story = _logged(
+        tmp_path,
+        "boxed.json",
+        _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"),
+        body=body,
+        state="CLOSED",
+    )
+
+    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done")})
+
+    lines = _briefing(result, "after", "#248 is merged; 1 after-the-merge item is left.")
+    # The boxes are what say an item is done, so the context names the second one with no log entry
+    # about the first anywhere on the issue.
+    assert "  1. [x] Prove the script on main" in lines
+    assert "  2. [ ] Revoke the token" in lines
+    assert lines[-2:] == ["Apply: deckhand after apply 248 --item 2", "Clear: 1 after-the-merge item left"]
+
+
+def test_a_merged_story_with_every_item_ticked_is_done(fake_gh, repo, tmp_path):
+    body = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))["body"]
+    body = body.replace("### Notes", f"{AFTER_MERGE_ALL_TICKED}\n### Notes")
     story = _logged(
         tmp_path,
         "walked.json",
         _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"),
-        _entry("After the merge: proved the script on main", "2026-09-06T09:00:00Z"),
-        _entry("After the merge: revoked the token", "2026-09-06T10:00:00Z"),
-        _entry("After the merge: told the team", "2026-09-06T11:00:00Z"),
         body=body,
         state="CLOSED",
     )

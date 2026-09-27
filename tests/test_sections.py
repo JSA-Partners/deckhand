@@ -162,5 +162,24 @@ def test_after_merge_lists_the_bullets_of_the_plans_closing_block():
     assert sections.after_merge("### Story\n\nx\n") == []
 
 
+def test_after_merge_items_report_their_ticked_state():
+    body = (
+        "### Plan\n\n### Task 1\n\nDo it.\n\n### After the merge\n\n"
+        "- [x] Deploy it\n- [ ] Check the dashboard\n- Announce it\n\n### Notes\n"
+    )
+
+    assert sections.after_merge_items(body) == [
+        ("Deploy it", True),
+        ("Check the dashboard", False),
+        ("Announce it", False),
+    ]
+
+
+def test_after_merge_still_returns_the_text_alone():
+    body = "### Plan\n\n### After the merge\n\n- [x] Deploy it\n- [ ] Check the dashboard\n\n### Notes\n"
+
+    assert sections.after_merge(body) == ["Deploy it", "Check the dashboard"]
+
+
 if __name__ == "__main__":
     unittest.main()
