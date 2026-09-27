@@ -337,7 +337,8 @@ def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
     wrong = [
         (story, fleet.allowed(story)[0])
         for story in read.stories
-        if story.status and story.status not in fleet.allowed(story)
+        # a repair only ever writes to a story the process owns: allowed() calls every issue with no log a Draft
+        if fleet.touched(story) and story.status and story.status not in fleet.allowed(story)
     ]
     unmarked = _unmarked(read)
     if not wrong and not read.missing and not unmarked:

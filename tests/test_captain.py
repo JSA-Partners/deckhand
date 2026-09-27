@@ -227,7 +227,7 @@ def test_a_repair_with_nothing_to_repair_refuses(fleet_env, monkeypatch, capsys)
     assert "nothing to repair" in capsys.readouterr().err
 
 
-def _foreign() -> dict:
+def _foreign(status: str) -> dict:
     """A board item for an issue the process never wrote to: no log, no marker, and a column of its own."""
     return {
         "id": "I_96",
@@ -241,7 +241,7 @@ def _foreign() -> dict:
             "labels": {"nodes": []},
             "comments": {"nodes": []},
         },
-        "fieldValues": {"nodes": [{"name": "Backlog", "field": {"name": "Status"}}]},
+        "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
     }
 
 
@@ -260,13 +260,36 @@ def test_repair_marks_a_story_the_process_wrote_to(fleet_env, gh_calls, capsys):
 
 def test_repair_leaves_an_untouched_issue_unmarked(fleet_env, gh_calls, monkeypatch, tmp_path):
     """An issue the process never wrote to is not deckhand's, whatever column it sits in."""
-    for name, value in _items(tmp_path, "foreign-items.json", [*_nodes(), _foreign()]).items():
+    for name, value in _items(tmp_path, "foreign-items.json", [*_nodes(), _foreign("Backlog")]).items():
         monkeypatch.setenv(name, value)
 
     assert cli.main(["captain", "apply", "--repair"]) == 0
 
     marked = [call for call in gh_calls() if "--add-label" in call]
     assert marked and not [call for call in marked if " 96 " in call]
+
+
+def test_repair_leaves_an_issue_the_process_never_wrote_to_alone(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
+    """A board carries issues that are not deckhand's, and their column was chosen by a person."""
+    for name, value in _items(tmp_path, "foreign-column.json", [*_nodes(), _foreign("Pending Review")]).items():
+        monkeypatch.setenv(name, value)
+
+    assert cli.main(["captain", "apply", "--repair"]) == 0
+
+    out = capsys.readouterr().out
+    assert "acme/widgets#268 Status Draft" in out and "#96" not in out
+    assert len([call for call in gh_calls() if "item-edit" in call]) == 1
+
+
+def test_a_repair_with_only_untouched_issues_refuses(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
+    """Nothing the process owns is wrong, so the run refuses rather than reporting a success that wrote nothing."""
+    for name, value in _items(tmp_path, "clean-foreign.json", [*_clean_nodes(), _foreign("Pending Review")]).items():
+        monkeypatch.setenv(name, value)
+
+    assert cli.main(["captain", "apply", "--repair"]) == 1
+
+    assert "nothing to repair" in capsys.readouterr().err
+    assert not [call for call in gh_calls() if "item-edit" in call]
 
 
 def test_repair_with_only_the_marker_missing_is_not_nothing_to_repair(fleet_env, monkeypatch, tmp_path, capsys):
