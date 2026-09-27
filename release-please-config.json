@@ -4,7 +4,6 @@
   "include-v-in-tag": true,
   "include-component-in-tag": false,
   "pull-request-title-pattern": "chore(release): ${version}",
-  "bootstrap-sha": "71d8e5fd5afcee9f6cf5dc190e6aa4375b05f4b4",
   "packages": {
     ".": {
       "package-name": "deckhand",

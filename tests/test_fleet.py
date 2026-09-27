@@ -96,6 +96,15 @@ def test_a_story_marked_done_that_never_shipped_says_what_it_really_is():
     assert fleet.note(_story(268), [], behind=False) == "review not run"
 
 
+def test_a_story_in_verification_says_how_many_items_are_left():
+    """Verification is where a merged story waits on its own after-the-merge boxes, not a column gone wrong."""
+    one = fleet.stories(_closed("Verification", OWED))[0]
+    two = fleet.stories(_closed("Verification", OWED + "- [ ] Tell the client\n"))[0]
+
+    assert fleet.note(one, [], behind=False) == "merged, 1 item left"
+    assert fleet.note(two, [], behind=False) == "merged, 2 items left"
+
+
 BLOCKERS = {
     ("acme/widgets", 257): [("acme/widgets", 253, "Seed the role matrix")],
     ("acme/gadgets", 258): [("acme/widgets", 257, "Export the role matrix")],
