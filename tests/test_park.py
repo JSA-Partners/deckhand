@@ -18,6 +18,14 @@ def _park(repo: Path, tmp_path: Path, *flags: str, copy: Path | None = None):
     return run_deckhand("new", "apply", "--park", *flags, str(source), cwd=repo, env=env)
 
 
+def test_a_parked_feature_is_boarded_as_draft(fake_gh, gh_calls, repo, tmp_path):
+    """A parked feature has no settled requirements yet, which is Draft."""
+    result = _park(repo, tmp_path, "--title", TITLE)
+
+    assert result.returncode == 0, result.stderr
+    assert "--field-id PVTSSF_STATUS --single-select-option-id opt_draft" in "\n".join(gh_calls())
+
+
 def test_from_names_the_origin_and_writes_no_dependency(fake_gh, gh_calls, repo, tmp_path):
     copy = tmp_path / "bodies.md"
 

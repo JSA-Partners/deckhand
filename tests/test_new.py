@@ -23,15 +23,19 @@ STATUS_DRAFT = (
     "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
     "--single-select-option-id opt_draft"
 )
+STATUS_REFINEMENT = (
+    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
+    "--single-select-option-id opt_refinement"
+)
 NO_PROJECT = "deckhand new apply: no project is linked to acme/widgets; run /deckhand:setup"
 UNLINKED = {"GH_LINKED_PROJECTS": str(FIXTURES / "linked-none.json")}
 
 
-def _draft_writes(number: int) -> list[str]:
-    """The writes that put a written story on the board as Draft and open its log."""
+def _draft_writes(number: int, status: str = STATUS_DRAFT) -> list[str]:
+    """The writes that put a written story on the board and open its log."""
     return [
         f"project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/{number} --format json",
-        STATUS_DRAFT,
+        status,
         f"issue comment {number} --repo acme/widgets",
     ]
 
@@ -199,7 +203,8 @@ def test_apply_creates_the_issue_with_the_written_body(fake_gh, gh_calls, tmp_pa
     assert copy.read_text(encoding="utf-8") == "--- issue create\n" + _written() + "--- issue comment\n" + new.DRAFTED
 
 
-def test_apply_boards_the_new_story_as_draft_and_logs_it(fake_gh, gh_calls, tmp_path):
+def test_a_written_story_is_boarded_as_refinement(fake_gh, gh_calls, tmp_path):
+    """Draft is where requirements wait; a story with a body is being worked up, which is Refinement."""
     copy = tmp_path / "comment.md"
 
     result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
@@ -208,10 +213,12 @@ def test_apply_boards_the_new_story_as_draft_and_logs_it(fake_gh, gh_calls, tmp_
     assert result.stdout.splitlines() == [
         "Created #999 https://github.com/acme/widgets/issues/999",
         "Added to the board",
-        "Status=Draft",
+        "Status=Refinement",
         "Logged Drafted",
     ]
-    assert _calls([c for c in gh_calls() if c.startswith(("project item", "issue comment"))]) == _draft_writes(999)
+    assert _calls([c for c in gh_calls() if c.startswith(("project item", "issue comment"))]) == _draft_writes(
+        999, STATUS_REFINEMENT
+    )
     assert copy.read_text(encoding="utf-8").endswith("--- issue comment\n" + new.DRAFTED)
 
 
@@ -510,10 +517,13 @@ def test_apply_stub_writes_the_drafted_story_into_the_stub(fake_gh, gh_calls, tm
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
         "Added to the board",
-        "Status=Draft",
+        "Status=Refinement",
         "Logged Drafted",
     ]
-    assert _calls(_writes(gh_calls())) == ["issue edit 57 --repo acme/widgets", *_draft_writes(57)]
+    assert _calls(_writes(gh_calls())) == [
+        "issue edit 57 --repo acme/widgets",
+        *_draft_writes(57, STATUS_REFINEMENT),
+    ]
     assert copy.read_text(encoding="utf-8") == (
         "--- issue edit\n" + _written() + "--- issue comment\n" + new.STUB_DRAFTED
     )
@@ -564,11 +574,11 @@ def test_apply_stub_sets_the_title_after_the_body(fake_gh, gh_calls):
         "Written #57 https://github.com/acme/widgets/issues/57",
         "Title: Grant store",
         "Added to the board",
-        "Status=Draft",
+        "Status=Refinement",
         "Logged Drafted",
     ]
     body_edit, title_edit, *boarding = _writes(gh_calls())
-    assert _calls(boarding) == _draft_writes(57)
+    assert _calls(boarding) == _draft_writes(57, STATUS_REFINEMENT)
     assert body_edit.startswith("issue edit 57 --repo acme/widgets --body-file ")
     assert title_edit == "issue edit 57 --repo acme/widgets --title Grant store"
 
@@ -680,7 +690,7 @@ def test_apply_stub_keeps_the_stubs_title_when_the_flag_is_blank(fake_gh, gh_cal
     assert result.stdout.splitlines() == [
         "Written #57 https://github.com/acme/widgets/issues/57",
         "Added to the board",
-        "Status=Draft",
+        "Status=Refinement",
         "Logged Drafted",
     ]
     call, *_ = _writes(gh_calls())

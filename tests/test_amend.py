@@ -538,7 +538,7 @@ def test_apply_leaves_the_column_alone_once_the_story_is_boarded(fake_gh, gh_cal
 # --- apply, a story of its own ------------------------------------------------
 
 
-def test_new_issue_boards_the_new_story_as_draft_and_logs_split_and_drafted(fake_gh, gh_calls, tmp_path):
+def test_new_issue_boards_the_new_story_as_refinement_and_logs_split_and_drafted(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "comment.md"
     body = (FIXTURES / "body-valid.md").read_text(encoding="utf-8")
 
@@ -551,7 +551,7 @@ def test_new_issue_boards_the_new_story_as_draft_and_logs_split_and_drafted(fake
         "Created #999 https://github.com/acme/widgets/issues/999",
         "Blocked by #248",
         "Added to the board",
-        "Status=Draft",
+        "Status=Refinement",
         "Logged Drafted",
         "Logged Split",
     ]

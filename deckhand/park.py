@@ -16,14 +16,16 @@ from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 PARKED_HEADING = "## Parked feature"
 
 
-def board_draft(settings: Settings, repo: str, number: int, url: str, note: str | None) -> None:
-    """Put the issue on the board as Draft, then log that it was written when `note` is given.
+def board_draft(
+    settings: Settings, repo: str, number: int, url: str, note: str | None, status: str = columns.DRAFT
+) -> None:
+    """Put the issue on the board in `status`, then log that it was written when `note` is given.
 
     Every write prints as it lands, so the printed lines are the record of how far the story got.
     """
     board.add(settings, url)
     print("Added to the board", flush=True)
-    print(fields.set_field(settings, repo, number, "Status", columns.DRAFT), flush=True)
+    print(fields.set_field(settings, repo, number, "Status", status), flush=True)
     if note is not None:
         issue.comment(repo, number, log.checked(note))
         print(f"Logged {note.split(':', 1)[0]}", flush=True)
