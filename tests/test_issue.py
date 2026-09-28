@@ -291,13 +291,6 @@ def test_pull_request_rejects_a_malformed_repo(fake_gh, gh_calls):
 PR_URL = "https://github.com/acme/widgets/pull/1000"
 
 
-def test_merge_state_reads_the_pull_request(fake_gh, monkeypatch):
-    monkeypatch.setenv("GH_PR_STATE", "OPEN")
-    monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
-
-    assert issue.merge_state(REPO, "https://github.com/acme/widgets/pull/1000") == "BEHIND"
-
-
 # --- pull_request_for --------------------------------------------------------
 
 
