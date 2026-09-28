@@ -33,9 +33,7 @@ def facts(**changes) -> Facts:
     base = Facts(
         closed=False,
         status=None,
-        drafted=True,
-        reviewed=False,
-        amended_since_review=False,
+        written=True,
         branch=None,
         blockers=(),
         commits=None,
@@ -85,25 +83,20 @@ def facts(**changes) -> Facts:
         ({"status": "In Progress"}, "build", "No branch in this clone."),
         ({"status": "Backlog"}, "check", "On the board; check the plan against the code, then build."),
         ({"status": "Backlog", "blockers": ("#240  Grant store",)}, "wait", "Waits on #240."),
-        ({"status": "Draft", "drafted": False}, "write", "#248 is a stub."),
-        ({"status": None, "drafted": False}, "write", "#248 is a stub."),
+        ({"status": "Draft", "written": False}, "write", "#248 is a stub."),
+        ({"status": None, "written": False}, "write", "#248 is a stub."),
         (
-            {"status": "Draft", "drafted": False, "parked": True},
+            {"status": "Draft", "written": False, "parked": True},
             "settle",
             "#248 is a parked feature; settle its requirements.",
         ),
         ({"status": "Draft"}, "review", "Not reviewed."),
         ({"status": None}, "review", "Not reviewed."),
-        (
-            {"status": "Draft", "reviewed": True, "amended_since_review": True},
-            "reconsider",
-            "Amended since the review.",
-        ),
-        ({"status": "Draft", "reviewed": True}, "board", "Reviewed, nothing waiting."),
-        ({"status": None, "reviewed": True}, "board", "Reviewed, nothing waiting."),
+        ({"status": "Refinement"}, "review", "Not reviewed."),
+        ({"status": "Ready"}, "board", "Reviewed, nothing waiting."),
         ({"status": "In Review"}, "stop", "#248 is In Review with no open pull request; nothing decided."),
         ({"status": "Done"}, "stop", "#248 is Done with no open pull request; nothing decided."),
-        ({"status": "Parked", "reviewed": True}, "stop", "#248 is Parked with no open pull request; nothing decided."),
+        ({"status": "Parked"}, "stop", "#248 is Parked with no open pull request; nothing decided."),
     ],
 )
 def test_the_table(changes, step, why):
@@ -114,14 +107,12 @@ def test_the_rows_are_tried_in_order():
     """A closed story is done whatever else is true, and a pull request outranks the board."""
     everything = facts(
         closed=True,
-        drafted=False,
+        written=False,
         status="In Progress",
         branch=BRANCH,
         commits=2,
         pull_request=PR_URL,
         pull_requested=True,
-        reviewed=True,
-        amended_since_review=True,
         unavailable=("board",),
     )
     assert decide(248, everything)[0] == "done"
@@ -264,7 +255,7 @@ def test_the_log_block_is_the_last_three_entries(fake_gh, repo, tmp_path):
         _entry("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
         _entry("Review: sound", "2026-09-04T09:00:00Z"),
     )
-    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
+    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Ready")})
 
     lines = _briefing(result, "board", "Reviewed, nothing waiting.")
     assert lines[5:9] == [
@@ -306,56 +297,11 @@ def test_a_drafted_entry_on_a_stub_body_is_still_a_stub(fake_gh, repo, tmp_path)
     assert result.stdout.splitlines()[:2] == ["Step: write", "#248 is a stub."]
 
 
-def test_an_amend_after_the_review_is_reconsidered_with_the_amend_context(fake_gh, repo, tmp_path):
-    story = _logged(
-        tmp_path,
-        "amended.json",
-        _entry(REVIEW, "2026-09-02T09:00:00Z"),
-        _entry("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
-    )
-    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
-
-    lines = _briefing(result, "reconsider", "Amended since the review.")
-    context = _context(lines)
-    assert any(line.startswith("Body: ") for line in context)
-    assert "## Latest review" in context
-    assert not [line for line in context if "unavailable" in line]
-    assert any(line.startswith("Draft: ") for line in context)
-
-
-def test_an_amend_answered_by_a_later_review_is_boarded(fake_gh, repo, tmp_path):
-    """A second review clears the amend: only an `Amended:` after the latest `Review:` counts."""
-    story = _logged(
-        tmp_path,
-        "re-reviewed.json",
-        _entry(REVIEW, "2026-09-02T09:00:00Z"),
-        _entry("Amended: dropped the second criterion", "2026-09-03T09:00:00Z"),
-        _entry("Review: sound", "2026-09-04T09:00:00Z"),
-    )
-    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
-
-    lines = _briefing(result, "board", "Reviewed, nothing waiting.")
-    assert _context(lines)[0].startswith("Kinds:")
-
-
-def test_a_reviewed_story_off_the_board_is_boarded(fake_gh, repo, tmp_path):
-    """A story from before Draft existed has no Status; reviewed and quiet, it boards like a Draft."""
+def test_a_story_off_the_board_is_reviewed_again(fake_gh, repo, tmp_path):
+    """No column means nothing is known about it, whatever its comments say."""
     result = _next(repo, env={**REVIEWED, **fieldvalues(tmp_path, None)})
 
-    _briefing(result, "board", "Reviewed, nothing waiting.")
-
-
-def test_a_persons_comment_is_never_an_amend(fake_gh, repo, tmp_path):
-    """Nothing written on GitHub by a person is read; only the log's own entries move a story."""
-    story = _logged(
-        tmp_path,
-        "replied.json",
-        _entry(REVIEW, "2026-09-02T09:00:00Z"),
-        _entry("Also cover the empty case.", "2026-09-04T09:00:00Z"),
-    )
-    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
-
-    _briefing(result, "board", "Reviewed, nothing waiting.")
+    _briefing(result, "review", "Not reviewed.")
 
 
 def test_a_backlog_story_is_checked_with_the_start_context(fake_gh, repo, tmp_path):

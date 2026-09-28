@@ -26,15 +26,17 @@ have read.
 A story is one GitHub issue, written by Claude and frozen once the build starts. Its comments are the
 log, one entry per decision, so the issue reads top to bottom as what was planned, what was decided,
 and why. The story sits on a GitHub Project board from the moment it is written and moves from
-Draft to Done as the work does.
+Refinement to Done as the work does. A feature nobody has settled yet waits in Draft until it is
+written into one.
 
 ```mermaid
 flowchart LR
-    idea(["/deckhand:new"]) --> Draft
+    idea(["/deckhand:new"]) --> Refinement
+    parked(["/deckhand:new --park"]) --> Draft([Draft])
 
-    subgraph Draft
+    subgraph Refinement
         direction TB
-        d1[Story written<br/>as an issue] --> d2[Reviewer and<br/>skeptic read it]
+        r1[Story written<br/>as an issue] --> r2[Reviewer and<br/>skeptic read it]
     end
 
     subgraph Backlog
@@ -52,15 +54,18 @@ flowchart LR
         p1[Pull request<br/>opens] --> p2[Checks run]
     end
 
-    Draft -->|you settle the<br/>review and size| Backlog
+    Draft -->|you write it<br/>into a story| Refinement
+    Refinement -.->|the review<br/>finishes| Ready([Ready])
+    Ready -->|you choose the<br/>kind and points| Backlog
     Backlog -->|you say<br/>build| InProgress
     InProgress -->|you read<br/>the branch| InReview
-    InReview -->|you<br/>merge| Done([Done])
+    InReview -->|you<br/>merge| Verification([Verification])
+    Verification -->|you tick the<br/>after-the-merge<br/>items| Done([Done])
 ```
 
-The arrows are your decisions. The boxes are what Claude does between them. Several sessions can
-work from one clone, each on its own story in its own git worktree, and a worktree goes away when
-its story merges.
+The solid arrows are your decisions. The dashed one happens on its own. The boxes are what Claude
+does between them. Several sessions can work from one clone, each on its own story in its own git
+worktree, and a worktree goes away when its story merges.
 
 Nothing about a story is written to the repository, and a branch reaches GitHub only with its pull
 request. You never act on GitHub. You open it to read.

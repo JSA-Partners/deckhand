@@ -32,7 +32,6 @@ CONTEXT_OF = {
     "write": "new",
     "settle": "new",
     "review": "review",
-    "reconsider": "amend",
     "board": "ready",
     "check": "start",
     "build": "start",
@@ -46,9 +45,7 @@ class Facts(NamedTuple):
 
     closed: bool
     status: str | None  # None when off the board, which reads as Draft
-    drafted: bool  # a body that is not a stub: a `Drafted:` entry with no story behind it is not one
-    reviewed: bool  # a `Review:` entry
-    amended_since_review: bool  # an `Amended:` entry after the latest `Review:`, so a second review clears it
+    written: bool  # the body is a story rather than a draft's requirements
     branch: str | None  # the clone's branch, or the name start would cut; None without a Kind
     blockers: tuple[str, ...]  # the open blockers, each `<label>  <title>`, printed on the build rows
     commits: int | None  # past what has landed on main; None when this clone has no branch for the story
@@ -101,14 +98,14 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
     # an amend puts a story in one and a review in the other, and both still have a step to run.
     if f.status not in (None, columns.DRAFT, columns.REFINEMENT, columns.READY):
         return "stop", f"#{number} is {f.status} with no open pull request; nothing decided."
-    if not f.drafted and f.parked:
+    if not f.written and f.parked:
         return "settle", f"#{number} is a parked feature; settle its requirements."
-    if not f.drafted:
+    if not f.written:
         return "write", f"#{number} is a stub."
-    if not f.reviewed:
+    # Only the review writes Ready, so the column answers whether it ran; an amend writes Refinement,
+    # which lands here again rather than on a row of its own.
+    if not columns.at_least(f.status, columns.READY):
         return "review", "Not reviewed."
-    if f.amended_since_review:
-        return "reconsider", "Amended since the review."
     return "board", "Reviewed, nothing waiting."
 
 
@@ -206,13 +203,10 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         if repo and story and not closed
         else None
     )
-    reviewed = story is not None and log.last(story, "Review:") is not None
     return Facts(
         closed=closed,
         status=values["Status"] if values else None,
-        drafted=story is not None and not stub.is_stub(story.body),
-        reviewed=reviewed,
-        amended_since_review=reviewed and any(e.prefix == "Amended:" for e in log.since(story, "Review:")),
+        written=story is not None and not stub.is_stub(story.body),
         branch=branch,
         blockers=blockers or (),
         commits=commits,

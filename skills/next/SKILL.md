@@ -76,9 +76,8 @@ From the amend context (above, or run it), copy the body file it names to the dr
 edit that, keeping every heading, with superpowers:writing-plans for a plan rewrite, and run
 `amend apply $issue <draft> --note "<what changed and why>"`, the note saying what changed and
 why and never where it came from, with `--title "<new title>"` when the Story no longer matches
-it. If the amend changed what the story delivers, recommend reviewing
-again and ask; otherwise carry on to the board. When the briefing's step is reconsider, that
-question is the step. Work that belongs in its own story: overwrite the draft with its whole body
+it. An amend writes Refinement, so the next briefing asks for the review again; say what changed and
+carry on. Work that belongs in its own story: overwrite the draft with its whole body
 and run `amend apply $issue <draft> --new-issue "<title>"`; work that must land first takes `--before`.
 
 ## Board
