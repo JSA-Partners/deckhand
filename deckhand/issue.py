@@ -247,25 +247,24 @@ FAILED = ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STAR
 SETTLED = ("SUCCESS", "SKIPPED", "NEUTRAL")
 
 
-def pull_request_checks(repo: str, url: str) -> tuple[list[str], int]:
-    """`(the names of the checks that failed, how many are still running)` on the pull request at `url`.
+def _check_verdict(check: dict[str, Any]) -> tuple[str, str]:
+    """`(name, outcome)` for one check, however the rollup spelled its fields."""
+    outcome = check.get("conclusion") or check.get("state") or ""
+    name = check.get("name") or check.get("context") or "a check"
+    return str(name), outcome.upper()
 
-    A merge row that reads only the state would send a person to merge a red pull request; the
-    checks are the one thing left that GitHub decides after the push.
-    """
-    gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
-    rollup = data.get("statusCheckRollup") if isinstance(data, dict) else None
+
+def _rollup_checks(checks: list[Any]) -> tuple[list[str], int]:
+    """`(the names of the checks that failed, how many are still running)` from a status check rollup."""
     failed: list[str] = []
     pending = 0
-    for check in rollup or []:
+    for check in checks:
         if not isinstance(check, dict):
             continue
-        outcome = check.get("conclusion") or check.get("state") or ""
-        name = check.get("name") or check.get("context") or "a check"
-        if outcome.upper() in FAILED:
-            failed.append(str(name))
-        elif outcome.upper() not in SETTLED:
+        name, outcome = _check_verdict(check)
+        if outcome in FAILED:
+            failed.append(name)
+        elif outcome not in SETTLED:
             pending += 1
     return failed, pending
 
@@ -280,19 +279,77 @@ def merge_state(repo: str, url: str) -> str:
     return str(data.get("mergeStateStatus") or "").upper() if isinstance(data, dict) else ""
 
 
-def merged(repo: str, url: str) -> bool:
-    """Whether GitHub says the pull request at `url` merged, as opposed to closed or still open."""
-    gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
-    return isinstance(data, dict) and str(data.get("state") or "").upper() == "MERGED"
+PR_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ "
+    "issue(number:$number){ closedByPullRequestsReferences(first:5, includeClosedPrs:true){ nodes{ "
+    "number url state merged mergeStateStatus "
+    "commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:20){ nodes{ "
+    "... on CheckRun{ name conclusion status } ... on StatusContext{ context state } "
+    "} } } } } } } } } } }"
+)
+
+UNKNOWN_MERGE = "UNKNOWN"
 
 
-def pull_request_state(repo: str, url: str) -> str | None:
-    """`url` while the pull request there is open, else None; a URL gh cannot read is an error.
+@dataclass(frozen=True)
+class PullRequest:
+    """One pull request as the issue's own reference to it describes it, read in one call."""
 
-    For the pull request the log names: its head may be a branch this clone has never seen, so the
-    URL is the one handle that finds it wherever it was pushed from.
+    number: int
+    url: str
+    state: str  # OPEN, MERGED or CLOSED
+    merged: bool
+    behind: bool | None  # None while GitHub has not worked the mergeability out yet
+    failed_checks: tuple[str, ...]
+    pending_checks: int
+
+
+def _rollup_contexts(node: dict[str, Any]) -> list[Any]:
+    commits = ((node.get("commits") or {}).get("nodes")) or []
+    commit = (commits[0].get("commit") if commits and isinstance(commits[0], dict) else None) or {}
+    rollup = commit.get("statusCheckRollup") or {}
+    return (rollup.get("contexts") or {}).get("nodes") or []
+
+
+def _pull_request_node(owner: str, name: str, number: int) -> dict[str, Any] | None:
+    """The chosen `closedByPullRequestsReferences` node, preferring the one still open."""
+    page = gh.graphql(PR_QUERY, {"owner": owner, "name": name, "number": number})[0]
+    found = (((page.get("data") or {}).get("repository") or {}).get("issue") or {}).get(
+        "closedByPullRequestsReferences"
+    ) or {}
+    nodes = [node for node in (found.get("nodes") or []) if isinstance(node, dict)]
+    if not nodes:
+        return None
+    for node in nodes:
+        if str(node.get("state") or "").upper() == "OPEN":
+            return node
+    return nodes[0]
+
+
+def pull_request_for(repo: str, number: int) -> PullRequest | None:
+    """The pull request the issue links to, read in one call, or None when it links to none.
+
+    The issue's own reference to its pull request carries the state, whether it merged, its checks,
+    and whether main has moved on since, so one call answers what four separate reads used to ask.
     """
-    gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
-    return data.get("url") if isinstance(data, dict) and data.get("state") == "OPEN" else None
+    owner, name = gh.split_repo(repo)
+    node = _pull_request_node(owner, name, number)
+    if node is None:
+        return None
+    merge_state = str(node.get("mergeStateStatus") or "").upper()
+    if merge_state == UNKNOWN_MERGE:
+        retried = _pull_request_node(owner, name, number)
+        if retried is not None:
+            node = retried
+            merge_state = str(node.get("mergeStateStatus") or "").upper()
+    behind = None if merge_state == UNKNOWN_MERGE else merge_state in BEHIND
+    failed, pending = _rollup_checks(_rollup_contexts(node))
+    return PullRequest(
+        number=int(node.get("number") or 0),
+        url=str(node.get("url") or ""),
+        state=str(node.get("state") or "").upper(),
+        merged=bool(node.get("merged")),
+        behind=behind,
+        failed_checks=tuple(failed),
+        pending_checks=pending,
+    )

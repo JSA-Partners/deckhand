@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import issue
 from deckhand.next import Facts, decide
 from tests.conftest import FIXTURES, advance_origin, fieldvalues, run_deckhand, run_git
 
@@ -417,8 +416,8 @@ def test_merge_prints_the_link_and_nothing_more(fake_gh, repo, origin, branch, t
     assert lines[5:] == ["  none"]
 
 
-def test_the_pull_request_is_read_from_the_log_when_the_branch_is_elsewhere(fake_gh, gh_calls, repo, tmp_path):
-    """The log names the pull request; a head lookup by a name derived from today's title would miss it."""
+def test_the_pull_request_is_found_when_the_branch_is_elsewhere(fake_gh, gh_calls, repo, tmp_path):
+    """The issue links to its pull request; a head lookup by a name from today's title would miss it."""
     story = _logged(
         tmp_path,
         "opened.json",
@@ -431,8 +430,23 @@ def test_the_pull_request_is_read_from_the_log_when_the_branch_is_elsewhere(fake
 
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Step: merge", f"Pull request open: {PR_URL}"], result.stdout
-    assert f"pr view {PR_URL} --repo acme/widgets --json {issue.PR_FIELDS}" in gh_calls()
+    assert any("closedByPullRequestsReferences" in call for call in gh_calls())
     assert not any(call.startswith("pr list") for call in gh_calls())
+
+
+def test_an_unread_merge_state_stops_rather_than_reading_as_up_to_date(fake_gh, repo, tmp_path):
+    """GitHub works mergeability out lazily, and not knowing is not the same as knowing main has not moved."""
+    story = _logged(tmp_path, "unknown.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
+    env = {
+        **story,
+        **fieldvalues(tmp_path, "In Review"),
+        "GH_PR_STATE": "OPEN",
+        "GH_PR_MERGE_STATE": "UNKNOWN",
+    }
+
+    result = _next(repo, env=env)
+
+    _briefing(result, "stop", "Cannot read merge state; nothing decided.")
 
 
 def test_a_merged_pull_request_with_an_open_issue_says_to_close_it(fake_gh, repo, tmp_path):
@@ -466,7 +480,9 @@ def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, rep
         state="CLOSED",
     )
 
-    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done")})
+    env = {**story, **fieldvalues(tmp_path, "Done"), "GH_PR_STATE": "MERGED"}
+
+    result = _next(repo, env=env)
 
     lines = _briefing(result, "after", "#248 is merged; 1 after-the-merge item is left.")
     assert lines[5:7] == [
@@ -489,7 +505,9 @@ def test_the_items_left_come_from_the_boxes_without_any_log_entry(fake_gh, repo,
         state="CLOSED",
     )
 
-    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done")})
+    env = {**story, **fieldvalues(tmp_path, "Done"), "GH_PR_STATE": "MERGED"}
+
+    result = _next(repo, env=env)
 
     lines = _briefing(result, "after", "#248 is merged; 1 after-the-merge item is left.")
     # The boxes are what say an item is done, so the context names the second one with no log entry
@@ -827,14 +845,15 @@ def test_a_context_reads_each_fact_once(fake_gh, gh_calls, repo, tmp_path):
 
 
 def test_a_briefing_reads_the_pull_request_once(fake_gh, gh_calls, repo, tmp_path):
-    """Three readers asking for one superset of fields is one call inside a context's cache."""
+    """The state, the checks and the merge state are one read of the issue's own reference to it."""
     story = _logged(tmp_path, "pr.json", _entry("Pull request: " + PR_URL, "2026-09-05T10:00:00Z"))
 
     env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_STATE": "OPEN"}
 
     _next(repo, env=env)
 
-    assert len([c for c in gh_calls() if c.startswith("pr view")]) == 1
+    assert [c for c in gh_calls() if c.startswith("pr view")] == []
+    assert len([c for c in gh_calls() if "closedByPullRequestsReferences" in c]) == 1
 
 
 def test_next_catches_a_stale_clone_up_before_it_briefs(fake_gh, repo, origin, tmp_path):
