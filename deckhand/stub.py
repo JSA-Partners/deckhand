@@ -11,6 +11,7 @@ and is forgiving, because a stub the user edited by hand is still worth printing
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -85,48 +86,64 @@ def _entry(text: str) -> Entry:
     return Entry(title=parts[0], sentence=parts[1], after=after, number=number, repo=repo)
 
 
-def _checked(numbered: list[tuple[int, Entry]]) -> list[Entry]:
-    """Every entry, once each `after` names an entry that exists and comes before it."""
-    total = len(numbered)
-    for position, (line, entry) in enumerate(numbered, start=1):
-        seen: set[int] = set()
-        for after in entry.after:
-            if after in seen:
-                raise ValueError(f"line {line}: after {after} is named twice")
-            seen.add(after)
-            if not 1 <= after <= total:
-                raise ValueError(f"line {line}: after {after} names no story; there are {total}")
-            if after >= position:
-                raise ValueError(f"line {line}: after {after} names this story or a later one")
-    return [entry for _, entry in numbered]
+def _resolved(stories: list[object]) -> list[Entry]:
+    """Each story as an `Entry`, with `after` resolved from keys to the positions `render` writes.
+
+    The keys are the authored form and never leave here: a person counting positions by hand is what
+    an insertion silently shifts, and deckhand generates the positions it stores.
+    """
+    at: dict[str, int] = {}
+    entries: list[Entry] = []
+    for position, story in enumerate(stories, start=1):
+        where = f"story {position}"
+        if not isinstance(story, dict):
+            raise ValueError(f"{where}: not an object")
+        for field in ("key", "title", "sentence"):
+            if not str(story.get(field) or "").strip():
+                raise ValueError(f"{where}: needs a {field}")
+        key = str(story["key"]).strip()
+        if key in at:
+            raise ValueError(f"{where}: '{key}' is already the key of an earlier story")
+        after = story.get("after") or []
+        if not isinstance(after, list):
+            raise ValueError(f"{where}: after is a list of keys")
+        seen: set[str] = set()
+        positions: list[int] = []
+        for named in after:
+            if named in seen:
+                raise ValueError(f"{where}: after names '{named}' twice")
+            seen.add(str(named))
+            if named not in at:
+                raise ValueError(f"{where}: after names '{named}', which is not a story defined before it")
+            positions.append(at[str(named)])
+        at[key] = position
+        repo = str(story["repo"]).strip() if story.get("repo") else None
+        entries.append(
+            Entry(
+                title=str(story["title"]).strip(),
+                sentence=str(story["sentence"]).strip(),
+                after=tuple(positions),
+                repo=repo,
+            )
+        )
+    return entries
 
 
 def parse_split(text: str) -> tuple[str, list[Entry]]:
-    """The requirements and the stories of a split file, or a ValueError naming the line at fault."""
-    lines = _lines(text)
-    first = next((index for index, line in enumerate(lines) if line.strip()), None)
-    if first is None or lines[first].strip() != STUB_HEADING:
-        raise ValueError(f"line {(0 if first is None else first) + 1}: expected {STUB_HEADING}")
-    stories = next((index for index in range(first + 1, len(lines)) if lines[index].strip() == STORIES_HEADING), None)
-    if stories is None:
-        raise ValueError(f"line {len(lines)}: expected {STORIES_HEADING}")
-    requirements = "\n".join(lines[first + 1 : stories]).strip("\n").rstrip()
-    if not requirements.strip():
-        raise ValueError(f"line {first + 1}: {STUB_HEADING} has no text")
-    numbered: list[tuple[int, Entry]] = []
-    for line_number, line in enumerate(lines[stories + 1 :], start=stories + 2):
-        if not line.strip():
-            continue
-        bullet = _BULLET.match(line.strip())
-        if bullet is None:
-            raise ValueError(f"line {line_number}: expected a bullet '- <title> | <sentence>'")
-        try:
-            numbered.append((line_number, _entry(bullet.group(1))))
-        except ValueError as error:
-            raise ValueError(f"line {line_number}: {error}") from error
-    if not numbered:
-        raise ValueError(f"line {stories + 1}: {STORIES_HEADING} lists no stories; write one bullet per story")
-    return requirements, _checked(numbered)
+    """The requirements and the stories of a split document, or a ValueError naming what is wrong."""
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"line {error.lineno} column {error.colno}: {error.msg}") from None
+    if not isinstance(document, dict) or document.get("kind") != "split":
+        raise ValueError('opens with {"kind": "split", "requirements": "...", "stories": [...]}')
+    requirements = document.get("requirements")
+    if not isinstance(requirements, str) or not requirements.strip():
+        raise ValueError("'requirements' says what the feature needs, in full")
+    stories = document.get("stories")
+    if not isinstance(stories, list) or not stories:
+        raise ValueError("'stories' lists one story per issue the split opens")
+    return requirements.strip("\n").rstrip(), _resolved(stories)
 
 
 def lists_stories(text: str) -> bool:
@@ -143,12 +160,27 @@ def lists_stories(text: str) -> bool:
 
 
 def split_skeleton() -> str:
-    """The empty split file a session writes a feature into: both headings and one example bullet.
+    """The shape `parse_split` reads, in the one place that owns it.
 
-    The shape `parse_split` reads, in the one place that owns it, so a context can show the session
-    what to write without the wording drifting from what the parser accepts.
+    A context shows the session this, so the wording cannot drift from what the parser accepts.
     """
-    return "\n\n".join([STUB_HEADING, STORIES_HEADING, "- [owner/name: ]<title> | <one sentence> (after 1)"])
+    return json.dumps(
+        {
+            "kind": "split",
+            "requirements": "<what the feature needs, in full>",
+            "stories": [
+                {"key": "<name>", "title": "<title>", "sentence": "<one sentence>"},
+                {
+                    "key": "<name>",
+                    "title": "<title>",
+                    "sentence": "<one sentence>",
+                    "repo": "<owner/name, when it belongs elsewhere>",
+                    "after": ["<the key of a story above>"],
+                },
+            ],
+        },
+        indent=2,
+    )
 
 
 def _rendered(entry: Entry) -> str:

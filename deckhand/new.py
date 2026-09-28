@@ -42,7 +42,7 @@ from deckhand.step import (
 
 _RUN = datetime.now().strftime("%Y%m%d-%H%M%S")  # one token per run, so two sessions never share a draft
 DRAFT = f"new-{_RUN}.md"
-SPLIT = f"split-{_RUN}.md"
+SPLIT = f"split-{_RUN}.json"
 DEPENDS_HEADING = "## Depends on"
 SPLIT_NOTE = "If this is more than one story, write the split file instead."
 DRAFTED = "Drafted: the story and its plan, from the request."
@@ -88,7 +88,7 @@ def _draft_name(number: int) -> str:
 
 def _split_name(number: int) -> str:
     """The split file for the feature `number` holds, inside the repository's cache."""
-    return f"{number}-split.md"
+    return f"{number}-split.json"
 
 
 def _split_block(name: str) -> None:

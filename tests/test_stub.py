@@ -34,73 +34,111 @@ def _split(*bullets: str, requirements: str = REQUIREMENTS) -> str:
 # --- parse_split ------------------------------------------------------------
 
 
-def test_parse_split_reads_the_requirements_and_every_bullet():
-    requirements, entries = stub.parse_split(_split(*BULLETS))
+def _doc(stories: list[dict], requirements: str = REQUIREMENTS) -> str:
+    return json.dumps({"kind": "split", "requirements": requirements, "stories": stories})
+
+
+STORIES = [
+    {"key": "grant-store", "title": "Grant store", "sentence": "Persist grants."},
+    {"key": "handler-filter", "title": "Handler filter", "sentence": "Filter by grant.", "after": ["grant-store"]},
+    {
+        "key": "admin-view",
+        "title": "Admin view",
+        "sentence": "Show grants.",
+        "after": ["grant-store", "handler-filter"],
+    },
+]
+
+
+def test_parse_split_reads_the_requirements_and_resolves_every_key():
+    """The keys are the authored form; what is stored is the position, which deckhand generates."""
+    requirements, entries = stub.parse_split(_doc(STORIES))
 
     assert requirements == REQUIREMENTS
     assert entries == ENTRIES
 
 
-def test_parse_split_names_the_line_of_a_bullet_without_a_pipe():
-    text = _split(BULLETS[0], "- Handler filter filters by grant.", BULLETS[2])
+def test_parse_split_refuses_an_after_that_names_a_later_story():
+    stories = [STORIES[0], {**STORIES[1], "after": ["admin-view"]}, STORIES[2]]
 
-    with pytest.raises(ValueError, match="line 8: expected '<title> | <sentence>'"):
-        stub.parse_split(text)
-
-
-def test_parse_split_refuses_a_pipe_inside_the_title_or_the_sentence():
-    text = _split("- Grant | store | Persist grants.")
-
-    with pytest.raises(ValueError, match="line 7: a title or sentence cannot contain"):
-        stub.parse_split(text)
+    with pytest.raises(ValueError, match="story 2: after names 'admin-view', which is not a story defined before it"):
+        stub.parse_split(_doc(stories))
 
 
-def test_parse_split_refuses_an_after_that_names_a_later_entry():
-    text = _split(BULLETS[0], "- Handler filter | Filter by grant. (after 3)", BULLETS[2])
+def test_parse_split_refuses_an_after_that_names_nothing():
+    stories = [STORIES[0], {**STORIES[1], "after": ["nowhere"]}]
 
-    with pytest.raises(ValueError, match="line 8: after 3 names this story or a later one"):
-        stub.parse_split(text)
-
-
-def test_parse_split_refuses_an_after_out_of_range():
-    text = _split(BULLETS[0], "- Handler filter | Filter by grant. (after 9)", BULLETS[2])
-
-    with pytest.raises(ValueError, match="line 8: after 9 names no story; there are 3"):
-        stub.parse_split(text)
+    with pytest.raises(ValueError, match="story 2: after names 'nowhere'"):
+        stub.parse_split(_doc(stories))
 
 
 def test_parse_split_refuses_an_after_that_names_itself():
-    text = _split(BULLETS[0], "- Handler filter | Filter by grant. (after 2)", BULLETS[2])
+    stories = [STORIES[0], {**STORIES[1], "after": ["handler-filter"]}]
 
-    with pytest.raises(ValueError, match="line 8: after 2 names this story or a later one"):
-        stub.parse_split(text)
-
-
-def test_parse_split_refuses_an_after_position_named_twice():
-    text = _split(BULLETS[0], BULLETS[1], "- Admin view | Show grants. (after 1, 1)")
-
-    with pytest.raises(ValueError, match="line 9: after 1 is named twice"):
-        stub.parse_split(text)
+    with pytest.raises(ValueError, match="story 2: after names 'handler-filter'"):
+        stub.parse_split(_doc(stories))
 
 
-def test_parse_split_refuses_a_file_without_the_requirements_heading():
-    with pytest.raises(ValueError, match="line 1: expected ## Requirements"):
-        stub.parse_split(f"# Requirements\n\n{REQUIREMENTS}\n\n## Stories\n\n{BULLETS[0]}\n")
+def test_parse_split_refuses_a_key_named_twice_in_one_after():
+    stories = [STORIES[0], {**STORIES[1], "after": ["grant-store", "grant-store"]}]
+
+    with pytest.raises(ValueError, match="story 2: after names 'grant-store' twice"):
+        stub.parse_split(_doc(stories))
+
+
+def test_parse_split_refuses_two_stories_with_one_key():
+    stories = [STORIES[0], {**STORIES[1], "key": "grant-store"}]
+
+    with pytest.raises(ValueError, match="story 2: 'grant-store' is already the key of an earlier story"):
+        stub.parse_split(_doc(stories))
+
+
+@pytest.mark.parametrize("field", ["key", "title", "sentence"])
+def test_parse_split_refuses_a_story_missing_a_field(field):
+    story = {key: value for key, value in STORIES[0].items() if key != field}
+
+    with pytest.raises(ValueError, match=f"story 1: needs a {field}"):
+        stub.parse_split(_doc([story]))
 
 
 def test_parse_split_refuses_requirements_with_no_text():
-    with pytest.raises(ValueError, match="line 1: ## Requirements has no text"):
-        stub.parse_split(_split(*BULLETS, requirements=""))
+    with pytest.raises(ValueError, match="'requirements' says what the feature needs"):
+        stub.parse_split(_doc(STORIES, requirements="  "))
 
 
-def test_parse_split_refuses_a_file_without_the_stories_heading():
-    with pytest.raises(ValueError, match="expected ## Stories"):
-        stub.parse_split(f"## Requirements\n\n{REQUIREMENTS}\n")
+def test_parse_split_refuses_a_document_with_no_stories():
+    with pytest.raises(ValueError, match="'stories' lists one story per issue"):
+        stub.parse_split(_doc([]))
 
 
-def test_parse_split_refuses_a_stories_list_with_no_bullets():
-    with pytest.raises(ValueError, match="line 5: ## Stories lists no stories"):
-        stub.parse_split(_split())
+def test_parse_split_refuses_a_document_that_is_not_a_split():
+    with pytest.raises(ValueError, match='opens with {"kind": "split"'):
+        stub.parse_split(json.dumps({"kind": "findings", "findings": []}))
+
+
+def test_parse_split_refuses_text_that_is_not_json():
+    with pytest.raises(ValueError, match="line 1 column 1"):
+        stub.parse_split("## Requirements\n\n- Grant store | Persist grants.\n")
+
+
+def test_parse_split_keeps_a_colon_inside_a_title():
+    """A colon in a title cost a mistitled issue under the old grammar; JSON cannot lose it."""
+    story = {"key": "store", "title": "Store: grants", "sentence": "Persist grants."}
+
+    _, entries = stub.parse_split(_doc([story]))
+
+    assert entries == [Entry("Store: grants", "Persist grants.", ())]
+
+
+def test_parse_split_reads_a_repository():
+    stories = [
+        {"key": "endpoint", "title": "Endpoint", "sentence": "Lists grants.", "repo": "acme/gadgets"},
+        {"key": "screen", "title": "Screen", "sentence": "Shows them.", "after": ["endpoint"]},
+    ]
+
+    _, entries = stub.parse_split(_doc(stories, requirements="R."))
+
+    assert [(e.repo, e.title, e.after) for e in entries] == [("acme/gadgets", "Endpoint", ()), (None, "Screen", (1,))]
 
 
 # --- render and read --------------------------------------------------------
@@ -146,12 +184,6 @@ def test_a_title_that_carries_a_colon_survives_the_round_trip():
     requirements, read = stub.read(stub.render(REQUIREMENTS, entries))
 
     assert (requirements, read) == (REQUIREMENTS, entries)
-
-
-def test_parse_split_keeps_a_colon_inside_a_title():
-    requirements, entries = stub.parse_split(_split("- Store: grants | Persist grants."))
-
-    assert (requirements, entries) == (REQUIREMENTS, [Entry("Store: grants", "Persist grants.", ())])
 
 
 def test_read_tolerates_carriage_returns():
@@ -221,15 +253,6 @@ def test_lists_stories_is_false_without_the_stories_heading():
 
 def test_lists_stories_ignores_a_bullet_above_the_stories_heading():
     assert stub.lists_stories(_split(requirements=f"{REQUIREMENTS}\n\n- One requirement")) is False
-
-
-def test_parse_split_reads_a_repository_prefix():
-    stories = "- acme/gadgets: Endpoint | Lists grants.\n- Screen | Shows them. (after 1)\n"
-    text = f"## Requirements\n\nR.\n\n## Stories\n\n{stories}"
-
-    _, entries = stub.parse_split(text)
-
-    assert [(e.repo, e.title, e.after) for e in entries] == [("acme/gadgets", "Endpoint", ()), (None, "Screen", (1,))]
 
 
 def test_render_writes_the_repository_prefix_back():

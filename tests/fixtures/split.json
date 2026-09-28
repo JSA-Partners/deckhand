@@ -1,0 +1,11 @@
+{
+  "kind": "split",
+  "requirements": "Guests should see only the collections they were granted.",
+  "stories": [
+    {"key": "grant-store", "title": "Grant store", "sentence": "Persist grants."},
+    {"key": "handler-filter", "title": "Handler filter", "sentence": "Filter by grant.",
+     "after": ["grant-store"]},
+    {"key": "admin-view", "title": "Admin view", "sentence": "Show grants.",
+     "after": ["grant-store", "handler-filter"]}
+  ]
+}
