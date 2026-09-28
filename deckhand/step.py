@@ -382,7 +382,7 @@ def _context(
         print()
     tail = "Say what could not be read and stop."
     try:
-        with gh.cached():  # a context reads and never writes, so one fact is read once
+        with gh.cached(), git.cached():  # one fact is read once; a git write empties the git block
             return context(args) or 0
     except Exception as error:  # a skill injects this output; one line beats a failed prompt
         print(f"(deckhand {name} context failed: {error}. {tail})")

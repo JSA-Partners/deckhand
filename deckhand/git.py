@@ -8,7 +8,9 @@ own words without the paragraph around them.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 MARKERS = ("fatal:", "error:")
@@ -54,12 +56,60 @@ def message(stderr: str) -> str:
     return f"{head} {', '.join(detail)}" if detail else head
 
 
+# The subcommands that only report. Anything else may change what a later read would say, so it
+# empties the block rather than being served from it.
+READS = frozenset(
+    {"rev-parse", "rev-list", "merge-base", "log", "diff", "status", "ls-files", "check-ignore", "show", "for-each-ref"}
+)
+# The two that report in one form and write in another, so the form decides.
+READ_FORMS = frozenset({("worktree", "list"), ("branch", "--show-current")})
+
+_cache: dict[tuple[tuple[str, ...], str | None], str] | None = None
+_fetched: set[tuple[tuple[str, ...], str | None]] | None = None
+
+
+def reads(args: tuple[str, ...]) -> bool:
+    """Whether this call only reports; a subcommand nobody listed is a write, which is the safe answer."""
+    if not args:
+        return False
+    return args[0] in READS or (len(args) > 1 and (args[0], args[1]) in READ_FORMS)
+
+
+@contextlib.contextmanager
+def cached() -> Iterator[None]:
+    """Memoise every read for the length of the block, and fetch each ref at most once inside it.
+
+    A context reads far more than it writes, but unlike `gh` it does write: `next` sweeps the
+    worktrees of closed stories while it briefs. So a call that is not a read empties the block
+    rather than being served from it, and a second fetch of a ref already fetched here is skipped
+    instead, because repeating it inside one command cannot tell the caller anything new.
+    """
+    global _cache, _fetched
+    if _cache is not None:  # already inside a block; the outer one owns the cache
+        yield
+        return
+    _cache, _fetched = {}, set()
+    try:
+        yield
+    finally:
+        _cache, _fetched = None, None
+
+
 def run(*args: str, cwd: Path | None = None) -> str:
     """git's stdout without the newline it ends with; a non-zero exit raises `GitError`.
 
     Decoded leniently, and stripped of newlines rather than of whitespace: a diff is not always
     valid UTF-8, and a carriage return at the end of one is content, not padding.
     """
+    key = (args, str(cwd) if cwd is not None else None)
+    if _cache is not None and _fetched is not None:
+        if args[:1] == ("fetch",) and key in _fetched:
+            return ""
+        if reads(args):
+            if key in _cache:
+                return _cache[key]
+        else:
+            _cache.clear()
     try:
         result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=False)
     except FileNotFoundError as error:
@@ -73,7 +123,13 @@ def run(*args: str, cwd: Path | None = None) -> str:
             where = cwd or Path.cwd()
             raise GitError(f"not inside a git repository: {where}; run deckhand from the clone", stderr, stdout)
         raise GitError(message(stderr) or f"git {' '.join(args)} failed", stderr, stdout)
-    return result.stdout.decode("utf-8", errors="replace").strip("\n")
+    out = result.stdout.decode("utf-8", errors="replace").strip("\n")
+    if _cache is not None and _fetched is not None:
+        if reads(args):
+            _cache[key] = out
+        elif args[:1] == ("fetch",):
+            _fetched.add(key)
+    return out
 
 
 def set_ref(name: str, sha: str) -> None:

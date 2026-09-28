@@ -108,3 +108,63 @@ def test_a_command_outside_a_repository_says_so_in_deckhands_words(tmp_path, mon
 
     assert "not inside a git repository" in str(caught.value)
     assert str(tmp_path) in str(caught.value)
+
+
+def test_reads_is_the_form_not_just_the_subcommand():
+    """worktree reports in one form and removes in another, so the subcommand alone cannot answer."""
+    assert git.reads(("worktree", "list")) is True
+    assert git.reads(("worktree", "remove", "somewhere")) is False
+    assert git.reads(("branch", "--show-current")) is True
+    assert git.reads(("branch", "-D", "feat/x")) is False
+    assert git.reads(("rev-parse", "HEAD")) is True
+    assert git.reads(("push", "-u", "origin", "main")) is False
+    assert git.reads(()) is False
+
+
+def test_a_read_inside_the_block_runs_once(repo: Path):
+    first = git.run("rev-parse", "HEAD", cwd=repo)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "another")
+
+    with git.cached():
+        inside = git.run("rev-parse", "HEAD", cwd=repo)
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "third")
+        again = git.run("rev-parse", "HEAD", cwd=repo)
+
+    assert inside != first
+    assert again == inside  # the second ask is the first answer, not the new commit
+
+
+def test_a_read_outside_the_block_always_runs(repo: Path):
+    before = git.run("rev-parse", "HEAD", cwd=repo)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "another")
+
+    assert git.run("rev-parse", "HEAD", cwd=repo) != before
+
+
+def test_a_write_inside_the_block_empties_it(repo: Path):
+    """A context sweeps worktrees while it briefs, so a cached read must not outlive a write."""
+    with git.cached():
+        before = git.run("rev-parse", "HEAD", cwd=repo)
+        git.run("commit", "-q", "--allow-empty", "-m", "written through deckhand", cwd=repo)
+        after = git.run("rev-parse", "HEAD", cwd=repo)
+
+    assert after != before
+
+
+def test_one_fetch_of_a_ref_per_block(repo: Path, origin: Path, tmp_path: Path):
+    """A second fetch of a ref already fetched here would pick up a push and empty the block."""
+    _git(repo, "push", "-q", "-u", "origin", "main")
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
+    _git(other, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "elsewhere")
+
+    with git.cached():
+        git.run("fetch", "origin", "main", cwd=repo)
+        before = git.run("rev-parse", "origin/main", cwd=repo)
+        _git(other, "push", "-q", "origin", "main")
+        git.run("fetch", "origin", "main", cwd=repo)
+
+        assert git.run("rev-parse", "origin/main", cwd=repo) == before
+
+    git.run("fetch", "origin", "main", cwd=repo)
+    assert git.run("rev-parse", "origin/main", cwd=repo) != before
