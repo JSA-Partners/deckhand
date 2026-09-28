@@ -12,9 +12,9 @@ REFINEMENT = "Refinement"
 READY = "Ready"
 BACKLOG = "Backlog"
 IN_PROGRESS = "In Progress"
-PENDING_REVIEW = "Pending Review"
+IN_REVIEW = "In Review"
 VERIFICATION = "Verification"
 DONE = "Done"
 
 # The order a story moves through them, which is the order the project offers them in.
-ORDER = (DRAFT, REFINEMENT, READY, BACKLOG, IN_PROGRESS, PENDING_REVIEW, VERIFICATION, DONE)
+ORDER = (DRAFT, REFINEMENT, READY, BACKLOG, IN_PROGRESS, IN_REVIEW, VERIFICATION, DONE)

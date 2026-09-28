@@ -306,7 +306,7 @@ def test_context_reports_each_checklist_item(repo, fake_gh, tmp_path):
     result = run_deckhand("setup", "context", cwd=repo, env=env)
 
     assert _checklist(result) == [
-        "  Status options: set to Draft, Refinement, Ready, Backlog, In Progress, Pending Review, Verification, Done "
+        "  Status options: set to Draft, Refinement, Ready, Backlog, In Progress, In Review, Verification, Done "
         "(currently: Backlog, Blocked, In Progress, Pending Review, Done)",
         "  Board view fields: done",
         "  Kind colors: done",
@@ -800,7 +800,7 @@ def test_apply_names_what_is_left_with_the_page_and_the_click(repo, fake_gh, tmp
     start = lines.index("Finish by hand (the API cannot do this):")
     assert lines[start - 1] == ""
     assert lines[start + 1 :] == [
-        "  1. Status options: set to Draft, Refinement, Ready, Backlog, In Progress, Pending Review, "
+        "  1. Status options: set to Draft, Refinement, Ready, Backlog, In Progress, In Review, "
         "Verification, Done "
         "(currently: Backlog, Blocked, In Progress, Pending Review, Done). Project > Settings > Status. "
         "Deleting an option is permanent.",

@@ -10,7 +10,7 @@ do.
 
 The body mode never rewrites more than the model drafted: the draft's section headings have to match
 the ones the issue carries, so a body that lost a section is a refusal rather than a silent deletion.
-The body freezes once the story starts, which the board says as In Progress, Pending Review, or
+The body freezes once the story starts, which the board says as In Progress, In Review, or
 Done: a discovery during execution is a `Deviation:` entry or a new issue, never a rewritten story.
 A story still short of the board reaches Refinement, because an amend of one is somebody working it
 up; a story the board has already approved keeps the column the step that put it there wrote.
@@ -58,7 +58,7 @@ FROZEN_CONTEXT = (
     "  Work of its own goes in a new issue.\n"
     "  Only the title can still change."
 )
-STARTED = (columns.IN_PROGRESS, columns.PENDING_REVIEW, columns.DONE)
+STARTED = (columns.IN_PROGRESS, columns.IN_REVIEW, columns.DONE)
 # An unread column reads the same as none, so writing on either could demote a story that had started.
 WORKED_UP = (columns.DRAFT, columns.REFINEMENT, columns.READY)
 STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."

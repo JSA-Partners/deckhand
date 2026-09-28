@@ -95,7 +95,7 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
         return "wait", f"Waits on {named}."
     if f.status == columns.BACKLOG:
         return "check", "On the board; check the plan against the code, then build."
-    # Pending Review and Done are the board's own columns, and nothing here reboards a story out of
+    # In Review and Done are the board's own columns, and nothing here reboards a story out of
     # one: the pull request row above is the only way back in.
     # Refinement and Ready are positions inside the drafting rows below, not columns to stop at:
     # an amend puts a story in one and a review in the other, and both still have a step to run.

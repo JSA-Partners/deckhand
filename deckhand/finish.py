@@ -13,7 +13,7 @@ pull request opens only when HEAD is the commit the last `Reviewed:` entry names
 clean, the branch contains main, every subject is a conventional commit that names no story
 number, the docs audit is clean, and every check the caller named exits 0. Only then does it push
 the branch, which reaches origin here and nowhere earlier, open the pull request assigned to
-whoever ran the step, log `Pull request:` on the issue, and record Pending Review, so
+whoever ran the step, log `Pull request:` on the issue, and record In Review, so
 what merges is what was reviewed.
 
 Both verbs work against `origin/main`, never the local branch of that name: a story branches from
@@ -285,5 +285,5 @@ def apply(args: argparse.Namespace) -> int:
         print(f"Opened {url}")
     issue.comment(repo, args.issue, log.checked(f"Pull request: {url}"))
     print("Logged Pull request")
-    print(fields.set_field(settings, repo, args.issue, "Status", columns.PENDING_REVIEW))
+    print(fields.set_field(settings, repo, args.issue, "Status", columns.IN_REVIEW))
     return 0

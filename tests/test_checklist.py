@@ -127,7 +127,7 @@ def test_the_status_options_are_the_eight_columns():
         "Ready",
         "Backlog",
         "In Progress",
-        "Pending Review",
+        "In Review",
         "Verification",
         "Done",
     ]
@@ -141,7 +141,7 @@ def test_status_options_left_names_the_current_ones(fake_gh, settings):
     item = _item(checklist.checklist(settings, REPO, _fields(Status=status)), "Status options")
 
     assert item.left == (
-        "set to Draft, Refinement, Ready, Backlog, In Progress, Pending Review, Verification, Done "
+        "set to Draft, Refinement, Ready, Backlog, In Progress, In Review, Verification, Done "
         "(currently: Backlog, Done)"
     )
 
@@ -304,17 +304,3 @@ def test_merge_settings_are_unknown_when_the_repository_cannot_be_read(fake_gh, 
     item = _item(checklist.checklist(settings, REPO, _fields()), "Merge settings")
 
     assert item.unknown and item.left.startswith("unknown (")
-
-
-def test_the_checklist_offers_the_columns_in_the_order_a_story_moves_through_them():
-    """The option list is the pipeline, so a column added out of order would be a column out of order."""
-    assert checklist.STATUS_OPTIONS == [
-        "Draft",
-        "Refinement",
-        "Ready",
-        "Backlog",
-        "In Progress",
-        "Pending Review",
-        "Verification",
-        "Done",
-    ]

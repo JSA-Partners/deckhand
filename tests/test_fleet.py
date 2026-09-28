@@ -50,8 +50,8 @@ def test_a_started_story_can_only_be_in_progress():
 
 
 def test_a_story_with_a_pull_request_is_pending_review():
-    """finish writes Pending Review, and nothing moves a story back out of it."""
-    assert fleet.allowed(_story(117)) == ("Pending Review",)
+    """finish writes In Review, and nothing moves a story back out of it."""
+    assert fleet.allowed(_story(117)) == ("In Review",)
 
 
 def test_a_reviewed_story_may_still_be_waiting_to_be_boarded():
@@ -305,14 +305,14 @@ OWED = "### After the merge\n\n- [ ] Deploy the migration\n"
 
 def test_a_closed_story_left_in_pending_review_is_an_anomaly():
     """Nothing runs when GitHub closes the issue on merge, so a story nobody revisits is caught here."""
-    found = fleet.anomalies(fleet.stories(_closed("Pending Review")), {}, set(), [])
+    found = fleet.anomalies(fleet.stories(_closed("In Review")), {}, set(), [])
 
     assert [(item.number, item.fix) for item in found] == [(301, "Status Done")]
 
 
 def test_a_closed_story_with_items_left_wants_verification():
     """The column a repair writes follows the boxes, not the fact that it is closed."""
-    found = fleet.anomalies(fleet.stories(_closed("Pending Review", OWED)), {}, set(), [])
+    found = fleet.anomalies(fleet.stories(_closed("In Review", OWED)), {}, set(), [])
 
     assert [(item.number, item.fix) for item in found] == [(301, "Status Verification")]
 
@@ -323,12 +323,12 @@ def test_a_closed_story_in_verification_is_no_anomaly():
 
 
 def test_an_issue_the_process_never_touched_is_not_judged():
-    found = fleet.anomalies(fleet.stories(_foreign("Pending Review")), {}, set(), [])
+    found = fleet.anomalies(fleet.stories(_foreign("In Review")), {}, set(), [])
     assert found == []
 
 
 def test_an_issue_the_process_never_touched_says_so_in_its_row():
-    story = fleet.stories(_foreign("Pending Review"))[0]
+    story = fleet.stories(_foreign("In Review"))[0]
     assert fleet.note(story, [], behind=False) == "not a deckhand story"
 
 

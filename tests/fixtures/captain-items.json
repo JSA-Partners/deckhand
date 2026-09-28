@@ -321,7 +321,7 @@
               "fieldValues": {
                 "nodes": [
                   {
-                    "name": "Pending Review",
+                    "name": "In Review",
                     "field": {
                       "name": "Status"
                     }

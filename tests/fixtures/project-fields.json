@@ -13,7 +13,7 @@
                 { "id": "opt_ready", "name": "Ready", "color": "PINK" },
                 { "id": "opt_backlog", "name": "Backlog", "color": "GRAY" },
                 { "id": "opt_inprogress", "name": "In Progress", "color": "BLUE" },
-                { "id": "opt_pending", "name": "Pending Review", "color": "YELLOW" },
+                { "id": "opt_pending", "name": "In Review", "color": "YELLOW" },
                 { "id": "opt_verification", "name": "Verification", "color": "ORANGE" },
                 { "id": "opt_done", "name": "Done", "color": "GREEN" }
               ] },

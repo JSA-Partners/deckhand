@@ -12,7 +12,7 @@ def test_every_column_is_spelled_once_and_the_order_is_the_pipeline():
         "Ready",
         "Backlog",
         "In Progress",
-        "Pending Review",
+        "In Review",
         "Verification",
         "Done",
     ]

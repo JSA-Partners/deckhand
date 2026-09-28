@@ -75,7 +75,7 @@ def facts(**changes) -> Facts:
         ({"unavailable": ("board", "branch")}, "stop", "Cannot read board, branch; nothing decided."),
         ({"pull_request": PR_URL}, "merge", f"Pull request open: {PR_URL}"),
         (
-            {"merged": True, "status": "Pending Review"},
+            {"merged": True, "status": "In Review"},
             "stop",
             "#248 has a merged pull request and an open issue; close the issue on GitHub.",
         ),
@@ -101,7 +101,7 @@ def facts(**changes) -> Facts:
         ),
         ({"status": "Draft", "reviewed": True}, "board", "Reviewed, nothing waiting."),
         ({"status": None, "reviewed": True}, "board", "Reviewed, nothing waiting."),
-        ({"status": "Pending Review"}, "stop", "#248 is Pending Review with no open pull request; nothing decided."),
+        ({"status": "In Review"}, "stop", "#248 is In Review with no open pull request; nothing decided."),
         ({"status": "Done"}, "stop", "#248 is Done with no open pull request; nothing decided."),
         ({"status": "Parked", "reviewed": True}, "stop", "#248 is Parked with no open pull request; nothing decided."),
     ],
@@ -449,7 +449,7 @@ def test_running_checks_are_named_on_the_merge_row():
 def test_a_failed_check_prints_the_start_context(fake_gh, repo, origin, branch, tmp_path):
     checks = json.dumps([{"name": "Unit tests", "conclusion": "FAILURE"}, {"name": "Lint", "conclusion": "SUCCESS"}])
     env = {
-        **fieldvalues(tmp_path, "Pending Review"),
+        **fieldvalues(tmp_path, "In Review"),
         "GH_PR_EXISTS": "1",
         "GH_PR_STATE": "OPEN",
         "GH_PR_CHECKS": checks,
@@ -479,7 +479,7 @@ def test_the_pull_request_is_read_from_the_log_when_the_branch_is_elsewhere(fake
         _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"),
         title="Guests see granted collections only",
     )
-    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "OPEN"}
+    env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_STATE": "OPEN"}
 
     result = _next(repo, env=env)
 
@@ -492,7 +492,7 @@ def test_the_pull_request_is_read_from_the_log_when_the_branch_is_elsewhere(fake
 def test_a_merged_pull_request_with_an_open_issue_says_to_close_it(fake_gh, repo, tmp_path):
     """The squash landed and the Closes footer did not fire, so the story is nobody's until it closes."""
     story = _logged(tmp_path, "merged-pr.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
-    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "MERGED"}
+    env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_STATE": "MERGED"}
 
     result = _next(repo, env=env)
 
@@ -501,11 +501,11 @@ def test_a_merged_pull_request_with_an_open_issue_says_to_close_it(fake_gh, repo
 
 def test_a_pull_request_closed_without_merging_is_not_one(fake_gh, repo, tmp_path):
     story = _logged(tmp_path, "closed-pr.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
-    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "CLOSED"}
+    env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_STATE": "CLOSED"}
 
     result = _next(repo, env=env)
 
-    _briefing(result, "stop", "#248 is Pending Review with no open pull request; nothing decided.")
+    _briefing(result, "stop", "#248 is In Review with no open pull request; nothing decided.")
 
 
 def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, repo, tmp_path):
@@ -711,10 +711,10 @@ def test_an_unreadable_pull_request_stops(fake_gh, repo, origin, branch, tmp_pat
 
 
 def test_a_story_in_a_column_next_cannot_act_on_stops(fake_gh, repo, tmp_path):
-    """Pending Review with no pull request is the board's business, so there is no step to offer."""
-    result = _next(repo, env=fieldvalues(tmp_path, "Pending Review"))
+    """In Review with no pull request is the board's business, so there is no step to offer."""
+    result = _next(repo, env=fieldvalues(tmp_path, "In Review"))
 
-    lines = _briefing(result, "stop", "#248 is Pending Review with no open pull request; nothing decided.")
+    lines = _briefing(result, "stop", "#248 is In Review with no open pull request; nothing decided.")
     assert lines[5:] == ["  none"]
 
 
@@ -834,7 +834,7 @@ ELSEWHERE = '[{"number":9,"title":"Endpoint","state":"open","repository":{"full_
 
 def test_a_pull_request_behind_main_is_updated(fake_gh, repo, origin, branch, tmp_path):
     story = _logged(tmp_path, "pr.json", _entry(f"Pull request: {PR_URL}", "2026-09-05T09:00:00Z"))
-    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "OPEN", "GH_PR_MERGE_STATE": "BEHIND"}
+    env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_STATE": "OPEN", "GH_PR_MERGE_STATE": "BEHIND"}
 
     result = _next(repo, env=env)
 
@@ -884,7 +884,7 @@ def test_a_briefing_reads_the_pull_request_once(fake_gh, gh_calls, repo, tmp_pat
     """Three readers asking for one superset of fields is one call inside a context's cache."""
     story = _logged(tmp_path, "pr.json", _entry("Pull request: " + PR_URL, "2026-09-05T10:00:00Z"))
 
-    env = {**story, **fieldvalues(tmp_path, "Pending Review"), "GH_PR_STATE": "OPEN"}
+    env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_STATE": "OPEN"}
 
     _next(repo, env=env)
 
