@@ -1,13 +1,12 @@
 """Reading a findings, verdicts or decisions file into data.
 
-The three files are three positional arguments of the same shape, so every refusal here says which
-line failed and, when the whole file parses as one of the other two, which shape it actually reads
-as. Nothing here touches GitHub: it is text in, data or `Refusal` out.
+The three files are JSON documents of the same shape: a `kind` naming which one it is, and a list
+of entries under that same name. Nothing here touches GitHub: it is text in, data or `Refusal` out.
 """
 
 from __future__ import annotations
 
-import re
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -18,23 +17,21 @@ SEVERITIES = ("P1", "P2", "P3")
 PENDING = "PENDING"
 VERDICTS = ("CONFIRMED", "REJECTED")
 DECISIONS = ("accepted", "declined", "changed")
+SHAPES = ("findings", "verdicts", "decisions")
 
-_EXPECTED = f"expected <lens>.<n> | P1|P2|P3 | {PENDING} | <claim> | <evidence>"
-_EXPECTED_VERDICT = "expected <lens>.<n> | CONFIRMED, or <lens>.<n> | REJECTED | <reason>"
-_EXPECTED_DECISION = "expected <lens>.<n> | accepted|declined|changed [| <reason>]"
-_CODE_SPAN = re.compile(r"(?P<ticks>`+).*?(?P=ticks)")
+_EntryReader = Callable[[object, int, list[str]], "tuple[str, str, str] | None"]
 
 
 @dataclass(frozen=True)
 class Finding:
-    """One finding: the reviewer's line split into its columns, with the skeptic's verdict on it."""
+    """One finding: the reviewer's entry, with the skeptic's verdict on it."""
 
     lens: str
     ordinal: int
     severity: str
-    verdict: str
     claim: str
     evidence: str
+    verdict: str = PENDING
     rejection: str = ""
 
     @property
@@ -42,169 +39,93 @@ class Finding:
         return f"{self.lens}.{self.ordinal}"
 
 
-def _id(ref: str) -> tuple[str, int] | None:
-    """`(lens, ordinal)` from `<lens>.<n>`, or None when it is not one."""
-    lens, dot, ordinal = ref.partition(".")
-    if not lens or not dot or not (ordinal.isascii() and ordinal.isdigit()):
-        return None
-    return lens, int(ordinal)
+def _entries(text: str, kind: str) -> list[object]:
+    """The list of entries a `kind` document carries; a malformed document is a `Refusal`, not a guess."""
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise Refusal(f"line {error.lineno} column {error.colno}: {error.msg}") from None
+    if not isinstance(document, dict) or "kind" not in document:
+        raise Refusal(f'a {kind} file opens with {{"kind": "{kind}", "{kind}": [...]}}')
+    if document["kind"] != kind:
+        raise Refusal(f"expected a {kind} file, got {document['kind']}; the order is {', '.join(SHAPES)}")
+    if not isinstance(document.get(kind), list):
+        raise Refusal(f"'{kind}' must be a list")
+    return document[kind]
 
 
-def _masked(line: str) -> str:
-    """`line` with every backtick span blanked, so a pipe inside code is never a separator.
-
-    The blanks are the same length as what they replace, so an index found in the masked line is the
-    same index in the original. An unclosed run matches nothing and masks nothing, which leaves a
-    malformed line refused rather than swallowing the rest of the row.
-    """
-    return _CODE_SPAN.sub(lambda span: "\x00" * len(span.group(0)), line)
-
-
-def _split_at(line: str, masked: str, separator: str) -> list[str]:
-    """`line` cut where `masked` holds `separator`, so a separator inside a code span never cuts."""
-    out: list[str] = []
-    start, index = 0, masked.find(separator)
-    while index != -1:
-        out.append(line[start:index].strip())
-        start = index + len(separator)
-        index = masked.find(separator, start)
-    out.append(line[start:].strip())
-    return out
-
-
-def _fields(line: str, *wanted: int) -> list[str]:
-    """The line's fields: `" | "` when that gives one of `wanted`, else the bare `"|"`.
-
-    A claim or an evidence may hold a pipe, in a regex alternation or a shell pipeline, and a split
-    on the bare character takes half the column into the next one. Code spans are masked before
-    either split, and the bare split stays as the fallback so a line written without the spaces
-    around its separators still reads.
-    """
-    masked = _masked(line)
-    spaced = _split_at(line, masked, " | ")
-    if len(spaced) in wanted:
-        return spaced
-    return _split_at(line, masked, "|")
-
-
-def _parse(line: str) -> Finding | None:
-    """One findings line as a `Finding`, or None when it is not in the format the brief stated."""
-    parts = _fields(line, 5)
-    if len(parts) != 5:
-        return None
-    ref, severity, verdict, claim, evidence = parts
-    found = _id(ref)
-    if found is None or severity not in SEVERITIES or verdict != PENDING or not claim or not evidence:
-        return None
-    return Finding(*found, severity, verdict, claim, evidence)
-
-
-def _parse_verdict(line: str) -> tuple[str, str, str] | None:
-    """`(id, verdict, reason)` from one verdict line, or None; a rejection has to say why."""
-    parts = _fields(line, 2, 3)
-    if len(parts) not in (2, 3) or _id(parts[0]) is None or parts[1] not in VERDICTS:
-        return None
-    reason_text = parts[2] if len(parts) == 3 else ""
-    if parts[1] == "REJECTED" and not reason_text:
-        return None
-    return parts[0], parts[1], reason_text if parts[1] == "REJECTED" else ""
-
-
-def _parse_decision(line: str) -> tuple[str, str, str] | None:
-    """`(id, decision, reason)` from one decision line, or None; the reason is the person's and optional."""
-    parts = _fields(line, 2, 3)
-    if len(parts) not in (2, 3) or _id(parts[0]) is None or parts[1] not in DECISIONS:
-        return None
-    return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
-
-
-SHAPES = ("findings", "verdicts", "decisions")
-
-
-def _reads_as(text: str, passed: str) -> str | None:
-    """The one of `SHAPES` every line of `text` parses as, when that is not `passed`; else None.
-
-    The three files are three positional arguments of the same shape, so a swap arrives as a format
-    error about one line. Naming the shape the whole file does read as turns that into the mistake
-    it is, and the order is what the person needs to hear next.
-    """
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        return None
-    for shape, parse in zip(SHAPES, (_parse, _parse_verdict, _parse_decision), strict=True):
-        if shape != passed and all(parse(line) is not None for line in lines):
-            return shape
-    return None
-
-
-def _fault(number: int, line: str, expected: str, first: bool, *wanted: int) -> str:
-    """One line's fault: the expected shape on the first of them, and the field count when that is what is wrong.
-
-    `first` is the first line whose shape is wrong, not the first fault of any kind, because a file
-    whose earlier faults are all semantic still has to be told the shape it was meant to be written in.
-    """
-    count = len(_fields(line, *wanted))
-    counted = "" if count in wanted else f"found {count} field{'' if count == 1 else 's'}"
-    if first:
-        return f"line {number}: {expected}" + (f"; {counted}" if counted else "")
-    return f"line {number}: {counted or 'not in that format'}"
-
-
-def _refuse(faults: list[str], text: str, passed: str) -> None:
-    """One refusal carrying every fault, with the shape the whole file reads as when it reads as one.
-
-    A file written the wrong width is wrong the same way on every line, and refusing the first alone
-    costs a run for each of the rest.
-    """
-    if not faults:
-        return
-    found = _reads_as(text, passed)
-    hint = f"; that file reads as {found}, and the order is findings, verdicts, decisions" if found else ""
-    raise Refusal("\n".join([faults[0] + hint, *faults[1:]]))
+def _missing(entry: object, keys: tuple[str, ...], position: int, faults: list[str]) -> bool:
+    """Whether `entry` is unusable: not an object, or missing one of `keys`; each absence gets its own fault."""
+    if not isinstance(entry, dict):
+        faults.append(f"entry {position}: not an object")
+        return True
+    ok = True
+    for key in keys:
+        if key not in entry:
+            faults.append(f"entry {position}: missing '{key}'")
+            ok = False
+    return not ok
 
 
 def _by_finding(
-    text: str, found: list[Finding], parse: Callable[[str], tuple[str, str, str] | None], noun: str, expected: str
+    entries: list[object], found: list[Finding], read: _EntryReader, noun: str
 ) -> dict[str, tuple[str, str]]:
-    """One `(word, reason)` per finding id from `text`, read with `parse`; every finding gets one, and only findings do.
-
-    The verdicts and the decisions are the same shape read from two files, so one reader holds the
-    rules and each caller names only its parse and its noun for the refusals.
-    """
+    """One `(word, reason)` per finding id, read one entry at a time by `read`; every finding gets one, and only
+    findings do."""
     ids = {finding.id for finding in found}
-    read: dict[str, tuple[str, str]] = {}
+    joined: dict[str, tuple[str, str]] = {}
     faults: list[str] = []
-    shaped = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        parsed = parse(line)
+    for position, entry in enumerate(entries, start=1):
+        parsed = read(entry, position, faults)
         if parsed is None:
-            faults.append(_fault(number, line, expected, not shaped, 2, 3))
-            shaped = True
             continue
-        ref, word, why = parsed
+        ref, word, reason = parsed
         if ref not in ids:
-            faults.append(f"line {number}: {ref} is not a finding")
-        elif ref in read:
-            faults.append(f"line {number}: {ref} already has a {noun}")
+            faults.append(f"entry {position}: {ref} is not a finding")
+        elif ref in joined:
+            faults.append(f"entry {position}: {ref} already has a {noun}")
         else:
-            read[ref] = (word, why)
-    _refuse(faults, text, f"{noun}s")
-    missing = [finding.id for finding in found if finding.id not in read]
+            joined[ref] = (word, reason)
+    if faults:
+        raise Refusal("\n".join(faults))
+    missing = [finding.id for finding in found if finding.id not in joined]
     if missing:
         raise Refusal(f"no {noun} for {', '.join(missing)}")
-    return read
+    return joined
+
+
+def _verdict_entry(entry: object, position: int, faults: list[str]) -> tuple[str, str, str] | None:
+    if _missing(entry, ("id", "verdict"), position, faults):
+        return None
+    ref, verdict = entry["id"], entry["verdict"]
+    if verdict not in VERDICTS:
+        faults.append(f"entry {position}: verdict must be one of {', '.join(VERDICTS)}, got {verdict!r}")
+        return None
+    reason = entry.get("reason", "")
+    if verdict == "REJECTED" and not reason:
+        faults.append(f"entry {position}: a REJECTED verdict needs a reason")
+        return None
+    return ref, verdict, reason if verdict == "REJECTED" else ""
+
+
+def _decision_entry(entry: object, position: int, faults: list[str]) -> tuple[str, str, str] | None:
+    if _missing(entry, ("id", "decision"), position, faults):
+        return None
+    ref, decision = entry["id"], entry["decision"]
+    if decision not in DECISIONS:
+        faults.append(f"entry {position}: decision must be one of {', '.join(DECISIONS)}, got {decision!r}")
+        return None
+    return ref, decision, entry.get("reason", "")
 
 
 def verdicts(text: str, found: list[Finding]) -> dict[str, tuple[str, str]]:
     """The skeptic's verdict and reason by finding id."""
-    return _by_finding(text, found, _parse_verdict, "verdict", _EXPECTED_VERDICT)
+    return _by_finding(_entries(text, "verdicts"), found, _verdict_entry, "verdict")
 
 
 def decisions(text: str, found: list[Finding]) -> dict[str, tuple[str, str]]:
     """The person's decision and reason by finding id."""
-    return _by_finding(text, found, _parse_decision, "decision", _EXPECTED_DECISION)
+    return _by_finding(_entries(text, "decisions"), found, _decision_entry, "decision")
 
 
 def judged(found: list[Finding], text: str) -> list[Finding]:
@@ -214,28 +135,27 @@ def judged(found: list[Finding], text: str) -> list[Finding]:
 
 
 def findings(text: str, known: set[str]) -> list[Finding]:
-    """Every finding in `text`; a line that is not in the stated format is a refusal, not a guess."""
-    if text.strip() == CLEAN:
-        return []
+    """Every finding in `text`; an entry out of the stated shape, or naming an unknown lens, is a refusal."""
+    entries = _entries(text, "findings")
     parsed: list[Finding] = []
     seen: set[str] = set()
     faults: list[str] = []
-    shaped = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
+    for position, entry in enumerate(entries, start=1):
+        if _missing(entry, ("lens", "ordinal", "severity", "claim", "evidence"), position, faults):
             continue
-        found = _parse(line)
-        if found is None:
-            faults.append(_fault(number, line, _EXPECTED, not shaped, 5))
-            shaped = True
-        elif found.lens not in known:
-            faults.append(f"line {number}: no lens named '{found.lens}'")
-        elif found.id in seen:
-            faults.append(f"line {number}: {found.id} is already the id of an earlier finding")
-        else:
-            seen.add(found.id)
-            parsed.append(found)
-    _refuse(faults, text, "findings")
-    if not parsed:
-        raise Refusal(f"the findings file is empty; write the findings, or exactly `{CLEAN}`")
+        lens, severity = entry["lens"], entry["severity"]
+        if severity not in SEVERITIES:
+            faults.append(f"entry {position}: severity must be one of {', '.join(SEVERITIES)}, got {severity!r}")
+            continue
+        if lens not in known:
+            faults.append(f"entry {position}: no lens named '{lens}'")
+            continue
+        found = Finding(lens, entry["ordinal"], severity, entry["claim"], entry["evidence"])
+        if found.id in seen:
+            faults.append(f"entry {position}: {found.id} is already the id of an earlier finding")
+            continue
+        seen.add(found.id)
+        parsed.append(found)
+    if faults:
+        raise Refusal("\n".join(faults))
     return parsed
