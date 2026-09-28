@@ -35,16 +35,16 @@ from deckhand.step import (
 )
 
 FINDING_FORMAT = (
-    'Findings: {"kind": "findings", "findings": [{"lens": "<lens>", "ordinal": 1, "severity": "P1|P2|P3", '
+    'Report findings as {"kind": "findings", "findings": [{"lens": "<lens>", "ordinal": 1, "severity": "P1|P2|P3", '
     '"claim": "<one sentence>", "evidence": "<one sentence, citing the section>"}]}; an empty list found nothing'
 )
 VERDICT_FORMAT = (
-    'Verdicts, one per finding in the reviewer\'s order: {"kind": "verdicts", "verdicts": '
+    'Report verdicts, one per finding in the reviewer\'s order, as {"kind": "verdicts", "verdicts": '
     '[{"id": "<lens>.<n>", "verdict": "CONFIRMED"}, {"id": "<lens>.<n>", "verdict": "REJECTED", '
     '"reason": "<why>"}]}'
 )
 DECISION_FORMAT = (
-    'Decisions, one per finding: {"kind": "decisions", "decisions": '
+    'Report decisions, one per finding, as {"kind": "decisions", "decisions": '
     '[{"id": "<lens>.<n>", "decision": "accepted|declined|changed", "reason": "<why, optional>"}]}'
 )
 
