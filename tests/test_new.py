@@ -97,9 +97,10 @@ BROKEN = {
 
 
 def _draft_line(lines: list[str], tmp_path: Path, kind: str, label: str = "Draft") -> bool:
-    """True when a line names a `<kind>-<timestamp>.md` draft in the widgets cache, unique to the run."""
+    """True when a line names a `<kind>-<timestamp>` draft in the widgets cache, unique to the run."""
     folder = re.escape(str(tmp_path / "cache" / "widgets"))
-    return any(re.fullmatch(rf"{label}: {folder}/{kind}-\d{{8}}-\d{{6}}\.md", line) for line in lines)
+    suffix = "json" if kind == "split" else "md"
+    return any(re.fullmatch(rf"{label}: {folder}/{kind}-\d{{8}}-\d{{6}}\.{suffix}", line) for line in lines)
 
 
 def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
@@ -408,8 +409,8 @@ def test_context_does_not_repeat_a_heading_the_prose_already_has(fake_gh):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[0] == "## Requirements"
-    # One from the argument, one from the split file's shape; never two in a row from the argument.
-    assert lines.count("## Requirements") == 2
+    # The argument's own heading, once: the context never adds a second one above what it echoes.
+    assert lines.count("## Requirements") == 1
     assert lines[1] == ""
     assert lines[2] == "Guests should share collections."
 
@@ -423,14 +424,17 @@ def test_context_keeps_the_line_breaks_of_a_multi_line_request(fake_gh):
     assert request in result.stdout
 
 
-def test_context_still_reads_a_file_argument(fake_gh):
-    result = run_deckhand("new", "context", str(FIXTURES / "split.md"))
+def test_context_still_reads_a_file_argument(fake_gh, tmp_path):
+    source = tmp_path / "request.md"
+    source.write_text("Guests should see only the collections they were granted.\n", encoding="utf-8")
+
+    result = run_deckhand("new", "context", str(source))
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[0] == "## Requirements"
     assert "Guests should see only the collections they were granted." in lines
-    assert str(FIXTURES / "split.md") not in result.stdout
+    assert str(FIXTURES / "split.json") not in result.stdout
 
 
 def test_context_still_reads_a_digits_argument(fake_gh):
@@ -487,7 +491,7 @@ def test_context_on_a_parked_feature_offers_the_draft_and_the_split(fake_gh, tmp
     assert "Guests should be able to share a collection with another guest, without an admin in the loop." in lines
     assert f"Draft: {tmp_path / 'cache' / 'widgets' / '60-story.md'}" in lines
     assert "Rules:" in lines
-    assert f"Split file: {tmp_path / 'cache' / 'widgets' / '60-split.md'}" in lines
+    assert f"Split file: {tmp_path / 'cache' / 'widgets' / '60-split.json'}" in lines
     assert _split_skeleton(lines)
     assert "Park shape:" not in lines
     assert lines[-1] == (
@@ -589,9 +593,9 @@ SPLIT_NOTE = "If this is more than one story, write the split file instead."
 
 
 def _split_skeleton(lines: list[str]) -> bool:
-    """Whether the split file's shape is printed: both headings and the example bullet."""
-    bullet = "- [owner/name: ]<title> | <one sentence> (after 1)"
-    return "## Requirements" in lines and "## Stories" in lines and bullet in lines
+    """Whether the split document's shape is printed: its kind, its requirements and a keyed story."""
+    printed = "\n".join(lines)
+    return all(part in printed for part in ('"kind": "split"', '"requirements"', '"key"', '"after"'))
 
 
 def test_context_shows_the_split_file_when_there_is_no_source(fake_gh, tmp_path):
@@ -641,8 +645,8 @@ def test_context_does_not_repeat_a_heading_the_file_already_has(fake_gh, tmp_pat
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[0] == "## Requirements"
-    # One from the file, one from the split file's shape; never two in a row from the file.
-    assert lines.count("## Requirements") == 2
+    # The file's own heading, once: the context never adds a second one above the prose it echoes.
+    assert lines.count("## Requirements") == 1
     assert lines[1] == ""
     assert lines[2] == "Guests should share collections."
 
@@ -699,7 +703,7 @@ def test_apply_stub_keeps_the_stubs_title_when_the_flag_is_blank(fake_gh, gh_cal
 
 # --- apply --split -----------------------------------------------------------
 
-SPLIT_FILE = FIXTURES / "split.md"
+SPLIT_FILE = FIXTURES / "split.json"
 NUMBERS = {"GH_NEW_ISSUE": "57,58,59"}
 STORIES = ["Grant store", "Handler filter", "Admin view"]
 DISPATCH = "Dispatch deckhand:author for each of #57 #58 #59 with "
@@ -821,11 +825,10 @@ def test_apply_split_hands_what_waited_on_the_feature_to_every_story(fake_gh, gh
 
 
 def test_apply_split_refuses_a_first_story_that_belongs_elsewhere(fake_gh, gh_calls, tmp_path):
-    led = tmp_path / "led-elsewhere.md"
-    led.write_text(
-        SPLIT_FILE.read_text(encoding="utf-8").replace("- Grant store |", "- acme/other: Grant store |"),
-        encoding="utf-8",
-    )
+    led = tmp_path / "led-elsewhere.json"
+    document = json.loads(SPLIT_FILE.read_text(encoding="utf-8"))
+    document["stories"][0]["repo"] = "acme/other"
+    led.write_text(json.dumps(document), encoding="utf-8")
 
     result = run_deckhand("new", "apply", "--split", str(led), "--from", "60", env={**NUMBERS, **PARKED})
 
@@ -887,13 +890,13 @@ def test_apply_split_refuses_before_the_first_write_when_no_project_is_linked(fa
 
 
 def test_apply_split_refuses_a_malformed_file_and_names_its_line(fake_gh, gh_calls, tmp_path):
-    bad = tmp_path / "split.md"
-    bad.write_text("## Requirements\n\nGuests share.\n\n## Stories\n\n- no pipe here\n", encoding="utf-8")
+    bad = tmp_path / "split.json"
+    bad.write_text('{"kind": "split", "requirements": "Guests share.", "stories": [', encoding="utf-8")
 
     result = run_deckhand("new", "apply", "--split", str(bad))
 
     assert result.returncode == 1
-    assert result.stderr.strip() == "deckhand new apply: split file line 7: expected '<title> | <sentence>'"
+    assert result.stderr.strip() == "deckhand new apply: split file line 1 column 64: Expecting value"
     assert result.stdout == ""
     assert _writes(gh_calls()) == []
 
@@ -988,8 +991,13 @@ def test_apply_park_takes_the_title_flag(fake_gh, gh_calls, tmp_path):
     assert " --title Guest sharing --body-file " in call
 
 
-def test_apply_park_refuses_a_file_that_already_lists_stories(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--park", str(SPLIT_FILE))
+def test_apply_park_refuses_a_file_that_already_lists_stories(fake_gh, gh_calls, tmp_path):
+    listed = tmp_path / "listed.md"
+    listed.write_text(
+        "## Requirements\n\nGuests share.\n\n## Stories\n\n- Grant store | Persist grants.\n", encoding="utf-8"
+    )
+
+    result = run_deckhand("new", "apply", "--park", str(listed))
 
     assert result.returncode == 1
     assert result.stderr.strip() == "deckhand new apply: a parked feature has no stories yet; use --split"
@@ -1070,7 +1078,7 @@ def test_the_draft_and_split_names_are_unique_to_the_run(fake_gh, tmp_path):
     draft = next(line for line in lines if line.startswith("Draft: "))
     split = next(line for line in lines if line.startswith("Split file: "))
     token = re.search(r"new-(\d{8}-\d{6})\.md$", draft).group(1)
-    assert split.endswith(f"split-{token}.md")
+    assert split.endswith(f"split-{token}.json")
 
 
 def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
@@ -1162,11 +1170,23 @@ def test_repo_and_blocks_are_only_for_park(fake_gh, gh_calls):
 
 
 def test_split_parks_a_story_for_another_repository(fake_gh, gh_calls, tmp_path):
-    split = tmp_path / "split.md"
+    split = tmp_path / "split.json"
     split.write_text(
-        "## Requirements\n\nGuests see granted collections.\n\n## Stories\n\n"
-        "- acme/gadgets: Grant endpoint | Lists grants for a guest.\n"
-        "- Guest screen | Shows the grants. (after 1)\n",
+        json.dumps(
+            {
+                "kind": "split",
+                "requirements": "Guests see granted collections.",
+                "stories": [
+                    {
+                        "key": "endpoint",
+                        "title": "Grant endpoint",
+                        "sentence": "Lists grants for a guest.",
+                        "repo": "acme/gadgets",
+                    },
+                    {"key": "screen", "title": "Guest screen", "sentence": "Shows the grants.", "after": ["endpoint"]},
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     copy = tmp_path / "body.md"
