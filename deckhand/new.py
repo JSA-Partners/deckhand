@@ -2,16 +2,16 @@
 
 `context` says where the draft goes, what shape it takes, and which rules the body has to meet, so
 the skill never has to carry the contract in prose. It takes the session's starting point too:
-nothing, a file holding a request, the request itself, or the number of a stub, whose feature it
+nothing, a file holding a request, the request itself, or the number of a draft, whose feature it
 prints whole so the session can judge what belongs in this story rather than in a sibling.
 
-`apply` lints the draft, opens the issue or writes the draft into the stub it stands for, boards it
+`apply` lints the body, opens the issue or writes it into the draft it stands for, boards it
 as Draft, and logs `Drafted:`; the draft is the model's working file and the issue the only record
-that outlives it. A written stub keeps its number, so its split-time dependencies are its own.
+that outlives it. A written draft keeps its number, so its split-time dependencies are its own.
 
-A request bigger than one story takes the other two forms: `--split` opens one stub per story and
+A request bigger than one story takes the other two forms: `--split` opens one draft per story and
 records what waits on what, and ends on the line that sends one author agent to each of them; and
-`--park` opens a feature stub for a feature nobody is writing yet.
+`--park` opens a draft for a feature nobody is writing yet.
 """
 
 from __future__ import annotations
@@ -22,17 +22,17 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import columns, gh, invoke, issue, lint, log, naming, park, sections, stub, worktree
+from deckhand import columns, draft, gh, invoke, issue, lint, log, naming, park, sections, worktree
 from deckhand.lint import RULES
 from deckhand.step import (
     Refusal,
     block,
     blockers_block,
-    draft_line,
+    file_line,
     fits_title,
     indented,
     issue_number,
-    read_draft,
+    read_file,
     reason,
     ref_label,
     resolved_settings,
@@ -46,11 +46,11 @@ SPLIT = f"split-{_RUN}.json"
 DEPENDS_HEADING = "## Depends on"
 SPLIT_NOTE = "If this is more than one story, write the split file instead."
 DRAFTED = "Drafted: the story and its plan, from the request."
-STUB_DRAFTED = "Drafted: the story and its plan, from the stub."
+FROM_DRAFT = "Drafted: the story and its plan, from the draft."
 IDEA_ONLY = "#{number} is an issue; /deckhand:next {number} carries it"
 PARKED = (
     "This is a parked feature. One outcome: deckhand:author writes the draft into it with "
-    "new apply --stub {number} <draft>. Several: write the split file and run "
+    "new apply --draft {number} <file>. Several: write the split file and run "
     "new apply --split <file> --from {number}."
 )
 
@@ -82,7 +82,7 @@ def skeleton() -> str:
 
 
 def _draft_name(number: int) -> str:
-    """The draft file for the story stub `number` becomes, inside the repository's cache."""
+    """The file the story draft `number` becomes is written into, inside the repository's cache."""
     return f"{number}-story.md"
 
 
@@ -93,9 +93,9 @@ def _split_name(number: int) -> str:
 
 def _split_block(name: str) -> None:
     """Where the split file goes and the shape it takes; the feature path starts here."""
-    print(draft_line("Split file", name))
+    print(file_line("Split file", name))
     print()
-    print(stub.split_skeleton())
+    print(draft.split_skeleton())
 
 
 def _rules() -> int:
@@ -111,16 +111,16 @@ def _tail(name: str, split: str | None = None, park: bool = False, number: int |
 
     `split` names the split file to offer after the rules, for a starting point that may yet turn
     out to be a whole feature; `park` shows the park shape, for a request that may shed one. `number`
-    is the stub being written, which the draft goes into rather than opening an issue of its own.
+    is the draft being written, which the body goes into rather than opening an issue of its own.
     """
     source = ("--from", str(number)) if number else ()
-    print(draft_line("Draft", name))
+    print(file_line("Body", name))
     print()
     print(skeleton())
     print()
     if park:
-        parking = invoke.apply_line("new", "<draft>", "--park", *source, '--title "<title>"')
-        block("Park shape:", lambda: indented([*stub.skeleton().splitlines(), parking]))
+        parking = invoke.apply_line("new", "<file>", "--park", *source, '--title "<title>"')
+        block("Park shape:", lambda: indented([*draft.skeleton().splitlines(), parking]))
         print()
     _rules()
     if split is not None:
@@ -129,7 +129,7 @@ def _tail(name: str, split: str | None = None, park: bool = False, number: int |
         _split_block(split)
         print(invoke.apply_line("new", "<split>", "--split", *source))
     print()
-    print(invoke.apply_line("new", "<draft>", *(("--stub", str(number)) if number else ())))
+    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ())))
     return 0
 
 
@@ -137,7 +137,7 @@ def _request_context(source: str) -> int:
     """The starting point handed over: the text of a file, or the request typed after the command.
 
     A source that is not a file is the request itself, because what a person types there is a
-    request far more often than it is a path; either way it goes under the heading a stub uses.
+    request far more often than it is a path; either way it goes under the heading a draft uses.
     """
     path = Path(source).expanduser()
     try:
@@ -145,8 +145,8 @@ def _request_context(source: str) -> int:
     except (OSError, UnicodeDecodeError) as error:
         print(f"Requirements: unavailable ({reason(error)})")
     else:
-        if not stub.is_stub(text):  # a request already under the heading keeps the one it has
-            print(stub.STUB_HEADING)
+        if not draft.is_draft(text):  # a request already under the heading keeps the one it has
+            print(draft.REQUIREMENTS_HEADING)
             print()
         print(text)
     print()
@@ -154,15 +154,15 @@ def _request_context(source: str) -> int:
 
 
 def _state(repo: str, number: int) -> str:
-    """A sibling's state: `stub` while it is still one, else the state GitHub holds."""
+    """A sibling's state: `draft` while it is still one, else the state GitHub holds."""
     try:
         state, body = issue.sibling(repo, number)
     except Exception:  # one sibling that will not load costs its own line, not the list
         return "unavailable"
-    return "stub" if stub.is_stub(body) else (state or "unknown").lower()
+    return "draft" if draft.is_draft(body) else (state or "unknown").lower()
 
 
-def _entry_line(repo: str, position: int, entry: stub.Entry, own: int) -> str:
+def _entry_line(repo: str, position: int, entry: draft.Entry, own: int) -> str:
     """One story of the feature, with where it has got to; the one being written says so.
 
     The sentence rides along with the title: the boundary between two stories is what the session
@@ -188,27 +188,27 @@ def _parked_context(number: int, requirements: str) -> int:
 
 
 def _issue_context(number: int) -> int:
-    """The stub's whole feature, or the one line that says this number is not a stub to write."""
+    """The draft's whole feature, or the one line that says this number is not a draft to write."""
     try:
         repo = gh.repo_slug()
         story = issue.view(repo, number)
     except Exception as error:
         failure = error  # `error` is unbound once the except block ends, and the block reads it
-        block(f"## Stub #{number}", lambda: usable(failure))
+        block(f"## Draft #{number}", lambda: usable(failure))
         print()
         return _tail(_draft_name(number), park=True, number=number)
-    if not stub.is_stub(story.body):
+    if not draft.is_draft(story.body):
         print(f"#{number} is already a story; run /deckhand:next {number}")
         print()
         return _rules()
-    requirements, entries = stub.read(story.body)
+    requirements, entries = draft.read(story.body)
     if not entries:
         return _parked_context(number, requirements)
-    print(f"## Stub #{number}")
+    print(f"## Draft #{number}")
     print()
     print(requirements)
     print()
-    block(stub.STORIES_HEADING, lambda: [_entry_line(repo, i, e, number) for i, e in enumerate(entries, start=1)])
+    block(draft.STORIES_HEADING, lambda: [_entry_line(repo, i, e, number) for i, e in enumerate(entries, start=1)])
     print()
     block(DEPENDS_HEADING, lambda: blockers_block(repo, number))
     print()
@@ -241,31 +241,31 @@ def title(flag: str | None, body: str) -> str:
         raise Refusal(str(error)) from error
 
 
-def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
-    """Rewrite the stub as the story it stands for; its number and dependencies are untouched.
+def _write_draft(repo: str, number: int, edited: str, flag: str | None) -> int:
+    """Rewrite the draft as the story it stands for; its number and dependencies are untouched.
 
-    A parked feature is a stub too, and a feature with one outcome is written straight into it: the
+    A parked feature is a draft too, and a feature with one outcome is written straight into it: the
     feature becomes the story, so every blocker and every reference already pointing at it still
     points at the work. A feature with several outcomes goes through the split instead, which makes
     it the first of them.
     """
     story = issue.view(repo, number)
-    if not stub.is_stub(story.body):
+    if not draft.is_draft(story.body):
         raise Refusal(f"#{number} is already a story; run /deckhand:next {number}")
     subject = fits_title((flag or "").strip())
-    body = lint.checked(draft)
+    body = lint.checked(edited)
     settings = resolved_settings()
     issue.update_body(repo, number, body)
     print(f"Written #{number} {story.url}", flush=True)
-    if subject:  # the stub's own title stands unless the session says otherwise
+    if subject:  # the draft's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
         print(f"Title: {subject}", flush=True)
-    park.board_draft(settings, repo, number, story.url, STUB_DRAFTED, columns.REFINEMENT)
+    park.board_draft(settings, repo, number, story.url, FROM_DRAFT, columns.REFINEMENT)
     return 0
 
 
 def _split(repo: str, text: str, parked: int | None) -> int:
-    """Open one stub per story of a feature, number them all, then record what waits on what.
+    """Open one draft per story of a feature, number them all, then record what waits on what.
 
     A story that belongs to another repository is parked there instead, with the requirements and
     its own sentence, for that repository's session to write. A feature these stories came from is
@@ -274,23 +274,23 @@ def _split(repo: str, text: str, parked: int | None) -> int:
     nothing is retried, so a failure part way through leaves the printed lines as the record.
     """
     try:
-        requirements, entries = stub.parse_split(text)
+        requirements, entries = draft.parse_split(text)
     except ValueError as error:
         raise Refusal(f"split file {error}") from error
     parked_url = park.unsplit(repo, parked) if parked is not None else None
     if parked is not None and entries[0].repo:
         raise Refusal(f"the first story of #{parked} is written into it, so it stays in this repository")
     settings = resolved_settings()
-    # Every stub carries the whole feature, so the first pass writes it unnumbered: no story can
+    # Every draft carries the whole feature, so the first pass writes it unnumbered: no story can
     # name its siblings' numbers until every issue exists.
-    provisional = stub.render(requirements, entries)
+    provisional = draft.render(requirements, entries)
     origin = f"{repo}#{parked}" if parked is not None else f"a split in {repo}"
     numbers: list[int] = []
     urls: list[str] = []
     local: list[int] = []
     for position, entry in enumerate(entries):
         if entry.repo:
-            body = stub.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
+            body = draft.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
             number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin)
         elif position == 0 and parked is not None:
             number, url = parked, parked_url or ""
@@ -303,13 +303,13 @@ def _split(repo: str, text: str, parked: int | None) -> int:
             local.append(number)
         numbers.append(number)
         urls.append(url)
-    body = stub.render(requirements, [replace(e, number=n) for e, n in zip(entries, numbers, strict=True)])
+    body = draft.render(requirements, [replace(e, number=n) for e, n in zip(entries, numbers, strict=True)])
     for number, url in zip(numbers, urls, strict=True):
         if number not in local:
             continue
         issue.update_body(repo, number, body)
         print(f"Numbered #{number}", flush=True)
-        park.board_draft(settings, repo, number, url, None)  # a stub is not drafted yet; its author logs that
+        park.board_draft(settings, repo, number, url, None)  # a draft is not written yet; its author logs that
     park.wire(repo, entries, numbers)
     siblings = [(e.repo or repo, n) for e, n in zip(entries[1:], numbers[1:], strict=True)]
     if parked is not None and siblings:  # one story shed nothing, so there is nothing to say or inherit
@@ -318,8 +318,8 @@ def _split(repo: str, text: str, parked: int | None) -> int:
         print("Logged Split", flush=True)
         park.inherit(repo, parked, siblings)
     # An agent gets no plugin-root substitution, so the launcher it is to run travels in the line.
-    stubs = " ".join(f"#{number}" for number in local)
-    print(f"Dispatch deckhand:author for each of {stubs} with {Path(sys.argv[0]).resolve()}")
+    drafted = " ".join(f"#{number}" for number in local)
+    print(f"Dispatch deckhand:author for each of {drafted} with {Path(sys.argv[0]).resolve()}")
     return 0
 
 
@@ -335,9 +335,9 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("file", type=Path, help="the draft body file")
     form = parser.add_mutually_exclusive_group()
-    form.add_argument("--stub", type=issue_number, metavar="N", help="write the draft into stub N")
-    form.add_argument("--split", action="store_true", help="the file is a split file: one stub per story")
-    form.add_argument("--park", action="store_true", help="the file is a feature to stub and leave for later")
+    form.add_argument("--draft", type=issue_number, metavar="N", help="write the body into draft N")
+    form.add_argument("--split", action="store_true", help="the file is a split document: one draft per story")
+    form.add_argument("--park", action="store_true", help="the file is a feature to draft and leave for later")
     parser.add_argument(
         "--from",
         dest="parked",
@@ -357,7 +357,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 @step("new", _configure, issue_bound=False, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
-    """Open a story or a stub from the drafted body, split a feature, or park one for later."""
+    """Open a story or a draft from the edited body, split a feature, or park one for later."""
     if args.parked is not None and not (args.split or args.park):
         args.usage.error("--from is for --split or --park")
     if args.split and args.title is not None:
@@ -373,15 +373,15 @@ def apply(args: argparse.Namespace) -> int:
 
 
 def _write(args: argparse.Namespace) -> int:
-    draft = read_draft(args.file)
-    if args.stub is not None:
-        return _write_stub(gh.repo_slug(), args.stub, draft, args.title)
+    edited = read_file(args.file)
+    if args.draft is not None:
+        return _write_draft(gh.repo_slug(), args.draft, edited, args.title)
     if args.split:
-        return _split(gh.repo_slug(), draft, args.parked)
+        return _split(gh.repo_slug(), edited, args.parked)
     if args.park:
         settings, repo = resolved_settings(), gh.repo_slug()
-        return park.feature(settings, repo, draft, args.title, args.repo, args.blocks, args.parked, args.after)
-    body = lint.checked(draft)
+        return park.feature(settings, repo, edited, args.title, args.repo, args.blocks, args.parked, args.after)
+    body = lint.checked(edited)
     subject = title(args.title, body)
     settings = resolved_settings()
     repo = gh.repo_slug()

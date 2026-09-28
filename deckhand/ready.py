@@ -29,7 +29,7 @@ from deckhand.step import (
     open_issue,
     reason,
     ref_label,
-    refuse_stub,
+    refuse_draft,
     settings_or_error,
     spill,
     step,
@@ -188,7 +188,7 @@ def apply(args: argparse.Namespace) -> int:
     """Move a reviewed story to Backlog with its kind, its points, and its blockers."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
-    refuse_stub(args.issue, story.body)
+    refuse_draft(args.issue, story.body)
     settings = config.load()
     if args.kind not in settings.kinds:
         raise Refusal(f"kind must be one of: {', '.join(settings.kinds)}")

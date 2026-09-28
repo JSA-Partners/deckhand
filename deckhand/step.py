@@ -19,7 +19,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
-from deckhand import __version__, config, gh, git, issue, naming, stub
+from deckhand import __version__, config, draft, gh, git, issue, naming
 from deckhand.cli import Configure, Handler, command, newer_installed
 from deckhand.config import Settings
 
@@ -114,14 +114,14 @@ def refuse_git(*args: str) -> str:
         raise Refusal(str(error)) from error
 
 
-def refuse_stub(number: int, body: str) -> None:
-    """Refuse an issue that is still a stub; every step but `new` and `amend` works on a story.
+def refuse_draft(number: int, body: str) -> None:
+    """Refuse an issue that is still a draft; every step but `new` and `amend` works on a story.
 
     The first thing an issue-bound step does with a body it has just read, so nothing downstream has
-    to wonder whether the sections it wants are missing because the story is a stub.
+    to wonder whether the sections it wants are missing because the story is a draft.
     """
-    if stub.is_stub(body):
-        raise Refusal(f"#{number} is a stub; run /deckhand:next {number} first")
+    if draft.is_draft(body):
+        raise Refusal(f"#{number} is a draft; run /deckhand:next {number} first")
 
 
 def branch_for(settings: Settings, kind: str | None, title: str, number: int) -> str:
@@ -218,7 +218,7 @@ def usable[T](value: T | Exception) -> T:
     return value
 
 
-def draft_path(settings: Settings, repo: str, name: str) -> Path:
+def file_path(settings: Settings, repo: str, name: str) -> Path:
     """The cache path `<cache>/<repo name>/<name>`, with parents made and the file left unwritten.
 
     `name` may hold subdirectories but must stay inside the cache; a name that escapes it is a bug
@@ -232,7 +232,7 @@ def draft_path(settings: Settings, repo: str, name: str) -> Path:
     return path
 
 
-def draft_line(label: str, name: str, repo: str | None = None) -> str:
+def file_line(label: str, name: str, repo: str | None = None) -> str:
     """`<label>: <path>`, or `<label>: unavailable (<reason>)` when the path will not resolve.
 
     A context prints this before it prints anything the model has to write, and a repository or a
@@ -240,7 +240,7 @@ def draft_line(label: str, name: str, repo: str | None = None) -> str:
     the draft belongs to when it is not this one.
     """
     try:
-        return f"{label}: {draft_path(config.load(), repo or gh.repo_slug(), name)}"
+        return f"{label}: {file_path(config.load(), repo or gh.repo_slug(), name)}"
     except Exception as error:
         return f"{label}: unavailable ({reason(error)})"
 
@@ -250,11 +250,11 @@ def spill(label: str, name: str, fill: Callable[[], str], repo: str | None = Non
 
     A block long enough to run past what the harness shows costs a rerun of the whole command to
     read, and every rerun reads GitHub again. A file is read once, in as many parts as the reader
-    likes, and a failure costs one line, as `draft_line` does. An empty block takes the earlier
+    likes, and a failure costs one line, as `file_line` does. An empty block takes the earlier
     run's file with it, because a reader sent to that path would otherwise read a stale block.
     """
     try:
-        path = draft_path(config.load(), repo or gh.repo_slug(), name)
+        path = file_path(config.load(), repo or gh.repo_slug(), name)
         text = fill().strip("\n")
         if not text:
             path.unlink(missing_ok=True)
@@ -266,7 +266,7 @@ def spill(label: str, name: str, fill: Callable[[], str], repo: str | None = Non
     return f"{label}: {path} ({count} line{'' if count == 1 else 's'})"
 
 
-def read_draft(path: Path) -> str:
+def read_file(path: Path) -> str:
     """The text of the file the model drafted; one it cannot hand over is a refusal, not a traceback.
 
     `utf-8-sig` because an editor's byte order mark would otherwise ride into the first field the

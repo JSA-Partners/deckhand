@@ -15,11 +15,11 @@ from deckhand.step import (
     PLUGIN_ROOT,
     Refusal,
     branch_for,
-    draft_path,
+    file_path,
     indented,
     issue_ref,
     local_branch,
-    read_draft,
+    read_file,
     ref_label,
     refuse_git,
     spill,
@@ -191,7 +191,7 @@ def test_command_help_is_the_apply_docstrings_first_line(demo, capsys):
 def test_draft_path_makes_the_parents_but_not_the_file(tmp_path: Path):
     settings = Settings(cache=tmp_path / "cache")
 
-    path = draft_path(settings, "acme/widgets", "5/draft.md")
+    path = file_path(settings, "acme/widgets", "5/draft.md")
 
     assert path == tmp_path / "cache" / "widgets" / "5" / "draft.md"
     assert path.parent.is_dir()
@@ -350,35 +350,35 @@ def test_draft_path_refuses_a_name_that_escapes_the_cache(tmp_path):
     settings = Settings(cache=tmp_path / "cache")
 
     with pytest.raises(ValueError, match="escapes the cache"):
-        draft_path(settings, "acme/widgets", "../../outside.md")
+        file_path(settings, "acme/widgets", "../../outside.md")
     assert not (tmp_path / "outside.md").exists()
 
 
-# --- read_draft -------------------------------------------------------------
+# --- read_file -------------------------------------------------------------
 
 
 def test_read_draft_returns_the_text(tmp_path: Path):
     path = tmp_path / "draft.md"
     path.write_text("### Task 1\n", encoding="utf-8")
 
-    assert read_draft(path) == "### Task 1\n"
+    assert read_file(path) == "### Task 1\n"
 
 
 def test_read_draft_refuses_a_missing_file(tmp_path: Path):
     with pytest.raises(Refusal, match="cannot read "):
-        read_draft(tmp_path / "nope.md")
+        read_file(tmp_path / "nope.md")
 
 
 def test_read_draft_refuses_a_directory(tmp_path: Path):
     with pytest.raises(Refusal, match="cannot read "):
-        read_draft(tmp_path)
+        read_file(tmp_path)
 
 
 def test_read_draft_reads_past_a_byte_order_mark(tmp_path: Path):
     path = tmp_path / "draft.md"
     path.write_bytes("\ufeffNothing found.\n".encode("utf-8"))
 
-    assert read_draft(path) == "Nothing found.\n"
+    assert read_file(path) == "Nothing found.\n"
 
 
 def test_read_draft_refuses_bytes_that_are_not_utf_8(tmp_path: Path):
@@ -386,7 +386,7 @@ def test_read_draft_refuses_bytes_that_are_not_utf_8(tmp_path: Path):
     path.write_bytes(b"\xff\xfe not utf-8")
 
     with pytest.raises(Refusal, match="it is not valid UTF-8"):
-        read_draft(path)
+        read_file(path)
 
 
 def test_indented_puts_two_spaces_in_front_of_every_line_that_has_one():

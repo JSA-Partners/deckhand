@@ -9,7 +9,7 @@ from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
-STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
+DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
 ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
 POINT = "A point groups stories that take about as long as each other. It is not hours."
 HEADER = "| Pts | # | Repo | Title | Hours |"
@@ -313,10 +313,10 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
 
 
 def test_apply_refuses_a_stub(fake_gh, gh_calls):
-    result = run_deckhand("ready", "apply", "57", "--kind", "feat", "--points", "3", env=STUB)
+    result = run_deckhand("ready", "apply", "57", "--kind", "feat", "--points", "3", env=DRAFT)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: #57 is a stub; run /deckhand:next 57 first\n"
+    assert result.stderr == "deckhand ready apply: #57 is a draft; run /deckhand:next 57 first\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
 

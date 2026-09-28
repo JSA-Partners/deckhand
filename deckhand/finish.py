@@ -36,9 +36,9 @@ from deckhand.step import (
     TAIL,
     Refusal,
     block,
-    draft_line,
+    file_line,
     indented,
-    read_draft,
+    read_file,
     ref_label,
     refuse_git,
     step,
@@ -202,7 +202,7 @@ def context(args: argparse.Namespace) -> int:
     block("## Recent pull requests", _recent_block)
     detected = checks(Path.cwd())
     block("## Checks detected", lambda: indented(detected, "none detected"))
-    print(draft_line("Summary", f"{args.issue}-summary.md"))
+    print(file_line("Summary", f"{args.issue}-summary.md"))
     flags = [f'--check "{command}"' for command in detected] or ['--check "<cmd>"']
     print(invoke.apply_line("finish", str(args.issue), "<summary>", *flags))
     return 0
@@ -242,7 +242,7 @@ def apply(args: argparse.Namespace) -> int:
     if open_blockers:
         named = "; ".join(f"{ref_label(where, number, repo)} {title}" for where, number, title in open_blockers)
         raise Refusal(f"blocked by {named}; the pull request opens when it closes")
-    title, body = _message(settings, repo, args.issue, breaking, story, read_draft(args.file))
+    title, body = _message(settings, repo, args.issue, breaking, story, read_file(args.file))
     branch = _branch()
     gates.reviewed_head(args.issue)
     gates.clean_tree()

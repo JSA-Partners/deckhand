@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import naming, sections, stub
+from deckhand import draft, naming, sections
 from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
-STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
-PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
-PARKED_BODY = json.loads((FIXTURES / "stub-parked.json").read_text(encoding="utf-8"))["body"]
-STUB_BODY = json.loads((FIXTURES / "stub.json").read_text(encoding="utf-8"))["body"]
-STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
-DRAFT_RULE = "Write the whole edited body to the draft; keep every section heading."
+DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
+PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "draft-parked.json")}
+PARKED_BODY = json.loads((FIXTURES / "draft-parked.json").read_text(encoding="utf-8"))["body"]
+DRAFT_BODY = json.loads((FIXTURES / "draft.json").read_text(encoding="utf-8"))["body"]
+STUB_RULE = "Write the whole edited draft to the file it names; change the Requirements and keep the Stories list."
+DRAFT_RULE = "Write the whole edited body to the file it names; keep every section heading."
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
 ISSUE = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
 REVIEW = json.loads((FIXTURES / "issue-reviewed.json").read_text(encoding="utf-8"))
@@ -111,9 +111,9 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
     review = REVIEW["comments"][-1]["body"].strip("\n").splitlines()
     assert lines[lines.index("## Latest review") + 1 :][: len(review)] == review
     assert "## Feedback" not in lines
-    assert lines[-3] == f"Draft: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
-    assert lines[-2] == "Write the whole edited body to the draft; keep every section heading."
-    assert lines[-1] == 'Apply: deckhand amend apply 248 <draft> --note "<why>"'
+    assert lines[-3] == f"Rewrite: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
+    assert lines[-2] == "Write the whole edited body to the file it names; keep every section heading."
+    assert lines[-1] == 'Apply: deckhand amend apply 248 <file> --note "<why>"'
 
 
 def test_context_leaves_an_unapplied_new_draft_alone(fake_gh, tmp_path):
@@ -194,32 +194,33 @@ def test_context_never_fails(fake_gh, tmp_path):
     assert "Status: unavailable (nope)" in out
     assert "Body: unavailable (nope)" in out
     assert "## Latest review\n  unavailable (nope)" in out
-    assert "Draft: unavailable (nope)" in out
+    assert "Rewrite: unavailable (nope)" in out
 
 
 # --- apply, the story's own body ---------------------------------------------
 
 
 def test_apply_refuses_a_story_body_for_a_stub(fake_gh, gh_calls, tmp_path):
-    result = run_deckhand("amend", "apply", "57", _draft(tmp_path), "--note", NOTE, env=STUB)
+    result = run_deckhand("amend", "apply", "57", _draft(tmp_path), "--note", NOTE, env=DRAFT)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand amend apply: a stub starts with ## Requirements\n"
+    assert result.stderr == "deckhand amend apply: a draft starts with ## Requirements\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
 
 
 def test_apply_amends_a_stubs_requirements_and_keeps_its_stories(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "body-copy.md"
-    edited = STUB_BODY.replace("they were granted.", "they were granted, and nothing else.")
+    edited = DRAFT_BODY.replace("they were granted.", "they were granted, and nothing else.")
 
     result = run_deckhand(
-        "amend", "apply", "57", _draft(tmp_path, edited), "--note", NOTE, env={**STUB, "GH_BODY_FILE_COPY": str(copy)}
+        "amend", "apply", "57", _draft(tmp_path, edited), "--note", NOTE, env={**DRAFT, "GH_BODY_FILE_COPY": str(copy)}
     )
 
     assert result.returncode == 0, result.stderr
-    requirements, entries = stub.read(STUB_BODY)
-    assert _bodies(copy)["edit"] == stub.render(requirements.replace("granted.", "granted, and nothing else."), entries)
+    requirements, entries = draft.read(DRAFT_BODY)
+    changed = requirements.replace("granted.", "granted, and nothing else.")
+    assert _bodies(copy)["edit"] == draft.render(changed, entries)
     assert _writes(gh_calls) == ["issue edit 57 --repo acme/widgets", "issue comment 57 --repo acme/widgets"]
 
 
@@ -241,7 +242,7 @@ def test_apply_amends_a_stub_in_another_repository(fake_gh, gh_calls, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["Updated #60 https://github.com/acme/widgets/issues/60", "Logged Amended"]
-    assert _bodies(copy)["edit"] == stub.render(
+    assert _bodies(copy)["edit"] == draft.render(
         "Guests should be able to share a collection with another guest, with the owner's approval.", []
     )
     assert _bodies(copy)["comment"] == f"Amended: {NOTE}"
@@ -250,13 +251,13 @@ def test_apply_amends_a_stub_in_another_repository(fake_gh, gh_calls, tmp_path):
 
 
 def test_apply_refuses_a_stub_whose_stories_changed(fake_gh, gh_calls, tmp_path):
-    edited = STUB_BODY.replace("Filter by grant.", "Filter by role.")
+    edited = DRAFT_BODY.replace("Filter by grant.", "Filter by role.")
 
-    result = run_deckhand("amend", "apply", "57", _draft(tmp_path, edited), "--note", NOTE, env=STUB)
+    result = run_deckhand("amend", "apply", "57", _draft(tmp_path, edited), "--note", NOTE, env=DRAFT)
 
     assert result.returncode == 1
     assert result.stderr == (
-        "deckhand amend apply: the Stories list changed; a stub's stories change only through a split\n"
+        "deckhand amend apply: the Stories list changed; a draft's stories change only through a split\n"
     )
     assert result.stdout == ""
     assert _writes(gh_calls) == []
@@ -308,9 +309,9 @@ def test_context_on_a_stub_elsewhere_prints_its_body_and_the_stub_rule(fake_gh, 
     body = spilled(result.stdout, "Body").splitlines()
     assert "Guests should be able to share a collection with another guest, without an admin in the loop." in body
     assert "Shape:" not in lines
-    assert lines[-3] == f"Draft: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
+    assert lines[-3] == f"Rewrite: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
     assert lines[-2] == STUB_RULE
-    assert lines[-1] == 'Apply: deckhand amend apply 60 <draft> --repo acme/gadgets --note "<why>"'
+    assert lines[-1] == 'Apply: deckhand amend apply 60 <file> --repo acme/gadgets --note "<why>"'
 
 
 def test_apply_refuses_changed_headings(fake_gh, gh_calls, tmp_path):
@@ -804,7 +805,7 @@ def test_context_on_a_backlog_story_still_prints_the_draft_line_and_rule(fake_gh
     result = run_deckhand("amend", "context", "248", env=_status_reads(tmp_path, "Backlog"))
 
     assert result.returncode == 0
-    assert "Draft:" in result.stdout
+    assert "Rewrite:" in result.stdout
     assert DRAFT_RULE in result.stdout
     assert "The body is frozen once the story starts." not in result.stdout
 

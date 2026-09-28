@@ -11,7 +11,7 @@ import pytest
 from deckhand import worktree
 from tests.conftest import FIXTURES, fieldvalues, run_deckhand, run_git, spilled
 
-STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
+DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
 REVIEW_DATE = "2026-09-02T09:00:00Z"  # the Review: entry in the reviewed fixture
@@ -100,10 +100,10 @@ def _start(verb: str, repo: Path, env: dict[str, str] | None = None, *args: str)
 
 
 def test_apply_refuses_a_stub(fake_gh, gh_calls, repo, origin):
-    result = run_deckhand("start", "apply", "57", "--note", "x", cwd=repo, env=STUB)
+    result = run_deckhand("start", "apply", "57", "--note", "x", cwd=repo, env=DRAFT)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand start apply: #57 is a stub; run /deckhand:next 57 first\n"
+    assert result.stderr == "deckhand start apply: #57 is a draft; run /deckhand:next 57 first\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
     assert _branches(repo) == ["main"]
