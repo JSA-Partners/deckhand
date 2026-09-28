@@ -73,7 +73,7 @@ def ranked(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
     """The Backlog ranked: what can start first, by the work it frees, then what waits.
 
     Weight is the points of everything transitively waiting on a story rather than a count of its
-    neighbours, so the story that frees the longest chain leads. Equal weight breaks toward fewer
+    neighbors, so the story that frees the longest chain leads. Equal weight breaks toward fewer
     points, so a cheap unblocker goes first, and equal again breaks by number so two runs agree.
     """
     waits = waiting(blockers)

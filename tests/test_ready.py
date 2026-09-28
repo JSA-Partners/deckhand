@@ -268,14 +268,14 @@ def test_context_lists_the_stories_a_blocker_could_be(fake_gh):
 def test_a_closed_issue_is_not_offered_as_a_blocker(fake_gh, tmp_path):
     """The list says open stories, and with archived items in the read the closed ones would flood it."""
 
-    def _reopen_the_column(nodes):
+    def _leave_it_in_review(nodes):
         for node in nodes:
             if (node.get("content") or {}).get("number") == 210:
                 for value in node["fieldValues"]["nodes"]:
                     if (value.get("field") or {}).get("name") == "Status":
                         value["name"] = "In Review"
 
-    env = {**REVIEWED, **_items_file(tmp_path, "closed-not-done.json", _reopen_the_column)}
+    env = {**REVIEWED, **_items_file(tmp_path, "closed-not-done.json", _leave_it_in_review)}
 
     result = run_deckhand("ready", "context", "248", env=env)
 

@@ -803,7 +803,7 @@ def test_apply_names_what_is_left_with_the_page_and_the_click(repo, fake_gh, tmp
         "  1. Status options: set to Draft, Refinement, Ready, Backlog, In Progress, In Review, "
         "Verification, Done "
         "(currently: Backlog, Blocked, In Progress, Pending Review, Done). Project > Settings > Status. "
-        "Deleting an option is permanent.",
+        "Rename an option to keep its items; deleting one is permanent.",
         "Run setup again when done; it says what is still left.",
     ]
     assert not any("Issue Types" in line or "issue-types" in line for line in lines)

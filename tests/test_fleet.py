@@ -345,8 +345,8 @@ def test_a_loop_through_a_draft_names_every_story_on_it():
     assert entry.fix == "captain apply --unblock on one edge"
 
 
-def test_an_archived_item_is_set_aside_rather_than_listed():
-    """An archived story is read in so it can be reported, and kept out of the board's own tables."""
+def test_an_item_carries_whether_it_is_archived():
+    """The query asks for both states, so every row has to say which one it came back in."""
     nodes = _nodes()
     for node in nodes:
         if (node.get("content") or {}).get("number") == 117:
@@ -354,6 +354,66 @@ def test_an_archived_item_is_set_aside_rather_than_listed():
     found = {story.number: story for story in fleet.stories(nodes)}
     assert found[117].archived is True
     assert found[253].archived is False
+
+
+def test_the_items_query_asks_for_archived_items_and_says_which_they_are():
+    """Without the argument the project returns only unarchived items, and an archived story is lost."""
+    assert "archivedStates:[ARCHIVED,NOT_ARCHIVED]" in fleet.ITEMS_QUERY
+    assert "isArchived" in fleet.ITEMS_QUERY
+
+
+def _archived(tmp_path: Path, number: int) -> str:
+    """The board fixture with `number` archived, as a path for GH_PROJECT_ITEMS_FILE."""
+    data = json.loads((FIXTURES / "captain-items.json").read_text())
+    for node in data["data"]["organization"]["projectV2"]["items"]["nodes"]:
+        if (node.get("content") or {}).get("number") == number:
+            node["isArchived"] = True
+    path = tmp_path / "archived-items.json"
+    path.write_text(json.dumps(data))
+    return str(path)
+
+
+def test_a_read_sets_an_archived_story_aside(fake_gh, settings, monkeypatch, tmp_path):
+    """An archived story leaves the tables that drive the board and stays reachable to be reported."""
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", _archived(tmp_path, 117))
+
+    read = fleet.read(settings)
+
+    assert 117 not in [story.number for story in read.stories]
+    assert [story.number for story in read.archived] == [117]
+    assert ("acme/widgets", 117) not in read.blockers
+
+
+def test_a_read_does_not_call_an_archived_story_missing(fake_gh, settings, monkeypatch, tmp_path):
+    """An archived story is on the board, so reporting it as never boarded would be a second wrong answer.
+
+    The repository lists it as open and its issue carries a `Drafted:` entry, which is everything the
+    missing check looks for; only its key being on the board keeps it off the list.
+    """
+    listed = tmp_path / "open-issues.json"
+    listed.write_text(json.dumps([{"number": 117}]))
+    drafted = tmp_path / "issue-117.json"
+    drafted.write_text(
+        json.dumps(
+            {
+                "number": 117,
+                "title": "Warn before the export runs",
+                "state": "OPEN",
+                "url": "https://github.com/acme/widgets/issues/117",
+                "body": "### Story\n\nAs a user, I want a warning, so that nothing is lost.",
+                "comments": [
+                    {"author": {"login": "mjm"}, "createdAt": "2026-09-20T09:00:00Z", "body": "Drafted: from a request"}
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", _archived(tmp_path, 117))
+    monkeypatch.setenv("GH_ISSUE_LIST_ACME_WIDGETS", str(listed))
+    monkeypatch.setenv("GH_ISSUE_FILE_117", str(drafted))
+
+    read = fleet.read(settings)
+
+    assert read.missing == []
 
 
 def test_an_archived_story_the_process_owns_is_an_anomaly():
@@ -366,7 +426,7 @@ def test_an_archived_story_the_process_owns_is_an_anomaly():
 
 
 def test_an_archived_story_that_is_done_is_not_an_anomaly():
-    """Archiving finished work is what the project's own workflow is for; 90 items arrived that way."""
+    """Archiving finished work is what the project's own workflow is for."""
     archived = [dataclasses.replace(fleet.stories(_closed("Done"))[0], archived=True)]
     assert fleet.anomalies([], {}, set(), [], archived=archived) == []
 

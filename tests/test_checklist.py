@@ -120,19 +120,6 @@ def test_each_item_names_its_click(fake_gh, settings):
     ]
 
 
-def test_the_status_options_are_the_eight_columns():
-    assert checklist.STATUS_OPTIONS == [
-        "Draft",
-        "Refinement",
-        "Ready",
-        "Backlog",
-        "In Progress",
-        "In Review",
-        "Verification",
-        "Done",
-    ]
-
-
 def test_status_options_left_names_the_current_ones(fake_gh, settings):
     status = {
         "options": [{"id": "o1", "name": "Backlog", "color": "GRAY"}, {"id": "o2", "name": "Done", "color": "GRAY"}]

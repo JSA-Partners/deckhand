@@ -71,7 +71,7 @@ def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
     return {points: sorted(found[points]) for points in sorted(found, key=lambda p: (p is None, p))}
 
 
-def _order(stories: list[fleet.Story], blockers: fleet.Blockers) -> list[fleet.Story]:
+def _placed(stories: list[fleet.Story], blockers: fleet.Blockers) -> list[fleet.Story]:
     return order.topological(stories, blockers, lambda story: (story.number, story.number, story.number))
 
 
@@ -86,7 +86,7 @@ def floor(stories: list[fleet.Story], blockers: fleet.Blockers, sessions: int, h
     duration = {story.key: hours.get(story.points, fallback) for story in stories}
     finish: dict[fleet.Key, float] = {}
     path = 0.0
-    for story in _order(stories, blockers):
+    for story in _placed(stories, blockers):
         end = _waits(story, blockers, finish) + duration[story.key]
         finish[story.key] = end
         path = max(path, end)
@@ -122,7 +122,7 @@ def simulate(
     """The makespan at `PERCENTILES`, from `runs` schedules drawn from `samples`."""
     rng = random.Random(seed)
     pool = [value for band in samples.values() for value in band]
-    placed = _order(stories, blockers)
+    placed = _placed(stories, blockers)
 
     def _draw() -> dict[fleet.Key, float]:
         return {story.key: rng.choice(samples.get(story.points) or pool) for story in stories}

@@ -16,7 +16,7 @@ from deckhand.config import Settings
 # gh --paginate advances the cursor only when the variable is named endCursor.
 ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
-    "projectV2(number:$number){ items(first:50, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
+    "projectV2(number:$number){ items(first:100, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
     "pageInfo{ hasNextPage endCursor } nodes{ id isArchived "
     "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
     "labels(first:20){ nodes{ name } } "
@@ -133,8 +133,12 @@ def _nodes(settings: Settings) -> list[dict]:
 
 
 def load(settings: Settings) -> list[Story]:
-    """Every story on the project with its log, and nothing else read."""
-    return stories(_nodes(settings))
+    """Every story on the project with its log, and nothing else read; an archived one is not a story here.
+
+    The query asks for archived items because `read` reports the archived story the process still owns.
+    Nothing else wants them, so this drops them and every caller sees the board as a person does.
+    """
+    return [story for story in stories(_nodes(settings)) if not story.archived]
 
 
 def allowed(story: Story) -> tuple[str, ...]:
@@ -267,7 +271,7 @@ def anomalies(
         # Archiving is how finished work leaves the board, so only a story still in play is wrong.
         if not touched(story) or story.status == columns.DONE:
             continue
-        what = f"archived, and still {story.status or 'off the board'}"
+        what = f"archived, and still {story.status or 'without a column'}"
         out.append(Anomaly(story.number, story.repo, what, "unarchive it on the board"))
     return out
 
@@ -284,18 +288,18 @@ class Fleet:
     archived: list[Story] = field(default_factory=list)
 
 
-def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
+def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
     """`(repo, number, url)` of every open story that carries a log and never reached the board.
 
     One cheap list per repository, and a read of an issue only when the board does not already hold
     it, so the usual answer of none costs one call per repository and nothing else. An issue with no
     `Drafted:` entry is not a story and is never reported.
     """
-    on_board = {story.key for story in found}
+    keys = {story.key for story in on_board}
     off: list[tuple[str, int, str]] = []
-    for repo in sorted({story.repo for story in found if story.repo}):
+    for repo in sorted({story.repo for story in on_board if story.repo}):
         for number in issue.list_open(repo):
-            if (repo, number) in on_board:
+            if (repo, number) in keys:
                 continue
             story = issue.view(repo, number)
             if log.last(story, "Drafted:") is not None:
@@ -332,7 +336,7 @@ def read(settings: Settings) -> Fleet:
         stories=found,
         blockers=blockers,
         behind=behind,
-        missing=_missing(every),
+        missing=_missing(every),  # archived included: an archived story is on the board, not off it
         me=gh.login(),
         archived=[story for story in every if story.archived],
     )
