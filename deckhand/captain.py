@@ -15,7 +15,7 @@ import math
 import os
 import statistics
 
-from deckhand import board, checklist, config, edges, fields, fleet, forecast, gh, issue, sessions
+from deckhand import board, checklist, config, edges, fields, fleet, forecast, gh, issue, order, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -64,8 +64,8 @@ def _fleet_rows(read: fleet.Fleet) -> list[str]:
     return rows if len(rows) > 2 else ["  nothing on the board"]
 
 
-def _ranked(read: fleet.Fleet) -> list[fleet.Ranked]:
-    return fleet.order([story for story in read.stories if story.status == "Backlog"], read.blockers)
+def _ranked(read: fleet.Fleet) -> list[order.Ranked]:
+    return order.ranked([story for story in read.stories if story.status == "Backlog"], read.blockers)
 
 
 def _order_rows(read: fleet.Fleet) -> list[str]:
@@ -101,9 +101,9 @@ def _head(read: fleet.Fleet, repo: str) -> str | None:
             roots.add(key)
     if not roots:
         return None
-    waits = fleet.waiting(read.blockers)
-    best = max(sorted(roots), key=lambda key: len(fleet.downstream(key, waits)))
-    count = len(fleet.downstream(best, waits))
+    waits = order.waiting(read.blockers)
+    best = max(sorted(roots), key=lambda key: len(order.downstream(key, waits)))
+    count = len(order.downstream(best, waits))
     story = next((row for row in read.stories if row.key == best), None)
     status = story.status if story and story.status else "off the board"
     stories = "story" if count == 1 else "stories"

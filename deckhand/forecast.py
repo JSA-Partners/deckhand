@@ -15,7 +15,7 @@ import random
 import statistics
 from datetime import datetime
 
-from deckhand import fleet, log
+from deckhand import fleet, log, order
 
 PERCENTILES = (50, 85, 95, 100)
 POINT = "A point groups stories that take about as long as each other. It is not hours."
@@ -72,7 +72,7 @@ def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
 
 
 def _order(stories: list[fleet.Story], blockers: fleet.Blockers) -> list[fleet.Story]:
-    return fleet._topological(stories, blockers, lambda story: (story.number, story.number, story.number))
+    return order.topological(stories, blockers, lambda story: (story.number, story.number, story.number))
 
 
 def _waits(story: fleet.Story, blockers: fleet.Blockers, finish: dict[fleet.Key, float]) -> float:
@@ -94,12 +94,12 @@ def floor(stories: list[fleet.Story], blockers: fleet.Blockers, sessions: int, h
 
 
 def _schedule(
-    order: list[fleet.Story], blockers: fleet.Blockers, sessions: int, duration: dict[fleet.Key, float]
+    placed: list[fleet.Story], blockers: fleet.Blockers, sessions: int, duration: dict[fleet.Key, float]
 ) -> float:
     """List scheduling: each story to whichever session frees up first, no earlier than its blockers finish."""
     free = [0.0] * max(sessions, 1)
     finish: dict[fleet.Key, float] = {}
-    for story in order:
+    for story in placed:
         session = min(range(sessions), key=lambda i: free[i])
         start = max(free[session], _waits(story, blockers, finish))
         finish[story.key] = free[session] = start + duration[story.key]
@@ -122,10 +122,10 @@ def simulate(
     """The makespan at `PERCENTILES`, from `runs` schedules drawn from `samples`."""
     rng = random.Random(seed)
     pool = [value for band in samples.values() for value in band]
-    order = _order(stories, blockers)
+    placed = _order(stories, blockers)
 
     def _draw() -> dict[fleet.Key, float]:
         return {story.key: rng.choice(samples.get(story.points) or pool) for story in stories}
 
-    makespans = sorted(_schedule(order, blockers, sessions, _draw()) for _ in range(runs))
+    makespans = sorted(_schedule(placed, blockers, sessions, _draw()) for _ in range(runs))
     return {p: _percentile(makespans, p) for p in PERCENTILES}

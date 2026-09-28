@@ -1,4 +1,4 @@
-"""The fleet: every story the project holds, what its log allows, the build order, and what disagrees."""
+"""The fleet: every story the project holds, what its log allows, and what disagrees."""
 
 from __future__ import annotations
 
@@ -111,38 +111,6 @@ BLOCKERS = {
     ("acme/widgets", 253): [],
     ("acme/gadgets", 13): [],
 }
-
-
-def _backlog():
-    return [story for story in fleet.stories(_nodes()) if story.status == "Backlog"]
-
-
-def test_the_story_that_unlocks_the_most_goes_first():
-    ranked = fleet.order(_backlog(), BLOCKERS)
-    assert [row.story.number for row in ranked] == [253, 13, 257, 258]
-
-
-def test_the_reason_counts_the_work_unlocked():
-    ranked = {row.story.number: row.why for row in fleet.order(_backlog(), BLOCKERS)}
-    assert ranked[253] == "ready, unblocks 2 stories, 7 pts"
-    assert ranked[13] == "ready, unblocks nothing"
-    assert ranked[257] == "waits on #253"
-
-
-def test_a_story_never_precedes_what_it_waits_on():
-    ranked = [row.story.number for row in fleet.order(_backlog(), BLOCKERS)]
-    assert ranked.index(257) < ranked.index(258)
-
-
-def test_a_cycle_leaves_everyone_placed():
-    blockers = {
-        ("acme/widgets", 253): [("acme/widgets", 257, "Export")],
-        ("acme/widgets", 257): [("acme/widgets", 253, "Seed")],
-        ("acme/gadgets", 13): [],
-        ("acme/gadgets", 258): [],
-    }
-    ranked = fleet.order(_backlog(), blockers)
-    assert sorted(row.story.number for row in ranked) == [13, 253, 257, 258]
 
 
 def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float = 0.0):
