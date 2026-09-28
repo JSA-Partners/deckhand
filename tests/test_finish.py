@@ -621,7 +621,7 @@ def test_apply_pushes_then_opens_the_pull_request_and_logs_it(fake_gh, gh_calls,
         "Pushed",
         f"Opened {PR_URL}",
         "Logged Pull request",
-        "Status=Pending Review",
+        "Status=In Review",
     ]
     assert _sha(origin, BRANCH) == head
     assert copy.read_text(encoding="utf-8").endswith(f"--- issue comment\nPull request: {PR_URL}")
@@ -636,7 +636,7 @@ def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo,
         "Pushed",
         f"Opened {PR_URL}",
         "Logged Pull request",
-        "Status=Pending Review",
+        "Status=In Review",
     ]
     calls = [call for call in gh_calls() if "item-edit" in call or call.startswith(("issue", "pr "))]
     assert [" ".join(call.split()[:2]) for call in calls] == [
@@ -656,7 +656,7 @@ def test_apply_ends_on_the_fields_and_reads_nothing_more(fake_gh, gh_calls, repo
     result = _apply(repo, env={"GH_BLOCKING": BLOCKING})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Status=Pending Review"
+    assert result.stdout.splitlines()[-1] == "Status=In Review"
     assert "Next:" not in result.stdout
     assert [call for call in gh_calls() if "/dependencies/blocking" in call] == []
 
@@ -702,7 +702,7 @@ def test_apply_reuses_a_pull_request_the_branch_already_has(fake_gh, gh_calls, r
         f"Reusing {PR_URL}",
         "Assigned @me",
         "Logged Pull request",
-        "Status=Pending Review",
+        "Status=In Review",
     ]
     assert [call for call in gh_calls() if call.startswith("pr create")] == []
     assert [call for call in gh_calls() if "item-edit" in call] == [PENDING]

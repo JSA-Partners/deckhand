@@ -20,7 +20,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from deckhand import fields, gh, invoke, issue, sections
+from deckhand import columns, fields, gh, invoke, issue, sections
 from deckhand import findings as findings_file
 from deckhand.step import (
     PLUGIN_ROOT,
@@ -249,5 +249,5 @@ def apply(args: argparse.Namespace) -> int:
         decided = findings_file.decisions(read_draft(args.decisions), found)
     print(issue.comment(repo, args.issue, comment_body(verdict, ran, found, decided)))
     # Every verdict reaches Ready: it is a sentence, not data, and an amend is what moves a story back.
-    print(fields.set_field(resolved_settings(), repo, args.issue, "Status", "Ready"))
+    print(fields.set_field(resolved_settings(), repo, args.issue, "Status", columns.READY))
     return 0

@@ -257,6 +257,14 @@ def test_newer_installed_reports_nothing_from_a_checkout(tmp_path, monkeypatch):
     assert cli.newer_installed() == ""
 
 
+def test_the_fleet_does_not_import_the_build_order():
+    """order reads the fleet's rows, so the fleet importing it back would close the loop."""
+    source = (ROOT / "deckhand" / "fleet.py").read_text(encoding="utf-8")
+    imports = [line for line in source.splitlines() if line.startswith(("import ", "from "))]
+
+    assert not [line for line in imports if "order" in line], imports
+
+
 def test_no_module_is_over_the_size_rule():
     """CLAUDE.md caps a module at 400 lines, and nothing else enforces it."""
     limit = 400

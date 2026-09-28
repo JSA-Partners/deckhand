@@ -1,7 +1,8 @@
-"""The fleet: every story the project holds, what its log allows, the build order, and what disagrees."""
+"""The fleet: every story the project holds, what its log allows, and what disagrees."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -49,9 +50,9 @@ def test_a_started_story_can_only_be_in_progress():
     assert fleet.allowed(_story(120)) == ("In Progress",)
 
 
-def test_a_story_with_a_pull_request_is_pending_review():
-    """finish writes Pending Review, and nothing moves a story back out of it."""
-    assert fleet.allowed(_story(117)) == ("Pending Review",)
+def test_a_story_with_a_pull_request_is_in_review():
+    """finish writes In Review, and nothing moves a story back out of it."""
+    assert fleet.allowed(_story(117)) == ("In Review",)
 
 
 def test_a_reviewed_story_may_still_be_waiting_to_be_boarded():
@@ -111,38 +112,6 @@ BLOCKERS = {
     ("acme/widgets", 253): [],
     ("acme/gadgets", 13): [],
 }
-
-
-def _backlog():
-    return [story for story in fleet.stories(_nodes()) if story.status == "Backlog"]
-
-
-def test_the_story_that_unlocks_the_most_goes_first():
-    ranked = fleet.order(_backlog(), BLOCKERS)
-    assert [row.story.number for row in ranked] == [253, 13, 257, 258]
-
-
-def test_the_reason_counts_the_work_unlocked():
-    ranked = {row.story.number: row.why for row in fleet.order(_backlog(), BLOCKERS)}
-    assert ranked[253] == "ready, unblocks 2 stories, 7 pts"
-    assert ranked[13] == "ready, unblocks nothing"
-    assert ranked[257] == "waits on #253"
-
-
-def test_a_story_never_precedes_what_it_waits_on():
-    ranked = [row.story.number for row in fleet.order(_backlog(), BLOCKERS)]
-    assert ranked.index(257) < ranked.index(258)
-
-
-def test_a_cycle_leaves_everyone_placed():
-    blockers = {
-        ("acme/widgets", 253): [("acme/widgets", 257, "Export")],
-        ("acme/widgets", 257): [("acme/widgets", 253, "Seed")],
-        ("acme/gadgets", 13): [],
-        ("acme/gadgets", 258): [],
-    }
-    ranked = fleet.order(_backlog(), blockers)
-    assert sorted(row.story.number for row in ranked) == [13, 253, 257, 258]
 
 
 def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float = 0.0):
@@ -337,14 +306,14 @@ OWED = "### After the merge\n\n- [ ] Deploy the migration\n"
 
 def test_a_closed_story_left_in_pending_review_is_an_anomaly():
     """Nothing runs when GitHub closes the issue on merge, so a story nobody revisits is caught here."""
-    found = fleet.anomalies(fleet.stories(_closed("Pending Review")), {}, set(), [])
+    found = fleet.anomalies(fleet.stories(_closed("In Review")), {}, set(), [])
 
     assert [(item.number, item.fix) for item in found] == [(301, "Status Done")]
 
 
 def test_a_closed_story_with_items_left_wants_verification():
     """The column a repair writes follows the boxes, not the fact that it is closed."""
-    found = fleet.anomalies(fleet.stories(_closed("Pending Review", OWED)), {}, set(), [])
+    found = fleet.anomalies(fleet.stories(_closed("In Review", OWED)), {}, set(), [])
 
     assert [(item.number, item.fix) for item in found] == [(301, "Status Verification")]
 
@@ -355,12 +324,12 @@ def test_a_closed_story_in_verification_is_no_anomaly():
 
 
 def test_an_issue_the_process_never_touched_is_not_judged():
-    found = fleet.anomalies(fleet.stories(_foreign("Pending Review")), {}, set(), [])
+    found = fleet.anomalies(fleet.stories(_foreign("In Review")), {}, set(), [])
     assert found == []
 
 
 def test_an_issue_the_process_never_touched_says_so_in_its_row():
-    story = fleet.stories(_foreign("Pending Review"))[0]
+    story = fleet.stories(_foreign("In Review"))[0]
     assert fleet.note(story, [], behind=False) == "not a deckhand story"
 
 
@@ -374,3 +343,95 @@ def test_a_loop_through_a_draft_names_every_story_on_it():
     entry = next(item for item in found if item.number == 257 and "circle" in item.what)
     assert entry.what == "blockers run in a circle: #257 -> #268 -> #253 -> #257"
     assert entry.fix == "captain apply --unblock on one edge"
+
+
+def test_an_item_carries_whether_it_is_archived():
+    """The query asks for both states, so every row has to say which one it came back in."""
+    nodes = _nodes()
+    for node in nodes:
+        if (node.get("content") or {}).get("number") == 117:
+            node["isArchived"] = True
+    found = {story.number: story for story in fleet.stories(nodes)}
+    assert found[117].archived is True
+    assert found[253].archived is False
+
+
+def test_the_items_query_asks_for_archived_items_and_says_which_they_are():
+    """Without the argument the project returns only unarchived items, and an archived story is lost."""
+    assert "archivedStates:[ARCHIVED,NOT_ARCHIVED]" in fleet.ITEMS_QUERY
+    assert "isArchived" in fleet.ITEMS_QUERY
+
+
+def _archived(tmp_path: Path, number: int) -> str:
+    """The board fixture with `number` archived, as a path for GH_PROJECT_ITEMS_FILE."""
+    data = json.loads((FIXTURES / "captain-items.json").read_text())
+    for node in data["data"]["organization"]["projectV2"]["items"]["nodes"]:
+        if (node.get("content") or {}).get("number") == number:
+            node["isArchived"] = True
+    path = tmp_path / "archived-items.json"
+    path.write_text(json.dumps(data))
+    return str(path)
+
+
+def test_a_read_sets_an_archived_story_aside(fake_gh, settings, monkeypatch, tmp_path):
+    """An archived story leaves the tables that drive the board and stays reachable to be reported."""
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", _archived(tmp_path, 117))
+
+    read = fleet.read(settings)
+
+    assert 117 not in [story.number for story in read.stories]
+    assert [story.number for story in read.archived] == [117]
+    assert ("acme/widgets", 117) not in read.blockers
+
+
+def test_a_read_does_not_call_an_archived_story_missing(fake_gh, settings, monkeypatch, tmp_path):
+    """An archived story is on the board, so reporting it as never boarded would be a second wrong answer.
+
+    The repository lists it as open and its issue carries a `Drafted:` entry, which is everything the
+    missing check looks for; only its key being on the board keeps it off the list.
+    """
+    listed = tmp_path / "open-issues.json"
+    listed.write_text(json.dumps([{"number": 117}]))
+    drafted = tmp_path / "issue-117.json"
+    drafted.write_text(
+        json.dumps(
+            {
+                "number": 117,
+                "title": "Warn before the export runs",
+                "state": "OPEN",
+                "url": "https://github.com/acme/widgets/issues/117",
+                "body": "### Story\n\nAs a user, I want a warning, so that nothing is lost.",
+                "comments": [
+                    {"author": {"login": "mjm"}, "createdAt": "2026-09-20T09:00:00Z", "body": "Drafted: from a request"}
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", _archived(tmp_path, 117))
+    monkeypatch.setenv("GH_ISSUE_LIST_ACME_WIDGETS", str(listed))
+    monkeypatch.setenv("GH_ISSUE_FILE_117", str(drafted))
+
+    read = fleet.read(settings)
+
+    assert read.missing == []
+
+
+def test_an_archived_story_the_process_owns_is_an_anomaly():
+    """Archiving hides a story from every board read, so the one deckhand still owns has to be named."""
+    archived = [dataclasses.replace(_story(120), archived=True)]
+    found = fleet.anomalies([], {}, set(), [], archived=archived)
+    assert [(a.number, a.what, a.fix) for a in found] == [
+        (120, "archived, and still In Progress", "unarchive it on the board")
+    ]
+
+
+def test_an_archived_story_that_is_done_is_not_an_anomaly():
+    """Archiving finished work is what the project's own workflow is for."""
+    archived = [dataclasses.replace(fleet.stories(_closed("Done"))[0], archived=True)]
+    assert fleet.anomalies([], {}, set(), [], archived=archived) == []
+
+
+def test_an_archived_issue_the_process_never_wrote_to_is_not_an_anomaly():
+    """A board carries issues that are not deckhand's, and archiving one of those is nobody's business."""
+    archived = [dataclasses.replace(fleet.stories(_foreign("Backlog"))[0], archived=True)]
+    assert fleet.anomalies([], {}, set(), [], archived=archived) == []

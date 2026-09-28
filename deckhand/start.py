@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, drift, fields, gh, git, invoke, issue, log, sections, worktree
+from deckhand import columns, config, drift, fields, gh, git, invoke, issue, log, sections, worktree
 from deckhand.config import Settings
 from deckhand.step import (
     MAIN,
@@ -226,23 +226,23 @@ def apply(args: argparse.Namespace) -> int:
     # A branch the clone has while the story is still Backlog is a start that failed between the
     # cut and the board, so the status is still owed; a branch with the story In Progress is one
     # being picked back up. The log entry is owed until the issue has it, whichever run got there.
-    fresh = not found or status == "Backlog"
+    fresh = not found or status == columns.BACKLOG
     owed = log.last(story, "Started:") is None
     made: Path | None = None
     if found:
-        if status not in ("Backlog", "In Progress"):
+        if status not in (columns.BACKLOG, columns.IN_PROGRESS):
             raise Refusal(f"#{args.issue} has branch {branch} but is {status or 'off the board'}")
         if where is None:
             made = _worktree(branch, new=False)
         print(f"Existing branch {branch}; {'finishing the interrupted start' if fresh else 'status unchanged'}")
     elif status is None:
         raise Refusal(f"#{args.issue} is off the board; board it first with /deckhand:next {args.issue}")
-    elif status != "Backlog":
+    elif status != columns.BACKLOG:
         raise Refusal(f"#{args.issue} is {status}; a branch is cut only from Backlog")
     else:
         made = _start_branch(branch)
     if fresh:
-        print(fields.set_field(settings, repo, args.issue, "Status", "In Progress"))
+        print(fields.set_field(settings, repo, args.issue, "Status", columns.IN_PROGRESS))
     # Bookkeeping, so it comes after the status write the step exists to make: whoever started the
     # story owns it, and adding an assignee GitHub already has changes nothing.
     issue.assign(repo, args.issue)

@@ -9,7 +9,7 @@ lives here because every stub and story boards the same way, from new, amend, an
 
 from __future__ import annotations
 
-from deckhand import board, fields, gh, issue, log, stub
+from deckhand import board, columns, fields, gh, issue, log, stub
 from deckhand.config import Settings
 from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 
@@ -23,7 +23,7 @@ def board_draft(settings: Settings, repo: str, number: int, url: str, note: str 
     """
     board.add(settings, url)
     print("Added to the board", flush=True)
-    print(fields.set_field(settings, repo, number, "Status", "Draft"), flush=True)
+    print(fields.set_field(settings, repo, number, "Status", columns.DRAFT), flush=True)
     if note is not None:
         issue.comment(repo, number, log.checked(note))
         print(f"Logged {note.split(':', 1)[0]}", flush=True)

@@ -23,7 +23,7 @@ import argparse
 import os
 import time
 
-from deckhand import board, config, fields, fleet, forecast, gh, invoke, issue, log, sections
+from deckhand import board, columns, config, fields, fleet, forecast, gh, invoke, issue, log, sections
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -125,7 +125,7 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
     for node in board.items(usable(settings)):
         content = node.get("content") or {}
         status = board.field_value(node, "Status", "name") or "-"
-        if content.get("number") == number or status == "Done":
+        if content.get("number") == number or content.get("closedAt") or status == columns.DONE:
             continue
         rows.append(f"#{content.get('number')} {status} {content.get('title') or ''}".rstrip())
     return indented(rows, "none")
@@ -246,7 +246,7 @@ def apply(args: argparse.Namespace) -> int:
         print(f"Blocked by {ref_label(where, number, repo)}")
     # Every story boards in the same column: a blocker is a dependency GitHub holds and `start`
     # reads live, not a column that would need clearing when the last blocker closed.
-    status = "Backlog"
+    status = columns.BACKLOG
     added = gh.item_id(settings, repo, args.issue) is None  # a story from before every story was boarded at birth
     if added:
         board.add(settings, story.url)

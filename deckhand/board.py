@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from deckhand import gh
+from deckhand import columns, gh
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -83,7 +83,7 @@ def oldest_open(settings: Settings, repo: str, exclude: int) -> tuple[int, str] 
             continue
         if (content.get("repository") or {}).get("nameWithOwner") != repo:
             continue
-        if field_value(node, "Status", "name") == "Done":
+        if field_value(node, "Status", "name") == columns.DONE:
             continue
         candidates.append((number, " ".join((content.get("title") or "").split())))
     return min(candidates) if candidates else None

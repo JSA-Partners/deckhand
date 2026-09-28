@@ -22,7 +22,7 @@ import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from deckhand import board, config, fields, gh, git, issue, log, sections, stub, worktree
+from deckhand import board, columns, config, fields, gh, git, issue, log, sections, stub, worktree
 from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
@@ -83,23 +83,23 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
         return "merge", f"Pull request open: {f.pull_request}"
     if f.merged:
         return "stop", f"#{number} has a merged pull request and an open issue; close the issue on GitHub."
-    if f.status == "In Progress" and f.commits:
+    if f.status == columns.IN_PROGRESS and f.commits:
         return "resume", f"Branch {f.branch} has {f.commits} commits."
-    if f.status == "In Progress" and f.commits is None:
+    if f.status == columns.IN_PROGRESS and f.commits is None:
         where = f"Branch {f.branch} is not in this clone." if f.branch else "No branch in this clone."
         return "build", where
-    if f.status == "In Progress":
+    if f.status == columns.IN_PROGRESS:
         return "build", "Started, nothing built yet."
-    if f.status == "Backlog" and f.blockers:
+    if f.status == columns.BACKLOG and f.blockers:
         named = ", ".join(blocker.split("  ")[0] for blocker in f.blockers)
         return "wait", f"Waits on {named}."
-    if f.status == "Backlog":
+    if f.status == columns.BACKLOG:
         return "check", "On the board; check the plan against the code, then build."
-    # Pending Review and Done are the board's own columns, and nothing here reboards a story out of
+    # In Review and Done are the board's own columns, and nothing here reboards a story out of
     # one: the pull request row above is the only way back in.
     # Refinement and Ready are positions inside the drafting rows below, not columns to stop at:
     # an amend puts a story in one and a review in the other, and both still have a step to run.
-    if f.status not in (None, "Draft", "Refinement", "Ready"):
+    if f.status not in (None, columns.DRAFT, columns.REFINEMENT, columns.READY):
         return "stop", f"#{number} is {f.status} with no open pull request; nothing decided."
     if not f.drafted and f.parked:
         return "settle", f"#{number} is a parked feature; settle its requirements."

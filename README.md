@@ -47,15 +47,15 @@ flowchart LR
         i1[Built in the<br/>story's worktree] --> i2[Branch<br/>code review]
     end
 
-    subgraph PendingReview [Pending Review]
+    subgraph InReview [In Review]
         direction TB
         p1[Pull request<br/>opens] --> p2[Checks run]
     end
 
     Draft -->|you settle the<br/>review and size| Backlog
     Backlog -->|you say<br/>build| InProgress
-    InProgress -->|you read<br/>the branch| PendingReview
-    PendingReview -->|you<br/>merge| Done([Done])
+    InProgress -->|you read<br/>the branch| InReview
+    InReview -->|you<br/>merge| Done([Done])
 ```
 
 The arrows are your decisions. The boxes are what Claude does between them. Several sessions can

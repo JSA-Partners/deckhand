@@ -8,17 +8,16 @@ the board in a single paginated read instead of one read per story.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from deckhand import board, gh, issue, log, sections, sessions, step
+from deckhand import board, columns, gh, issue, log, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
 ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
-    "projectV2(number:$number){ items(first:50, after:$endCursor){ "
-    "pageInfo{ hasNextPage endCursor } nodes{ id "
+    "projectV2(number:$number){ items(first:100, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
+    "pageInfo{ hasNextPage endCursor } nodes{ id isArchived "
     "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
@@ -29,9 +28,6 @@ ITEMS_QUERY = (
     "... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
 )
-
-DONE = "Done"
-VERIFICATION = "Verification"
 
 _PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
@@ -53,6 +49,7 @@ class Story:
     issue: issue.Issue
     assignees: tuple[str, ...] = ()
     blocked_by: tuple[tuple[str, int, str], ...] = ()
+    archived: bool = False
 
     @property
     def key(self) -> tuple[str, int]:
@@ -118,6 +115,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                     str(person.get("login") or "") for person in (content.get("assignees") or {}).get("nodes") or []
                 ),
                 blocked_by=_open_blockers(content),
+                archived=bool(node.get("isArchived")),
             )
         )
     return found
@@ -135,8 +133,12 @@ def _nodes(settings: Settings) -> list[dict]:
 
 
 def load(settings: Settings) -> list[Story]:
-    """Every story on the project with its log, and nothing else read."""
-    return stories(_nodes(settings))
+    """Every story on the project with its log, and nothing else read; an archived one is not a story here.
+
+    The query asks for archived items because `read` reports the archived story the process still owns.
+    Nothing else wants them, so this drops them and every caller sees the board as a person does.
+    """
+    return [story for story in stories(_nodes(settings)) if not story.archived]
 
 
 def allowed(story: Story) -> tuple[str, ...]:
@@ -150,14 +152,14 @@ def allowed(story: Story) -> tuple[str, ...]:
     """
     if story.closed:
         owed = any(not ticked for _, ticked in sections.after_merge_items(story.issue.body))
-        return (VERIFICATION, DONE) if owed else (DONE, VERIFICATION)
+        return (columns.VERIFICATION, columns.DONE) if owed else (columns.DONE, columns.VERIFICATION)
     if log.last(story.issue, "Pull request:") is not None:
-        return ("Pending Review",)
+        return (columns.IN_REVIEW,)
     if log.last(story.issue, "Started:") is not None:
-        return ("In Progress",)
+        return (columns.IN_PROGRESS,)
     if log.last(story.issue, "Review:") is not None:
-        return ("Ready", "Backlog", "Draft")
-    return ("Draft", "Refinement")
+        return (columns.READY, columns.BACKLOG, columns.DRAFT)
+    return (columns.DRAFT, columns.REFINEMENT)
 
 
 def touched(story: Story) -> bool:
@@ -178,7 +180,7 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         # a story already built, rebased and reviewed still waits on an unmerged blocker; the column alone hides it
         named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
         return f"waits on {named}"
-    if story.status in ("In Progress", "Pending Review"):
+    if story.status in (columns.IN_PROGRESS, columns.IN_REVIEW):
         if behind:
             return "pull request behind main"
         if log.last(story.issue, "Pull request:") is not None:
@@ -186,50 +188,19 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         if log.last(story.issue, "Reviewed:") is not None:
             return "reviewed, no pull request"
         return "building"
-    if story.status == "Backlog":
+    if story.status == columns.BACKLOG:
         return "ready"
-    if story.status == VERIFICATION:
+    if story.status == columns.VERIFICATION:
         left = sum(1 for _, ticked in sections.after_merge_items(story.issue.body) if not ticked)
         items = "item" if left == 1 else "items"
         return f"merged, {left} {items} left"
-    if story.status == DONE and story.closed:
+    if story.status == columns.DONE and story.closed:
         return "done"
     return "reviewed, not boarded" if log.last(story.issue, "Review:") is not None else "review not run"
 
 
 Key = tuple[str, int]
 Blockers = dict[Key, list[tuple[str, int, str]]]
-
-
-@dataclass(frozen=True)
-class Ranked:
-    """One story in the build order, with the reason it sits where it does."""
-
-    story: Story
-    why: str
-
-
-def downstream(start: Key, waiting: dict[Key, set[Key]]) -> set[Key]:
-    """Every story that transitively waits on `start`; a cycle counts each member once and stops."""
-    found: set[Key] = set()
-    stack = list(waiting.get(start, ()))
-    while stack:
-        node = stack.pop()
-        if node in found:
-            continue
-        found.add(node)
-        stack.extend(waiting.get(node, ()))
-    found.discard(start)
-    return found
-
-
-def waiting(blockers: Blockers) -> dict[Key, set[Key]]:
-    """The blockers map turned around: who is waiting on each story."""
-    found: dict[Key, set[Key]] = {}
-    for key, holds in blockers.items():
-        for where, number, _ in holds:
-            found.setdefault((where, number), set()).add(key)
-    return found
 
 
 def _circle(start: Key, blockers: Blockers) -> list[Key]:
@@ -245,55 +216,6 @@ def _circle(start: Key, blockers: Blockers) -> list[Key]:
                 seen.add((where, number))
                 stack.append(((where, number), [*path, (where, number)]))
     return []
-
-
-def _topological(held: list[Story], blockers: Blockers, rank: Callable[[Story], tuple[int, int, int]]) -> list[Story]:
-    """`held` placed so nothing precedes a blocker that is also in `held`; a cycle falls back to rank."""
-    remaining = list(held)
-    left = {story.key for story in remaining}
-    placed: list[Story] = []
-    while remaining:
-        free = [s for s in remaining if not {(w, n) for w, n, _ in blockers.get(s.key) or []} & left]
-        best = min(free or remaining, key=rank)
-        placed.append(best)
-        remaining.remove(best)
-        left.discard(best.key)
-    return placed
-
-
-def _why(story: Story, blockers: list[tuple[str, int, str]], below: set[Key], points: dict[Key, int]) -> str:
-    if blockers:
-        named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
-        return f"waits on {named}"
-    if not below:
-        return "ready, unblocks nothing"
-    count = len(below)
-    stories = "story" if count == 1 else "stories"
-    return f"ready, unblocks {count} {stories}, {sum(points.get(key, 0) for key in below)} pts"
-
-
-def order(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
-    """The Backlog ranked: what can start first, by the work it frees, then what waits.
-
-    Weight is the points of everything transitively waiting on a story rather than a count of its
-    neighbours, so the story that frees the longest chain leads. Equal weight breaks toward fewer
-    points, so a cheap unblocker goes first, and equal again breaks by number so two runs agree.
-    """
-    waits = waiting(blockers)
-    points = {story.key: story.points or 0 for story in backlog}
-    ready = [story for story in backlog if not blockers.get(story.key)]
-    held = [story for story in backlog if blockers.get(story.key)]
-    weights = {story.key: downstream(story.key, waits) for story in backlog}
-
-    def rank(story: Story) -> tuple[int, int, int]:
-        below = weights[story.key]
-        return (-sum(points.get(key, 0) for key in below), story.points or 0, story.number)
-
-    placed = sorted(ready, key=rank) + _topological(held, blockers, rank)
-    return [
-        Ranked(story=story, why=_why(story, blockers.get(story.key) or [], weights[story.key], points))
-        for story in placed
-    ]
 
 
 @dataclass(frozen=True)
@@ -313,8 +235,9 @@ def anomalies(
     pulses: list,
     missing: list[tuple[str, int, str]] | None = None,
     me: str = "",
+    archived: list[Story] | None = None,
 ) -> list[Anomaly]:
-    """Every disagreement worth a line: a wrong Status, a story off the board, a stall, a cycle."""
+    """Every disagreement worth a line: a wrong Status, a story off the board or archived, a stall, a cycle."""
     on: dict[str, list[str]] = {}
     for beat in pulses:
         if beat.story != sessions.FREE and beat.idle < ACTIVE:
@@ -330,7 +253,7 @@ def anomalies(
             )
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
-        if story.status == "In Progress" and not labels and mine and not blockers.get(story.key):
+        if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):
             out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
         if len(labels) > 1:
             named = " and ".join(labels)
@@ -344,6 +267,12 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
+    for story in archived or []:
+        # Archiving is how finished work leaves the board, so only a story still in play is wrong.
+        if not touched(story) or story.status == columns.DONE:
+            continue
+        what = f"archived, and still {story.status or 'without a column'}"
+        out.append(Anomaly(story.number, story.repo, what, "unarchive it on the board"))
     return out
 
 
@@ -356,20 +285,21 @@ class Fleet:
     behind: set[Key]
     missing: list[tuple[str, int, str]]
     me: str = ""
+    archived: list[Story] = field(default_factory=list)
 
 
-def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
+def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
     """`(repo, number, url)` of every open story that carries a log and never reached the board.
 
     One cheap list per repository, and a read of an issue only when the board does not already hold
     it, so the usual answer of none costs one call per repository and nothing else. An issue with no
     `Drafted:` entry is not a story and is never reported.
     """
-    on_board = {story.key for story in found}
+    keys = {story.key for story in on_board}
     off: list[tuple[str, int, str]] = []
-    for repo in sorted({story.repo for story in found if story.repo}):
+    for repo in sorted({story.repo for story in on_board if story.repo}):
         for number in issue.list_open(repo):
-            if (repo, number) in on_board:
+            if (repo, number) in keys:
                 continue
             story = issue.view(repo, number)
             if log.last(story, "Drafted:") is not None:
@@ -378,14 +308,19 @@ def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
 
 
 def read(settings: Settings) -> Fleet:
-    """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request."""
-    found = stories(_nodes(settings))
+    """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request.
+
+    Archived items are read so an archived story can be named, and held apart from the rest, because
+    the project archives finished work by itself and those closed items would bury the stories.
+    """
+    every = stories(_nodes(settings))
+    found = [story for story in every if not story.archived]
     blockers: Blockers = {
-        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != DONE
+        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE
     }
     behind: set[Key] = set()
     for story in found:
-        if story.status not in ("In Progress", "Pending Review"):
+        if story.status not in (columns.IN_PROGRESS, columns.IN_REVIEW):
             continue
         entry = log.last(story.issue, "Pull request:")
         url = _PR_URL.search(entry.text) if entry is not None else None
@@ -397,4 +332,11 @@ def read(settings: Settings) -> Fleet:
             continue  # a pull request gh cannot read says nothing about main; the row stands without it
         if state in issue.BEHIND:
             behind.add(story.key)
-    return Fleet(stories=found, blockers=blockers, behind=behind, missing=_missing(found), me=gh.login())
+    return Fleet(
+        stories=found,
+        blockers=blockers,
+        behind=behind,
+        missing=_missing(every),  # archived included: an archived story is on the board, not off it
+        me=gh.login(),
+        archived=[story for story in every if story.archived],
+    )

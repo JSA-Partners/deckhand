@@ -463,7 +463,7 @@ def test_apply_refuses_any_body_change_once_the_story_is_in_progress(fake_gh, gh
     assert _writes(gh_calls) == []
 
 
-@pytest.mark.parametrize("status", ["Pending Review", "Done"])
+@pytest.mark.parametrize("status", ["In Review", "Done"])
 def test_apply_refuses_a_body_change_in_pending_review_and_done(fake_gh, gh_calls, tmp_path, status):
     result = run_deckhand(
         "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, status)

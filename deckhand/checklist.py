@@ -9,11 +9,10 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from deckhand import board, gh
+from deckhand import board, columns, gh
 from deckhand.config import Settings
 from deckhand.step import reason
 
-STATUS_OPTIONS = ["Draft", "Refinement", "Ready", "Backlog", "In Progress", "Pending Review", "Verification", "Done"]
 BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"]
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"
@@ -39,7 +38,7 @@ UNKNOWN = "unknown ("
 
 # What a person should know before the click, by item.
 NOTES = {
-    "Status options": "Deleting an option is permanent.",
+    "Status options": "Rename an option to keep its items; deleting one is permanent.",
     "Workflows": "The API can read these and cannot set them.",
 }
 
@@ -91,10 +90,10 @@ def _status_item(fields: list[dict[str, Any]] | None, unread: str) -> Item:
         return Item("Status options", click, f"{UNKNOWN}{unread})")
     status = next((f for f in fields if f["name"] == "Status"), None)
     current = [o["name"] for o in (status.get("options") or [])] if status else []
-    if current == STATUS_OPTIONS:
+    if current == list(columns.ORDER):
         return Item("Status options", click, None)
     return Item(
-        "Status options", click, f"set to {', '.join(STATUS_OPTIONS)} (currently: {', '.join(current) or 'none'})"
+        "Status options", click, f"set to {', '.join(columns.ORDER)} (currently: {', '.join(current) or 'none'})"
     )
 
 

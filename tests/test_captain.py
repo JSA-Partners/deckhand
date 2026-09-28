@@ -271,7 +271,7 @@ def test_repair_leaves_an_untouched_issue_unmarked(fleet_env, gh_calls, monkeypa
 
 def test_repair_leaves_an_issue_the_process_never_wrote_to_alone(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
     """A board carries issues that are not deckhand's, and their column was chosen by a person."""
-    for name, value in _items(tmp_path, "foreign-column.json", [*_nodes(), _foreign("Pending Review")]).items():
+    for name, value in _items(tmp_path, "foreign-column.json", [*_nodes(), _foreign("In Review")]).items():
         monkeypatch.setenv(name, value)
 
     assert cli.main(["captain", "apply", "--repair"]) == 0
@@ -283,7 +283,7 @@ def test_repair_leaves_an_issue_the_process_never_wrote_to_alone(fleet_env, gh_c
 
 def test_a_repair_with_only_untouched_issues_refuses(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
     """Nothing the process owns is wrong, so the run refuses rather than reporting a success that wrote nothing."""
-    for name, value in _items(tmp_path, "clean-foreign.json", [*_clean_nodes(), _foreign("Pending Review")]).items():
+    for name, value in _items(tmp_path, "clean-foreign.json", [*_clean_nodes(), _foreign("In Review")]).items():
         monkeypatch.setenv(name, value)
 
     assert cli.main(["captain", "apply", "--repair"]) == 1

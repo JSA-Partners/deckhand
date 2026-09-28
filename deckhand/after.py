@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import re
 
-from deckhand import fields, gh, invoke, issue, log, sections
+from deckhand import columns, fields, gh, invoke, issue, log, sections
 from deckhand.step import Refusal, block, indented, resolved_settings, step
 
 HEADING = "### After the merge"
@@ -90,9 +90,9 @@ def apply(args: argparse.Namespace) -> int:
     items = sections.after_merge_items(story.body)
     settings = resolved_settings()
     if not items:
-        print(fields.set_field(settings, repo, args.issue, "Status", "Done"))
+        print(fields.set_field(settings, repo, args.issue, "Status", columns.DONE))
         return 0
     body = _tick(repo, args.issue, story, items, args.item) if args.item is not None else story.body
     left = [text for text, ticked in sections.after_merge_items(body) if not ticked]
-    print(fields.set_field(settings, repo, args.issue, "Status", "Verification" if left else "Done"))
+    print(fields.set_field(settings, repo, args.issue, "Status", columns.VERIFICATION if left else columns.DONE))
     return 0
