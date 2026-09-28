@@ -35,14 +35,18 @@ from deckhand.step import (
 )
 
 FINDING_FORMAT = (
-    "Report findings as lines: <lens>.<n> | P1|P2|P3 | PENDING | <claim> | "
-    f"<evidence, citing the section>; or exactly `{findings_file.CLEAN}`"
+    'Report findings as {"kind": "findings", "findings": [{"lens": "<lens>", "ordinal": 1, "severity": "P1|P2|P3", '
+    '"claim": "<one sentence>", "evidence": "<one sentence, citing the section>"}]}; an empty list found nothing'
 )
 VERDICT_FORMAT = (
-    "Report verdicts as lines, one per finding in the reviewer's order: <lens>.<n> | CONFIRMED, "
-    "or <lens>.<n> | REJECTED | <reason>"
+    'Report verdicts, one per finding in the reviewer\'s order, as {"kind": "verdicts", "verdicts": '
+    '[{"id": "<lens>.<n>", "verdict": "CONFIRMED"}, {"id": "<lens>.<n>", "verdict": "REJECTED", '
+    '"reason": "<why>"}]}'
 )
-DECISION_FORMAT = "Report decisions as lines, one per finding: <lens>.<n> | accepted|declined|changed [| <reason>]"
+DECISION_FORMAT = (
+    'Report decisions, one per finding, as {"kind": "decisions", "decisions": '
+    '[{"id": "<lens>.<n>", "decision": "accepted|declined|changed", "reason": "<why, optional>"}]}'
+)
 
 _FRONTMATTER_FIELD = re.compile(r"^([a-z_]+):\s*(.*)$")
 # `Lenses: a, b` anywhere in Notes, as a line of its own or as a bullet.
@@ -163,11 +167,11 @@ def context(args: argparse.Namespace) -> int:
     print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected)))
     print()
     print(FINDING_FORMAT)
-    print(draft_line("Findings", f"{args.issue}-findings.md"))
+    print(draft_line("Findings", f"{args.issue}-findings.json"))
     print(VERDICT_FORMAT)
-    print(draft_line("Verdicts", f"{args.issue}-verdicts.md"))
+    print(draft_line("Verdicts", f"{args.issue}-verdicts.json"))
     print(DECISION_FORMAT)
-    print(draft_line("Decisions", f"{args.issue}-decisions.md"))
+    print(draft_line("Decisions", f"{args.issue}-decisions.json"))
     print()
     print(
         invoke.apply_line(

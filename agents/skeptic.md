@@ -14,11 +14,18 @@ holds the reviewer's lines and the path to the story body they came from. For ea
 the body: look for the sentence that already handles it, and ask whether the evidence says what the
 claim says.
 
-Output one line per finding, in the reviewer's order, and nothing else:
+Output one JSON document and nothing else, one verdict per finding, in the reviewer's order:
 
-- `<lens>.<n> | CONFIRMED` when the evidence holds and the claim follows from it.
-- `<lens>.<n> | REJECTED | <reason>` when the evidence does not support the claim, or the story
-  already handles it. The reason names the sentence or the gap, in one line with no `|` in it.
+```json
+{"kind": "verdicts", "verdicts": [
+  {"id": "chaos.2", "verdict": "CONFIRMED"},
+  {"id": "chaos.3", "verdict": "REJECTED", "reason": "Scope Out already excludes the admin path"}
+]}
+```
 
-You mark; you never delete, reword, or renumber. A wrong rejection costs a reviewer seconds to
-rescue; a missing line costs the finding.
+`CONFIRMED` when the evidence holds and the claim follows from it. `REJECTED` when the evidence does
+not support the claim, or the story already handles it, and then the reason names the sentence or the
+gap in one line.
+
+You mark; you never delete, reword, or renumber. A wrong rejection costs a reviewer seconds to rescue;
+a missing verdict costs the finding.

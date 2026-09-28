@@ -1,6 +1,8 @@
-"""The findings, verdicts and decisions parser: the shape all three files share."""
+"""The findings, verdicts and decisions parser: the JSON shape all three files share."""
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -10,8 +12,23 @@ from deckhand.step import Refusal
 KNOWN = {"chaos", "unknowns"}
 
 
-def test_a_well_formed_findings_line_parses():
-    text = "chaos.1 | P2 | PENDING | A retried job writes the grant twice | Scope In names one write\n"
+def _doc(kind: str, **entries) -> str:
+    return json.dumps({"kind": kind, kind: entries[kind]})
+
+
+def test_a_well_formed_finding_parses():
+    text = _doc(
+        "findings",
+        findings=[
+            {
+                "lens": "chaos",
+                "ordinal": 1,
+                "severity": "P2",
+                "claim": "A retried job writes the grant twice",
+                "evidence": "Scope In names one write",
+            }
+        ],
+    )
 
     (found,) = findings.findings(text, KNOWN)
 
@@ -20,142 +37,311 @@ def test_a_well_formed_findings_line_parses():
     assert found.severity == "P2"
     assert found.claim == "A retried job writes the grant twice"
     assert found.evidence == "Scope In names one write"
+    assert found.verdict == findings.PENDING
 
 
-def test_a_claim_with_a_bare_pipe_still_parses():
-    """A regex alternation in backticks has no spaces around its pipe, so the spaced split still gives five fields."""
-    line = "chaos.1 | P2 | PENDING | The pattern `^(a|b)$` admits an empty match. | store.go:14"
-
-    found = findings._parse(line)
-
-    assert found is not None
-    assert found.claim == "The pattern `^(a|b)$` admits an empty match."
-    assert found.evidence == "store.go:14"
+def test_an_empty_findings_array_is_a_clean_pass():
+    assert findings.findings(_doc("findings", findings=[]), KNOWN) == []
 
 
-def test_a_line_written_without_spaces_still_parses():
-    found = findings._parse("chaos.1|P2|PENDING|A claim.|store.go:14")
-
-    assert found is not None
-    assert found.claim == "A claim."
-
-
-def test_a_verdict_reason_may_contain_a_bare_pipe():
-    assert findings._parse_verdict("chaos.1 | REJECTED | The guard reads `a|b` already.") == (
-        "chaos.1",
-        "REJECTED",
-        "The guard reads `a|b` already.",
-    )
-
-
-def test_a_spaced_pipe_in_the_claim_is_refused_and_names_the_line():
-    text = "chaos.1 | P1 | PENDING | foo(a | b) is never bounded | Scope In\n"
-
-    with pytest.raises(Refusal) as refused:
-        findings.findings(text, KNOWN)
-
-    assert str(refused.value).startswith("line 1: expected ")
-
-
-def test_four_fields_instead_of_five_is_refused():
-    text = "chaos.1 | P2 | PENDING | a claim with no evidence\n"
-
-    with pytest.raises(Refusal) as refused:
-        findings.findings(text, KNOWN)
-
-    assert str(refused.value).startswith("line 1: expected ")
-
-
-def test_every_malformed_findings_line_is_named_in_one_refusal():
-    """Nine lines written four fields wide cost nine refusals; the repair needs them all at once."""
-    text = (
-        "chaos.1 | P2 | PENDING | a claim with no evidence\n"
-        "chaos.2 | P1 | PENDING | another claim folded in\n"
-        "chaos.3 | P2 | PENDING | A claim | store.go:14\n"
+def test_an_unknown_lens_is_refused_naming_the_entry():
+    text = _doc(
+        "findings",
+        findings=[
+            {"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "store.go:14"},
+            {"lens": "vibes", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "store.go:14"},
+        ],
     )
 
     with pytest.raises(Refusal) as refused:
         findings.findings(text, KNOWN)
 
-    assert str(refused.value).splitlines() == [
-        "line 1: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>; found 4 fields",
-        "line 2: found 4 fields",
-    ]
+    assert str(refused.value) == "entry 2: no lens named 'vibes'"
 
 
-def test_an_unknown_lens_is_refused_by_the_line_that_carries_it():
-    text = "chaos.1 | P2 | PENDING | A claim | store.go:14\nvibes.1 | P2 | PENDING | A claim | store.go:14\n"
-
-    with pytest.raises(Refusal) as refused:
-        findings.findings(text, KNOWN)
-
-    assert str(refused.value) == "line 2: no lens named 'vibes'"
-
-
-def test_the_expected_shape_rides_on_the_first_malformed_line_whatever_came_before_it():
-    """A file whose first fault is semantic still has to be told the shape the rest was meant to take."""
-    text = "vibes.1 | P2 | PENDING | A claim | store.go:14\nchaos.2 | P1 | PENDING | a claim with no evidence\n"
-
-    with pytest.raises(Refusal) as refused:
-        findings.findings(text, KNOWN)
-
-    assert str(refused.value).splitlines() == [
-        "line 1: no lens named 'vibes'",
-        "line 2: expected <lens>.<n> | P1|P2|P3 | PENDING | <claim> | <evidence>; found 4 fields",
-    ]
-    assert str(refused.value).count("expected ") == 1
-
-
-def test_a_verdicts_file_passed_as_findings_names_the_shape_it_reads_as():
-    text = "chaos.1 | CONFIRMED\n"
+def test_two_findings_with_the_same_lens_and_ordinal_are_refused():
+    text = _doc(
+        "findings",
+        findings=[
+            {
+                "lens": "chaos",
+                "ordinal": 1,
+                "severity": "P1",
+                "claim": "A retry writes twice",
+                "evidence": "Scope In",
+            },
+            {
+                "lens": "chaos",
+                "ordinal": 1,
+                "severity": "P2",
+                "claim": "The cache outlives the row",
+                "evidence": "Notes",
+            },
+        ],
+    )
 
     with pytest.raises(Refusal) as refused:
         findings.findings(text, KNOWN)
 
-    assert "reads as verdicts" in str(refused.value)
-    assert "findings, verdicts, decisions" in str(refused.value)
+    assert str(refused.value) == "entry 2: chaos.1 is already the id of an earlier finding"
+
+
+def test_a_severity_that_is_not_p1_p2_or_p3_is_refused():
+    text = _doc(
+        "findings",
+        findings=[{"lens": "chaos", "ordinal": 1, "severity": "P4", "claim": "A claim", "evidence": "store.go:14"}],
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert "severity" in str(refused.value)
+    assert "entry 1" in str(refused.value)
 
 
 def test_a_rejected_verdict_with_no_reason_is_refused():
     found = findings.findings(
-        "chaos.1 | P2 | PENDING | A retried job writes the grant twice | Scope In names one write\n", KNOWN
+        _doc(
+            "findings",
+            findings=[
+                {
+                    "lens": "chaos",
+                    "ordinal": 1,
+                    "severity": "P2",
+                    "claim": "A retried job writes the grant twice",
+                    "evidence": "Scope In names one write",
+                }
+            ],
+        ),
+        KNOWN,
     )
 
     with pytest.raises(Refusal) as refused:
-        findings.verdicts("chaos.1 | REJECTED\n", found)
+        findings.verdicts(_doc("verdicts", verdicts=[{"id": "chaos.1", "verdict": "REJECTED"}]), found)
 
-    assert str(refused.value).startswith("line 1: expected ")
-
-
-def test_clean_as_the_whole_findings_file_is_accepted():
-    assert findings.findings(f"{findings.CLEAN}\n", KNOWN) == []
+    assert "reason" in str(refused.value)
+    assert "entry 1" in str(refused.value)
 
 
-def test_a_spaced_pipe_inside_backticks_parses():
-    """A shell pipeline is the natural way to write evidence, and its pipe is not a separator."""
-    line = "chaos.2 | P2 | PENDING | A retried job writes the grant twice | `jq '.results | length'` at store.go:14"
+def test_a_verdict_naming_an_id_that_is_not_a_finding_is_refused():
+    found = findings.findings(
+        _doc(
+            "findings",
+            findings=[{"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"}],
+        ),
+        KNOWN,
+    )
 
-    found = findings._parse(line)
+    with pytest.raises(Refusal) as refused:
+        findings.verdicts(
+            _doc(
+                "verdicts",
+                verdicts=[{"id": "chaos.1", "verdict": "CONFIRMED"}, {"id": "chaos.2", "verdict": "CONFIRMED"}],
+            ),
+            found,
+        )
 
-    assert found is not None
-    assert found.claim == "A retried job writes the grant twice"
-    assert found.evidence == "`jq '.results | length'` at store.go:14"
-
-
-def test_a_doubled_backtick_run_masks_its_pipe():
-    line = "chaos.1 | P2 | PENDING | counts ``a | b`` once | `jq '.x | .y'` at c.ts:41"
-
-    found = findings._parse(line)
-
-    assert found is not None
-    assert found.claim == "counts ``a | b`` once"
-    assert found.evidence == "`jq '.x | .y'` at c.ts:41"
+    assert str(refused.value) == "entry 2: chaos.2 is not a finding"
 
 
-def test_an_unclosed_backtick_masks_nothing_and_the_line_is_refused():
-    text = "chaos.1 | P2 | PENDING | an unclosed `tick | span | store.go:1\n"
+def test_two_verdicts_for_the_same_finding_are_refused():
+    found = findings.findings(
+        _doc(
+            "findings",
+            findings=[{"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"}],
+        ),
+        KNOWN,
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.verdicts(
+            _doc(
+                "verdicts",
+                verdicts=[
+                    {"id": "chaos.1", "verdict": "CONFIRMED"},
+                    {"id": "chaos.1", "verdict": "REJECTED", "reason": "no"},
+                ],
+            ),
+            found,
+        )
+
+    assert str(refused.value) == "entry 2: chaos.1 already has a verdict"
+
+
+def test_a_finding_with_no_verdict_is_refused():
+    found = findings.findings(
+        _doc(
+            "findings",
+            findings=[{"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"}],
+        ),
+        KNOWN,
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.verdicts(_doc("verdicts", verdicts=[]), found)
+
+    assert str(refused.value) == "no verdict for chaos.1"
+
+
+def test_a_decision_naming_an_id_that_is_not_a_finding_is_refused():
+    found = findings.findings(
+        _doc(
+            "findings",
+            findings=[{"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"}],
+        ),
+        KNOWN,
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.decisions(
+            _doc(
+                "decisions",
+                decisions=[
+                    {"id": "chaos.1", "decision": "accepted"},
+                    {"id": "chaos.9", "decision": "accepted"},
+                ],
+            ),
+            found,
+        )
+
+    assert str(refused.value) == "entry 2: chaos.9 is not a finding"
+
+
+def test_two_decisions_for_the_same_finding_are_refused():
+    found = findings.findings(
+        _doc(
+            "findings",
+            findings=[{"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"}],
+        ),
+        KNOWN,
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.decisions(
+            _doc(
+                "decisions",
+                decisions=[
+                    {"id": "chaos.1", "decision": "accepted"},
+                    {"id": "chaos.1", "decision": "declined"},
+                ],
+            ),
+            found,
+        )
+
+    assert str(refused.value) == "entry 2: chaos.1 already has a decision"
+
+
+def test_a_finding_with_no_decision_is_refused():
+    found = findings.findings(
+        _doc(
+            "findings",
+            findings=[{"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"}],
+        ),
+        KNOWN,
+    )
+
+    with pytest.raises(Refusal) as refused:
+        findings.decisions(_doc("decisions", decisions=[]), found)
+
+    assert str(refused.value) == "no decision for chaos.1"
+
+
+# --- what is new with JSON ---------------------------------------------------
+
+
+def test_a_document_with_the_wrong_kind_is_refused_naming_both():
+    text = json.dumps({"kind": "findings", "findings": []})
+
+    with pytest.raises(Refusal) as refused:
+        findings.decisions(text, [])
+
+    message = str(refused.value)
+    assert "decisions" in message
+    assert "findings" in message
+
+
+def test_text_that_is_not_json_is_refused_with_the_line_and_column():
+    with pytest.raises(Refusal) as refused:
+        findings.findings("not json at all", KNOWN)
+
+    message = str(refused.value)
+    assert "line" in message
+    assert "column" in message
+    assert "Traceback" not in message
+
+
+def test_an_entry_missing_a_required_key_names_it_and_its_position():
+    text = _doc(
+        "findings",
+        findings=[
+            {"lens": "chaos", "ordinal": 1, "severity": "P2", "claim": "A claim", "evidence": "e"},
+            {"lens": "chaos", "ordinal": 2, "severity": "P2", "evidence": "e"},
+        ],
+    )
 
     with pytest.raises(Refusal) as refused:
         findings.findings(text, KNOWN)
 
-    assert str(refused.value).startswith("line 1: expected ")
+    message = str(refused.value)
+    assert "claim" in message
+    assert "entry 2" in message
+
+
+def test_the_list_key_missing_refuses_naming_the_key():
+    text = json.dumps({"kind": "findings"})
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert "findings" in str(refused.value)
+
+
+def test_the_list_key_holding_an_object_refuses_naming_the_key():
+    text = json.dumps({"kind": "findings", "findings": {"lens": "chaos"}})
+
+    with pytest.raises(Refusal) as refused:
+        findings.findings(text, KNOWN)
+
+    assert "findings" in str(refused.value)
+
+
+def _finding(lens: str, ordinal: int) -> dict:
+    return {
+        "lens": lens,
+        "ordinal": ordinal,
+        "severity": "P2",
+        "claim": "A retried job writes the grant twice",
+        "evidence": "Scope In names one write",
+    }
+
+
+def test_every_bad_entry_is_named_in_one_refusal():
+    """A file wrong the same way throughout costs one run to fix, not one run per entry."""
+    text = _doc("findings", findings=[_finding("chaos", 1), {"lens": "chaos"}, {"ordinal": 3}])
+
+    with pytest.raises(Refusal) as raised:
+        findings.findings(text, KNOWN)
+
+    said = str(raised.value).splitlines()
+    assert len(said) > 2
+    assert any("entry 2" in line for line in said)
+    assert any("entry 3" in line for line in said)
+
+
+def test_every_bad_verdict_is_named_in_one_refusal():
+    found = findings.findings(_doc("findings", findings=[_finding("chaos", 1), _finding("chaos", 2)]), KNOWN)
+    text = _doc(
+        "verdicts",
+        verdicts=[
+            {"id": "chaos.1", "verdict": "CONFIRMED"},
+            {"id": "chaos.1", "verdict": "CONFIRMED"},
+            {"id": "chaos.9", "verdict": "CONFIRMED"},
+        ],
+    )
+
+    with pytest.raises(Refusal) as raised:
+        findings.verdicts(text, found)
+
+    said = str(raised.value).splitlines()
+    assert any("already has a verdict" in line for line in said)
+    assert any("chaos.9 is not a finding" in line for line in said)
