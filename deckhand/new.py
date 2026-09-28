@@ -22,7 +22,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import gh, invoke, issue, lint, log, naming, park, sections, stub, worktree
+from deckhand import columns, gh, invoke, issue, lint, log, naming, park, sections, stub, worktree
 from deckhand.lint import RULES
 from deckhand.step import (
     Refusal,
@@ -260,7 +260,7 @@ def _write_stub(repo: str, number: int, draft: str, flag: str | None) -> int:
     if subject:  # the stub's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
         print(f"Title: {subject}", flush=True)
-    park.board_draft(settings, repo, number, story.url, STUB_DRAFTED)
+    park.board_draft(settings, repo, number, story.url, STUB_DRAFTED, columns.REFINEMENT)
     return 0
 
 
@@ -387,7 +387,7 @@ def _write(args: argparse.Namespace) -> int:
     repo = gh.repo_slug()
     number, url = issue.create(repo, subject, body)
     print(f"Created #{number} {url}", flush=True)
-    park.board_draft(settings, repo, number, url, DRAFTED)
+    park.board_draft(settings, repo, number, url, DRAFTED, columns.REFINEMENT)
     if (note := lint.headroom(body)) is not None:
         print(note)
     return 0

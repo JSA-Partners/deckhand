@@ -71,15 +71,6 @@ def last(story: issue.Issue, prefix: str) -> Entry | None:
     return next((entry for entry in reversed(entries(story)) if entry.prefix == prefix), None)
 
 
-def since(story: issue.Issue, prefix: str) -> list[Entry]:
-    """Every entry after the latest one with `prefix`; all of them when there is none."""
-    found = entries(story)
-    for index, entry in reversed(list(enumerate(found))):
-        if entry.prefix == prefix:
-            return found[index + 1 :]
-    return found
-
-
 def checked(text: str) -> str:
     """`text` when the log will read it back as an entry, else a refusal saying what is missing.
 

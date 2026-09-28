@@ -74,3 +74,16 @@ def run(*args: str, cwd: Path | None = None) -> str:
             raise GitError(f"not inside a git repository: {where}; run deckhand from the clone", stderr, stdout)
         raise GitError(message(stderr) or f"git {' '.join(args)} failed", stderr, stdout)
     return result.stdout.decode("utf-8", errors="replace").strip("\n")
+
+
+def set_ref(name: str, sha: str) -> None:
+    """Point `name` at `sha`; the ref is this clone's own note and never leaves it."""
+    run("update-ref", name, sha)
+
+
+def ref(name: str) -> str | None:
+    """The sha `name` points at, or None when this clone does not hold it."""
+    try:
+        return run("rev-parse", "--verify", f"{name}^{{commit}}")
+    except GitError:
+        return None

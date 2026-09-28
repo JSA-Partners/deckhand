@@ -66,14 +66,6 @@ def test_the_review_fixture_reads_as_a_review(fake_gh, monkeypatch):
     assert log.last(issue.view("acme/widgets", 248), "Review:") is not None
 
 
-def test_since_is_every_entry_after_the_latest_with_that_prefix():
-    story = _story("Review: r1", "Amended: a1", "Review: r2", "Amended: a2", "Deviation: d1")
-
-    assert [e.text for e in log.since(story, "Review:")] == ["a2", "d1"]
-    assert [e.text for e in log.since(story, "Started:")] == ["r1", "a1", "r2", "a2", "d1"]
-    assert log.since(story, "Deviation:") == []
-
-
 def test_the_command_posts_the_text_as_written(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "comment.md"
 

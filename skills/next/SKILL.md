@@ -76,9 +76,8 @@ From the amend context (above, or run it), copy the body file it names to the dr
 edit that, keeping every heading, with superpowers:writing-plans for a plan rewrite, and run
 `amend apply $issue <draft> --note "<what changed and why>"`, the note saying what changed and
 why and never where it came from, with `--title "<new title>"` when the Story no longer matches
-it. If the amend changed what the story delivers, recommend reviewing
-again and ask; otherwise carry on to the board. When the briefing's step is reconsider, that
-question is the step. Work that belongs in its own story: overwrite the draft with its whole body
+it. An amend writes Refinement, so the next briefing asks for the review again; say what changed and
+carry on. Work that belongs in its own story: overwrite the draft with its whole body
 and run `amend apply $issue <draft> --new-issue "<title>"`; work that must land first takes `--before`.
 
 ## Board
@@ -127,8 +126,8 @@ they paste the export or say there are no comments. On comments: fix every
 one, commit with deckhand:commit, run the same review over
 `<the previous pass's last commit>..HEAD` only, fix its P1 and P2, and hand off the same way with
 that range. The review never runs on its own fixes and never after a clean pass; only their
-comments start a round. Log the clean pass with `log $issue "Reviewed: <full sha> <one line>"`, the
-full sha first; the pull request opens only from that commit. Then run the
+comments start a round. Record the clean pass with `reviewed apply $issue "<one line>"`, which reads
+the commit itself; the pull request opens only from that commit. Then run the
 deckhand:document skill, fixing what its audit lists first; its commits land past the reviewed one
 and need no pass, because docs/claude is Claude's alone.
 

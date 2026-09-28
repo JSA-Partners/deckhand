@@ -1,15 +1,15 @@
 """The finish step: the branch a human approved becomes a pull request, or nothing happens.
 
 Reading the branch line by line is this step's first act, before anything here runs: the loop of
-exports and fixes is what earns the sha the `Reviewed:` entry names, so no code reaches a pull
+exports and fixes is what earns the commit the reviewed ref names, so no code reaches a pull
 request unread. `context` prints the branch's commits, what it changed, the pull request message it
 would open, and the check commands the project's own files say it runs. The commits are the one
-thing the Reviewed: entry is checked against, and no other block in this context answers what they
+thing the reviewed ref is checked against, and no other block in this context answers what they
 are. The message is what the human approves: the repository squashes, so the pull request title and
 body are the commit that lands on main and the branch's own commits never do.
 
 `apply` is the one gate of the loop, and every part of it is a refusal before a single write. The
-pull request opens only when HEAD is the commit the last `Reviewed:` entry names, the tree is
+pull request opens only when HEAD is the commit the reviewed ref names, the tree is
 clean, the branch contains main, every subject is a conventional commit that names no story
 number, the docs audit is clean, and every check the caller named exits 0. Only then does it push
 the branch, which reaches origin here and nowhere earlier, open the pull request assigned to
@@ -161,7 +161,7 @@ def _message(
 
 
 def _commits_block(base: str) -> list[str]:
-    """The commits this branch adds, which is what the Reviewed: entry is checked against."""
+    """The commits this branch adds, which is what the reviewed ref is checked against."""
     return indented(refuse_git("log", "--oneline", f"{base}..HEAD").splitlines(), "none")
 
 
@@ -244,7 +244,7 @@ def apply(args: argparse.Namespace) -> int:
         raise Refusal(f"blocked by {named}; the pull request opens when it closes")
     title, body = _message(settings, repo, args.issue, breaking, story, read_draft(args.file))
     branch = _branch()
-    gates.reviewed_head(story, args.issue)
+    gates.reviewed_head(args.issue)
     gates.clean_tree()
     gates.contains_main()
     gates.conventional_commits()

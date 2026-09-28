@@ -18,3 +18,14 @@ DONE = "Done"
 
 # The order a story moves through them, which is the order the project offers them in.
 ORDER = (DRAFT, REFINEMENT, READY, BACKLOG, IN_PROGRESS, IN_REVIEW, VERIFICATION, DONE)
+
+
+def at_least(status: str | None, wanted: str) -> bool:
+    """Whether `status` is `wanted` or a column past it; an unknown column is never past anything.
+
+    A story moves one way through `ORDER`, so where it sits answers what it has been through. A
+    column the project does not offer says nothing, which is what a story off the board also says.
+    """
+    if status not in ORDER:
+        return False
+    return ORDER.index(status) >= ORDER.index(wanted)

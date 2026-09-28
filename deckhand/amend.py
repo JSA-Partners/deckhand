@@ -282,7 +282,7 @@ def _new_issue(repo: str, number: int, draft: str, title: str, before: bool) -> 
     else:
         issue.add_dependency(repo, new, blocked_by=(repo, number))
         print(f"Blocked by #{number}", flush=True)
-    board_draft(settings, repo, new, url, SPLIT_DRAFTED)
+    board_draft(settings, repo, new, url, SPLIT_DRAFTED, columns.REFINEMENT)
     ran = "which this story waits on" if before else "blocked by this story"
     issue.comment(repo, number, log.checked(f"Split: #{new} {title}, {ran}."))
     print("Logged Split")
