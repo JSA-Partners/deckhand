@@ -11,7 +11,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from deckhand import config, document, git, issue, log
+from deckhand import config, document, git, reviewed
 from deckhand.step import MAIN, ORIGIN_MAIN, TAIL, Refusal, indented, refuse_git
 
 CONVENTIONAL = re.compile(rf"^({'|'.join(config.TYPES)})(\([^)]+\))?!?: .+$")
@@ -21,24 +21,17 @@ ATTRIBUTION = re.compile(r"^(co-authored-by|claude-session|signed-off-by)\s*:|ge
 DIRTY = 5  # lines of a dirty tree, enough to recognise what is uncommitted
 
 
-def reviewed_head(story: issue.Issue, number: int) -> None:
-    """Refuse unless HEAD is the commit the last `Reviewed:` entry names, or only docs sit past it.
+def reviewed_head(number: int) -> None:
+    """Refuse unless HEAD is the commit the review passed, or only docs sit past it.
 
-    Nothing unread opens a pull request. The one exception is `docs/claude/`, which the document
-    step writes after the person's pass and which is Claude's alone to keep, so commits past the
-    reviewed one that touch nothing else are let through. Both shas go through rev-parse, and the
-    named side as a commit, because a full sha that names nothing in this clone would otherwise
-    come back as itself.
+    Nothing unread opens a pull request. The one exception is `docs/claude/`, which the document step
+    writes after the person's pass and which is Claude's alone to keep, so commits past the reviewed
+    one that touch nothing else are let through.
     """
-    entry = log.last(story, "Reviewed:")
-    if entry is None:
-        raise Refusal(f"no Reviewed: entry on #{number}; review the branch first")
-    named = entry.text.split()[0]
+    wanted = git.ref(reviewed.ref_name(number))
+    if wanted is None:
+        raise Refusal(f"no review recorded for #{number} in this clone; review the branch first")
     head = refuse_git("rev-parse", "--verify", "HEAD")
-    try:
-        wanted = git.run("rev-parse", "--verify", f"{named}^{{commit}}")
-    except git.GitError as error:
-        raise Refusal(f"the last Reviewed: entry names {named}, which this clone does not have") from error
     if head == wanted:
         return
     try:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import naming
+from deckhand import naming, reviewed
 from tests.conftest import FIXTURES, run_deckhand
 
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
@@ -88,16 +88,9 @@ def _issue(tmp_path: Path, name: str, **changes: str) -> dict[str, str]:
     return {"GH_ISSUE_FILE": str(path)}
 
 
-def _reviewed_issue(tmp_path: Path, sha: str, **changes: str) -> dict[str, str]:
-    """The approved story with a `Reviewed: <sha>` entry as its last comment."""
-    data = json.loads((FIXTURES / "issue-approved.json").read_text(encoding="utf-8"))
-    data["comments"].append(
-        {"author": {"login": "claude"}, "createdAt": "2026-09-03T10:00:00Z", "body": f"Reviewed: {sha} clean pass"}
-    )
-    data.update(changes)
-    path = tmp_path / f"issue-reviewed-{sha[:7]}.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return {"GH_ISSUE_FILE": str(path)}
+def _mark_reviewed(repo: Path, sha: str, number: int = 248) -> None:
+    """Write the ref an apply of `reviewed` would write, without going through the step."""
+    _git(repo, "update-ref", reviewed.ref_name(number), sha)
 
 
 @pytest.fixture
@@ -147,20 +140,22 @@ def _summary_file(repo: Path, text: str = SUMMARY) -> str:
     return str(path)
 
 
-def _apply(repo: Path, *extra: str, env: dict[str, str] | None = None, summary: str = SUMMARY):
-    """Apply with HEAD reviewed unless an issue in `env` says otherwise, from a written summary."""
+def _apply(
+    repo: Path, *extra: str, env: dict[str, str] | None = None, summary: str = SUMMARY, reviewed_sha: str | None = None
+):
+    """Apply with HEAD reviewed unless `reviewed_sha` names a different commit, from a written summary."""
     args = [_summary_file(repo, summary), *extra]
     if "--check" not in args:
         args += ["--check", "true"]
-    reviewed = _reviewed_issue(repo.parent, _sha(repo, "HEAD"))
-    return _finish("apply", repo, *args, env={**reviewed, **(env or {})})
+    _mark_reviewed(repo, reviewed_sha or _sha(repo, "HEAD"))
+    return _finish("apply", repo, *args, env=env or {})
 
 
 # --- context ----------------------------------------------------------------
 
 
 def test_context_prints_the_commits_before_the_stat_and_the_checks(fake_gh, repo, branch):
-    """The commits are what the Reviewed: entry is checked against, so they lead the stat and the checks."""
+    """The commits are what the reviewed ref is checked against, so they lead the stat and the checks."""
     result = _finish("context", repo)
 
     assert result.returncode == 0, result.stderr
@@ -178,7 +173,7 @@ def test_context_prints_the_commits_before_the_stat_and_the_checks(fake_gh, repo
 
 
 def test_context_prints_the_commits_the_pull_request_will_carry(fake_gh, repo):
-    """The pull request opens from the commit the Reviewed: entry names, so the commits are the page."""
+    """The pull request opens from the commit the reviewed ref names, so the commits are the page."""
     _git(repo, "checkout", "-q", "-b", BRANCH)
     _commit(repo, "store.py", "def by_grant():\n    return []\n", FIRST)
 
@@ -346,11 +341,11 @@ def test_apply_no_longer_takes_an_actual(fake_gh, gh_calls, repo, origin, branch
     assert _writes(gh_calls) == []
 
 
-def test_apply_refuses_a_head_that_is_not_the_reviewed_commit(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+def test_apply_refuses_a_head_that_is_not_the_reviewed_commit(fake_gh, gh_calls, repo, origin, branch):
     head = _sha(repo, "HEAD")
     earlier = _sha(repo, "HEAD~1")
 
-    result = _apply(repo, env=_reviewed_issue(tmp_path, earlier))
+    result = _apply(repo, reviewed_sha=earlier)
 
     assert result.returncode == 1
     assert result.stderr == (
@@ -360,20 +355,20 @@ def test_apply_refuses_a_head_that_is_not_the_reviewed_commit(fake_gh, gh_calls,
     assert BRANCH not in _branches(origin)
 
 
-def test_apply_lets_a_docs_commit_past_the_reviewed_one(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+def test_apply_lets_a_docs_commit_past_the_reviewed_one(fake_gh, gh_calls, repo, origin, branch):
     """The document step writes docs/claude after the person's pass, and that directory is Claude's alone."""
-    reviewed = _sha(repo, "HEAD")
+    reviewed_sha = _sha(repo, "HEAD")
     (repo / "docs" / "claude").mkdir(parents=True)
     _commit(repo, "docs/claude/decisions.md", "# Decisions\n", "docs: record the grant decision")
 
-    result = _apply(repo, env=_reviewed_issue(tmp_path, reviewed))
+    result = _apply(repo, reviewed_sha=reviewed_sha)
 
     assert result.returncode == 0, result.stderr
     assert _sha(origin, BRANCH) == _sha(repo, "HEAD")
 
 
-def test_apply_refuses_a_docs_commit_that_also_touches_code(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    reviewed = _sha(repo, "HEAD")
+def test_apply_refuses_a_docs_commit_that_also_touches_code(fake_gh, gh_calls, repo, origin, branch):
+    reviewed_sha = _sha(repo, "HEAD")
     (repo / "docs" / "claude").mkdir(parents=True)
     (repo / "docs" / "claude" / "decisions.md").write_text("# Decisions\n", encoding="utf-8")
     (repo / "store.py").write_text("def by_grant():\n    return [1]\n", encoding="utf-8")
@@ -381,32 +376,23 @@ def test_apply_refuses_a_docs_commit_that_also_touches_code(fake_gh, gh_calls, r
     _git(repo, "commit", "-qm", "docs: record the decision and touch the store")
     head = _sha(repo, "HEAD")
 
-    result = _apply(repo, env=_reviewed_issue(tmp_path, reviewed))
+    result = _apply(repo, reviewed_sha=reviewed_sha)
 
     assert result.returncode == 1
     assert result.stderr == (
-        f"deckhand finish apply: HEAD {head} is not the last reviewed commit {reviewed}; review the branch again\n"
+        f"deckhand finish apply: HEAD {head} is not the last reviewed commit {reviewed_sha}; review the branch again\n"
     )
     assert _writes(gh_calls) == []
     assert BRANCH not in _branches(origin)
 
 
-def test_apply_refuses_a_story_never_reviewed(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    result = _apply(repo, env=_issue(tmp_path, "unreviewed"))
-
-    assert result.returncode == 1
-    assert result.stderr == "deckhand finish apply: no Reviewed: entry on #248; review the branch first\n"
-    assert _writes(gh_calls) == []
-    assert BRANCH not in _branches(origin)
-
-
-def test_apply_refuses_a_reviewed_commit_this_clone_does_not_have(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    result = _apply(repo, env=_reviewed_issue(tmp_path, "0123456789abcdef0123456789abcdef01234567"))
+def test_apply_refuses_a_story_never_reviewed(fake_gh, gh_calls, repo, origin, branch):
+    """No apply of `reviewed` has run in this clone, so it holds no ref for #248 at all."""
+    result = _finish("apply", repo, _summary_file(repo), "--check", "true")
 
     assert result.returncode == 1
     assert result.stderr == (
-        "deckhand finish apply: the last Reviewed: entry names 0123456789abcdef0123456789abcdef01234567, "
-        "which this clone does not have\n"
+        "deckhand finish apply: no review recorded for #248 in this clone; review the branch first\n"
     )
     assert _writes(gh_calls) == []
     assert BRANCH not in _branches(origin)
@@ -798,30 +784,28 @@ def test_apply_refuses_a_blocked_story_before_any_check(fake_gh, gh_calls, repo,
 
 def test_apply_accepts_a_merge_of_main_on_the_reviewed_commit(fake_gh, gh_calls, repo, origin, branch):
     """GitHub's update-branch makes this shape; the only new lines are main's own."""
-    reviewed = _sha(repo, "HEAD")
+    reviewed_sha = _sha(repo, "HEAD")
     _git(repo, "checkout", "-q", "main")
     _commit(repo, "other.py", "x = 1\n", "feat: other story")
     _git(repo, "push", "-q", "origin", "main")
     _git(repo, "checkout", "-q", BRANCH)
     _git(repo, "merge", "-q", "--no-edit", "origin/main")
-    assert _sha(repo, "HEAD") != reviewed
+    assert _sha(repo, "HEAD") != reviewed_sha
 
-    env = _reviewed_issue(repo.parent, reviewed)
-    result = _finish("apply", repo, _summary_file(repo), "--check", "true", env=env)
+    result = _apply(repo, reviewed_sha=reviewed_sha)
 
     assert result.returncode == 0, result.stderr
     assert "Pushed" in result.stdout.splitlines()
 
 
 def test_apply_refuses_a_merge_whose_other_side_is_not_main(fake_gh, gh_calls, repo, origin, branch):
-    reviewed = _sha(repo, "HEAD")
+    reviewed_sha = _sha(repo, "HEAD")
     _git(repo, "checkout", "-q", "-b", "side", "main")
     _commit(repo, "side.py", "y = 2\n", "feat: side work")
     _git(repo, "checkout", "-q", BRANCH)
     _git(repo, "merge", "-q", "--no-edit", "side")
 
-    env = _reviewed_issue(repo.parent, reviewed)
-    result = _finish("apply", repo, _summary_file(repo), "--check", "true", env=env)
+    result = _apply(repo, reviewed_sha=reviewed_sha)
 
     assert result.returncode == 1
     assert "is not the last reviewed commit" in result.stderr

@@ -6,8 +6,8 @@ reviewed commit stays what the person read, the checks run again, and finish nev
 time. A conflict is the one case GitHub refuses, and then the branch is merged in the worktree by
 hand, logged as a Deviation, and finished again. A story still building has no pull request yet, so
 nothing asks GitHub for it: the same merge happens locally instead, in the worktree the branch is
-checked out in. Either way a merge only adds a commit; it never rewrites the one the last Reviewed:
-entry names, which is why finish accepts it.
+checked out in. Either way a merge only adds a commit; it never rewrites the one the reviewed ref
+names, which is why finish accepts it.
 """
 
 from __future__ import annotations
