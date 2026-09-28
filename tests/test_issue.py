@@ -291,67 +291,144 @@ def test_pull_request_rejects_a_malformed_repo(fake_gh, gh_calls):
 PR_URL = "https://github.com/acme/widgets/pull/1000"
 
 
-def test_pull_request_checks_names_the_failed_and_counts_the_running(fake_gh, gh_calls, monkeypatch):
-    monkeypatch.setenv("GH_PR_STATE", "OPEN")
-    monkeypatch.setenv(
-        "GH_PR_CHECKS",
-        json.dumps(
-            [
-                {"name": "Unit tests", "conclusion": "FAILURE"},
-                {"name": "Lint", "conclusion": "SUCCESS"},
-                {"name": "Integration tests", "conclusion": None, "state": "IN_PROGRESS"},
-                {"context": "ci/legacy", "state": "PENDING"},
-            ]
-        ),
-    )
-
-    assert issue.pull_request_checks(REPO, PR_URL) == (["Unit tests"], 2)
-    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json {issue.PR_FIELDS}"]
-
-
-def test_pull_request_checks_is_clean_with_no_checks(fake_gh, monkeypatch):
-    monkeypatch.setenv("GH_PR_STATE", "OPEN")
-
-    assert issue.pull_request_checks(REPO, PR_URL) == ([], 0)
-
-
-def test_pull_request_state_returns_the_url_while_it_is_open(fake_gh, gh_calls, monkeypatch):
-    monkeypatch.setenv("GH_PR_STATE", "OPEN")
-
-    assert issue.pull_request_state(REPO, PR_URL) == PR_URL
-    assert gh_calls() == [f"pr view {PR_URL} --repo acme/widgets --json {issue.PR_FIELDS}"]
-
-
-@pytest.mark.parametrize("state", ["MERGED", "CLOSED"])
-def test_pull_request_state_is_none_once_it_is_not_open(fake_gh, monkeypatch, state):
-    monkeypatch.setenv("GH_PR_STATE", state)
-
-    assert issue.pull_request_state(REPO, PR_URL) is None
-
-
-@pytest.mark.parametrize(("state", "answer"), [("MERGED", True), ("CLOSED", False), ("OPEN", False)])
-def test_merged_is_true_only_once_the_pull_request_has_merged(fake_gh, monkeypatch, state, answer):
-    monkeypatch.setenv("GH_PR_STATE", state)
-
-    assert issue.merged(REPO, PR_URL) is answer
-
-
-def test_pull_request_state_fails_when_the_pull_request_cannot_be_read(fake_gh):
-    with pytest.raises(gh.GhError):
-        issue.pull_request_state(REPO, PR_URL)
-
-
-def test_pull_request_state_rejects_a_malformed_repo(fake_gh, gh_calls):
-    with pytest.raises(gh.GhError):
-        issue.pull_request_state("widgets", PR_URL)
-    assert gh_calls() == []
-
-
 def test_merge_state_reads_the_pull_request(fake_gh, monkeypatch):
     monkeypatch.setenv("GH_PR_STATE", "OPEN")
     monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
 
     assert issue.merge_state(REPO, "https://github.com/acme/widgets/pull/1000") == "BEHIND"
+
+
+# --- pull_request_for --------------------------------------------------------
+
+
+def _pr_node(number=1000, state="OPEN", merged=False, merge_state="CLEAN", contexts=None):
+    return {
+        "number": number,
+        "url": f"https://github.com/acme/widgets/pull/{number}",
+        "state": state,
+        "merged": merged,
+        "mergeStateStatus": merge_state,
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": contexts or []}}}}]},
+    }
+
+
+def _pr_reference_fixture(tmp_path, *nodes):
+    body = json.dumps({"data": {"repository": {"issue": {"closedByPullRequestsReferences": {"nodes": list(nodes)}}}}})
+    path = tmp_path / "pr-reference.json"
+    path.write_text(body)
+    return path
+
+
+def test_pull_request_for_reads_an_open_pull_request(fake_gh, gh_calls, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(tmp_path, _pr_node(number=1000, state="OPEN", merged=False))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.state == "OPEN"
+    assert result.merged is False
+    assert result.number == 1000
+    assert result.url == "https://github.com/acme/widgets/pull/1000"
+    call = gh_calls()[-1]
+    assert "closedByPullRequestsReferences" in call
+    assert "includeClosedPrs:true" in call
+    assert "-f owner=acme -f name=widgets -F number=248" in call
+
+
+def test_pull_request_for_reads_a_merged_pull_request(fake_gh, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(tmp_path, _pr_node(state="MERGED", merged=True))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.state == "MERGED"
+    assert result.merged is True
+
+
+def test_pull_request_for_is_none_without_a_linked_pull_request(fake_gh, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(tmp_path)
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    assert issue.pull_request_for(REPO, 248) is None
+
+
+def test_pull_request_for_prefers_the_open_node_over_an_older_closed_one(fake_gh, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(
+        tmp_path,
+        _pr_node(number=900, state="CLOSED", merged=False),
+        _pr_node(number=1000, state="OPEN", merged=False),
+    )
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.number == 1000
+    assert result.state == "OPEN"
+
+
+def test_pull_request_for_takes_the_first_node_when_none_is_open(fake_gh, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(
+        tmp_path,
+        _pr_node(number=900, state="CLOSED", merged=False),
+        _pr_node(number=1000, state="MERGED", merged=True),
+    )
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.number == 900
+
+
+@pytest.mark.parametrize("merge_state", ["BEHIND", "DIRTY"])
+def test_pull_request_for_is_behind_when_main_moved_on_or_the_merge_would_conflict(
+    fake_gh, tmp_path, monkeypatch, merge_state
+):
+    path = _pr_reference_fixture(tmp_path, _pr_node(merge_state=merge_state))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    assert issue.pull_request_for(REPO, 248).behind is True
+
+
+def test_pull_request_for_is_not_behind_when_clean(fake_gh, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(tmp_path, _pr_node(merge_state="CLEAN"))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    assert issue.pull_request_for(REPO, 248).behind is False
+
+
+def test_pull_request_for_is_neither_when_github_has_not_worked_it_out(fake_gh, gh_calls, tmp_path, monkeypatch):
+    """UNKNOWN is computed lazily; it must never be read as a settled False."""
+    path = _pr_reference_fixture(tmp_path, _pr_node(merge_state="UNKNOWN"))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.behind is None
+    assert len([call for call in gh_calls() if call.startswith("api graphql")]) == 2
+
+
+def test_pull_request_for_asks_once_when_the_merge_state_is_already_settled(fake_gh, gh_calls, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(tmp_path, _pr_node(merge_state="CLEAN"))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    issue.pull_request_for(REPO, 248)
+
+    assert len([call for call in gh_calls() if call.startswith("api graphql")]) == 1
+
+
+def test_pull_request_for_names_the_failed_check_and_counts_the_running_one(fake_gh, tmp_path, monkeypatch):
+    contexts = [
+        {"name": "Unit tests", "conclusion": "FAILURE"},
+        {"name": "Lint", "conclusion": "SUCCESS"},
+        {"context": "ci/legacy", "state": "PENDING"},
+    ]
+    path = _pr_reference_fixture(tmp_path, _pr_node(contexts=contexts))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.failed_checks == ("Unit tests",)
+    assert result.pending_checks == 1
 
 
 # --- a dependency GitHub already holds ----------------------------------------

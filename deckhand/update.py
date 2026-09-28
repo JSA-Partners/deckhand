@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import gh, git, invoke, issue, log, worktree
+from deckhand import gh, git, invoke, issue, worktree
 from deckhand.step import Refusal, local_branch, step, trunk
 
 CONFLICT = (
@@ -26,10 +26,13 @@ LOCAL_CONFLICT = "main conflicts with the branch; resolve it in the worktree, co
 
 
 def _open_pull_request(repo: str, number: int) -> str | None:
-    """The URL of the story's open pull request, from the log, or None when it has none."""
-    story = issue.view(repo, number)
-    entry = log.last(story, "Pull request:")
-    return issue.pull_request_state(repo, entry.text.split()[0]) if entry else None
+    """The URL of the story's open pull request, or None when it has none.
+
+    The issue's own reference to it answers this, so a step that runs after every task commit no
+    longer pulls the whole story body to find out.
+    """
+    found = issue.pull_request_for(repo, number)
+    return found.url if found is not None and found.state == "OPEN" else None
 
 
 def _branch_here(number: int) -> tuple[str, Path] | None:

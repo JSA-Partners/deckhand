@@ -207,6 +207,25 @@ elif head == "label create":
         sys.exit(1)
     sys.exit(0)
 elif head == "api graphql":
+    if "closedByPullRequestsReferences" in joined and "GH_GRAPHQL_FILE" not in os.environ:
+        # The issue's reference to its pull request answers from the same $GH_PR_ variables a view
+        # does, so a test that set the state before this query existed still means what it meant.
+        pr_state = os.environ.get("GH_PR_STATE") or ("OPEN" if os.environ.get("GH_PR_EXISTS") else "")
+        pr_nodes = []
+        if pr_state:
+            rollup = {"contexts": {"nodes": json.loads(os.environ.get("GH_PR_CHECKS", "[]"))}}
+            pr_nodes = [
+                {
+                    "number": 1000,
+                    "url": f"https://github.com/{repo}/pull/1000",
+                    "state": pr_state,
+                    "merged": pr_state == "MERGED",
+                    "mergeStateStatus": os.environ.get("GH_PR_MERGE_STATE", "CLEAN"),
+                    "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
+                }
+            ]
+        linked = {"closedByPullRequestsReferences": {"nodes": pr_nodes}}
+        respond(json.dumps({"data": {"repository": {"issue": linked}}}))
     if "createProjectV2Field" in joined:
         respond('{"data":{"createProjectV2Field":{}}}')
     if "updateProjectV2Field" in joined:

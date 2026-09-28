@@ -54,7 +54,7 @@ class Facts(NamedTuple):
     pending_checks: int  # the pull request's checks still running
     behind: bool  # the pull request is behind main, or in conflict with it
     pull_requested: bool  # a `Pull request:` entry, so a closed story is a merged one
-    merged: bool  # the pull request the log names has merged while the issue is still open
+    merged: bool  # the pull request merged; the closed rows above answer a story that is done
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
     parked: bool = False  # a stub with no stories yet: a feature to settle before anything is written
@@ -160,20 +160,17 @@ def _after_merge_left(story: issue.Issue) -> list[str]:
     return [text for text, ticked in sections.after_merge_items(story.body) if not ticked]
 
 
-def _pull_request(repo: str, story: issue.Issue, branch: str | None) -> tuple[str | None, bool]:
-    """`(the URL of the story's open pull request or None, whether the one the log names merged)`.
+def _linked(repo: str, number: int, branch: str | None) -> issue.PullRequest | None:
+    """The story's pull request, from the issue's own reference to it.
 
-    The log names the pull request `finish` opened, and its URL finds it whatever branch it was
-    pushed from; the head lookup is for a story whose log has no entry, from before the log or from
-    a pull request opened by hand. Whether it merged comes from the same view, which the cache holds,
-    because a pull request that is not open says nothing about which of the two ways it ended.
+    The head lookup is the fallback for one opened by hand, which GitHub does not link to the issue
+    and which therefore no reference can name.
     """
-    entry = log.last(story, "Pull request:")
-    if entry is not None:
-        url = entry.text.split()[0]
-        state = issue.pull_request_state(repo, url)
-        return state, state is None and issue.merged(repo, url)
-    return (issue.pull_request(repo, branch) if branch else None), False
+    found = issue.pull_request_for(repo, number)
+    if found is not None or not branch:
+        return found
+    url = issue.pull_request(repo, branch)
+    return issue.PullRequest(0, url, "OPEN", False, None, (), 0) if url else None
 
 
 def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Reader) -> Facts:
@@ -187,14 +184,12 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
     found = reader.read("branch", lambda: _branch(kind, story.title, number)) if repo and story else None
     branch, commits = found if found else (None, None)
     closed = story is not None and story.state.upper() == "CLOSED"
-    requested = (
-        reader.read("pull request", lambda: _pull_request(repo, story, branch))
-        if repo and story and not closed
-        else None
-    )
-    pull, merged = requested if requested else (None, False)
-    checks = reader.read("checks", lambda: issue.pull_request_checks(repo, pull)) if pull else None
-    behind = reader.read("merge state", lambda: issue.merge_state(repo, pull) in issue.BEHIND) if pull else False
+    found = reader.read("pull request", lambda: _linked(repo, number, branch)) if repo and story else None
+    open_now = found is not None and found.state == "OPEN"
+    # Mergeability is worked out lazily, and only an open pull request has a branch to bring up to
+    # date, so an unread state is a fact this run is missing rather than one that reads as settled.
+    if open_now and found.behind is None:
+        reader.missing.append("merge state")
     blockers = (
         reader.read(
             "blockers",
@@ -210,12 +205,12 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         branch=branch,
         blockers=blockers or (),
         commits=commits,
-        pull_request=pull,
-        failed_checks=tuple(checks[0]) if checks else (),
-        pending_checks=checks[1] if checks else 0,
-        behind=bool(behind),
-        pull_requested=story is not None and log.last(story, "Pull request:") is not None,
-        merged=merged,
+        pull_request=found.url if open_now else None,
+        failed_checks=found.failed_checks if open_now else (),
+        pending_checks=found.pending_checks if open_now else 0,
+        behind=bool(found.behind) if open_now else False,
+        pull_requested=found is not None,
+        merged=found is not None and found.merged,
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
         parked=story is not None and stub.is_stub(story.body) and not stub.read(story.body)[1],
