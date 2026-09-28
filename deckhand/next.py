@@ -22,7 +22,7 @@ import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from deckhand import board, columns, config, fields, gh, git, issue, log, sections, stub, worktree
+from deckhand import board, columns, config, draft, fields, gh, git, issue, log, sections, worktree
 from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
@@ -57,7 +57,7 @@ class Facts(NamedTuple):
     merged: bool  # the pull request merged; the closed rows above answer a story that is done
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
-    parked: bool = False  # a stub with no stories yet: a feature to settle before anything is written
+    parked: bool = False  # an open draft: a feature to settle before anything is written
 
 
 def decide(number: int, f: Facts) -> tuple[str, str]:
@@ -101,7 +101,7 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
     if not f.written and f.parked:
         return "settle", f"#{number} is a parked feature; settle its requirements."
     if not f.written:
-        return "write", f"#{number} is a stub."
+        return "write", f"#{number} is a draft."
     # Only the review writes Ready, so the column answers whether it ran; an amend writes Refinement,
     # which lands here again rather than on a row of its own.
     if not columns.at_least(f.status, columns.READY):
@@ -201,7 +201,7 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
     return Facts(
         closed=closed,
         status=values["Status"] if values else None,
-        written=story is not None and not stub.is_stub(story.body),
+        written=story is not None and not draft.is_draft(story.body),
         branch=branch,
         blockers=blockers or (),
         commits=commits,
@@ -213,7 +213,7 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         merged=found is not None and found.merged,
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
-        parked=story is not None and stub.is_stub(story.body) and not stub.read(story.body)[1],
+        parked=story is not None and draft.is_draft(story.body) and not draft.read(story.body)[1],
     )
 
 

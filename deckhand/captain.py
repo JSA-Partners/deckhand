@@ -15,7 +15,7 @@ import math
 import os
 import statistics
 
-from deckhand import board, checklist, columns, config, edges, fields, fleet, forecast, gh, issue, order, sessions
+from deckhand import board, checklist, columns, config, edges, fleet, forecast, gh, order, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -329,38 +329,19 @@ def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
     return len(ranked)
 
 
-def _unmarked(read: fleet.Fleet) -> list[fleet.Story]:
-    """Stories the process has written to whose label does not say so yet."""
-    name, _, _ = checklist.LABEL
-    return [story for story in read.stories if fleet.touched(story) and name not in story.issue.labels]
-
-
 def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
-    wrong = [
-        (story, fleet.allowed(story)[0])
-        for story in read.stories
-        # a repair only ever writes to a story the process owns: allowed() calls every issue with no log a Draft
-        if fleet.touched(story) and story.status and story.status not in fleet.allowed(story)
-    ]
-    unmarked = _unmarked(read)
-    if not wrong and not read.missing and not unmarked:
-        raise Refusal(
-            f"nothing to repair: every Status of the {len(read.stories)} stories agrees with its log, "
-            "every story the process wrote to carries the label, and no drafted issue is off the board"
-        )
-    for story, want in wrong:
-        # Several stories may be put right in one run, so the line names which one rather than
-        # returning the bare `Status=X` a step prints about the story a person already named.
-        fields.set_field(settings, story.repo, story.number, "Status", want)
-        print(f"{story.repo}#{story.number} Status {want}")
-    label, _, _ = checklist.LABEL
-    for story in unmarked:
-        issue.add_label(story.repo, story.number, label)
-        print(f"{story.repo}#{story.number} label {label}")
+    """Put every story the process owns that never reached the board on it.
+
+    Nothing else is left to repair. The column is written by a step's apply and read back by the
+    same, so there is no second source for it to disagree with, and the label is what makes a story
+    the process's business rather than something a repair could work out.
+    """
+    if not read.missing:
+        raise Refusal(f"nothing to repair: every story the process owns is on the board, all {len(read.stories)}")
     for repo, number, url in read.missing:
         board.add(settings, url)
         print(f"Added {repo}#{number} to the board")
-    return len(wrong) + len(unmarked) + len(read.missing)
+    return len(read.missing)
 
 
 @step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)

@@ -25,9 +25,9 @@ from deckhand import findings as findings_file
 from deckhand.step import (
     PLUGIN_ROOT,
     Refusal,
-    draft_line,
-    read_draft,
-    refuse_stub,
+    file_line,
+    read_file,
+    refuse_draft,
     resolved_settings,
     spill,
     step,
@@ -167,11 +167,11 @@ def context(args: argparse.Namespace) -> int:
     print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected)))
     print()
     print(FINDING_FORMAT)
-    print(draft_line("Findings", f"{args.issue}-findings.json"))
+    print(file_line("Findings", f"{args.issue}-findings.json"))
     print(VERDICT_FORMAT)
-    print(draft_line("Verdicts", f"{args.issue}-verdicts.json"))
+    print(file_line("Verdicts", f"{args.issue}-verdicts.json"))
     print(DECISION_FORMAT)
-    print(draft_line("Decisions", f"{args.issue}-decisions.json"))
+    print(file_line("Decisions", f"{args.issue}-decisions.json"))
     print()
     print(
         invoke.apply_line(
@@ -241,16 +241,16 @@ def apply(args: argparse.Namespace) -> int:
     verdict = _verdict(args.verdict)
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
-    refuse_stub(args.issue, story.body)
+    refuse_draft(args.issue, story.body)
     lenses = _lens_files()
     ran = _selected(lenses, story.body, named_lenses(story.body))
-    found = findings_file.findings(read_draft(args.findings), set(lenses))
+    found = findings_file.findings(read_file(args.findings), set(lenses))
     decided: dict[str, tuple[str, str]] = {}
     if found:
         if args.verdicts is None or args.decisions is None:
             raise Refusal("the findings need the skeptic's verdicts and the person's decisions; pass both files")
-        found = findings_file.judged(found, read_draft(args.verdicts))
-        decided = findings_file.decisions(read_draft(args.decisions), found)
+        found = findings_file.judged(found, read_file(args.verdicts))
+        decided = findings_file.decisions(read_file(args.decisions), found)
     print(issue.comment(repo, args.issue, comment_body(verdict, ran, found, decided)))
     # Every verdict reaches Ready: it is a sentence, not data, and an amend is what moves a story back.
     print(fields.set_field(resolved_settings(), repo, args.issue, "Status", columns.READY))

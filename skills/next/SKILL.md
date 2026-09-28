@@ -42,16 +42,16 @@ give it or explain any line on request.
 
 ## Write
 
-A stub: dispatch the deckhand:author agent with the number and the path to deckhand, say in a
+A draft: dispatch the deckhand:author agent with the number and the path to deckhand, say in a
 sentence what it wrote, and carry on to the review.
 
 ## Settle
 
 A parked feature: settle its requirements with them from the context above, as new does. One
-outcome: dispatch deckhand:author as for a stub. Several: propose the split as one bullet per story
+outcome: dispatch deckhand:author as for a draft. Several: propose the split as one story per line
 in dependency order, each opening with `owner/name:` when it belongs elsewhere, confirm it in one
 question, write the split file, run `new apply --split <file> --from $issue`, and dispatch one
-author per stub it prints, all at once, then carry on to each one's review.
+author per draft it prints, all at once, then carry on to each one's review.
 
 ## Review
 
@@ -74,11 +74,11 @@ the findings file alone with `--verdict`. Then amend from the accepted findings.
 
 From the amend context (above, or run it), copy the body file it names to the draft it names and
 edit that, keeping every heading, with superpowers:writing-plans for a plan rewrite, and run
-`amend apply $issue <draft> --note "<what changed and why>"`, the note saying what changed and
+`amend apply $issue <file> --note "<what changed and why>"`, the note saying what changed and
 why and never where it came from, with `--title "<new title>"` when the Story no longer matches
 it. An amend writes Refinement, so the next briefing asks for the review again; say what changed and
 carry on. Work that belongs in its own story: overwrite the draft with its whole body
-and run `amend apply $issue <draft> --new-issue "<title>"`; work that must land first takes `--before`.
+and run `amend apply $issue <file> --new-issue "<title>"`; work that must land first takes `--before`.
 
 ## Board
 
@@ -108,7 +108,7 @@ alters what the story delivers: say so in one sentence with the diff's size and 
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
 amend step. A decision that changes an issue in another repository before it starts: run
 `amend context N --repo owner/name`, edit its draft, run
-`amend apply N <draft> --repo owner/name --note "<why>"`, and name it in the Deviation. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
+`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
 commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what does not
 depend on it, then stop. A branch that is built but must not merge before another story: run

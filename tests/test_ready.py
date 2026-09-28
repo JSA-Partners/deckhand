@@ -9,8 +9,7 @@ from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 FAKE_GH = ROOT / "tests" / "fakes" / "gh"
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
-STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
-NO_WAIT = {"DECKHAND_SETTLE": "0"}
+DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
 ONE_BLOCKER = json.dumps([{"number": 240, "title": "Grant store", "state": "open"}])
 POINT = "A point groups stories that take about as long as each other. It is not hours."
 HEADER = "| Pts | # | Repo | Title | Hours |"
@@ -73,7 +72,7 @@ def _calls(gh_calls) -> list[str]:
 
 
 def _apply(*args: str, env: dict[str, str] | None = None):
-    return run_deckhand("ready", "apply", "248", *args, env={**REVIEWED, **NO_WAIT, **(env or {})})
+    return run_deckhand("ready", "apply", "248", *args, env={**REVIEWED, **(env or {})})
 
 
 def _blocked(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -252,7 +251,7 @@ def test_context_prints_the_plan_and_the_review_the_step_holds(fake_gh):
     assert result.returncode == 0, result.stderr
     assert "### Task 1: Store method" in spilled(result.stdout, "Plan")
     assert "Review: sound" in result.stdout
-    assert "A story boards only with a Review: entry in its log." in result.stdout
+    assert "A story boards only once its column says the review ran." in result.stdout
 
 
 def test_context_lists_the_stories_a_blocker_could_be(fake_gh):
@@ -314,10 +313,10 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
 
 
 def test_apply_refuses_a_stub(fake_gh, gh_calls):
-    result = run_deckhand("ready", "apply", "57", "--kind", "feat", "--points", "3", env=STUB)
+    result = run_deckhand("ready", "apply", "57", "--kind", "feat", "--points", "3", env=DRAFT)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand ready apply: #57 is a stub; run /deckhand:next 57 first\n"
+    assert result.stderr == "deckhand ready apply: #57 is a draft; run /deckhand:next 57 first\n"
     assert result.stdout == ""
     assert _writes(gh_calls) == []
 
@@ -357,13 +356,26 @@ def test_apply_refuses_zero_points(fake_gh, gh_calls):
     assert _writes(gh_calls) == []
 
 
-def test_apply_refuses_a_story_with_no_review_entry(fake_gh, gh_calls):
-    result = run_deckhand("ready", "apply", "248", "--kind", "feat", "--points", "3")
+def test_apply_refuses_a_story_whose_column_says_the_review_has_not_run(fake_gh, gh_calls, tmp_path):
+    env = {**REVIEWED, **_status_reads(tmp_path, "Refinement")}
+
+    result = run_deckhand("ready", "apply", "248", "--kind", "feat", "--points", "3", env=env)
 
     assert result.returncode == 1
     assert result.stderr == (
-        "deckhand ready apply: A story boards only with a Review: entry in its log. Run /deckhand:next 248.\n"
+        "deckhand ready apply: A story boards only once its column says the review ran. Run /deckhand:next 248.\n"
     )
+    assert _writes(gh_calls) == []
+
+
+def test_apply_refuses_a_story_that_never_reached_the_board(fake_gh, gh_calls, tmp_path):
+    """No column answers the same as a column before Ready: nothing says the review ran."""
+    env = {**REVIEWED, "GH_ITEM_MISSING_CALLS": "9"}
+
+    result = run_deckhand("ready", "apply", "248", "--kind", "feat", "--points", "3", env=env)
+
+    assert result.returncode == 1
+    assert "A story boards only once its column says the review ran." in result.stderr
     assert _writes(gh_calls) == []
 
 
@@ -373,15 +385,6 @@ def test_apply_moves_a_reviewed_draft_to_backlog(fake_gh, gh_calls):
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["Kind=feat", "Story Points=3", "Status=Backlog"]
     assert _writes(gh_calls) == EDITS
-
-
-def test_apply_adds_a_story_that_is_not_on_the_board_yet(fake_gh, gh_calls):
-    """A story from before Draft existed is still boarded; the add is the one extra write."""
-    result = _apply("--kind", "feat", "--points", "3", env=LEGACY)
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["Added to the board", "Kind=feat", "Story Points=3", "Status=Backlog"]
-    assert _writes(gh_calls) == [ITEM_ADD, *EDITS]
 
 
 def test_apply_boards_a_reviewed_story_with_no_approval_reply(fake_gh):
@@ -454,11 +457,13 @@ def test_apply_records_dependencies_checks_the_board_and_sets_the_fields(fake_gh
     assert _calls(gh_calls) == [
         "repo view --json nameWithOwner",
         "issue view 248 --repo acme/widgets --json number,title,body,url,state,comments,labels",
+        # the gate reads the column before anything is written, so a refusal costs no writes
+        "api graphql linked-projects",
+        "api graphql item-id",
+        "api graphql field-values",
         "issue view 240 --repo acme/widgets --json state,body",
         "api repos/acme/widgets/issues/240",
         "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156",
-        "api graphql item-id",
-        "api graphql linked-projects",
         "api graphql item-id",
         "project field-list 2 --owner acme --format json",
         "project view 2 --owner acme --format json",
@@ -511,50 +516,6 @@ def test_apply_refuses_a_story_that_blocks_itself(fake_gh, gh_calls):
     assert result.returncode == 1
     assert result.stderr == "deckhand ready apply: #248 cannot block itself\n"
     assert _writes(gh_calls) == []
-
-
-def test_apply_re_sets_status_once_when_the_automation_flipped_it(fake_gh, gh_calls, tmp_path):
-    result = _apply("--kind", "feat", "--points", "3", env={**LEGACY, **_status_reads(tmp_path, "In Progress")})
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Status re-set to Backlog (the board's own automation had changed it)"
-    status_writes = [c for c in gh_calls() if "PVTSSF_STATUS" in c]
-    assert (
-        status_writes
-        == [
-            "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST "
-            "--field-id PVTSSF_STATUS --single-select-option-id opt_backlog"
-        ]
-        * 2
-    )
-
-
-def test_apply_says_status_is_unverified_when_the_read_back_fails(fake_gh, tmp_path):
-    env = _wrapper(
-        tmp_path,
-        "#!/usr/bin/env bash\n"
-        'if [[ "$*" == *"node(id:"* ]]; then echo "the field read failed" >&2; exit 1; fi\n'
-        f'exec "{FAKE_GH}" "$@"\n',
-    )
-
-    result = _apply("--kind", "feat", "--points", "3", env={**LEGACY, **env})
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Status not verified (the field read failed)"
-
-
-def test_the_settle_wait_defaults_to_two_seconds():
-    assert ready.settle_seconds() == 2.0
-
-
-def test_the_settle_wait_is_never_negative(monkeypatch):
-    for value in ("-5", "not a number", ""):
-        monkeypatch.setenv("DECKHAND_SETTLE", value)
-
-        assert ready.settle_seconds() >= 0.0
-
-    monkeypatch.setenv("DECKHAND_SETTLE", "-5")
-    assert ready.settle_seconds() == 0.0
 
 
 def test_apply_records_a_blocker_in_another_repository(fake_gh, gh_calls, tmp_path):

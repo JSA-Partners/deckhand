@@ -21,14 +21,14 @@ idea: a fix needs a question or two, a feature the whole conversation.
 
 One story: run superpowers:writing-plans into the draft, with an "After the merge" block at the
 end of the Plan for anything that can only happen once the code is on main, and run
-`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <draft>`. It boards the story as Draft. Then run
+`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <file>`. It boards the story as Draft. Then run
 `... next context <number>` and carry on from the Review section of
 `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md`, speaking as its Speaking section says.
 
 Several outcomes: settle the requirements, propose the split as one bullet per story in dependency
 order, each opening with `owner/name:` when it belongs elsewhere, where it is parked for that
 repository's session, confirm it in one question, write the split file, and run
-`... new apply --split <file>`. Dispatch one deckhand:author agent per stub on the
+`... new apply --split <file>`. Dispatch one deckhand:author agent per draft on the
 line it printed, all at once, then run `... next context N` for each and carry on from that file's
 Review section. Park any other feature the conversation produced with `... new apply --park <file> --title "<name>"`,
 with `--repo owner/name` for another repository, `--blocks N` for the story here waiting on it, and

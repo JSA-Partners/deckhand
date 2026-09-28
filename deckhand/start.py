@@ -39,8 +39,8 @@ from deckhand.step import (
     local_branch,
     reason,
     ref_label,
+    refuse_draft,
     refuse_git,
-    refuse_stub,
     settings_or_error,
     spill,
     step,
@@ -208,7 +208,7 @@ def apply(args: argparse.Namespace) -> int:
     """Branch a story from origin/main in its own worktree, or take up the branch it has, and log the start."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
-    refuse_stub(args.issue, story.body)
+    refuse_draft(args.issue, story.body)
     open_blockers = issue.blockers(repo, args.issue)
     if open_blockers:
         named = "; ".join(f"{ref_label(where, number, repo)} {title}" for where, number, title in open_blockers)

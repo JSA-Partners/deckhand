@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import lint, log, naming, new, sections, step, stub
+from deckhand import draft, lint, log, naming, new, sections, step
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
 from tests.conftest import FIXTURES, ROOT, advance_origin, run_deckhand, run_git
@@ -96,7 +96,7 @@ BROKEN = {
 }
 
 
-def _draft_line(lines: list[str], tmp_path: Path, kind: str, label: str = "Draft") -> bool:
+def _draft_line(lines: list[str], tmp_path: Path, kind: str, label: str = "Body") -> bool:
     """True when a line names a `<kind>-<timestamp>` draft in the widgets cache, unique to the run."""
     folder = re.escape(str(tmp_path / "cache" / "widgets"))
     suffix = "json" if kind == "split" else "md"
@@ -143,7 +143,7 @@ def test_context_prints_the_park_shape_without_stories(fake_gh, tmp_path):
         "Park shape:",
         "  ## Requirements",
         "  <what the feature needs, in full>",
-        '  Apply: deckhand new apply <draft> --park --title "<title>"',
+        '  Apply: deckhand new apply <file> --park --title "<title>"',
         "",
     ]
     assert "Stub and park shape:" not in lines
@@ -168,7 +168,7 @@ def test_context_still_prints_when_the_repository_is_unknown(no_real_gh, tmp_pat
     result = run_deckhand("new", "context", env={"DECKHAND_CACHE": str(tmp_path / "cache")})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.startswith("Draft: unavailable (")
+    assert result.stdout.startswith("Body: unavailable (")
     assert "### Story" in result.stdout
     assert "#### Out" in result.stdout
     assert "Rules:" in result.stdout
@@ -226,7 +226,7 @@ def test_a_written_story_is_boarded_as_refinement(fake_gh, gh_calls, tmp_path):
 def test_the_drafted_lines_are_entries_the_log_reads_back():
     """Each note opens with a prefix and says what happened, so the log never skips it."""
     assert log.checked(new.DRAFTED) == new.DRAFTED
-    assert log.checked(new.STUB_DRAFTED) == new.STUB_DRAFTED
+    assert log.checked(new.FROM_DRAFT) == new.FROM_DRAFT
 
 
 def test_apply_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls):
@@ -349,8 +349,8 @@ def test_every_printed_rule_is_one_that_is_enforced(fake_gh):
 
 # --- context from a source ---------------------------------------------------
 
-STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
-PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
+DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
+PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "draft-parked.json")}
 
 
 def test_context_from_a_file_prints_its_requirements(fake_gh, tmp_path):
@@ -438,10 +438,10 @@ def test_context_still_reads_a_file_argument(fake_gh, tmp_path):
 
 
 def test_context_still_reads_a_digits_argument(fake_gh):
-    result = run_deckhand("new", "context", "57", env=STUB)
+    result = run_deckhand("new", "context", "57", env=DRAFT)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[0] == "## Stub #57"
+    assert result.stdout.splitlines()[0] == "## Draft #57"
 
 
 def test_context_on_a_story_says_to_run_next(fake_gh):
@@ -455,29 +455,29 @@ def test_context_on_a_story_says_to_run_next(fake_gh):
 
 
 def test_context_on_a_stub_prints_the_feature_and_its_stories(fake_gh, tmp_path):
-    result = run_deckhand("new", "context", "57", env=STUB)
+    result = run_deckhand("new", "context", "57", env=DRAFT)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "## Stub #57"
+    assert lines[0] == "## Draft #57"
     assert "Guests should see only the collections they were granted." in lines
     assert "## Stories" in lines
     assert "1. #57 Grant store | Persist grants. (this one)" in lines
-    assert "2. #58 Handler filter | Filter by grant. (stub)" in lines
-    assert "3. #59 Admin view | Show grants. (stub)" in lines
+    assert "2. #58 Handler filter | Filter by grant. (draft)" in lines
+    assert "3. #59 Admin view | Show grants. (draft)" in lines
     assert lines[lines.index("## Depends on") + 1] == "  none"
-    assert f"Draft: {tmp_path / 'cache' / 'widgets' / '57-story.md'}" in lines
+    assert f"Body: {tmp_path / 'cache' / 'widgets' / '57-story.md'}" in lines
     assert "### Story" in lines
     assert "Rules:" in lines
 
 
 def test_context_on_a_stub_survives_an_unreachable_sibling(fake_gh):
-    result = run_deckhand("new", "context", "57", env={**STUB, "GH_ISSUE_VIEW_FAILS": "58"})
+    result = run_deckhand("new", "context", "57", env={**DRAFT, "GH_ISSUE_VIEW_FAILS": "58"})
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert "2. #58 Handler filter | Filter by grant. (unavailable)" in lines
-    assert "3. #59 Admin view | Show grants. (stub)" in lines
+    assert "3. #59 Admin view | Show grants. (draft)" in lines
     assert "Rules:" in lines
 
 
@@ -489,19 +489,19 @@ def test_context_on_a_parked_feature_offers_the_draft_and_the_split(fake_gh, tmp
     lines = result.stdout.splitlines()
     assert lines[0] == "## Parked feature #60"
     assert "Guests should be able to share a collection with another guest, without an admin in the loop." in lines
-    assert f"Draft: {tmp_path / 'cache' / 'widgets' / '60-story.md'}" in lines
+    assert f"Body: {tmp_path / 'cache' / 'widgets' / '60-story.md'}" in lines
     assert "Rules:" in lines
     assert f"Split file: {tmp_path / 'cache' / 'widgets' / '60-split.json'}" in lines
     assert _split_skeleton(lines)
     assert "Park shape:" not in lines
     assert lines[-1] == (
         "This is a parked feature. One outcome: deckhand:author writes the draft into it with "
-        "new apply --stub 60 <draft>. Several: write the split file and run "
+        "new apply --draft 60 <file>. Several: write the split file and run "
         "new apply --split <file> --from 60."
     )
 
 
-# --- apply --stub ------------------------------------------------------------
+# --- apply --draft ------------------------------------------------------------
 
 
 CHANGES = ("issue create", "issue edit", "issue close", "issue comment", "project item-add", "project item-edit")
@@ -515,7 +515,7 @@ def _writes(calls: list[str]) -> list[str]:
 def test_apply_stub_writes_the_drafted_story_into_the_stub(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "body-copy.md"
 
-    result = run_deckhand("new", "apply", "--stub", "57", str(VALID), env={**STUB, "GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), env={**DRAFT, "GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -529,12 +529,12 @@ def test_apply_stub_writes_the_drafted_story_into_the_stub(fake_gh, gh_calls, tm
         *_draft_writes(57, STATUS_REFINEMENT),
     ]
     assert copy.read_text(encoding="utf-8") == (
-        "--- issue edit\n" + _written() + "--- issue comment\n" + new.STUB_DRAFTED
+        "--- issue edit\n" + _written() + "--- issue comment\n" + new.FROM_DRAFT
     )
 
 
 def test_apply_stub_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--stub", "57", str(VALID), env={**STUB, **UNLINKED})
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), env={**DRAFT, **UNLINKED})
 
     assert result.returncode == 1
     assert result.stderr.strip() == NO_PROJECT
@@ -543,7 +543,7 @@ def test_apply_stub_refuses_before_the_first_write_when_no_project_is_linked(fak
 
 
 def test_apply_stub_refuses_a_story_and_writes_nothing(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--stub", "248", str(VALID))
+    result = run_deckhand("new", "apply", "--draft", "248", str(VALID))
 
     assert result.returncode == 1
     assert result.stderr.strip() == "deckhand new apply: #248 is already a story; run /deckhand:next 248"
@@ -553,7 +553,7 @@ def test_apply_stub_refuses_a_story_and_writes_nothing(fake_gh, gh_calls):
 
 def test_apply_stub_writes_a_parked_feature_into_its_story(fake_gh, gh_calls):
     """One outcome keeps the number, so everything already pointing at the feature points at the story."""
-    result = run_deckhand("new", "apply", "--stub", "60", str(VALID), env=PARKED)
+    result = run_deckhand("new", "apply", "--draft", "60", str(VALID), env=PARKED)
 
     assert result.returncode == 0, result.stderr
     assert "Written #60" in result.stdout
@@ -562,7 +562,7 @@ def test_apply_stub_writes_a_parked_feature_into_its_story(fake_gh, gh_calls):
 
 
 def test_apply_stub_refuses_a_bad_body_and_writes_nothing(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--stub", "57", str(INVALID), env=STUB)
+    result = run_deckhand("new", "apply", "--draft", "57", str(INVALID), env=DRAFT)
 
     assert result.returncode == 1
     assert result.stderr.startswith("deckhand new apply: body: ")
@@ -571,7 +571,7 @@ def test_apply_stub_refuses_a_bad_body_and_writes_nothing(fake_gh, gh_calls):
 
 
 def test_apply_stub_sets_the_title_after_the_body(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--stub", "57", str(VALID), "--title", "Grant store", env=STUB)
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), "--title", "Grant store", env=DRAFT)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -621,7 +621,7 @@ def test_context_shows_the_split_file_after_a_file(fake_gh, tmp_path):
 
 
 def test_context_on_a_stub_does_not_offer_the_split_file(fake_gh):
-    result = run_deckhand("new", "context", "57", env=STUB)
+    result = run_deckhand("new", "context", "57", env=DRAFT)
 
     assert result.returncode == 0, result.stderr
     assert SPLIT_NOTE not in result.stdout
@@ -652,13 +652,13 @@ def test_context_does_not_repeat_a_heading_the_file_already_has(fake_gh, tmp_pat
 
 
 def test_context_says_so_when_the_stub_itself_cannot_be_read(fake_gh, tmp_path):
-    result = run_deckhand("new", "context", "57", env={**STUB, "GH_ISSUE_VIEW_FAILS": "57"})
+    result = run_deckhand("new", "context", "57", env={**DRAFT, "GH_ISSUE_VIEW_FAILS": "57"})
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "## Stub #57"
+    assert lines[0] == "## Draft #57"
     assert lines[1].startswith("  unavailable (")
-    assert f"Draft: {tmp_path / 'cache' / 'widgets' / '57-story.md'}" in lines
+    assert f"Body: {tmp_path / 'cache' / 'widgets' / '57-story.md'}" in lines
     assert "Rules:" in lines
 
 
@@ -673,7 +673,7 @@ def _state_file(tmp_path, number: int, state: str) -> str:
 
 def test_context_shows_each_siblings_own_state(fake_gh, tmp_path):
     env = {
-        **STUB,
+        **DRAFT,
         "GH_ISSUE_FILE_58": _state_file(tmp_path, 58, "OPEN"),
         "GH_ISSUE_FILE_59": _state_file(tmp_path, 59, "CLOSED"),
     }
@@ -688,7 +688,7 @@ def test_context_shows_each_siblings_own_state(fake_gh, tmp_path):
 
 
 def test_apply_stub_keeps_the_stubs_title_when_the_flag_is_blank(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--stub", "57", str(VALID), "--title", "   ", env=STUB)
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), "--title", "   ", env=DRAFT)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -717,8 +717,8 @@ def _dispatch(line: str) -> None:
 
 def _numbered_body() -> str:
     """The stub body every story of the fixture feature ends up carrying."""
-    requirements, entries = stub.parse_split(SPLIT_FILE.read_text(encoding="utf-8"))
-    return stub.render(requirements, [replace(e, number=n) for e, n in zip(entries, (57, 58, 59), strict=True)])
+    requirements, entries = draft.parse_split(SPLIT_FILE.read_text(encoding="utf-8"))
+    return draft.render(requirements, [replace(e, number=n) for e, n in zip(entries, (57, 58, 59), strict=True)])
 
 
 def _bodies(copy) -> list[tuple[str, str]]:
@@ -790,8 +790,8 @@ def test_apply_split_creates_unnumbered_bodies_and_rewrites_them_numbered(fake_g
     assert result.returncode == 0, result.stderr
     bodies = _bodies(copy)
     assert [call for call, _ in bodies] == ["issue create"] * 3 + ["issue edit"] * 3
-    requirements, entries = stub.parse_split(SPLIT_FILE.read_text(encoding="utf-8"))
-    assert {body for call, body in bodies if call == "issue create"} == {stub.render(requirements, entries)}
+    requirements, entries = draft.parse_split(SPLIT_FILE.read_text(encoding="utf-8"))
+    assert {body for call, body in bodies if call == "issue create"} == {draft.render(requirements, entries)}
     assert [body for call, body in bodies if call == "issue edit"] == [_numbered_body()] * 3
 
 
@@ -840,7 +840,7 @@ def test_apply_split_refuses_a_first_story_that_belongs_elsewhere(fake_gh, gh_ca
 
 
 def test_apply_split_refuses_a_from_that_is_not_a_parked_feature(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--from", "57", env={**NUMBERS, **STUB})
+    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--from", "57", env={**NUMBERS, **DRAFT})
 
     assert result.returncode == 1
     assert result.stderr.strip() == "deckhand new apply: #57 is not a parked feature"
@@ -850,7 +850,7 @@ def test_apply_split_refuses_a_from_that_is_not_a_parked_feature(fake_gh, gh_cal
 
 def test_apply_split_refuses_a_parked_feature_that_was_already_split(fake_gh, gh_calls, tmp_path):
     """A split writes the numbered body onto the feature, and a body that lists stories has been split."""
-    data = json.loads((FIXTURES / "stub-parked.json").read_text(encoding="utf-8"))
+    data = json.loads((FIXTURES / "draft-parked.json").read_text(encoding="utf-8"))
     data["body"] = _numbered_body()
     split_already = tmp_path / "parked-split.json"
     split_already.write_text(json.dumps(data), encoding="utf-8")
@@ -942,7 +942,7 @@ def test_apply_title_with_split_is_a_usage_error(fake_gh, gh_calls):
 
 
 def test_apply_split_and_stub_together_is_a_usage_error(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--split", "--stub", "57", str(SPLIT_FILE))
+    result = run_deckhand("new", "apply", "--split", "--draft", "57", str(SPLIT_FILE))
 
     assert result.returncode == 2
     assert gh_calls() == []
@@ -976,8 +976,8 @@ def test_apply_park_opens_a_feature_stub_with_no_stories(fake_gh, gh_calls, tmp_
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
     assert f" --title {FEATURE_LINE} --body-file " in call
     (_, body), (_, drafted) = _bodies(copy)
-    assert body == stub.render(FEATURE_LINE, [])
-    assert stub.read(body) == (FEATURE_LINE, [])
+    assert body == draft.render(FEATURE_LINE, [])
+    assert draft.read(body) == (FEATURE_LINE, [])
     assert drafted == "Drafted: parked from acme/widgets"
 
 
@@ -1006,8 +1006,8 @@ def test_apply_park_refuses_a_file_that_already_lists_stories(fake_gh, gh_calls,
 
 
 def test_apply_park_refuses_a_file_whose_stories_are_already_numbered(fake_gh, gh_calls, tmp_path):
-    requirements, entries = stub.parse_split(SPLIT_FILE.read_text(encoding="utf-8"))
-    path = _park_file(tmp_path, stub.render(requirements, entries))
+    requirements, entries = draft.parse_split(SPLIT_FILE.read_text(encoding="utf-8"))
+    path = _park_file(tmp_path, draft.render(requirements, entries))
 
     result = run_deckhand("new", "apply", "--park", str(path))
 
@@ -1038,7 +1038,7 @@ def test_apply_park_takes_a_file_without_the_heading(fake_gh, gh_calls, tmp_path
 
     assert result.returncode == 0, result.stderr
     (_, body), *_ = _bodies(copy)
-    assert stub.read(body) == ("Guests should be able to share a collection.", [])
+    assert draft.read(body) == ("Guests should be able to share a collection.", [])
 
 
 def test_apply_park_takes_the_heading_its_own_context_prints(fake_gh, gh_calls, tmp_path):
@@ -1051,7 +1051,7 @@ def test_apply_park_takes_the_heading_its_own_context_prints(fake_gh, gh_calls, 
 
     assert result.returncode == 0, result.stderr
     (_, body), *_ = _bodies(copy)
-    assert stub.read(body) == ("Guests should be able to share a collection.", [])
+    assert draft.read(body) == ("Guests should be able to share a collection.", [])
 
 
 def test_apply_sweeps_the_worktrees_of_closed_stories_from_the_clone(fake_gh, gh_calls, repo, tmp_path):
@@ -1075,7 +1075,7 @@ def test_the_draft_and_split_names_are_unique_to_the_run(fake_gh, tmp_path):
     """Two sessions drafting in one repository never share a file: the names carry the run's time."""
     lines = run_deckhand("new", "context").stdout.splitlines()
 
-    draft = next(line for line in lines if line.startswith("Draft: "))
+    draft = next(line for line in lines if line.startswith("Body: "))
     split = next(line for line in lines if line.startswith("Split file: "))
     token = re.search(r"new-(\d{8}-\d{6})\.md$", draft).group(1)
     assert split.endswith(f"split-{token}.json")
@@ -1252,15 +1252,15 @@ def test_a_new_request_names_the_draft_split_and_park_applies(fake_gh):
     result = run_deckhand("new", "context")
 
     lines = result.stdout.splitlines()
-    assert lines[-1] == "Apply: deckhand new apply <draft>"
+    assert lines[-1] == "Apply: deckhand new apply <file>"
     assert "Apply: deckhand new apply <split> --split" in lines
-    assert '  Apply: deckhand new apply <draft> --park --title "<title>"' in lines
+    assert '  Apply: deckhand new apply <file> --park --title "<title>"' in lines
 
 
 def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):
-    result = run_deckhand("new", "context", "248", env=STUB)
+    result = run_deckhand("new", "context", "248", env=DRAFT)
 
     lines = result.stdout.splitlines()
-    assert lines[-1] == "Apply: deckhand new apply <draft> --stub 248"
+    assert lines[-1] == "Apply: deckhand new apply <file> --draft 248"
     assert "Park shape:" in lines
-    assert '  Apply: deckhand new apply <draft> --park --from 248 --title "<title>"' in lines
+    assert '  Apply: deckhand new apply <file> --park --from 248 --title "<title>"' in lines

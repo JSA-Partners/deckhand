@@ -17,8 +17,8 @@ REPO = "acme/widgets"
 ISSUE_URL = f"https://github.com/{REPO}/issues/248"
 TITLE = "Title: Guest users see only their granted collections"
 REVIEWED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-reviewed.json")}
-STUB = {"GH_ISSUE_FILE": str(FIXTURES / "stub.json")}
-PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "stub-parked.json")}
+DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
+PARKED = {"GH_ISSUE_FILE": str(FIXTURES / "draft-parked.json")}
 # Two projects linked to the repository: the one failure that costs the board and nothing else.
 NO_BOARD = {"GH_LINKED_PROJECTS": str(FIXTURES / "linked-two.json")}
 REVIEW = "Review: sound\n\n- chaos.1, P2, accepted: A claim."
@@ -82,8 +82,8 @@ def facts(**changes) -> Facts:
         ({"status": "In Progress"}, "build", "No branch in this clone."),
         ({"status": "Backlog"}, "check", "On the board; check the plan against the code, then build."),
         ({"status": "Backlog", "blockers": ("#240  Grant store",)}, "wait", "Waits on #240."),
-        ({"status": "Draft", "written": False}, "write", "#248 is a stub."),
-        ({"status": None, "written": False}, "write", "#248 is a stub."),
+        ({"status": "Draft", "written": False}, "write", "#248 is a draft."),
+        ({"status": None, "written": False}, "write", "#248 is a draft."),
         (
             {"status": "Draft", "written": False, "parked": True},
             "settle",
@@ -266,12 +266,12 @@ def test_the_log_block_is_the_last_three_entries(fake_gh, repo, tmp_path):
 
 
 def test_a_stub_is_written_with_the_new_context(fake_gh, repo, tmp_path):
-    result = _next(repo, "57", env={**STUB, **fieldvalues(tmp_path, "Draft")})
+    result = _next(repo, "57", env={**DRAFT, **fieldvalues(tmp_path, "Draft")})
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:2] == ["Step: write", "#57 is a stub."]
-    assert "## Stub #57" in _context(lines)
+    assert lines[:2] == ["Step: write", "#57 is a draft."]
+    assert "## Draft #57" in _context(lines)
 
 
 def test_a_parked_feature_is_settled_with_the_new_context(fake_gh, repo, tmp_path):
@@ -285,15 +285,15 @@ def test_a_parked_feature_is_settled_with_the_new_context(fake_gh, repo, tmp_pat
 
 def test_a_drafted_entry_on_a_stub_body_is_still_a_stub(fake_gh, repo, tmp_path):
     """The body is what says a story was written; an entry with no story behind it moves nothing."""
-    stub_body = json.loads((FIXTURES / "stub.json").read_text(encoding="utf-8"))["body"]
+    draft_body = json.loads((FIXTURES / "draft.json").read_text(encoding="utf-8"))["body"]
     story = _logged(
-        tmp_path, "logged-stub.json", _entry("Drafted: from a brainstorm", "2026-09-01T10:00:00Z"), body=stub_body
+        tmp_path, "logged-draft.json", _entry("Drafted: from a brainstorm", "2026-09-01T10:00:00Z"), body=draft_body
     )
 
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[:2] == ["Step: write", "#248 is a stub."]
+    assert result.stdout.splitlines()[:2] == ["Step: write", "#248 is a draft."]
 
 
 def test_a_story_off_the_board_is_reviewed_again(fake_gh, repo, tmp_path):
@@ -571,7 +571,7 @@ def test_a_closed_story_with_items_left_and_no_pull_request_is_done(fake_gh, rep
 
 
 def test_a_closed_stub_is_done(fake_gh, repo, tmp_path):
-    story = _story(tmp_path, "closed-stub.json", fixture="stub.json", state="CLOSED")
+    story = _story(tmp_path, "closed-draft.json", fixture="draft.json", state="CLOSED")
 
     result = _next(repo, "57", env={**story, **_board(tmp_path)})
 

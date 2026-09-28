@@ -9,19 +9,14 @@ the rest of the prompt.
 
 `apply` validates the kind, the points, the review, and every blocker before it writes anything,
 then records the dependencies and sets the fields, printing one line per write. A story is already
-on the board as Draft from the moment it was written, so the item is added only for a story from
-before that, one not on the board yet. The latest `Review:` entry is the whole gate: nobody has to
-reply, and Status is always Backlog, because the board has no Blocked column and `start` reads the
-blockers live. The board's own automation sets Status after an item is added, asynchronously, so
-when `apply` has added one it waits, reads Status back, and puts it right once if the automation
-moved it. `DECKHAND_SETTLE` is that wait in seconds; the tests set it to 0.
+on the board from the moment it was written, so there is no item to add. The column is the whole
+gate: nobody has to reply, and Status is always Backlog, because the board has no Blocked column and
+`start` reads the blockers live.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import time
 
 from deckhand import board, columns, config, fields, fleet, forecast, gh, invoke, issue, log, sections
 from deckhand.config import Settings
@@ -34,7 +29,7 @@ from deckhand.step import (
     open_issue,
     reason,
     ref_label,
-    refuse_stub,
+    refuse_draft,
     settings_or_error,
     spill,
     step,
@@ -47,26 +42,8 @@ BOARDING_LIMIT = 50_000
 
 FIELDS = ("Kind", "Story Points")
 REFERENCES = 3  # per point value: enough to compare against, few enough to read
-SETTLE = 2.0
 TABLE_HEADER = "| Pts | # | Repo | Title | Hours |"
 TABLE_RULE = "| --- | --- | --- | --- | --- |"
-
-
-def settle_seconds() -> float:
-    """How long to wait before reading Status back; `DECKHAND_SETTLE` overrides the default.
-
-    Never negative, and never a value `time.sleep` would reject: anything that is not a positive
-    number is no wait at all.
-    """
-    raw = os.environ.get("DECKHAND_SETTLE")
-    try:
-        seconds = float(raw) if raw else SETTLE
-    except ValueError:
-        seconds = SETTLE
-    return seconds if seconds > 0 else 0.0
-
-
-# --- the reference stories -------------------------------------------------
 
 
 def reference_rows(stories: list[fleet.Story]) -> list[str]:
@@ -176,30 +153,17 @@ def _points(value: str) -> int:
     return points
 
 
-def _reviewed(story: issue.Issue, number: int) -> None:
-    """Refuse unless the story carries a `Review:` entry, which is the only gate this step holds."""
-    if log.last(story, "Review:") is None:
+def _reviewed(status: str | None, number: int) -> None:
+    """Refuse unless the column says the review ran, which is the only gate this step holds.
+
+    A story that never reached the board has no column, which answers the same as a column before
+    Ready: nothing says the review ran.
+    """
+    if not columns.at_least(status, columns.READY):
         raise Refusal(f"{RULE_REVIEWED} Run /deckhand:next {number}.")
 
 
-def _hold_status(settings: Settings, repo: str, number: int, status: str) -> None:
-    """Read Status back after the board's automation has had its moment, and put it right once.
-
-    Every write has landed by now, so a failed read is a line to report, not a run to fail.
-    """
-    time.sleep(settle_seconds())
-    try:
-        current = fields.get_field(settings, repo, number, "Status")
-    except gh.GhError as error:
-        print(f"Status not verified ({reason(error)})")
-        return
-    if current == status:
-        return
-    fields.set_field(settings, repo, number, "Status", status)
-    print(f"Status re-set to {status} (the board's own automation had changed it)")
-
-
-RULE_REVIEWED = "A story boards only with a Review: entry in its log."
+RULE_REVIEWED = "A story boards only once its column says the review ran."
 RULE_SIZE = f"A body over {BOARDING_LIMIT} characters needs --oversized saying why it is one story."
 RULES = (RULE_REVIEWED, RULE_SIZE)
 
@@ -224,12 +188,12 @@ def apply(args: argparse.Namespace) -> int:
     """Move a reviewed story to Backlog with its kind, its points, and its blockers."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
-    refuse_stub(args.issue, story.body)
+    refuse_draft(args.issue, story.body)
     settings = config.load()
     if args.kind not in settings.kinds:
         raise Refusal(f"kind must be one of: {', '.join(settings.kinds)}")
     points = _points(args.points)
-    _reviewed(story, args.issue)
+    _reviewed(fields.get_field(settings, repo, args.issue, "Status"), args.issue)
     size = len(story.body.replace("\r\n", "\n"))
     if size > BOARDING_LIMIT and not args.oversized:
         raise Refusal(f"{RULE_SIZE} Body is {size} characters; board it with --oversized '<why it is one>'.")
@@ -247,15 +211,9 @@ def apply(args: argparse.Namespace) -> int:
     # Every story boards in the same column: a blocker is a dependency GitHub holds and `start`
     # reads live, not a column that would need clearing when the last blocker closed.
     status = columns.BACKLOG
-    added = gh.item_id(settings, repo, args.issue) is None  # a story from before every story was boarded at birth
-    if added:
-        board.add(settings, story.url)
-        print("Added to the board")
     print(fields.set_field(settings, repo, args.issue, "Kind", args.kind))
     print(fields.set_field(settings, repo, args.issue, "Story Points", str(points)))
     print(fields.set_field(settings, repo, args.issue, "Status", status))
-    if added:
-        _hold_status(settings, repo, args.issue, status)
     if args.oversized:  # the size was judged here, so the judgment belongs on the record here
         issue.comment(repo, args.issue, log.checked(f"Noted: boarded at {size} characters. {args.oversized}"))
         print("Logged Noted")

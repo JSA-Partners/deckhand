@@ -19,7 +19,7 @@ The record is the issue's own log, not a block inside the story: every amend pos
 entry, so the body the draft carries reaches GitHub as it was drafted and the log reads in the order
 it was written. A split boards the new story as Draft and logs `Drafted:` there and `Split:` here.
 
-A stub takes `--note` too: its Requirements change and its Stories list comes back as it was, since
+A draft takes `--note` too: its Requirements change and its Stories list comes back as it was, since
 stories change only through a split. `--repo` reaches an issue in another repository, for a build
 whose decision changed an issue there that has not started.
 """
@@ -29,17 +29,17 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import columns, config, fields, gh, invoke, issue, lint, log, sections, stub
+from deckhand import columns, config, draft, fields, gh, invoke, issue, lint, log, sections
 from deckhand.lint import RULES as BODY_RULES
 from deckhand.new import skeleton
 from deckhand.park import board_draft
 from deckhand.step import (
     Refusal,
     block,
-    draft_line,
+    file_line,
     fits_title,
     indented,
-    read_draft,
+    read_file,
     reason,
     resolved_settings,
     spill,
@@ -47,7 +47,7 @@ from deckhand.step import (
     usable,
 )
 
-DRAFT_RULE = "Write the whole edited body to the draft; keep every section heading."
+BODY_RULE = "Write the whole edited body to the file it names; keep every section heading."
 REVIEW_HEADING = "## Latest review"
 SPLIT_DRAFTED = "Drafted: the story and its plan, split from this one."
 
@@ -61,8 +61,8 @@ FROZEN_CONTEXT = (
 STARTED = (columns.IN_PROGRESS, columns.IN_REVIEW, columns.DONE)
 # An unread column reads the same as none, so writing on either could demote a story that had started.
 WORKED_UP = (columns.DRAFT, columns.REFINEMENT, columns.READY)
-STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
-STORIES_CHANGED = "the Stories list changed; a stub's stories change only through a split"
+DRAFT_RULE = "Write the whole edited draft to the file it names; change the Requirements and keep the Stories list."
+STORIES_CHANGED = "the Stories list changed; a draft's stories change only through a split"
 ELSEWHERE = "--new-issue opens its story in this repository; --repo is only for --note"
 
 
@@ -132,7 +132,7 @@ def context(args: argparse.Namespace) -> int:
     except Exception as error:
         repo = error
     story = _story(repo, args.issue)
-    a_stub = not isinstance(story, Exception) and stub.is_stub(story.body)
+    a_draft = not isinstance(story, Exception) and draft.is_draft(story.body)
     status = _status_line(repo, args.issue)
     elsewhere = ("--repo", args.repo) if args.repo else ()
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
@@ -147,26 +147,26 @@ def context(args: argparse.Namespace) -> int:
         print()
         print(invoke.apply_line("amend", str(args.issue), '--title "<title>"', *elsewhere, '--note "<why>"'))
         return 0
-    if not a_stub:  # a stub's shape is the body above, and its stories are not the draft's to change
+    if not a_draft:  # a draft's shape is the body above, and its stories are not the file's to change
         block("Shape:", lambda: indented(skeleton().splitlines()))
         print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
     print()
-    print(draft_line("Draft", _draft_name(args.issue), args.repo))
-    print(STUB_RULE if a_stub else DRAFT_RULE)
-    print(invoke.apply_line("amend", str(args.issue), "<draft>", *elsewhere, '--note "<why>"'))
+    print(file_line("Rewrite", _draft_name(args.issue), args.repo))
+    print(DRAFT_RULE if a_draft else BODY_RULE)
+    print(invoke.apply_line("amend", str(args.issue), "<file>", *elsewhere, '--note "<why>"'))
     return 0
 
 
 # --- apply ------------------------------------------------------------------
 
 
-def _same_headings(draft: str, body: str) -> None:
+def _same_headings(edited: str, body: str) -> None:
     """Refuse a draft whose sections are not the issue's own, in the issue's own order."""
-    drafted = [name for name, _ in sections.parse(draft)[1]]
+    written = [name for name, _ in sections.parse(edited)[1]]
     current = [name for name, _ in sections.parse(body)[1]]
-    if drafted != current:
-        raise Refusal(f"headings changed: expected {', '.join(current) or 'none'}; got {', '.join(drafted) or 'none'}")
+    if written != current:
+        raise Refusal(f"headings changed: expected {', '.join(current) or 'none'}; got {', '.join(written) or 'none'}")
 
 
 def _title(flag: str | None, story: issue.Issue) -> str | None:
@@ -222,7 +222,7 @@ def _refine(repo: str, number: int, status: str | None) -> None:
     print(fields.set_field(resolved_settings(), repo, number, "Status", columns.REFINEMENT))
 
 
-def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
+def _amend(repo: str, number: int, edited: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
     """Put the drafted body and title on the issue and log the amend, unless the story is frozen.
 
     The body is the draft as it was written: what changed and why goes on the issue's own log, where
@@ -232,8 +232,8 @@ def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None
     """
     note = _note(note)
     title = _title(title_flag, story)
-    _same_headings(draft, story.body)
-    body = lint.checked(draft)
+    _same_headings(edited, story.body)
+    body = lint.checked(edited)
     status = _status(repo, number)
     if status in STARTED:
         raise Refusal(FROZEN)
@@ -244,22 +244,22 @@ def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None
     return 0
 
 
-def _amend_stub(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
-    """Rewrite a stub's requirements; its stories come back as they were, because a split owns them."""
+def _amend_stub(repo: str, number: int, edited: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
+    """Rewrite a draft's requirements; its stories come back as they were, because a split owns them."""
     note = _note(note)
     title = _title(title_flag, story)
-    if not stub.is_stub(draft):
-        raise Refusal(f"a stub starts with {stub.STUB_HEADING}")
-    requirements, entries = stub.read(draft)
+    if not draft.is_draft(edited):
+        raise Refusal(f"a draft starts with {draft.REQUIREMENTS_HEADING}")
+    requirements, entries = draft.read(edited)
     if not requirements.strip():
-        raise Refusal(f"{stub.STUB_HEADING} has no text")
-    if entries != stub.read(story.body)[1]:
+        raise Refusal(f"{draft.REQUIREMENTS_HEADING} has no text")
+    if entries != draft.read(story.body)[1]:
         raise Refusal(STORIES_CHANGED)
-    _write(repo, number, stub.render(requirements, entries), title, note, story)
+    _write(repo, number, draft.render(requirements, entries), title, note, story)
     return 0
 
 
-def _new_issue(repo: str, number: int, draft: str, title: str, before: bool) -> int:
+def _new_issue(repo: str, number: int, edited: str, title: str, before: bool) -> int:
     """Open the drafted body as its own story, record which way the dependency runs, and log both ends.
 
     `before` is work that has to land first, so this story waits on the new one; without it the new
@@ -270,7 +270,7 @@ def _new_issue(repo: str, number: int, draft: str, title: str, before: bool) -> 
     if not title:
         raise Refusal("--new-issue needs a title")
     fits_title(title)
-    body = lint.checked(draft)
+    body = lint.checked(edited)
     settings = resolved_settings()
     new, url = issue.create(repo, title, body)
     # Printed before the links are written: the issue exists from here on, and a failure below has
@@ -311,7 +311,7 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
 
 @step("amend", _configure, rules=BODY_RULES, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
-    """Amend a story or a stub from the drafted body, or split the draft out as its own blocked story."""
+    """Amend a story or a draft from the edited body, or split it out as its own blocked story."""
     if args.before and args.new_issue is None:
         args.usage.error("--before is only for --new-issue")
     if args.repo is not None and args.new_issue is not None:
@@ -324,13 +324,13 @@ def apply(args: argparse.Namespace) -> int:
         if args.title is None:
             args.usage.error("give a draft file, or --title to change the title alone")
         return _retitle(repo, args.issue, args.note, args.title, story)
-    draft = read_draft(args.file)
-    if stub.is_stub(story.body):
+    edited = read_file(args.file)
+    if draft.is_draft(story.body):
         if args.new_issue is not None:
-            raise Refusal(f"#{args.issue} is a stub; amend it with --note")
-        return _amend_stub(repo, args.issue, draft, args.note, args.title, story)
+            raise Refusal(f"#{args.issue} is a draft; amend it with --note")
+        return _amend_stub(repo, args.issue, edited, args.note, args.title, story)
     if args.new_issue is not None:
         if args.title is not None:
             raise Refusal("--title goes with --note; --new-issue carries its title as its argument")
-        return _new_issue(repo, args.issue, draft, args.new_issue, args.before)
-    return _amend(repo, args.issue, draft, args.note, args.title, story)
+        return _new_issue(repo, args.issue, edited, args.new_issue, args.before)
+    return _amend(repo, args.issue, edited, args.note, args.title, story)

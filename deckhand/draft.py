@@ -1,12 +1,13 @@
-"""The stub: a plain issue whose body is a feature's requirements and the stories it was split into.
+"""The draft: a plain issue whose body is a feature's requirements and the stories it was split into.
 
-A stub is not a story. It carries no section headings, no board item, and no plan; `new` turns one
-into a story by rewriting its body, and every other step refuses it on sight. `is_stub` is the whole
-of that test, so nothing else has to know what a stub looks like.
+A draft is not a story. It carries no section headings and no plan; `new` turns one into a story by
+rewriting its body, and every other step refuses it on sight. `is_draft` is the whole of that test, so
+nothing else has to know what a draft looks like. A draft is open while its Stories list is empty and
+settled once that list names what to write.
 
-Everything here is pure text. `parse_split` reads what the session wrote and is strict, because a
-bad line is a bad split and the user has to see which line; `read` reads a body GitHub already holds
-and is forgiving, because a stub the user edited by hand is still worth printing.
+`parse_split` reads the document a session writes and is strict, because a bad field is a bad split
+and the user has to see which story it was; `read` reads a body GitHub already holds and is forgiving,
+because a draft the user edited by hand is still worth printing.
 """
 
 from __future__ import annotations
@@ -15,13 +16,13 @@ import json
 import re
 from dataclasses import dataclass
 
-STUB_HEADING = "## Requirements"
+REQUIREMENTS_HEADING = "## Requirements"
 STORIES_HEADING = "## Stories"
 
 
 def skeleton() -> str:
     """The empty shape a park file takes: the requirements alone, because a park has no stories yet."""
-    return "\n\n".join([STUB_HEADING, "<what the feature needs, in full>"])
+    return "\n\n".join([REQUIREMENTS_HEADING, "<what the feature needs, in full>"])
 
 
 _BULLET = re.compile(r"^-\s+(.*)$")
@@ -47,11 +48,11 @@ def _lines(text: str) -> list[str]:
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
-def is_stub(body: str) -> bool:
-    """Whether `body` is a stub: its first non-blank line is the requirements heading."""
+def is_draft(body: str) -> bool:
+    """Whether `body` is a draft: its first non-blank line is the requirements heading."""
     for line in _lines(body):
         if line.strip():
-            return line.strip() == STUB_HEADING
+            return line.strip() == REQUIREMENTS_HEADING
     return False
 
 
@@ -192,8 +193,8 @@ def _rendered(entry: Entry) -> str:
 
 
 def render(requirements: str, entries: list[Entry]) -> str:
-    """The stub body every stub of one feature carries: the requirements and the numbered stories."""
-    lines = [STUB_HEADING, "", requirements.rstrip(), "", STORIES_HEADING]
+    """The body every draft of one feature carries: the requirements and the numbered stories."""
+    lines = [REQUIREMENTS_HEADING, "", requirements.rstrip(), "", STORIES_HEADING]
     if entries:
         lines.append("")
         lines += [f"{position}. {_rendered(entry)}" for position, entry in enumerate(entries, start=1)]
@@ -204,11 +205,11 @@ def read(body: str) -> tuple[str, list[Entry]]:
     """What `render` wrote: the requirements and the entries; a parked feature reads as no entries.
 
     A line under Stories that is not an entry is skipped rather than refused: this reads a body
-    GitHub already holds, and a hand-edited stub is still worth showing the session.
+    GitHub already holds, and a hand-edited draft is still worth showing the session.
     """
     lines = _lines(body)
     start = next((index for index, line in enumerate(lines) if line.strip()), len(lines))
-    if start < len(lines) and lines[start].strip() == STUB_HEADING:
+    if start < len(lines) and lines[start].strip() == REQUIREMENTS_HEADING:
         start += 1
     stories = next((index for index in range(start, len(lines)) if lines[index].strip() == STORIES_HEADING), len(lines))
     requirements = "\n".join(lines[start:stories]).strip("\n").rstrip()

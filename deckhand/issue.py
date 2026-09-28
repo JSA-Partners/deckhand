@@ -241,8 +241,6 @@ def merged_pull_requests(repo: str, limit: int) -> list[tuple[str, str]]:
 
 # One field list for every read of a pull request, so a briefing that wants two of them makes one
 # call: `gh.cached` keys on the arguments, and three readers asking for three sets defeated it.
-PR_FIELDS = "state,url,statusCheckRollup,mergeStateStatus"
-
 FAILED = ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE")
 SETTLED = ("SUCCESS", "SKIPPED", "NEUTRAL")
 
@@ -270,13 +268,6 @@ def _rollup_checks(checks: list[Any]) -> tuple[list[str], int]:
 
 
 BEHIND = {"BEHIND", "DIRTY"}  # main moved on, or the merge would conflict; both need the branch brought up
-
-
-def merge_state(repo: str, url: str) -> str:
-    """GitHub's merge state for the pull request at `url`, upper case; empty when it reports none."""
-    gh.split_repo(repo)
-    data = gh.json_out("pr", "view", url, "--repo", repo, "--json", PR_FIELDS)
-    return str(data.get("mergeStateStatus") or "").upper() if isinstance(data, dict) else ""
 
 
 PR_QUERY = (

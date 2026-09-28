@@ -211,6 +211,13 @@ elif head == "api graphql":
         # The issue's reference to its pull request answers from the same $GH_PR_ variables a view
         # does, so a test that set the state before this query existed still means what it meant.
         pr_state = os.environ.get("GH_PR_STATE") or ("OPEN" if os.environ.get("GH_PR_EXISTS") else "")
+        # $GH_PR_ISSUES narrows which issues have one, for a fleet where some stories do and some do not.
+        only = os.environ.get("GH_PR_ISSUES")
+        if only:
+            fields = [argv[i + 1] for i, a in enumerate(argv) if a == "-F"]
+            asked = next((f for f in fields if f.startswith("number=")), "")
+            if asked.partition("=")[2] not in only.split(","):
+                pr_state = ""
         pr_nodes = []
         if pr_state:
             rollup = {"contexts": {"nodes": json.loads(os.environ.get("GH_PR_CHECKS", "[]"))}}
