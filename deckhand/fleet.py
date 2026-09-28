@@ -7,10 +7,9 @@ the board in a single paginated read instead of one read per story.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
-from deckhand import board, columns, gh, issue, log, sections, sessions, step
+from deckhand import board, checklist, columns, gh, issue, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -28,8 +27,6 @@ ITEMS_QUERY = (
     "... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
 )
-
-_PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
 # An open session idle longer than this is not counted as working on its story.
 ACTIVE = 3600.0
@@ -141,35 +138,14 @@ def load(settings: Settings) -> list[Story]:
     return [story for story in stories(_nodes(settings)) if not story.archived]
 
 
-def allowed(story: Story) -> tuple[str, ...]:
-    """The board Statuses this story's log allows, canonical one first.
-
-    Every status is written by a step's apply, so a board holding anything else was moved by
-    something that was not a step. Boarding is the one place a person's answer sits between two
-    statuses: a reviewed story is Backlog once the question has been answered and Draft until then.
-    A merged story is the other: `after` ticks one box at a time, so Verification and Done are both
-    places to be, and the after-the-merge boxes say which of them the story belongs in.
-    """
-    if story.closed:
-        owed = any(not ticked for _, ticked in sections.after_merge_items(story.issue.body))
-        return (columns.VERIFICATION, columns.DONE) if owed else (columns.DONE, columns.VERIFICATION)
-    if log.last(story.issue, "Pull request:") is not None:
-        return (columns.IN_REVIEW,)
-    if log.last(story.issue, "Started:") is not None:
-        return (columns.IN_PROGRESS,)
-    if log.last(story.issue, "Review:") is not None:
-        return (columns.READY, columns.BACKLOG, columns.DRAFT)
-    return (columns.DRAFT, columns.REFINEMENT)
-
-
 def touched(story: Story) -> bool:
-    """Whether the process ever wrote to this issue, which is what makes its column deckhand's business.
+    """Whether this issue is the process's business, which is what the label it carries says.
 
     A board holds issues older than the process and issues opened by hand. Nothing deckhand knows
-    applies to them: their column was chosen by a person, and reading it against a log that does not
-    exist would call every one of them broken.
+    applies to them: their column was chosen by a person, and reading it as one of ours would call
+    every one of them broken.
     """
-    return bool(log.entries(story.issue))
+    return checklist.LABEL[0] in story.issue.labels
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
@@ -183,20 +159,16 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
     if story.status in (columns.IN_PROGRESS, columns.IN_REVIEW):
         if behind:
             return "pull request behind main"
-        if log.last(story.issue, "Pull request:") is not None:
-            return "pull request open"
-        if log.last(story.issue, "Reviewed:") is not None:
-            return "reviewed, no pull request"
-        return "building"
+        return "pull request open" if story.status == columns.IN_REVIEW else "building"
     if story.status == columns.BACKLOG:
         return "ready"
     if story.status == columns.VERIFICATION:
         left = sum(1 for _, ticked in sections.after_merge_items(story.issue.body) if not ticked)
         items = "item" if left == 1 else "items"
         return f"merged, {left} {items} left"
-    if story.status == columns.DONE and story.closed:
-        return "done"
-    return "reviewed, not boarded" if log.last(story.issue, "Review:") is not None else "review not run"
+    if story.status == columns.DONE:
+        return "done" if story.closed else "Done, but the issue is open"
+    return "reviewed, not boarded" if columns.at_least(story.status, columns.READY) else "review not run"
 
 
 Key = tuple[str, int]
@@ -246,11 +218,13 @@ def anomalies(
     for story in found:
         if not touched(story):
             continue
-        may = allowed(story)
-        if story.status and story.status not in may:
-            out.append(
-                Anomaly(story.number, story.repo, f"{story.status}, but the log allows {may[0]}", f"Status {may[0]}")
-            )
+        # Two typed sources, so they can still disagree: only finished work closes an issue, and
+        # only a closed story reaches the last two columns.
+        if story.status == columns.DONE and not story.closed:
+            out.append(Anomaly(story.number, story.repo, "Done, but the issue is open", "close it or move it back"))
+        if story.closed and story.status and story.status not in (columns.DONE, columns.VERIFICATION):
+            what = f"closed, but {story.status}"
+            out.append(Anomaly(story.number, story.repo, what, f"Status {columns.VERIFICATION} or {columns.DONE}"))
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
         if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):
@@ -289,11 +263,11 @@ class Fleet:
 
 
 def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
-    """`(repo, number, url)` of every open story that carries a log and never reached the board.
+    """`(repo, number, url)` of every open story the process owns that never reached the board.
 
     One cheap list per repository, and a read of an issue only when the board does not already hold
-    it, so the usual answer of none costs one call per repository and nothing else. An issue with no
-    `Drafted:` entry is not a story and is never reported.
+    it, so the usual answer of none costs one call per repository and nothing else. An issue without
+    the label is not the process's business and is never reported.
     """
     keys = {story.key for story in on_board}
     off: list[tuple[str, int, str]] = []
@@ -302,7 +276,7 @@ def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
             if (repo, number) in keys:
                 continue
             story = issue.view(repo, number)
-            if log.last(story, "Drafted:") is not None:
+            if checklist.LABEL[0] in story.labels:
                 off.append((repo, number, story.url))
     return off
 
@@ -322,15 +296,11 @@ def read(settings: Settings) -> Fleet:
     for story in found:
         if story.status not in (columns.IN_PROGRESS, columns.IN_REVIEW):
             continue
-        entry = log.last(story.issue, "Pull request:")
-        url = _PR_URL.search(entry.text) if entry is not None else None
-        if url is None:
-            continue
         try:
-            state = issue.merge_state(story.repo, url.group(0))
+            found_pr = issue.pull_request_for(story.repo, story.number)
         except gh.GhError:
             continue  # a pull request gh cannot read says nothing about main; the row stands without it
-        if state in issue.BEHIND:
+        if found_pr is not None and found_pr.behind:
             behind.add(story.key)
     return Fleet(
         stories=found,

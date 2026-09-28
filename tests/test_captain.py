@@ -215,12 +215,6 @@ def test_the_order_is_written_to_the_board(fleet_env, gh_calls, capsys):
     assert "Ordered 4 stories" in capsys.readouterr().out
 
 
-def test_a_repair_sets_the_status_the_log_allows(fleet_env, capsys):
-    assert cli.main(["captain", "apply", "--repair"]) == 0
-    out = capsys.readouterr().out
-    assert "268" in out and "Draft" in out
-
-
 def test_a_repair_with_nothing_to_repair_refuses(fleet_env, monkeypatch, capsys):
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-clean.json"))
     assert cli.main(["captain", "apply", "--repair"]) == 1
@@ -250,37 +244,6 @@ def _without_labels(nodes: list[dict]) -> list[dict]:
     return [{**node, "content": {**node["content"], "labels": {"nodes": []}}} for node in nodes]
 
 
-def test_repair_marks_a_story_the_process_wrote_to(fleet_env, gh_calls, capsys):
-    """The board cannot say an issue is deckhand's, so the label does, and repair puts it right."""
-    assert cli.main(["captain", "apply", "--repair"]) == 0
-
-    assert "issue edit 120 --repo acme/widgets --add-label deckhand" in gh_calls()
-    assert "acme/widgets#120 label deckhand" in capsys.readouterr().out
-
-
-def test_repair_leaves_an_untouched_issue_unmarked(fleet_env, gh_calls, monkeypatch, tmp_path):
-    """An issue the process never wrote to is not deckhand's, whatever column it sits in."""
-    for name, value in _items(tmp_path, "foreign-items.json", [*_nodes(), _foreign("Backlog")]).items():
-        monkeypatch.setenv(name, value)
-
-    assert cli.main(["captain", "apply", "--repair"]) == 0
-
-    marked = [call for call in gh_calls() if "--add-label" in call]
-    assert marked and not [call for call in marked if " 96 " in call]
-
-
-def test_repair_leaves_an_issue_the_process_never_wrote_to_alone(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
-    """A board carries issues that are not deckhand's, and their column was chosen by a person."""
-    for name, value in _items(tmp_path, "foreign-column.json", [*_nodes(), _foreign("In Review")]).items():
-        monkeypatch.setenv(name, value)
-
-    assert cli.main(["captain", "apply", "--repair"]) == 0
-
-    out = capsys.readouterr().out
-    assert "acme/widgets#268 Status Draft" in out and "#96" not in out
-    assert len([call for call in gh_calls() if "item-edit" in call]) == 1
-
-
 def test_a_repair_with_only_untouched_issues_refuses(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
     """Nothing the process owns is wrong, so the run refuses rather than reporting a success that wrote nothing."""
     for name, value in _items(tmp_path, "clean-foreign.json", [*_clean_nodes(), _foreign("In Review")]).items():
@@ -290,16 +253,6 @@ def test_a_repair_with_only_untouched_issues_refuses(fleet_env, gh_calls, monkey
 
     assert "nothing to repair" in capsys.readouterr().err
     assert not [call for call in gh_calls() if "item-edit" in call]
-
-
-def test_repair_with_only_the_marker_missing_is_not_nothing_to_repair(fleet_env, monkeypatch, tmp_path, capsys):
-    """The refusal counts the marker too, or a board needing only labels would refuse to be fixed."""
-    for name, value in _items(tmp_path, "unmarked-items.json", _without_labels(_clean_nodes())).items():
-        monkeypatch.setenv(name, value)
-
-    assert cli.main(["captain", "apply", "--repair"]) == 0
-
-    assert "acme/widgets#253 label deckhand" in capsys.readouterr().out
 
 
 def test_blocking_a_boarded_story_records_the_dependency(fake_gh, gh_calls, capsys):

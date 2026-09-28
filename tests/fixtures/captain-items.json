@@ -394,7 +394,11 @@
                   "nameWithOwner": "acme/widgets"
                 },
                 "labels": {
-                  "nodes": []
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
                 },
                 "comments": {
                   "nodes": [

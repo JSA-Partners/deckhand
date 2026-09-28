@@ -31,7 +31,7 @@ def test_a_row_carries_the_labels_the_issue_holds():
     """The board cannot say which of its issues are the process's business, so the read carries the labels."""
     found = {story.number: story for story in fleet.stories(_nodes())}
     assert found[253].issue.labels == ("deckhand",)
-    assert found[120].issue.labels == ()
+    assert fleet.stories(_foreign("Backlog"))[0].issue.labels == ()
 
 
 def test_a_story_without_points_says_so():
@@ -44,25 +44,6 @@ def test_a_row_knows_its_key():
 
 def _story(number: int):
     return {story.number: story for story in fleet.stories(_nodes())}[number]
-
-
-def test_a_started_story_can_only_be_in_progress():
-    assert fleet.allowed(_story(120)) == ("In Progress",)
-
-
-def test_a_story_with_a_pull_request_is_in_review():
-    """finish writes In Review, and nothing moves a story back out of it."""
-    assert fleet.allowed(_story(117)) == ("In Review",)
-
-
-def test_a_reviewed_story_may_still_be_waiting_to_be_boarded():
-    """Review leaves a story in Ready, so that is what a repair writes: boarding needs a kind and points."""
-    assert fleet.allowed(_story(253)) == ("Ready", "Backlog", "Draft")
-
-
-def test_a_story_with_only_a_draft_entry_is_a_draft():
-    """An amend moves a drafting story to Refinement, so that is a place to be and not an anomaly."""
-    assert fleet.allowed(_story(268)) == ("Draft", "Refinement")
 
 
 def test_a_backlog_story_with_no_blocker_is_ready():
@@ -94,7 +75,14 @@ def test_a_story_in_flight_with_a_pull_request_says_so():
 
 
 def test_a_story_marked_done_that_never_shipped_says_what_it_really_is():
-    assert fleet.note(_story(268), [], behind=False) == "review not run"
+    """Two typed sources, so they can disagree: the column says finished and the issue is still open."""
+    assert fleet.note(_story(268), [], behind=False) == "Done, but the issue is open"
+
+
+def test_a_story_marked_done_whose_issue_is_open_is_an_anomaly():
+    found = fleet.anomalies(fleet.stories(_nodes()), {}, set(), [])
+
+    assert [(a.number, a.what) for a in found if a.number == 268] == [(268, "Done, but the issue is open")]
 
 
 def test_a_story_in_verification_says_how_many_items_are_left():
@@ -127,13 +115,6 @@ def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float
         started=1.0,
         path=Path("x.jsonl"),
     )
-
-
-def test_a_done_story_whose_issue_is_open_is_an_anomaly():
-    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[])
-    entry = next(item for item in found if item.number == 268)
-    assert entry.what == "Done, but the log allows Draft"
-    assert entry.fix == "Status Draft"
 
 
 def test_a_story_in_flight_with_nobody_on_it_is_reported_and_not_fixed():
@@ -200,6 +181,7 @@ def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, set
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
     monkeypatch.setenv("GH_PR_STATE", "OPEN")
     monkeypatch.setenv("GH_PR_MERGE_STATE", "BEHIND")
+    monkeypatch.setenv("GH_PR_ISSUES", "117")  # 120 is building and has none
     read = fleet.read(settings)
     assert [story.number for story in read.stories] == [253, 257, 258, 13, 117, 268, 120]
     assert read.blockers[("acme/widgets", 257)] == [("acme/widgets", 253, "Seed")]
@@ -242,6 +224,7 @@ def test_an_open_issue_with_a_log_and_no_board_item_is_missing(fake_gh, settings
                 "state": "OPEN",
                 "url": "https://github.com/acme/widgets/issues/281",
                 "body": "### Story",
+                "labels": [{"name": "deckhand"}],
                 "comments": [
                     {"body": "Drafted: from a request", "createdAt": "2026-09-15T00:00:00Z", "author": {"login": "mjm"}}
                 ],
@@ -252,6 +235,42 @@ def test_an_open_issue_with_a_log_and_no_board_item_is_missing(fake_gh, settings
     monkeypatch.setenv("GH_ISSUE_LIST_ACME_WIDGETS", str(listing))
     monkeypatch.setenv("GH_ISSUE_FILE_281", str(drafted))
     assert fleet.read(settings).missing == [("acme/widgets", 281, "https://github.com/acme/widgets/issues/281")]
+
+
+def test_an_open_issue_without_the_label_is_not_missing(fake_gh, settings, tmp_path, monkeypatch):
+    """A repository holds issues that are not the process's business, and none of them wants boarding."""
+    listing = tmp_path / "list.json"
+    listing.write_text(json.dumps([{"number": 281}]))
+    theirs = tmp_path / "281.json"
+    theirs.write_text(
+        json.dumps(
+            {
+                "number": 281,
+                "title": "Somebody else's",
+                "state": "OPEN",
+                "url": "https://github.com/acme/widgets/issues/281",
+                "body": "### Story",
+                "labels": [],
+                "comments": [],
+            }
+        )
+    )
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    monkeypatch.setenv("GH_ISSUE_LIST_ACME_WIDGETS", str(listing))
+    monkeypatch.setenv("GH_ISSUE_FILE_281", str(theirs))
+
+    assert fleet.read(settings).missing == []
+
+
+def test_a_closed_story_left_in_an_earlier_column_is_an_anomaly():
+    """Only a closed story reaches the last two columns, so closed anywhere else is two facts disagreeing."""
+    found = fleet.anomalies(fleet.stories(_closed("In Review")), {}, set(), [])
+
+    assert [(a.number, a.what, a.fix) for a in found] == [(301, "closed, but In Review", "Status Verification or Done")]
+
+
+def test_a_closed_story_in_verification_is_not_an_anomaly():
+    assert fleet.anomalies(fleet.stories(_closed("Verification")), {}, set(), []) == []
 
 
 def _foreign(status: str) -> list[dict]:
@@ -286,6 +305,7 @@ def _closed(status: str, plan: str = "") -> list[dict]:
                 "closedAt": "2026-09-20T09:00:00Z",
                 "body": f"### Plan\n\n{plan}",
                 "repository": {"nameWithOwner": REPO},
+                "labels": {"nodes": [{"name": "deckhand"}]},
                 "comments": {
                     "nodes": [
                         {
@@ -302,20 +322,6 @@ def _closed(status: str, plan: str = "") -> list[dict]:
 
 
 OWED = "### After the merge\n\n- [ ] Deploy the migration\n"
-
-
-def test_a_closed_story_left_in_pending_review_is_an_anomaly():
-    """Nothing runs when GitHub closes the issue on merge, so a story nobody revisits is caught here."""
-    found = fleet.anomalies(fleet.stories(_closed("In Review")), {}, set(), [])
-
-    assert [(item.number, item.fix) for item in found] == [(301, "Status Done")]
-
-
-def test_a_closed_story_with_items_left_wants_verification():
-    """The column a repair writes follows the boxes, not the fact that it is closed."""
-    found = fleet.anomalies(fleet.stories(_closed("In Review", OWED)), {}, set(), [])
-
-    assert [(item.number, item.fix) for item in found] == [(301, "Status Verification")]
 
 
 def test_a_closed_story_in_verification_is_no_anomaly():
