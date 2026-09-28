@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import config, fields, gh, invoke, issue, lint, log, sections, stub
+from deckhand import columns, config, fields, gh, invoke, issue, lint, log, sections, stub
 from deckhand.lint import RULES as BODY_RULES
 from deckhand.new import skeleton
 from deckhand.park import board_draft
@@ -58,9 +58,9 @@ FROZEN_CONTEXT = (
     "  Work of its own goes in a new issue.\n"
     "  Only the title can still change."
 )
-STARTED = ("In Progress", "Pending Review", "Done")
+STARTED = (columns.IN_PROGRESS, columns.PENDING_REVIEW, columns.DONE)
 # An unread column reads the same as none, so writing on either could demote a story that had started.
-WORKED_UP = ("Draft", "Refinement", "Ready")
+WORKED_UP = (columns.DRAFT, columns.REFINEMENT, columns.READY)
 STUB_RULE = "Write the whole edited stub to the draft; change the Requirements and keep the Stories list as it is."
 STORIES_CHANGED = "the Stories list changed; a stub's stories change only through a split"
 ELSEWHERE = "--new-issue opens its story in this repository; --repo is only for --note"
@@ -219,7 +219,7 @@ def _refine(repo: str, number: int, status: str | None) -> None:
     """Write Refinement, which is where a story somebody is still working up belongs."""
     if status not in WORKED_UP:
         return
-    print(fields.set_field(resolved_settings(), repo, number, "Status", "Refinement"))
+    print(fields.set_field(resolved_settings(), repo, number, "Status", columns.REFINEMENT))
 
 
 def _amend(repo: str, number: int, draft: str, note: str, title_flag: str | None, story: issue.Issue) -> int:

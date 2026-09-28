@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from deckhand import board, gh
+from deckhand import board, columns, gh
 from deckhand.config import Settings
 from deckhand.step import reason
 
-STATUS_OPTIONS = ["Draft", "Refinement", "Ready", "Backlog", "In Progress", "Pending Review", "Verification", "Done"]
+STATUS_OPTIONS = list(columns.ORDER)
 BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"]
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"

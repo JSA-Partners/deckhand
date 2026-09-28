@@ -15,7 +15,7 @@ import math
 import os
 import statistics
 
-from deckhand import board, checklist, config, edges, fields, fleet, forecast, gh, issue, order, sessions
+from deckhand import board, checklist, columns, config, edges, fields, fleet, forecast, gh, issue, order, sessions
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -54,7 +54,7 @@ def _since(seconds: float) -> str:
 def _fleet_rows(read: fleet.Fleet) -> list[str]:
     rows = ["| # | Repo | Title | Status | Pts | Who | Note |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for story in read.stories:
-        if story.status == fleet.DONE and story.closed:
+        if story.status == columns.DONE and story.closed:
             continue
         note = fleet.note(story, read.blockers.get(story.key) or [], story.key in read.behind)
         points = "-" if story.points is None else str(story.points)
@@ -65,7 +65,7 @@ def _fleet_rows(read: fleet.Fleet) -> list[str]:
 
 
 def _ranked(read: fleet.Fleet) -> list[order.Ranked]:
-    return order.ranked([story for story in read.stories if story.status == "Backlog"], read.blockers)
+    return order.ranked([story for story in read.stories if story.status == columns.BACKLOG], read.blockers)
 
 
 def _order_rows(read: fleet.Fleet) -> list[str]:
@@ -85,7 +85,7 @@ def _head(read: fleet.Fleet, repo: str) -> str | None:
     A blocker that is not in Backlog is nowhere in the order table, so a repository whose whole
     Backlog waits has nothing to show without it.
     """
-    backlog = {story.key for story in read.stories if story.status == "Backlog"}
+    backlog = {story.key for story in read.stories if story.status == columns.BACKLOG}
     seen: set[fleet.Key] = set()
     roots: set[fleet.Key] = set()
     stack = [(w, n) for key, holds in read.blockers.items() if key[0] == repo and key in backlog for w, n, _ in holds]

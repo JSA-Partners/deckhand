@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from deckhand import board, gh, issue, log, sections, sessions, step
+from deckhand import board, columns, gh, issue, log, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -28,9 +28,6 @@ ITEMS_QUERY = (
     "... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
 )
-
-DONE = "Done"
-VERIFICATION = "Verification"
 
 _PR_URL = re.compile(r"https://\S+/pull/[0-9]+")
 
@@ -149,14 +146,14 @@ def allowed(story: Story) -> tuple[str, ...]:
     """
     if story.closed:
         owed = any(not ticked for _, ticked in sections.after_merge_items(story.issue.body))
-        return (VERIFICATION, DONE) if owed else (DONE, VERIFICATION)
+        return (columns.VERIFICATION, columns.DONE) if owed else (columns.DONE, columns.VERIFICATION)
     if log.last(story.issue, "Pull request:") is not None:
-        return ("Pending Review",)
+        return (columns.PENDING_REVIEW,)
     if log.last(story.issue, "Started:") is not None:
-        return ("In Progress",)
+        return (columns.IN_PROGRESS,)
     if log.last(story.issue, "Review:") is not None:
-        return ("Ready", "Backlog", "Draft")
-    return ("Draft", "Refinement")
+        return (columns.READY, columns.BACKLOG, columns.DRAFT)
+    return (columns.DRAFT, columns.REFINEMENT)
 
 
 def touched(story: Story) -> bool:
@@ -177,7 +174,7 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         # a story already built, rebased and reviewed still waits on an unmerged blocker; the column alone hides it
         named = ", ".join(step.ref_label(where, number, story.repo) for where, number, _ in blockers)
         return f"waits on {named}"
-    if story.status in ("In Progress", "Pending Review"):
+    if story.status in (columns.IN_PROGRESS, columns.PENDING_REVIEW):
         if behind:
             return "pull request behind main"
         if log.last(story.issue, "Pull request:") is not None:
@@ -185,13 +182,13 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         if log.last(story.issue, "Reviewed:") is not None:
             return "reviewed, no pull request"
         return "building"
-    if story.status == "Backlog":
+    if story.status == columns.BACKLOG:
         return "ready"
-    if story.status == VERIFICATION:
+    if story.status == columns.VERIFICATION:
         left = sum(1 for _, ticked in sections.after_merge_items(story.issue.body) if not ticked)
         items = "item" if left == 1 else "items"
         return f"merged, {left} {items} left"
-    if story.status == DONE and story.closed:
+    if story.status == columns.DONE and story.closed:
         return "done"
     return "reviewed, not boarded" if log.last(story.issue, "Review:") is not None else "review not run"
 
@@ -249,7 +246,7 @@ def anomalies(
             )
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
-        if story.status == "In Progress" and not labels and mine and not blockers.get(story.key):
+        if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):
             out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
         if len(labels) > 1:
             named = " and ".join(labels)
@@ -300,11 +297,11 @@ def read(settings: Settings) -> Fleet:
     """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request."""
     found = stories(_nodes(settings))
     blockers: Blockers = {
-        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != DONE
+        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE
     }
     behind: set[Key] = set()
     for story in found:
-        if story.status not in ("In Progress", "Pending Review"):
+        if story.status not in (columns.IN_PROGRESS, columns.PENDING_REVIEW):
             continue
         entry = log.last(story.issue, "Pull request:")
         url = _PR_URL.search(entry.text) if entry is not None else None
