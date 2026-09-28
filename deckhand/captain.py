@@ -174,7 +174,9 @@ def _setup_rows(settings: Settings, repo: str) -> list[str]:
 
 
 def _anomaly_rows(settings: Settings, read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
-    found = fleet.anomalies(read.stories, read.blockers, read.behind, pulses, read.missing, read.me)
+    found = fleet.anomalies(
+        read.stories, read.blockers, read.behind, pulses, read.missing, read.me, archived=read.archived
+    )
     rows = [f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |" for item in found]
     rows += _setup_rows(settings, gh.repo_slug())
     if not rows:

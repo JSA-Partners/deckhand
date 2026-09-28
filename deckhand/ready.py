@@ -125,7 +125,7 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
     for node in board.items(usable(settings)):
         content = node.get("content") or {}
         status = board.field_value(node, "Status", "name") or "-"
-        if content.get("number") == number or status == columns.DONE:
+        if content.get("number") == number or content.get("closedAt") or status == columns.DONE:
             continue
         rows.append(f"#{content.get('number')} {status} {content.get('title') or ''}".rstrip())
     return indented(rows, "none")

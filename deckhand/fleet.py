@@ -8,7 +8,7 @@ the board in a single paginated read instead of one read per story.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from deckhand import board, columns, gh, issue, log, sections, sessions, step
 from deckhand.config import Settings
@@ -16,8 +16,8 @@ from deckhand.config import Settings
 # gh --paginate advances the cursor only when the variable is named endCursor.
 ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
-    "projectV2(number:$number){ items(first:50, after:$endCursor){ "
-    "pageInfo{ hasNextPage endCursor } nodes{ id "
+    "projectV2(number:$number){ items(first:50, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
+    "pageInfo{ hasNextPage endCursor } nodes{ id isArchived "
     "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
@@ -49,6 +49,7 @@ class Story:
     issue: issue.Issue
     assignees: tuple[str, ...] = ()
     blocked_by: tuple[tuple[str, int, str], ...] = ()
+    archived: bool = False
 
     @property
     def key(self) -> tuple[str, int]:
@@ -114,6 +115,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                     str(person.get("login") or "") for person in (content.get("assignees") or {}).get("nodes") or []
                 ),
                 blocked_by=_open_blockers(content),
+                archived=bool(node.get("isArchived")),
             )
         )
     return found
@@ -229,8 +231,9 @@ def anomalies(
     pulses: list,
     missing: list[tuple[str, int, str]] | None = None,
     me: str = "",
+    archived: list[Story] | None = None,
 ) -> list[Anomaly]:
-    """Every disagreement worth a line: a wrong Status, a story off the board, a stall, a cycle."""
+    """Every disagreement worth a line: a wrong Status, a story off the board or archived, a stall, a cycle."""
     on: dict[str, list[str]] = {}
     for beat in pulses:
         if beat.story != sessions.FREE and beat.idle < ACTIVE:
@@ -260,6 +263,12 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
+    for story in archived or []:
+        # Archiving is how finished work leaves the board, so only a story still in play is wrong.
+        if not touched(story) or story.status == columns.DONE:
+            continue
+        what = f"archived, and still {story.status or 'off the board'}"
+        out.append(Anomaly(story.number, story.repo, what, "unarchive it on the board"))
     return out
 
 
@@ -272,6 +281,7 @@ class Fleet:
     behind: set[Key]
     missing: list[tuple[str, int, str]]
     me: str = ""
+    archived: list[Story] = field(default_factory=list)
 
 
 def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
@@ -294,8 +304,13 @@ def _missing(found: list[Story]) -> list[tuple[str, int, str]]:
 
 
 def read(settings: Settings) -> Fleet:
-    """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request."""
-    found = stories(_nodes(settings))
+    """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request.
+
+    Archived items are read so an archived story can be named, and held apart from the rest, because
+    the project archives finished work by itself and those closed items would bury the stories.
+    """
+    every = stories(_nodes(settings))
+    found = [story for story in every if not story.archived]
     blockers: Blockers = {
         story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE
     }
@@ -313,4 +328,11 @@ def read(settings: Settings) -> Fleet:
             continue  # a pull request gh cannot read says nothing about main; the row stands without it
         if state in issue.BEHIND:
             behind.add(story.key)
-    return Fleet(stories=found, blockers=blockers, behind=behind, missing=_missing(found), me=gh.login())
+    return Fleet(
+        stories=found,
+        blockers=blockers,
+        behind=behind,
+        missing=_missing(every),
+        me=gh.login(),
+        archived=[story for story in every if story.archived],
+    )

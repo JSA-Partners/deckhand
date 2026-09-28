@@ -15,7 +15,7 @@ from deckhand.config import Settings
 # gh --paginate advances the cursor only when the variable is named endCursor.
 ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
-    "projectV2(number:$number){ items(first:100, after:$endCursor){ "
+    "projectV2(number:$number){ items(first:100, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
     "pageInfo{ hasNextPage endCursor } nodes{ "
     "content{ ... on Issue{ number closedAt title body repository{ nameWithOwner } } } "
     "fieldValues(first:30){ nodes{ "

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def test_a_started_story_can_only_be_in_progress():
     assert fleet.allowed(_story(120)) == ("In Progress",)
 
 
-def test_a_story_with_a_pull_request_is_pending_review():
+def test_a_story_with_a_pull_request_is_in_review():
     """finish writes In Review, and nothing moves a story back out of it."""
     assert fleet.allowed(_story(117)) == ("In Review",)
 
@@ -342,3 +343,35 @@ def test_a_loop_through_a_draft_names_every_story_on_it():
     entry = next(item for item in found if item.number == 257 and "circle" in item.what)
     assert entry.what == "blockers run in a circle: #257 -> #268 -> #253 -> #257"
     assert entry.fix == "captain apply --unblock on one edge"
+
+
+def test_an_archived_item_is_set_aside_rather_than_listed():
+    """An archived story is read in so it can be reported, and kept out of the board's own tables."""
+    nodes = _nodes()
+    for node in nodes:
+        if (node.get("content") or {}).get("number") == 117:
+            node["isArchived"] = True
+    found = {story.number: story for story in fleet.stories(nodes)}
+    assert found[117].archived is True
+    assert found[253].archived is False
+
+
+def test_an_archived_story_the_process_owns_is_an_anomaly():
+    """Archiving hides a story from every board read, so the one deckhand still owns has to be named."""
+    archived = [dataclasses.replace(_story(120), archived=True)]
+    found = fleet.anomalies([], {}, set(), [], archived=archived)
+    assert [(a.number, a.what, a.fix) for a in found] == [
+        (120, "archived, and still In Progress", "unarchive it on the board")
+    ]
+
+
+def test_an_archived_story_that_is_done_is_not_an_anomaly():
+    """Archiving finished work is what the project's own workflow is for; 90 items arrived that way."""
+    archived = [dataclasses.replace(fleet.stories(_closed("Done"))[0], archived=True)]
+    assert fleet.anomalies([], {}, set(), [], archived=archived) == []
+
+
+def test_an_archived_issue_the_process_never_wrote_to_is_not_an_anomaly():
+    """A board carries issues that are not deckhand's, and archiving one of those is nobody's business."""
+    archived = [dataclasses.replace(fleet.stories(_foreign("Backlog"))[0], archived=True)]
+    assert fleet.anomalies([], {}, set(), [], archived=archived) == []

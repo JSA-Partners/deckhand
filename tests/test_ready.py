@@ -265,6 +265,26 @@ def test_context_lists_the_stories_a_blocker_could_be(fake_gh):
     assert "#248" not in listed
 
 
+def test_a_closed_issue_is_not_offered_as_a_blocker(fake_gh, tmp_path):
+    """The list says open stories, and with archived items in the read the closed ones would flood it."""
+
+    def _reopen_the_column(nodes):
+        for node in nodes:
+            if (node.get("content") or {}).get("number") == 210:
+                for value in node["fieldValues"]["nodes"]:
+                    if (value.get("field") or {}).get("name") == "Status":
+                        value["name"] = "In Review"
+
+    env = {**REVIEWED, **_items_file(tmp_path, "closed-not-done.json", _reopen_the_column)}
+
+    result = run_deckhand("ready", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    listed = result.stdout.split("Could block this story:")[1]
+    assert "#210" not in listed
+    assert "#300" in listed
+
+
 def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
     env = _wrapper(tmp_path, "#!/usr/bin/env bash\necho nope >&2\nexit 1\n")
 
