@@ -133,8 +133,8 @@ a new story in any repository of the project, carrying what the session learned.
 who holds it, every open Claude Code session on this machine and what it is working on, and opens
 with what to run next and where.
 After that, ask it anything: what is blocked, what a session is up to, what to pick up. It writes
-to the board only, to put the backlog in build order, add a blocker a story gained late, or move a
-story back to the column its log says it belongs in.
+to the board only, to put the backlog in build order, add a blocker a story gained late, or board a
+story it owns that never reached the board.
 
 Ask it for a forecast and it gives a stakeholder two numbers for everything left on the board: a
 floor, from the critical path through the blockers and how many stories run at once, and a
