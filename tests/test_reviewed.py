@@ -106,3 +106,52 @@ def test_apply_refuses_an_empty_summary_and_writes_nothing(fake_gh, gh_calls, re
     assert [c for c in gh_calls() if c.startswith("issue comment")] == []
     with pytest.raises(subprocess.CalledProcessError):
         _git(repo, "rev-parse", "--verify", reviewed.ref_name(NUMBER))
+
+
+def test_apply_refuses_when_the_story_has_a_branch_and_this_is_not_it(fake_gh, gh_calls, repo):
+    """A review runs in the story's worktree; recording main's commit would only fail later at finish."""
+    _git(repo, "branch", f"feat/{NUMBER}-guest-collections")
+
+    result = _apply(repo, "Clean pass.")
+
+    assert result.returncode == 1
+    assert result.stderr == (
+        f"deckhand reviewed apply: #{NUMBER} is built on feat/{NUMBER}-guest-collections; "
+        f"this is main. Run it in that worktree.\n"
+    )
+    assert [c for c in gh_calls() if c.startswith("issue comment")] == []
+    with pytest.raises(subprocess.CalledProcessError):
+        _git(repo, "rev-parse", "--verify", reviewed.ref_name(NUMBER))
+
+
+def test_apply_records_the_pass_on_the_storys_own_branch(fake_gh, repo, tmp_path):
+    copy = tmp_path / "comment.md"
+    _git(repo, "checkout", "-q", "-b", f"feat/{NUMBER}-guest-collections")
+    head = _sha(repo, "HEAD")
+
+    result = _apply(repo, "Clean pass.", env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert _sha(repo, reviewed.ref_name(NUMBER)) == head
+
+
+def test_apply_records_the_pass_when_the_clone_has_no_branch_for_the_story(fake_gh, repo, tmp_path):
+    """A story reviewed before it had a branch of its own is still a pass this clone can record."""
+    copy = tmp_path / "comment.md"
+
+    result = _apply(repo, "Clean pass.", env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert _sha(repo, reviewed.ref_name(NUMBER)) == _sha(repo, "HEAD")
+
+
+def test_apply_records_the_pass_when_the_clone_cannot_say_which_branch_is_the_storys(fake_gh, repo, tmp_path):
+    """Two branches for one number is a question this cannot answer, and the gate at finish still holds."""
+    copy = tmp_path / "comment.md"
+    _git(repo, "branch", f"feat/{NUMBER}-one")
+    _git(repo, "branch", f"feat/{NUMBER}-two")
+
+    result = _apply(repo, "Clean pass.", env={"GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert _sha(repo, reviewed.ref_name(NUMBER)) == _sha(repo, "HEAD")
