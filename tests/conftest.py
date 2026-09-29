@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import cli, gh
+from deckhand import cli, gh, issue
 from deckhand.config import Settings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,8 +18,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(autouse=True)
 def _clear_repo_slug_cache() -> None:
-    """repo_slug() is memoized in the process; clear it before each test so fixtures don't leak across tests."""
+    """repo_slug() and ensure_label() are memoized in the process; clear them so fixtures don't leak."""
     gh.repo_slug.cache_clear()
+    issue.ensure_label.cache_clear()
 
 
 @pytest.fixture

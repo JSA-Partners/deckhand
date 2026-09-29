@@ -259,6 +259,12 @@ elif head == "api graphql":
         and bump("item") <= int(os.environ["GH_ITEM_MISSING_CALLS"])
     ):
         respond('{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}')
+    if "issueOrPullRequest(" in joined:
+        if os.environ.get("GH_RELATED_ERROR"):
+            sys.stdout.write(fixture("GH_RELATED_FILE", "graphql-related.json"))
+            sys.stderr.write(os.environ["GH_RELATED_ERROR"] + "\n")
+            sys.exit(1)
+        respond(fixture("GH_RELATED_FILE", "graphql-related.json"))
     respond(fixture("GH_GRAPHQL_FILE", "graphql-item.json"))
 elif argv and argv[0] == "api":
     value_flags = {"-H", "--header", "-q", "--jq", "-X", "--method", "-f", "-F", "--input"}

@@ -94,6 +94,25 @@ def test_a_story_in_verification_says_how_many_items_are_left():
     assert fleet.note(two, [], behind=False) == "merged, 2 items left"
 
 
+def _in(status: str, body: str):
+    story = _story(253)
+    return dataclasses.replace(story, status=status, issue=dataclasses.replace(story.issue, body=body))
+
+
+def test_a_parked_feature_is_a_draft_to_settle():
+    assert fleet.note(_in("Draft", "## Requirements\n\nA feature.\n"), [], behind=False) == "draft to settle"
+
+
+def test_a_draft_with_stories_named_is_a_draft_to_write():
+    body = "## Requirements\n\nA feature.\n\n## Stories\n\n1. #57 Grant endpoint | Persist grants.\n"
+    assert fleet.note(_in("Draft", body), [], behind=False) == "draft to write"
+
+
+def test_a_written_story_below_ready_is_review_not_run():
+    body = "### Story\n\nAs a user, I want x, so that y.\n"
+    assert fleet.note(_in("Refinement", body), [], behind=False) == "review not run"
+
+
 BLOCKERS = {
     ("acme/widgets", 257): [("acme/widgets", 253, "Seed the role matrix")],
     ("acme/gadgets", 258): [("acme/widgets", 257, "Export the role matrix")],

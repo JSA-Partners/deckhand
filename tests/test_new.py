@@ -504,7 +504,15 @@ def test_context_on_a_parked_feature_offers_the_draft_and_the_split(fake_gh, tmp
 # --- apply --draft ------------------------------------------------------------
 
 
-CHANGES = ("issue create", "issue edit", "issue close", "issue comment", "project item-add", "project item-edit")
+CHANGES = (
+    "label create",
+    "issue create",
+    "issue edit",
+    "issue close",
+    "issue comment",
+    "project item-add",
+    "project item-edit",
+)
 
 
 def _writes(calls: list[str]) -> list[str]:
@@ -760,7 +768,9 @@ def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_
     _dispatch(lines[-1])
     calls = gh_calls()
     # Every stub is boarded as Draft with no log line: the author who writes it is the one who drafts it.
+    assert all(c.endswith("--label deckhand") for c in calls if c.startswith("issue create"))
     assert _calls(_writes(calls)) == [
+        "label create deckhand --repo acme/widgets --color 5319e7 --description A story deckhand runs",
         *[f"issue create --repo acme/widgets --title {story}" for story in STORIES],
         *[
             write

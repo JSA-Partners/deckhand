@@ -83,6 +83,36 @@ def test_create_rejects_unexpected_output(fake_gh, monkeypatch):
         issue.create(REPO, "A title", TRICKY_BODY)
 
 
+def test_create_labels_the_issue(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "deckhand"}]))
+    issue.create(REPO, "A title", TRICKY_BODY)
+    (call,) = [c for c in gh_calls() if c.startswith("issue create")]
+    assert " --label deckhand" in call
+
+
+def test_create_makes_the_label_where_it_is_missing(fake_gh, gh_calls):
+    issue.create(REPO, "A title", TRICKY_BODY)
+    calls = gh_calls()
+    assert calls[:2] == [
+        "label list --repo acme/widgets --limit 200 --json name",
+        "label create deckhand --repo acme/widgets --color 5319e7 --description A story deckhand runs",
+    ]
+    assert calls[2].startswith("issue create --repo acme/widgets --title A title")
+
+
+def test_create_leaves_a_label_that_is_there(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "deckhand"}]))
+    issue.create(REPO, "A title", TRICKY_BODY)
+    assert not [c for c in gh_calls() if c.startswith("label create")]
+
+
+def test_the_label_is_checked_once_per_repository(fake_gh, gh_calls, monkeypatch):
+    monkeypatch.setenv("GH_LABELS", json.dumps([{"name": "deckhand"}]))
+    issue.create(REPO, "A title", TRICKY_BODY)
+    issue.create(REPO, "Another title", TRICKY_BODY)
+    assert len([c for c in gh_calls() if c.startswith("label list")]) == 1
+
+
 # --- update_body ------------------------------------------------------------
 
 

@@ -9,17 +9,13 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from deckhand import board, columns, gh
+from deckhand import board, columns, gh, issue
 from deckhand.config import Settings
 from deckhand.step import reason
 
 BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"]
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"
-
-# The one label the story state needs: the board cannot say an issue is deckhand's, because it
-# carries issues that are not, and this makes the fleet read one query.
-LABEL = ("deckhand", "5319e7", "A story deckhand runs")
 
 # Built-in project workflows that write what deckhand owns. Auto-archive items is deliberately not
 # here: it is the only built-in that never touches Status.
@@ -151,7 +147,7 @@ def _workflows_item(settings: Settings) -> Item:
 
 
 def _label_item(repo: str | None) -> Item:
-    name, _, _ = LABEL
+    name, _, _ = issue.LABEL
     click = "Repository > Issues > Labels"
     if not repo:
         return Item("Label", click, f"{UNKNOWN}no repository)")

@@ -22,7 +22,7 @@ import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from deckhand import board, columns, config, draft, fields, gh, git, issue, log, sections, worktree
+from deckhand import board, columns, config, draft, fields, gh, git, issue, log, related, sections, worktree
 from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
@@ -317,6 +317,18 @@ def _worktree(name: str, branch: str | None) -> tuple[str | None, str | None]:
         return f"Worktree: unavailable ({reason(error)})", None
 
 
+def _related_block(repo: str, number: int, story: issue.Issue, skip: frozenset[tuple[str, int]]) -> None:
+    """The issues the story names or is linked to, with their state and column, or why they are not."""
+    try:
+        found = related.read(config.load(), repo, number, story.body, skip)
+    except Exception as error:
+        print(f"Related: unavailable ({reason(error)})")
+        return
+    print("Related:" if found else "Related: none")
+    for line in related.lines(found, repo):
+        print(f"  {line}")
+
+
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("issue", type=issue_number, nargs="?", default=None, help="the issue number")
 
@@ -347,11 +359,15 @@ def context(args: argparse.Namespace) -> int:
         print(f"Issue: {story.url}")
     if line:
         print(line)
+    printed: frozenset[tuple[str, int]] = frozenset()
     if name in ("wait", "build", "resume") and facts.blockers:
+        printed = frozenset((where, n) for where, n, _ in issue.blockers(repo, number))
         print("Blocked by:")
         for blocker in facts.blockers:
             print(f"  {blocker}")
     _log_block(story)
+    if repo and story and not facts.closed:
+        _related_block(repo, number, story, printed)
     if name in CONTEXT_OF:
         _context(name, number)
         # The after context lists the items and names the tick, so only what the session still owes

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import draft, naming, sections
+from deckhand import draft, lint, naming, sections
 from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
@@ -89,7 +89,7 @@ def _story(tmp_path: Path, name: str, *, notes: str | None = None, review: str |
 
 def _writes(gh_calls) -> list[str]:
     """The recorded calls that write, with the temp body-file path cut off."""
-    starts = ("issue create", "issue edit", "issue comment", "api -X POST")
+    starts = ("label create", "issue create", "issue edit", "issue comment", "api -X POST")
     return [call.split(" --body-file")[0] for call in gh_calls() if call.startswith(starts)]
 
 
@@ -136,6 +136,15 @@ def test_context_prints_the_body_rules_and_the_shape(fake_gh):
     assert result.returncode == 0, result.stderr
     assert "Plan holds at least a '### Task 1' block." in result.stdout
     assert "### Acceptance Criteria" in result.stdout
+
+
+def test_context_prints_the_budget_in_file_characters(fake_gh):
+    bare = sections.bare(REVIEW["body"])
+    result = run_deckhand("amend", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    budget = f"Budget: the file may be {lint.budget(bare)} characters; the body is {len(bare)} now"
+    assert budget in result.stdout.splitlines()
 
 
 def test_context_prints_the_body_without_the_fold(fake_gh, tmp_path):
@@ -353,6 +362,7 @@ def test_apply_writes_the_body_then_posts_the_amend_as_a_comment(fake_gh, gh_cal
     assert result.stdout.splitlines() == [
         "Updated #248 https://github.com/acme/widgets/issues/248",
         "Logged Amended",
+        "Status=Refinement",
     ]
     bodies = _bodies(copy)
     assert bodies["edit"] == sections.render(*sections.parse(BODY))
@@ -488,7 +498,7 @@ def test_amend_accepts_a_plan_change_when_backlog(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Logged Amended"
+    assert result.stdout.splitlines()[1:] == ["Logged Amended", "Status=Refinement"]
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -526,14 +536,15 @@ def test_apply_moves_an_unboarded_story_to_refinement(fake_gh, gh_calls, tmp_pat
     assert "--field-id PVTSSF_STATUS --single-select-option-id opt_refinement" in "\n".join(gh_calls())
 
 
-def test_apply_leaves_the_column_alone_once_the_story_is_boarded(fake_gh, gh_calls, tmp_path):
-    """A boarded story's column belongs to the step that put it there, so an amend must not move it."""
+def test_apply_moves_a_boarded_story_back_to_refinement(fake_gh, gh_calls, tmp_path):
+    """A plan changed after its review has to be reviewed again before it is built."""
     result = run_deckhand(
         "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, "Backlog")
     )
 
     assert result.returncode == 0, result.stderr
-    assert not any("PVTSSF_STATUS" in call for call in gh_calls())
+    assert "--field-id PVTSSF_STATUS --single-select-option-id opt_refinement" in "\n".join(gh_calls())
+    assert "Status=Refinement" in result.stdout.splitlines()
 
 
 # --- apply, a story of its own ------------------------------------------------
@@ -556,7 +567,9 @@ def test_new_issue_boards_the_new_story_as_refinement_and_logs_split_and_drafted
         "Logged Drafted",
         "Logged Split",
     ]
+    assert any(c.startswith("issue create") and c.endswith("--label deckhand") for c in gh_calls())
     assert _writes(gh_calls) == [
+        "label create deckhand --repo acme/widgets --color 5319e7 --description A story deckhand runs",
         f"issue create --repo acme/widgets --title {TITLE}",
         "api -X POST repos/acme/widgets/issues/999/dependencies/blocked_by -F issue_id=5099965156",
         "issue comment 999 --repo acme/widgets",
@@ -593,19 +606,24 @@ def test_new_issue_refuses_a_bad_body(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls) == []
 
 
-def test_note_and_new_issue_are_exclusive(fake_gh, gh_calls, tmp_path):
+def test_note_and_new_issue_together_are_refused(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, "--new-issue", TITLE)
 
-    assert result.returncode == 2
-    assert "not allowed with" in result.stderr
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: --new-issue opens the file as its own story and logs the Split here; "
+        "amend this story first with its own --note\n"
+    )
     assert _writes(gh_calls) == []
 
 
 def test_apply_needs_one_of_the_two_modes(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path))
 
-    assert result.returncode == 2
-    assert "one of the arguments" in result.stderr
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: say what to do: --note for an amend, --new-issue to split the file out\n"
+    )
     assert _writes(gh_calls) == []
 
 
@@ -738,7 +756,8 @@ def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Updated #248 https://github.com/acme/widgets/issues/248", "Logged Amended"]
-    assert lines[2].startswith("Body is ")
+    assert lines[2] == "Status=Refinement"
+    assert lines[3].startswith("Body is ")
 
 
 # --- which way a split runs ----------------------------------------------------

@@ -12,8 +12,8 @@ The body mode never rewrites more than the model drafted: the draft's section he
 the ones the issue carries, so a body that lost a section is a refusal rather than a silent deletion.
 The body freezes once the story starts, which the board says as In Progress, In Review, or
 Done: a discovery during execution is a `Deviation:` entry or a new issue, never a rewritten story.
-A story still short of the board reaches Refinement, because an amend of one is somebody working it
-up; a story the board has already approved keeps the column the step that put it there wrote.
+A story short of the started columns, Backlog included, returns to Refinement, because an amend of
+one is somebody working it up; only a started story keeps its column, frozen.
 
 The record is the issue's own log, not a block inside the story: every amend posts one `Amended:`
 entry, so the body the draft carries reaches GitHub as it was drafted and the log reads in the order
@@ -60,10 +60,14 @@ FROZEN_CONTEXT = (
 )
 STARTED = (columns.IN_PROGRESS, columns.IN_REVIEW, columns.DONE)
 # An unread column reads the same as none, so writing on either could demote a story that had started.
-WORKED_UP = (columns.DRAFT, columns.REFINEMENT, columns.READY)
+WORKED_UP = (columns.DRAFT, columns.REFINEMENT, columns.READY, columns.BACKLOG)
 DRAFT_RULE = "Write the whole edited draft to the file it names; change the Requirements and keep the Stories list."
 STORIES_CHANGED = "the Stories list changed; a draft's stories change only through a split"
 ELSEWHERE = "--new-issue opens its story in this repository; --repo is only for --note"
+BOTH_MODES = (
+    "--new-issue opens the file as its own story and logs the Split here; amend this story first with its own --note"
+)
+NO_MODE = "say what to do: --note for an amend, --new-issue to split the file out"
 
 
 def _draft_name(number: int) -> str:
@@ -152,6 +156,9 @@ def context(args: argparse.Namespace) -> int:
         print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
     print()
+    if not isinstance(story, Exception):
+        bare = sections.bare(story.body)
+        print(f"Budget: the file may be {lint.budget(bare)} characters; the body is {len(bare)} now")
     print(file_line("Rewrite", _draft_name(args.issue), args.repo))
     print(DRAFT_RULE if a_draft else BODY_RULE)
     print(invoke.apply_line("amend", str(args.issue), "<file>", *elsewhere, '--note "<why>"'))
@@ -239,7 +246,7 @@ def _amend(repo: str, number: int, edited: str, note: str, title_flag: str | Non
         raise Refusal(FROZEN)
     _write(repo, number, body, title, note, story)
     _refine(repo, number, status)
-    if (room := lint.headroom(body)) is not None:
+    if (room := lint.headroom(body, given=edited)) is not None:
         print(room)
     return 0
 
@@ -291,9 +298,8 @@ def _new_issue(repo: str, number: int, edited: str, title: str, before: bool) ->
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("file", type=Path, nargs="?", help="the drafted body; omit it to change the title alone")
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--note", help="one line saying what changed and why")
-    mode.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
+    parser.add_argument("--note", help="one line saying what changed and why")
+    parser.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
     parser.add_argument("--title", help="with --note: the story's new title, alone when no draft is given")
     parser.add_argument("--repo", metavar="OWNER/NAME", help="with --note: the issue's repository, when not this one")
     parser.add_argument(
@@ -312,6 +318,10 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
 @step("amend", _configure, rules=BODY_RULES, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
     """Amend a story or a draft from the edited body, or split it out as its own blocked story."""
+    if args.note is not None and args.new_issue is not None:
+        raise Refusal(BOTH_MODES)
+    if args.note is None and args.new_issue is None:
+        raise Refusal(NO_MODE)
     if args.before and args.new_issue is None:
         args.usage.error("--before is only for --new-issue")
     if args.repo is not None and args.new_issue is not None:

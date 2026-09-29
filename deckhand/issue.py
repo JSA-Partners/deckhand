@@ -5,6 +5,7 @@ Bodies always travel through a temp file, so quoting never matters and a body of
 
 from __future__ import annotations
 
+import functools
 import re
 import tempfile
 from collections.abc import Iterator
@@ -15,6 +16,8 @@ from typing import Any
 from deckhand import gh
 
 VIEW_FIELDS = "number,title,body,url,state,comments,labels"
+# The board cannot say an issue is deckhand's, because it carries issues that are not; this label does.
+LABEL = ("deckhand", "5319e7", "A story deckhand runs")
 
 _ISSUE_URL = re.compile(r"https://\S+/issues/([0-9]+)(?:#\S+)?")
 
@@ -99,11 +102,22 @@ def list_open(repo: str) -> list[int]:
 
 
 def create(repo: str, title: str, body: str) -> tuple[int, str]:
-    """Create an issue; returns its `(number, url)`."""
+    """Create an issue carrying the marker label; returns its `(number, url)`."""
     gh.split_repo(repo)
+    ensure_label(repo)
     with _body_file(body) as path:
-        output = gh.run("issue", "create", "--repo", repo, "--title", title, "--body-file", path)
+        output = gh.run("issue", "create", "--repo", repo, "--title", title, "--body-file", path, "--label", LABEL[0])
     return _parsed_url(output, "issue create")
+
+
+@functools.cache
+def ensure_label(repo: str, known: tuple[str, ...] | None = None) -> bool:
+    """Create the marker label in `repo` unless it is there, `known` being the names already read; True when created."""
+    name, color, description = LABEL
+    if name in (gh.labels(repo) if known is None else known):
+        return False
+    gh.create_label(repo, name, color, description)
+    return True
 
 
 def update_body(repo: str, number: int, body: str) -> None:
@@ -126,15 +140,6 @@ def assign(repo: str, number: int, login: str = "@me") -> None:
     """
     gh.split_repo(repo)
     gh.run("issue", "edit", str(number), "--repo", repo, "--add-assignee", login)
-
-
-def add_label(repo: str, number: int, name: str) -> None:
-    """Add `name` to the issue's labels, leaving the ones already there alone.
-
-    GitHub takes a label it already holds as a no-op, so a story marked twice costs nothing.
-    """
-    gh.split_repo(repo)
-    gh.run("issue", "edit", str(number), "--repo", repo, "--add-label", name)
 
 
 def close(repo: str, number: int) -> None:

@@ -388,6 +388,6 @@ def _write(args: argparse.Namespace) -> int:
     number, url = issue.create(repo, subject, body)
     print(f"Created #{number} {url}", flush=True)
     park.board_draft(settings, repo, number, url, DRAFTED, columns.REFINEMENT)
-    if (note := lint.headroom(body)) is not None:
+    if (note := lint.headroom(body, given=edited)) is not None:
         print(note)
     return 0
