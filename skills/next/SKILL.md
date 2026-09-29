@@ -111,7 +111,7 @@ amend step. A decision that changes an issue in another repository before it sta
 `amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
 on or review what is there, recommending carry on while tasks are left, which skips the tasks the
 commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what does not
-depend on it, then stop. A branch that is built but must not merge before another story: run
+depend on it, then stop. A story that must not start or merge before another: run
 `captain apply --block $issue --by M`, run `log $issue "Noted: <why>"`, and stop.
 
 ## Branch review
