@@ -353,6 +353,7 @@ def test_apply_writes_the_body_then_posts_the_amend_as_a_comment(fake_gh, gh_cal
     assert result.stdout.splitlines() == [
         "Updated #248 https://github.com/acme/widgets/issues/248",
         "Logged Amended",
+        "Status=Refinement",
     ]
     bodies = _bodies(copy)
     assert bodies["edit"] == sections.render(*sections.parse(BODY))
@@ -488,7 +489,7 @@ def test_amend_accepts_a_plan_change_when_backlog(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Logged Amended"
+    assert result.stdout.splitlines()[1:] == ["Logged Amended", "Status=Refinement"]
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -526,14 +527,15 @@ def test_apply_moves_an_unboarded_story_to_refinement(fake_gh, gh_calls, tmp_pat
     assert "--field-id PVTSSF_STATUS --single-select-option-id opt_refinement" in "\n".join(gh_calls())
 
 
-def test_apply_leaves_the_column_alone_once_the_story_is_boarded(fake_gh, gh_calls, tmp_path):
-    """A boarded story's column belongs to the step that put it there, so an amend must not move it."""
+def test_apply_moves_a_boarded_story_back_to_refinement(fake_gh, gh_calls, tmp_path):
+    """A plan changed after its review has to be reviewed again before it is built."""
     result = run_deckhand(
         "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, env=_status_reads(tmp_path, "Backlog")
     )
 
     assert result.returncode == 0, result.stderr
-    assert not any("PVTSSF_STATUS" in call for call in gh_calls())
+    assert "--field-id PVTSSF_STATUS --single-select-option-id opt_refinement" in "\n".join(gh_calls())
+    assert "Status=Refinement" in result.stdout.splitlines()
 
 
 # --- apply, a story of its own ------------------------------------------------
@@ -740,7 +742,8 @@ def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Updated #248 https://github.com/acme/widgets/issues/248", "Logged Amended"]
-    assert lines[2].startswith("Body is ")
+    assert lines[2] == "Status=Refinement"
+    assert lines[3].startswith("Body is ")
 
 
 # --- which way a split runs ----------------------------------------------------
