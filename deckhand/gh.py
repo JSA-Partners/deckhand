@@ -42,7 +42,11 @@ LINKED_QUERY = (
 
 
 class GhError(Exception):
-    """gh exited non-zero; the message is gh's stderr."""
+    """gh exited non-zero; the message is gh's stderr and `stdout` is what it printed."""
+
+    def __init__(self, message: str, stdout: str = "") -> None:
+        super().__init__(message)
+        self.stdout = stdout
 
 
 _cache: dict[tuple[tuple[str, ...], str | None], str] | None = None
@@ -76,7 +80,8 @@ def run(*args: str, stdin: str | None = None) -> str:
     except FileNotFoundError as error:
         raise GhError("the GitHub CLI (gh) is not installed or not on PATH") from error
     if result.returncode != 0:
-        raise GhError(result.stderr.strip() or f"gh {' '.join(args)} failed with status {result.returncode}")
+        message = result.stderr.strip() or f"gh {' '.join(args)} failed with status {result.returncode}"
+        raise GhError(message, result.stdout)
     if _cache is not None:
         _cache[key] = result.stdout
     return result.stdout

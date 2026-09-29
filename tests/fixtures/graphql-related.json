@@ -1,0 +1,32 @@
+{
+  "data": {
+    "r0": {
+      "i253": {
+        "number": 253,
+        "title": "Seed the role matrix",
+        "state": "CLOSED",
+        "projectItems": {"nodes": [{"project": {"number": 2}, "fieldValueByName": {"name": "Done"}}]}
+      },
+      "i257": {
+        "number": 257,
+        "title": "Export the role matrix",
+        "state": "OPEN",
+        "projectItems": {"nodes": [{"project": {"number": 2}, "fieldValueByName": {"name": "Backlog"}}]}
+      },
+      "i281": {
+        "number": 281,
+        "title": "Cut over to the authority",
+        "state": "MERGED",
+        "projectItems": {"nodes": []}
+      }
+    },
+    "r1": {
+      "i13": {
+        "number": 13,
+        "title": "Deploy",
+        "state": "OPEN",
+        "projectItems": {"nodes": [{"project": {"number": 9}, "fieldValueByName": {"name": "Todo"}}]}
+      }
+    }
+  }
+}

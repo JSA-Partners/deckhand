@@ -242,7 +242,7 @@ def test_the_log_block_says_none_without_an_entry(fake_gh, repo, tmp_path):
     result = _next(repo, env=fieldvalues(tmp_path, None))
 
     lines = _briefing(result, "review", "Not reviewed.")
-    assert lines[5:7] == ["  none", ""]
+    assert lines[5:8] == ["  none", "Related: none", ""]
 
 
 def test_the_log_block_is_the_last_three_entries(fake_gh, repo, tmp_path):
@@ -257,10 +257,11 @@ def test_the_log_block_is_the_last_three_entries(fake_gh, repo, tmp_path):
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Ready")})
 
     lines = _briefing(result, "board", "Reviewed, nothing waiting.")
-    assert lines[5:9] == [
+    assert lines[5:10] == [
         "  2026-09-02 Review: sound",
         "  2026-09-03 Amended: dropped the second criterion",
         "  2026-09-04 Review: sound",
+        "Related: none",
         "",
     ]
 
@@ -413,7 +414,7 @@ def test_merge_prints_the_link_and_nothing_more(fake_gh, repo, origin, branch, t
     result = _next(repo, env={**fieldvalues(tmp_path, "In Progress"), "GH_PR_EXISTS": "1"})
 
     lines = _briefing(result, "merge", f"Pull request open: {PR_URL}")
-    assert lines[5:] == ["  none"]
+    assert lines[5:] == ["  none", "Related: none"]
 
 
 def test_the_pull_request_is_found_when_the_branch_is_elsewhere(fake_gh, gh_calls, repo, tmp_path):
@@ -679,7 +680,7 @@ def test_a_story_in_a_column_next_cannot_act_on_stops(fake_gh, repo, tmp_path):
     result = _next(repo, env=fieldvalues(tmp_path, "In Review"))
 
     lines = _briefing(result, "stop", "#248 is In Review with no open pull request; nothing decided.")
-    assert lines[5:] == ["  none"]
+    assert lines[5:] == ["  none", "Related: none"]
 
 
 # --- worktrees ----------------------------------------------------------------
@@ -725,6 +726,65 @@ def test_the_briefing_has_no_worktree_line_from_inside_it(fake_gh, repo, origin,
 
     _briefing(result, "build", "Started, nothing built yet.")
     assert "Worktree:" not in result.stdout
+
+
+def test_the_briefing_lists_what_the_story_names(fake_gh, repo, origin, tmp_path):
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data["body"] = data["body"].replace("### Notes", "### Notes\n\nFollows #253 and #257.", 1)
+    path = tmp_path / "named.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = _next(repo, env={"GH_ISSUE_FILE": str(path), **fieldvalues(tmp_path, "Backlog")})
+
+    lines = result.stdout.splitlines()
+    start = lines.index("Related:")
+    assert lines[start + 1 : start + 3] == [
+        "  #253 closed Done Seed the role matrix",
+        "  #257 open Backlog Export the role matrix",
+    ]
+    assert lines.index("Log:") < start < lines.index("## Context")
+
+
+def test_a_blocker_is_not_listed_again_under_related(fake_gh, repo, tmp_path):
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data["body"] += "\n\nNeeds acme/gadgets#9 and #253."
+    (tmp_path / "named.json").write_text(json.dumps(data), encoding="utf-8")
+    env = {
+        "GH_ISSUE_FILE": str(tmp_path / "named.json"),
+        "GH_BLOCKED_BY": ELSEWHERE,
+        **fieldvalues(tmp_path, "Backlog"),
+    }
+
+    lines = _next(repo, env=env).stdout.splitlines()
+
+    assert "  acme/gadgets#9  Endpoint" in lines
+    start = lines.index("Related:")
+    assert [line for line in lines[start + 1 :] if "gadgets#9" in line] == []
+    assert "  #253 closed Done Seed the role matrix" in lines[start + 1 :]
+
+
+def test_the_briefing_survives_a_failed_related_query(fake_gh, repo, origin, tmp_path):
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data["body"] += "\n\nFollows #253."
+    (tmp_path / "named.json").write_text(json.dumps(data), encoding="utf-8")
+    (tmp_path / "bad.json").write_text("not json", encoding="utf-8")
+    env = {
+        "GH_ISSUE_FILE": str(tmp_path / "named.json"),
+        "GH_RELATED_ERROR": "boom",
+        "GH_RELATED_FILE": str(tmp_path / "bad.json"),
+        **fieldvalues(tmp_path, "Backlog"),
+    }
+
+    result = _next(repo, env=env)
+
+    assert "Related: unavailable (boom)" in result.stdout.splitlines()
+    assert "## Context" in result.stdout.splitlines()
+
+
+def test_the_briefing_says_when_nothing_is_related(fake_gh, repo, origin, tmp_path):
+    result = _next(repo, env=fieldvalues(tmp_path, "Backlog"))
+
+    assert "Related: none" in result.stdout.splitlines()
 
 
 def test_done_from_the_clone_removes_the_worktree_and_the_branch(fake_gh, repo, origin, tmp_path):
