@@ -606,19 +606,24 @@ def test_new_issue_refuses_a_bad_body(fake_gh, gh_calls, tmp_path):
     assert _writes(gh_calls) == []
 
 
-def test_note_and_new_issue_are_exclusive(fake_gh, gh_calls, tmp_path):
+def test_note_and_new_issue_together_are_refused(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path), "--note", NOTE, "--new-issue", TITLE)
 
-    assert result.returncode == 2
-    assert "not allowed with" in result.stderr
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: --new-issue opens the file as its own story and logs the Split here; "
+        "amend this story first with its own --note\n"
+    )
     assert _writes(gh_calls) == []
 
 
 def test_apply_needs_one_of_the_two_modes(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path))
 
-    assert result.returncode == 2
-    assert "one of the arguments" in result.stderr
+    assert result.returncode == 1
+    assert result.stderr == (
+        "deckhand amend apply: say what to do: --note for an amend, --new-issue to split the file out\n"
+    )
     assert _writes(gh_calls) == []
 
 

@@ -64,6 +64,10 @@ WORKED_UP = (columns.DRAFT, columns.REFINEMENT, columns.READY, columns.BACKLOG)
 DRAFT_RULE = "Write the whole edited draft to the file it names; change the Requirements and keep the Stories list."
 STORIES_CHANGED = "the Stories list changed; a draft's stories change only through a split"
 ELSEWHERE = "--new-issue opens its story in this repository; --repo is only for --note"
+BOTH_MODES = (
+    "--new-issue opens the file as its own story and logs the Split here; amend this story first with its own --note"
+)
+NO_MODE = "say what to do: --note for an amend, --new-issue to split the file out"
 
 
 def _draft_name(number: int) -> str:
@@ -294,9 +298,8 @@ def _new_issue(repo: str, number: int, edited: str, title: str, before: bool) ->
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("file", type=Path, nargs="?", help="the drafted body; omit it to change the title alone")
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--note", help="one line saying what changed and why")
-    mode.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
+    parser.add_argument("--note", help="one line saying what changed and why")
+    parser.add_argument("--new-issue", metavar="TITLE", help="open the draft as its own blocked story")
     parser.add_argument("--title", help="with --note: the story's new title, alone when no draft is given")
     parser.add_argument("--repo", metavar="OWNER/NAME", help="with --note: the issue's repository, when not this one")
     parser.add_argument(
@@ -315,6 +318,10 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
 @step("amend", _configure, rules=BODY_RULES, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
     """Amend a story or a draft from the edited body, or split it out as its own blocked story."""
+    if args.note is not None and args.new_issue is not None:
+        raise Refusal(BOTH_MODES)
+    if args.note is None and args.new_issue is None:
+        raise Refusal(NO_MODE)
     if args.before and args.new_issue is None:
         args.usage.error("--before is only for --new-issue")
     if args.repo is not None and args.new_issue is not None:
