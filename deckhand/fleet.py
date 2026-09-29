@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from deckhand import board, checklist, columns, gh, issue, sections, sessions, step
+from deckhand import board, columns, gh, issue, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -145,7 +145,7 @@ def touched(story: Story) -> bool:
     applies to them: their column was chosen by a person, and reading it as one of ours would call
     every one of them broken.
     """
-    return checklist.LABEL[0] in story.issue.labels
+    return issue.LABEL[0] in story.issue.labels
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
@@ -276,7 +276,7 @@ def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
             if (repo, number) in keys:
                 continue
             story = issue.view(repo, number)
-            if checklist.LABEL[0] in story.labels:
+            if issue.LABEL[0] in story.labels:
                 off.append((repo, number, story.url))
     return off
 

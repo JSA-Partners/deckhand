@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from deckhand import checklist, config, gh
+from deckhand import checklist, config, gh, issue
 from deckhand.checklist import Item
 from deckhand.config import SETTINGS_FILE, Settings
 from deckhand.step import Refusal, reason, step
@@ -247,15 +247,13 @@ def _print_left(items: list[Item]) -> None:
 
 def _create_label(repo: str) -> None:
     """Create the marker label; one that already exists is left alone."""
-    name, color, description = checklist.LABEL
     try:
         found = gh.labels(repo)
     except Exception as error:
         print(f"Label: unknown ({reason(error)})")
         return
-    if name not in found:
-        gh.create_label(repo, name, color, description)
-        print(f"Created label {name}")
+    if issue.ensure_label(repo, tuple(found)):
+        print(f"Created label {issue.LABEL[0]}")
 
 
 def _target(settings: Settings, repo: str, project: str, owner: str | None) -> None:

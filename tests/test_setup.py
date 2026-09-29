@@ -921,6 +921,7 @@ def test_apply_creates_the_marker_label(repo, fake_gh, gh_calls):
 
     assert result.returncode == 0, result.stderr
     assert "label create deckhand --repo" in "\n".join(gh_calls())
+    assert "Created label deckhand" in result.stdout.splitlines()
 
 
 def test_apply_leaves_an_existing_marker_alone(repo, fake_gh, gh_calls):
@@ -930,6 +931,7 @@ def test_apply_leaves_an_existing_marker_alone(repo, fake_gh, gh_calls):
 
     assert result.returncode == 0, result.stderr
     assert "label create" not in "\n".join(gh_calls())
+    assert "Created label deckhand" not in result.stdout
 
 
 # --- apply: the fields the process did not make -------------------------

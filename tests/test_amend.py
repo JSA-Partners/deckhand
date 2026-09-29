@@ -89,7 +89,7 @@ def _story(tmp_path: Path, name: str, *, notes: str | None = None, review: str |
 
 def _writes(gh_calls) -> list[str]:
     """The recorded calls that write, with the temp body-file path cut off."""
-    starts = ("issue create", "issue edit", "issue comment", "api -X POST")
+    starts = ("label create", "issue create", "issue edit", "issue comment", "api -X POST")
     return [call.split(" --body-file")[0] for call in gh_calls() if call.startswith(starts)]
 
 
@@ -556,7 +556,9 @@ def test_new_issue_boards_the_new_story_as_refinement_and_logs_split_and_drafted
         "Logged Drafted",
         "Logged Split",
     ]
+    assert any(c.startswith("issue create") and c.endswith("--label deckhand") for c in gh_calls())
     assert _writes(gh_calls) == [
+        "label create deckhand --repo acme/widgets --color 5319e7 --description A story deckhand runs",
         f"issue create --repo acme/widgets --title {TITLE}",
         "api -X POST repos/acme/widgets/issues/999/dependencies/blocked_by -F issue_id=5099965156",
         "issue comment 999 --repo acme/widgets",
