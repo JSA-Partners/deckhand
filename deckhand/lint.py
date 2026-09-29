@@ -63,6 +63,12 @@ def checked(body: str) -> str:
     return written
 
 
+def budget(body: str) -> int:
+    """How long the file for `body` may be: the limit less what folding its Plan adds."""
+    text = body.replace("\r\n", "\n")
+    return BODY_LIMIT - (len(sections.render(*sections.parse(text))) - len(text))
+
+
 def _heading(lines: list[str], pattern: re.Pattern[str]) -> int | None:
     """The index of the first line matching `pattern`, or None when no line does."""
     return next((i for i, line in enumerate(lines) if pattern.match(line)), None)
@@ -94,10 +100,12 @@ def _fold_bullets(text: str) -> list[str]:
 
 
 def _too_big(size: int, given: str | None) -> str:
-    """The size message: what the fold made it, what the file was when that differs, and how much to cut."""
+    """The size message, in the file's characters when the fold made the body longer than the file."""
     raw = None if given is None else len(given.replace("\r\n", "\n"))
-    folded = "" if raw is None or raw == size else f" once the Plan is folded (the file is {raw})"
-    return f"body is {size} characters{folded}; the limit is {BODY_LIMIT}; cut {size - BODY_LIMIT}"
+    cut = size - BODY_LIMIT
+    if raw is None or raw == size:
+        return f"body is {size} characters; the limit is {BODY_LIMIT}; cut {cut}"
+    return f"the file is {raw} characters and may be {raw - cut}; cut {cut}"
 
 
 def lint(text: str, given: str | None = None) -> list[str]:
@@ -193,12 +201,21 @@ def _criteria(body: str) -> list[str]:
 HEADROOM = 0.9  # of the limit: a body this full is one or two amends from refusing, and usually two stories
 
 
-def headroom(text: str) -> str | None:
-    """A note when the body is within `HEADROOM` of the limit, or None; the size is the one lint measures."""
+def headroom(text: str, given: str | None = None) -> str | None:
+    """A note when the body is within `HEADROOM` of the limit, or None; the size is the one lint measures.
+
+    With `given`, the file as written, the note gives the file's size against its budget.
+    """
     size = len(text.replace("\r\n", "\n"))
     if size < BODY_LIMIT * HEADROOM:
         return None
+    raw = None if given is None else len(given.replace("\r\n", "\n"))
+    figures = (
+        f"Body is {size} of {BODY_LIMIT} characters"
+        if raw is None or raw == size
+        else f"The file is {raw} of {raw + BODY_LIMIT - size} characters"
+    )
     return (
-        f"Body is {size} of {BODY_LIMIT} characters; a story this size is usually more than one, "
+        f"{figures}; a story this size is usually more than one, "
         "and the next amend may not fit: move what belongs in its own story out with --new-issue"
     )

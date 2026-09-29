@@ -55,10 +55,10 @@ def test_checked_measures_the_body_as_it_is_written():
 
     with pytest.raises(Refusal) as refused:
         lint.checked(body)
-    assert f"the limit is {BODY_LIMIT}" in str(refused.value)
+    assert f"the file is {BODY_LIMIT} characters and may be" in str(refused.value)
 
 
-def test_the_size_refusal_names_the_fold_and_what_to_cut():
+def test_the_size_refusal_speaks_in_file_characters_when_the_fold_adds_some():
     body = VALID + "x" * (BODY_LIMIT - len(VALID))
     written = sections.render(*sections.parse(body))
     over = len(written) - BODY_LIMIT
@@ -66,10 +66,28 @@ def test_the_size_refusal_names_the_fold_and_what_to_cut():
     with pytest.raises(Refusal) as refused:
         lint.checked(body)
 
-    message = str(refused.value)
-    assert "once the Plan is folded" in message
-    assert f"(the file is {BODY_LIMIT})" in message
-    assert f"cut {over}" in message
+    assert f"the file is {BODY_LIMIT} characters and may be {BODY_LIMIT - over}; cut {over}" in str(refused.value)
+
+
+def test_budget_is_the_limit_less_what_the_fold_adds():
+    folded = len(sections.render(*sections.parse(VALID))) - len(VALID)
+    assert folded > 0
+    assert lint.budget(VALID) == BODY_LIMIT - folded
+
+
+def test_budget_of_a_body_with_nothing_to_fold_is_the_limit():
+    assert lint.budget("## Requirements\n\nA feature.\n") == BODY_LIMIT
+
+
+def test_headroom_speaks_in_file_characters_when_given_the_file():
+    body = sections.bare(sections.replace(VALID, "Notes", "note " * (BODY_LIMIT // 5)))
+    written = sections.render(*sections.parse(body))
+    assert len(written) > len(body)
+
+    note = lint.headroom(written, given=body)
+
+    assert note is not None
+    assert note.startswith(f"The file is {len(body)} of {lint.budget(body)} characters")
 
 
 def test_a_missing_section_reports_only_itself():

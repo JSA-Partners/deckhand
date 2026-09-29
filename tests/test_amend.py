@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import draft, naming, sections
+from deckhand import draft, lint, naming, sections
 from tests.conftest import FIXTURES, ROOT, run_deckhand, spilled
 
 DRAFT = {"GH_ISSUE_FILE": str(FIXTURES / "draft.json")}
@@ -136,6 +136,15 @@ def test_context_prints_the_body_rules_and_the_shape(fake_gh):
     assert result.returncode == 0, result.stderr
     assert "Plan holds at least a '### Task 1' block." in result.stdout
     assert "### Acceptance Criteria" in result.stdout
+
+
+def test_context_prints_the_budget_in_file_characters(fake_gh):
+    bare = sections.bare(REVIEW["body"])
+    result = run_deckhand("amend", "context", "248", env=REVIEWED)
+
+    assert result.returncode == 0, result.stderr
+    budget = f"Budget: the file may be {lint.budget(bare)} characters; the body is {len(bare)} now"
+    assert budget in result.stdout.splitlines()
 
 
 def test_context_prints_the_body_without_the_fold(fake_gh, tmp_path):

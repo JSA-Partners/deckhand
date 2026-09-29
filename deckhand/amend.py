@@ -152,6 +152,9 @@ def context(args: argparse.Namespace) -> int:
         print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
     print()
+    if not isinstance(story, Exception):
+        bare = sections.bare(story.body)
+        print(f"Budget: the file may be {lint.budget(bare)} characters; the body is {len(bare)} now")
     print(file_line("Rewrite", _draft_name(args.issue), args.repo))
     print(DRAFT_RULE if a_draft else BODY_RULE)
     print(invoke.apply_line("amend", str(args.issue), "<file>", *elsewhere, '--note "<why>"'))
@@ -239,7 +242,7 @@ def _amend(repo: str, number: int, edited: str, note: str, title_flag: str | Non
         raise Refusal(FROZEN)
     _write(repo, number, body, title, note, story)
     _refine(repo, number, status)
-    if (room := lint.headroom(body)) is not None:
+    if (room := lint.headroom(body, given=edited)) is not None:
         print(room)
     return 0
 
