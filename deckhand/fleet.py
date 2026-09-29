@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from deckhand import board, columns, gh, issue, sections, sessions, step
+from deckhand import board, columns, draft, gh, issue, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -168,7 +168,11 @@ def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> st
         return f"merged, {left} {items} left"
     if story.status == columns.DONE:
         return "done" if story.closed else "Done, but the issue is open"
-    return "reviewed, not boarded" if columns.at_least(story.status, columns.READY) else "review not run"
+    if columns.at_least(story.status, columns.READY):
+        return "reviewed, not boarded"
+    if draft.is_draft(story.issue.body):
+        return "draft to write" if draft.read(story.issue.body)[1] else "draft to settle"
+    return "review not run"
 
 
 Key = tuple[str, int]
