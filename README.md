@@ -130,9 +130,12 @@ a new story in any repository of the project, carrying what the session learned.
 ### The captain
 
 `captain` is the project manager. It reads the whole project at once, every story, its column and
-who holds it, every open Claude Code session on this machine and what it is working on, and opens
-with what to run next and where.
-After that, ask it anything: what is blocked, what a session is up to, what to pick up. It writes
+who holds it, every open Claude Code session on this machine and what it is working on. It opens
+with the sessions waiting on you and what each one asks, then what moved since you last looked,
+then what to run next and where, and which open pull request to merge first.
+After that, ask it anything: what is blocked, what a session is up to, what to pick up. Give it a
+priority and it plans lanes, one session each, keeping stories whose plans touch the same files
+apart. It writes
 to the board only, to put the backlog in build order, add a blocker a story gained late, or board a
 story it owns that never reached the board.
 
