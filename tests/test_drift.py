@@ -30,6 +30,13 @@ def test_references_ignores_a_branch_name_that_carries_a_version():
     assert drift.references(text) == ["scripts/release.sh"]
 
 
+def test_references_ignores_a_scoped_package():
+    """No repository path starts with `@`, and a scoped package such as `@types/google.maps` always does."""
+    text = "Install `@types/google.maps`, then edit `src/lib/map.ts`."
+
+    assert drift.references(text) == ["src/lib/map.ts"]
+
+
 def test_drift_text_lists_references_that_do_not_resolve(tmp_path):
     (tmp_path / "internal" / "store").mkdir(parents=True)
     (tmp_path / "internal" / "store" / "collection.go").write_text("a\nb\nc\n")

@@ -30,8 +30,8 @@ _CREATES = ("- create:", "create:")
 
 
 def references(text: str) -> list[str]:
-    """Every distinct backticked path or `path:line` reference in `text`, sorted."""
-    return sorted(set(_REFERENCE.findall(text)))
+    """Every distinct backticked path or `path:line` reference in `text`, sorted; a scoped package is not one."""
+    return sorted({ref for ref in _REFERENCE.findall(text) if not ref.startswith("@")})
 
 
 def _created(text: str) -> set[str]:
