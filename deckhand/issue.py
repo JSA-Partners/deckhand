@@ -228,11 +228,20 @@ def blocking(repo: str, number: int) -> list[tuple[str, int, str]]:
     )
 
 
-def pull_request(repo: str, branch: str) -> str | None:
-    """The URL of the open pull request whose head is `branch`, or None when it has none."""
+def pull_request(repo: str, branch: str) -> tuple[str, str] | None:
+    """`(url, state)` of the pull request whose head is `branch`, an open one before a merged one."""
     gh.split_repo(repo)
-    data = gh.json_out("pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "url")
-    return data[0].get("url") if isinstance(data, list) and data else None
+    data = gh.json_out("pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "url,state")
+    items = data if isinstance(data, list) else []
+    found = [(str(item.get("url")), str(item.get("state"))) for item in items if isinstance(item, dict)]
+    return next((pr for state in ("OPEN", "MERGED") for pr in found if pr[1] == state), None)
+
+
+def resave_pull_request(repo: str, url: str, body: str) -> None:
+    """Save the pull request's body again; GitHub links the issue its footer closes on a save it once missed."""
+    gh.split_repo(repo)
+    with _body_file(body) as path:
+        gh.run("pr", "edit", url, "--repo", repo, "--body-file", path)
 
 
 def merged_pull_requests(repo: str, limit: int) -> list[tuple[str, str]]:

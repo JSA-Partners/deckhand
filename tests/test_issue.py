@@ -278,11 +278,39 @@ def test_blocking_accepts_repo(fake_gh, gh_calls, monkeypatch):
 # --- pull_request -----------------------------------------------------------
 
 
-def test_pull_request_returns_the_open_ones_url(fake_gh, gh_calls, monkeypatch):
+def test_pull_request_returns_the_open_ones_url_and_state(fake_gh, gh_calls, monkeypatch):
     monkeypatch.setenv("GH_PR_EXISTS", "1")
 
-    assert issue.pull_request(REPO, "feat/248-guests") == "https://github.com/acme/widgets/pull/1000"
-    assert gh_calls() == ["pr list --repo acme/widgets --head feat/248-guests --state open --json url"]
+    assert issue.pull_request(REPO, "feat/248-guests") == ("https://github.com/acme/widgets/pull/1000", "OPEN")
+    assert gh_calls() == ["pr list --repo acme/widgets --head feat/248-guests --state all --json url,state"]
+
+
+def test_pull_request_prefers_the_open_one_to_a_merged_one(fake_gh, monkeypatch):
+    listed = [
+        {"url": "https://github.com/acme/widgets/pull/9", "state": "MERGED"},
+        {"url": "https://github.com/acme/widgets/pull/12", "state": "OPEN"},
+    ]
+    monkeypatch.setenv("GH_PR_LIST_BODY", json.dumps(listed))
+
+    assert issue.pull_request(REPO, "feat/248-guests") == ("https://github.com/acme/widgets/pull/12", "OPEN")
+
+
+def test_pull_request_finds_a_merged_one_and_passes_over_a_closed_one(fake_gh, monkeypatch):
+    listed = [
+        {"url": "https://github.com/acme/widgets/pull/7", "state": "CLOSED"},
+        {"url": "https://github.com/acme/widgets/pull/9", "state": "MERGED"},
+    ]
+    monkeypatch.setenv("GH_PR_LIST_BODY", json.dumps(listed))
+
+    assert issue.pull_request(REPO, "feat/248-guests") == ("https://github.com/acme/widgets/pull/9", "MERGED")
+
+
+def test_pull_request_is_none_when_the_branch_has_only_a_closed_one(fake_gh, monkeypatch):
+    """Closed without merging, it neither opens the story's review nor says the story landed."""
+    listed = [{"url": "https://github.com/acme/widgets/pull/7", "state": "CLOSED"}]
+    monkeypatch.setenv("GH_PR_LIST_BODY", json.dumps(listed))
+
+    assert issue.pull_request(REPO, "feat/248-guests") is None
 
 
 def test_pull_request_is_none_when_the_branch_has_none(fake_gh):

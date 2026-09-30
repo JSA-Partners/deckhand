@@ -165,14 +165,14 @@ def _after_merge_left(story: issue.Issue) -> list[str]:
 def _linked(repo: str, number: int, branch: str | None) -> issue.PullRequest | None:
     """The story's pull request, from the issue's own reference to it.
 
-    The head lookup is the fallback for one opened by hand, which GitHub does not link to the issue
-    and which therefore no reference can name.
+    The head lookup is the fallback for one GitHub never linked to the issue, open or merged, which
+    therefore no reference can name: one opened by hand, or one whose footer GitHub missed.
     """
     found = issue.pull_request_for(repo, number)
     if found is not None or not branch:
         return found
-    url = issue.pull_request(repo, branch)
-    return issue.PullRequest(0, url, "OPEN", False, None, (), 0) if url else None
+    head = issue.pull_request(repo, branch)
+    return issue.PullRequest(0, head[0], head[1], head[1] == "MERGED", None, (), 0) if head else None
 
 
 def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Reader) -> Facts:

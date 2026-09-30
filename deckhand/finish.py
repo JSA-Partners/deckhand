@@ -231,6 +231,16 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--breaking", metavar="TEXT", help="what a client of this change must react to")
 
 
+def _link(repo: str, number: int, url: str, body: str) -> None:
+    """Re-save the body once when GitHub missed its `Closes` footer; the pull request stands either way."""
+    if issue.pull_request_for(repo, number) is not None:
+        return
+    issue.resave_pull_request(repo, url, body)
+    print(f"Relinked #{number}")
+    if issue.pull_request_for(repo, number) is None:
+        print(f"GitHub has not linked {url} to #{number}; re-save its body on GitHub if it stays unlinked")
+
+
 @step("finish", _configure)
 def apply(args: argparse.Namespace) -> int:
     """Gate a story branch, then push it, open its pull request, and log the pull request."""
@@ -256,7 +266,8 @@ def apply(args: argparse.Namespace) -> int:
     # lease once did.
     _push(branch)
     print("Pushed")
-    url = issue.pull_request(repo, branch)
+    found = issue.pull_request(repo, branch)
+    url = found[0] if found and found[1] == "OPEN" else None
     if url:
         print(f"Reusing {url}")
         # The run that opened it may have failed before the fields were set, and a re-run is often a
@@ -283,6 +294,7 @@ def apply(args: argparse.Namespace) -> int:
             "@me",
         ).strip()
         print(f"Opened {url}")
+    _link(repo, args.issue, url, body)
     issue.comment(repo, args.issue, log.checked(f"Pull request: {url}"))
     print("Logged Pull request")
     print(fields.set_field(settings, repo, args.issue, "Status", columns.IN_REVIEW))

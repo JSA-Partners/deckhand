@@ -181,5 +181,16 @@ def test_after_merge_still_returns_the_text_alone():
     assert sections.after_merge(body) == ["Deploy it", "Check the dashboard"]
 
 
+def test_after_merge_reads_the_block_at_a_deeper_heading():
+    body = "### Plan\n\n#### After the merge\n\n- [x] Deploy it\n- [ ] Check the dashboard\n"
+
+    assert sections.after_merge_items(body) == [("Deploy it", True), ("Check the dashboard", False)]
+
+
+def test_after_merge_is_not_a_second_level_heading():
+    """A `##` heading closes the Plan on GitHub rather than sitting inside it, so it is not the block."""
+    assert sections.after_merge("### Plan\n\n## After the merge\n\n- Deploy it\n") == []
+
+
 if __name__ == "__main__":
     unittest.main()

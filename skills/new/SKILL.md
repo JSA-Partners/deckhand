@@ -19,8 +19,8 @@ project's repositories; a story elsewhere is one outcome. Give `new apply` a
 `--title` that reads as the change would in a commit subject: what it does, not what was wanted. Scale it to the
 idea: a fix needs a question or two, a feature the whole conversation.
 
-One story: run superpowers:writing-plans into the draft, with an "After the merge" block at the
-end of the Plan for anything that can only happen once the code is on main, and run
+One story: run superpowers:writing-plans into the draft, with a `### After the merge`
+heading at the end of the Plan for anything that can only happen once the code is on main, and run
 `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <file>`. It boards the story as Draft. Then run
 `... next context <number>` and carry on from the Review section of
 `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md`, speaking as its Speaking section says.
