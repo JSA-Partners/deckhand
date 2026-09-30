@@ -16,7 +16,6 @@ import re
 from deckhand import columns, fields, gh, invoke, issue, log, sections
 from deckhand.step import Refusal, block, indented, resolved_settings, step
 
-HEADING = "### After the merge"
 OWED = "After the merge:"
 _BULLET = re.compile(r"^- (?:\[[ xX]\]\s+)?")
 
@@ -50,7 +49,7 @@ def _ticked(body: str, position: int) -> str:
     """The body with item `position`'s box ticked, every other line of the plan as it was."""
     plan = sections.get(body, "Plan", "")
     lines = plan.split("\n")
-    start = next(number for number, line in enumerate(lines) if line.rstrip() == HEADING)
+    start = next(number for number, line in enumerate(lines) if sections.AFTER_MERGE.match(line))
     bullets = [number for number in range(start + 1, len(lines)) if lines[number].startswith("- ")]
     index = bullets[position - 1]
     lines[index] = _BULLET.sub("- [x] ", lines[index], count=1)

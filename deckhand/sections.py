@@ -22,7 +22,7 @@ FOLD_CLOSE = "</details>"
 _FOLD = re.compile(r"\A<details[^>]*>\s*<summary>.*?</summary>\s*(?P<body>.*?)\s*</details>\Z", re.DOTALL)
 _DETAILS_TAG = re.compile(r"<details[^>]*>|</details>")
 # The Plan's closing block: what is owed once the pull request has merged, one `- ` bullet each.
-_AFTER_MERGE = re.compile(r"^### After the merge\s*$", re.MULTILINE)
+AFTER_MERGE = re.compile(r"^#{3,6} After the merge\s*$", re.MULTILINE)
 _CHECKBOX = re.compile(r"^\[[ xX]\]\s+")
 _TICKED = re.compile(r"^\[[xX]\]\s+")
 
@@ -144,7 +144,7 @@ def replace(text: str, name: str, content: str) -> str:
 def after_merge_items(body: str) -> list[tuple[str, bool]]:
     """Each After the merge item with whether its box is ticked; a bullet with no box is not ticked."""
     plan = get(body, "Plan", "")
-    match = _AFTER_MERGE.search(plan)
+    match = AFTER_MERGE.search(plan)
     if match is None:
         return []
     bullets = [line[2:].strip() for line in plan[match.end() :].splitlines() if line.startswith("- ")]

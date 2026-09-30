@@ -33,6 +33,16 @@ def test_apply_ticks_the_item_and_writes_verification(fake_gh, gh_calls, tmp_pat
     assert any(call.startswith("issue edit 248") for call in gh_calls())
 
 
+def test_apply_ticks_an_item_under_a_deeper_heading(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "bodies.md"
+    env = {**_story(tmp_path, TWO.replace("### After", "#### After")), "GH_BODY_FILE_COPY": str(copy)}
+
+    result = run_deckhand("after", "apply", "248", "--item", "1", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "#### After the merge\n\n- [x] Deploy it\n- [ ] Check the dashboard" in copy.read_text(encoding="utf-8")
+
+
 def test_apply_writes_done_when_the_last_box_is_ticked(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("after", "apply", "248", "--item", "2", env=_story(tmp_path, ONE_DONE))
 
