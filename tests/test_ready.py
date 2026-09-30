@@ -577,3 +577,16 @@ def test_context_names_the_apply(fake_gh):
     result = run_deckhand("ready", "context", "248")
 
     assert result.stdout.splitlines()[-1] == "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>"
+
+
+def test_context_names_oversized_in_the_apply_when_the_body_is_over_the_gate(fake_gh, tmp_path):
+    data = json.loads((FIXTURES / "issue-reviewed.json").read_text(encoding="utf-8"))
+    data["body"] = OVERSIZED
+    path = tmp_path / "big.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = run_deckhand("ready", "context", "248", env={"GH_ISSUE_FILE": str(path)})
+
+    assert result.stdout.splitlines()[-1] == (
+        'Apply: deckhand ready apply 248 --kind <kind> --points <1-3> --oversized "<why it is one story>"'
+    )

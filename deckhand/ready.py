@@ -130,8 +130,17 @@ def context(args: argparse.Namespace) -> int:
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Could block this story:", lambda: _could_block(settings, args.issue))
     print()
-    print(invoke.apply_line("ready", str(args.issue), "--kind <kind>", "--points <1-3>"))
+    print(invoke.apply_line("ready", str(args.issue), "--kind <kind>", "--points <1-3>", *_oversized(args.issue)))
     return 0
+
+
+def _oversized(number: int) -> tuple[str, ...]:
+    """The size flag the apply will ask for, named up front; nothing when the body cannot be read."""
+    try:
+        body = issue.view(gh.repo_slug(), number).body
+    except Exception:
+        return ()
+    return ('--oversized "<why it is one story>"',) if len(body.replace("\r\n", "\n")) > BOARDING_LIMIT else ()
 
 
 # --- apply ------------------------------------------------------------------
