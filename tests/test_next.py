@@ -66,6 +66,13 @@ def facts(**changes) -> Facts:
         ),
         ({"closed": True, "after_merge_left": 2}, "done", "#248 is closed."),
         ({"closed": True, "pull_requested": True}, "done", "#248 is closed."),
+        (
+            {"closed": True, "pull_requested": True, "status": "In Review"},
+            "after",
+            "#248 is merged; its column still says In Review.",
+        ),
+        ({"closed": True, "pull_requested": True, "status": "Done"}, "done", "#248 is closed."),
+        ({"closed": True, "status": "In Review"}, "done", "#248 is closed."),
         ({"closed": True}, "done", "#248 is closed."),
         ({"closed": True, "unavailable": ("board",)}, "done", "#248 is closed."),
         ({"unavailable": ("board",)}, "stop", "Cannot read board; nothing decided."),
@@ -103,7 +110,7 @@ def test_the_table(changes, step, why):
 
 
 def test_the_rows_are_tried_in_order():
-    """A closed story is done whatever else is true, and a pull request outranks the board."""
+    """A closed story finishes whatever else is true, and a pull request outranks the board."""
     everything = facts(
         closed=True,
         written=False,
@@ -114,7 +121,8 @@ def test_the_rows_are_tried_in_order():
         pull_requested=True,
         unavailable=("board",),
     )
-    assert decide(248, everything)[0] == "done"
+    assert decide(248, everything)[0] == "after"
+    assert decide(248, everything._replace(status=None))[0] == "done"
     assert decide(248, everything._replace(closed=False))[0] == "stop"
     assert decide(248, everything._replace(closed=False, unavailable=()))[0] == "merge"
     assert decide(248, everything._replace(closed=False, unavailable=(), behind=True))[0] == "update"
