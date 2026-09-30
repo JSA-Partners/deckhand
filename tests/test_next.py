@@ -284,6 +284,41 @@ def test_a_parked_feature_is_settled_with_the_new_context(fake_gh, repo, tmp_pat
     assert "## Parked feature #60" in _context(lines)
 
 
+PARKED_BODY = json.loads((FIXTURES / "draft-parked.json").read_text(encoding="utf-8"))["body"]
+MEASURED = "Noted: every claim re-measured\n\nFour counts demoted.\nThe security finding refuted."
+
+
+def test_settle_prints_every_note_in_full(fake_gh, repo, tmp_path):
+    story = _logged(
+        tmp_path,
+        "noted.json",
+        _entry("Drafted: parked from acme/widgets", "2026-09-16T10:00:00Z"),
+        _entry(MEASURED, "2026-09-20T10:00:00Z"),
+        body=PARKED_BODY,
+    )
+
+    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Draft")})
+
+    lines = result.stdout.splitlines()
+    assert lines[0] == "Step: settle"
+    start = lines.index("Notes:")
+    assert lines[start + 1 : start + 5] == [
+        "  2026-09-20 Noted: every claim re-measured",
+        "",
+        "  Four counts demoted.",
+        "  The security finding refuted.",
+    ]
+    assert lines.index("Log:") < start < lines.index("## Context")
+
+
+def test_only_settle_prints_the_notes(fake_gh, repo, tmp_path):
+    story = _logged(tmp_path, "noted-story.json", _entry(MEASURED, "2026-09-20T10:00:00Z"))
+
+    result = _next(repo, env={**story, **fieldvalues(tmp_path, "Backlog")})
+
+    assert "Notes:" not in result.stdout.splitlines()
+
+
 def test_a_drafted_entry_on_a_stub_body_is_still_a_stub(fake_gh, repo, tmp_path):
     """The body is what says a story was written; an entry with no story behind it moves nothing."""
     draft_body = json.loads((FIXTURES / "draft.json").read_text(encoding="utf-8"))["body"]
