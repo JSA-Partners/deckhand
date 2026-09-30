@@ -1,21 +1,21 @@
 """The captain: one reading of every story, every working session, the build order, and what slipped.
 
-`context` prints four blocks and never fails, because it is what an open session reruns every time a
-person asks where things stand; `--only` prints one of them alone. `apply` writes the board and no
-more: the order onto it, a Status the board holds that the story's log does not allow, the label that
-says a story is this process's business, and a blocker added to or dropped from a boarded story.
-Everything else it finds is reported with the command that would fix it, because every other write is
-a step's, and a step is reached through `next`.
+`context` prints six blocks and never fails, because it is what an open session reruns every time a
+person asks where things stand: who is waiting, what moved since the last read, then the fleet, the
+order, the sessions and the anomalies; `--only` prints one of the last four, or the forecast, alone.
+`apply` writes the board and no more: the order onto it, a Status the board holds that the story's
+log does not allow, the label that says a story is this process's business, and a blocker added to
+or dropped from a boarded story. Everything else it finds is reported with the command that would
+fix it, because every other write is a step's, and a step is reached through `next`.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 import os
-import statistics
+import time
 
-from deckhand import board, checklist, columns, config, edges, fleet, forecast, gh, order, sessions, transcript
+from deckhand import board, checklist, columns, config, edges, fleet, forecast, gh, order, sessions, since, transcript
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -53,15 +53,36 @@ def _since(seconds: float) -> str:
 
 def _fleet_rows(read: fleet.Fleet) -> list[str]:
     rows = ["| # | Repo | Title | Status | Pts | Who | Note |", "| --- | --- | --- | --- | --- | --- | --- |"]
+    foreign = 0
     for story in read.stories:
         if story.status == columns.DONE and story.closed:
+            continue
+        if not fleet.touched(story):
+            foreign += 1
             continue
         note = fleet.note(story, read.blockers.get(story.key) or [], story.key in read.behind)
         points = "-" if story.points is None else str(story.points)
         title = story.title.replace("|", "\\|")
         who = ", ".join(story.assignees) or "-"
         rows.append(f"| {story.number} | {_name(story.repo)} | {title} | {story.status} | {points} | {who} | {note} |")
-    return rows if len(rows) > 2 else ["  nothing on the board"]
+    if len(rows) == 2:
+        rows = ["  nothing of deckhand's on the board" if foreign else "  nothing on the board"]
+    if foreign:
+        many = foreign != 1
+        rows += ["", f"{foreign} {'items' if many else 'item'} on the board {'are' if many else 'is'} not deckhand's."]
+    return rows
+
+
+def _story(story: str) -> str:
+    return story if story == sessions.FREE else f"#{story}"
+
+
+def _waiting_rows(pulses: list[sessions.Pulse]) -> list[str]:
+    held = sorted((beat for beat in pulses if beat.waiting), key=lambda beat: -beat.idle)
+    return [
+        f"  {beat.label} {_story(beat.story)}, {_since(beat.idle)}: {transcript.asking(beat.path) or 'no words yet'}"
+        for beat in held
+    ] or ["  nobody"]
 
 
 def _ranked(read: fleet.Fleet) -> list[order.Ranked]:
@@ -173,27 +194,36 @@ def _setup_rows(settings: Settings, repo: str) -> list[str]:
     return [f"| - | {_name(repo)} | {item.name}: {item.left} | run /deckhand:setup |" for item in owed]
 
 
-def _anomaly_rows(settings: Settings, read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[str]:
-    found = fleet.anomalies(
+def _found(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[fleet.Anomaly]:
+    return fleet.anomalies(
         read.stories, read.blockers, read.behind, pulses, read.missing, read.me, archived=read.archived
     )
-    rows = [f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |" for item in found]
-    rows += _setup_rows(settings, gh.repo_slug())
-    if not rows:
+
+
+def _line(item: fleet.Anomaly) -> str:
+    return f"{item.repo}#{item.number} {item.what}"
+
+
+def _anomaly_rows(settings: Settings, found: list[fleet.Anomaly], standing: set[str]) -> list[str]:
+    repo = gh.repo_slug()
+    new = [item for item in found if _line(item) not in standing]
+    rows = [f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |" for item in new]
+    rows += _setup_rows(settings, repo)
+    old = [f"Standing: {ref_label(item.repo, item.number, repo)} {item.what}" for item in found if item not in new]
+    if not rows and not old:
         return ["  nothing out of place"]
-    return ["| # | Repo | What | Fix |", "| --- | --- | --- | --- |", *rows]
+    table = ["| # | Repo | What | Fix |", "| --- | --- | --- | --- |", *rows] if rows else []
+    return [*table, *([""] if table and old else []), *old]
 
 
 BLOCKS = ("fleet", "order", "sessions", "anomalies")
 ON_REQUEST = ("forecast",)  # a simulation is not worth paying for on every rerun of the context
-THIN = 10  # samples in a band below which a percentile is a fit to noise, so the worst run is used
-HOURS_A_DAY = 24.0  # the durations are elapsed wall clock, including the hours a story waited
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", metavar="ID", help="read one session properly, by the id in the table")
     parser.add_argument("--since", type=float, default=WINDOW, help="how many hours back to look for sessions")
-    parser.add_argument("--only", choices=(*BLOCKS, *ON_REQUEST), help="print one block instead of all four")
+    parser.add_argument("--only", choices=(*BLOCKS, *ON_REQUEST), help="print one block instead of the full read")
     parser.add_argument("--sessions", type=int, help="stories to forecast at once; defaults to what history shows")
 
 
@@ -201,64 +231,20 @@ def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
     return sessions.discover(_repos(read.stories), since, os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
-def _days(hours: float) -> int:
-    return math.ceil(hours / HOURS_A_DAY)
+def _remember(read: fleet.Fleet, pulses: list[sessions.Pulse], found: list[fleet.Anomaly]) -> dict:
+    stories = {
+        f"{story.repo}#{story.number}": {"status": story.status, "closed": story.closed}
+        for story in read.stories
+        if fleet.touched(story)
+    }
+    held = {beat.label: {"story": beat.story, "waiting": beat.waiting} for beat in pulses}
+    return since.snapshot(stories, held, [_line(item) for item in found], time.time())
 
 
-def _forecast_row(label: str, hours: float, note: str) -> str:
-    return f"  {label:<12}{_days(hours):>3} days   {note}"
-
-
-def _parallel(given: int | None, read: fleet.Fleet, pulses: list[sessions.Pulse]) -> tuple[int, str]:
-    """How many stories the forecast runs at once, and where that number came from."""
-    if given is not None:
-        return given, "given"
-    measured = forecast.concurrency(read.stories)
-    if measured is not None:
-        return measured, "measured"
-    return max(len([beat for beat in pulses if beat.live]), 1), "open sessions"
-
-
-def _forecast_rows(read: fleet.Fleet, parallel: int, source: str) -> list[str]:
-    """The floor, the commitment, and the control that pools points away, over what is not yet Done."""
-    left = [story for story in read.stories if not story.closed]
-    if not left:
-        return ["  nothing left to forecast"]
-
-    points = sum(story.points or 0 for story in left)
-    story_word = "story" if len(left) == 1 else "stories"
-    header = f"  {len(left)} {story_word}, {points} points, {parallel} at once, {source}"
-
-    history = forecast.durations(read.stories)
-    if not history:
-        return [f"{header}: no finished stories, so no Floor and no Commitment."]
-
-    pooled = sorted(hours for band in history.values() for hours in band)
-    thin = any(len(band) < THIN for band in history.values())
-    commitment_p = 100 if thin else 85
-    worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
-    medians = {band: statistics.median(hours) for band, hours in history.items()}
-
-    floor_hours = forecast.floor(left, read.blockers, parallel, medians)
-    banded = forecast.simulate(left, read.blockers, parallel, history)
-    unbanded = forecast.simulate(left, read.blockers, parallel, {None: pooled})
-    commitment_note = ("worst run" if thin else "85th percentile") + ", banded by points"
-
-    rows = [
-        header,
-        "",
-        _forecast_row("Floor", floor_hours, "critical path, nothing stalls"),
-        _forecast_row("Commitment", banded[commitment_p], commitment_note),
-        _forecast_row("Worst seen", banded[worst_p], f"{worst_p}th percentile"),
-        "",
-        _forecast_row("Unbanded", unbanded[commitment_p], "the same, points ignored"),
-        "",
-        f"  From {len(pooled)} finished stories, the longest {pooled[-1]:.1f} hours against a median "
-        f"of {statistics.median(pooled):.1f}.",
-    ]
-    if thin:
-        rows.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
-    return [*rows, "", f"  {forecast.POINT}"]
+def _moved(before: dict, after: dict) -> list[str]:
+    head = since.heading(before, after["at"])
+    lines = since.changes(before, after, gh.repo_slug())
+    return [f"  {head}:", *(f"    {line}" for line in lines)] if lines else [f"  Nothing moved {head.lower()}."]
 
 
 def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
@@ -279,7 +265,7 @@ def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Read the fleet: every story, every session, the build order, and anything out of place."""
+    """Read the fleet: who is waiting, what moved, every story and session, the order, and what is out of place."""
     settings = usable(settings_or_error())
     with gh.cached():  # a context reads and never writes, so one fact is read once
         read = fleet.read(settings)
@@ -289,6 +275,20 @@ def context(args: argparse.Namespace) -> int:
         wanted = (args.only,) if args.only else BLOCKS
         print(f"Project: {settings.owner} #{settings.project}")
         print()
+        previous = after = found = None
+        if not args.only:
+            block("## Waiting on you", lambda: _waiting_rows(pulses))
+            print()
+            try:
+                found = _found(read, pulses)
+                previous, after = since.load(since.path(settings)), _remember(read, pulses, found)
+            except Exception as error:
+                unread = f"  what moved could not be read ({reason(error)})"
+                block("## Since you last looked", lambda: [unread])
+                print()
+            if previous and after:
+                block("## Since you last looked", lambda: _moved(previous, after))
+                print()
         if "fleet" in wanted:
             block("## Fleet", lambda: _fleet_rows(read))
             print()
@@ -299,11 +299,22 @@ def context(args: argparse.Namespace) -> int:
             block("## Sessions", lambda: _session_rows(pulses, args.since))
             print()
         if "anomalies" in wanted:
-            block("## Anomalies", lambda: _anomaly_rows(settings, read, pulses))
+            standing = set((previous or {}).get("anomalies") or [])
+            block(
+                "## Anomalies",
+                lambda: _anomaly_rows(settings, _found(read, pulses) if found is None else found, standing),
+            )
             print()
         if "forecast" in wanted:
-            parallel, source = _parallel(args.sessions, read, pulses)
-            block("## Forecast", lambda: _forecast_rows(read, parallel, source))
+            live = len([beat for beat in pulses if beat.live])
+            at_once, source = forecast.parallel(args.sessions, read, live=live)
+            block("## Forecast", lambda: forecast.rows(read, at_once, source))
+        if after:
+            try:
+                since.save(since.path(settings), after)
+            except OSError as error:
+                unsaved = f"  not saved, so the next read cannot say what moved ({reason(error)})"
+                block("## Snapshot", lambda: [unsaved])
     return 0
 
 

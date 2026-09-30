@@ -9,8 +9,11 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) AskUserQuestion
 
 !`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
 
-The four blocks above are the whole picture; nothing needs looking up again. Say where the work
-stands in two or three sentences, leading with what to run next and in which repository, then stop.
+The blocks above are the whole picture; nothing needs looking up again. Clear what is waiting
+first, longest wait first: name each session, what it asks, and your recommendation. Then say
+what moved since they last looked, in a sentence or two, and where the work stands, leading with
+what to run next and in which repository. Then stop. An anomaly under Standing has been seen
+before; mention it only when asked.
 
 Every later question in this session reruns `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
 rather than answering from what was printed before, because sessions move while a conversation sits.
