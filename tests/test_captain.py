@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -106,33 +105,22 @@ def test_the_order_names_what_to_run_per_repository(fleet_env, capsys):
     assert "Next per repository:" in capsys.readouterr().out
 
 
-def test_the_next_line_keeps_the_ranked_order_of_the_repositories():
-    """The urgent repository leads, so the line cannot be sorted by the repository's own name."""
-    found = list(fleet.stories(_nodes()))
-    read = fleet.Fleet(
-        stories=found,
-        blockers={story.key: list(story.blocked_by) for story in found if story.status != "Done"},
-        behind=set(),
-        missing=[],
-    )
-
-    assert captain._next_line(read, []) == (
-        "Next per repository: widgets 253 (no session open), gadgets 258 (no session open)"
-    )
+def test_the_merge_block_follows_the_order_and_ranks_the_open_pull_requests(fleet_env, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+    monkeypatch.setenv("GH_PR_ISSUES", "117")
+    cli.main(["captain", "context"])
+    out = capsys.readouterr().out
+    assert out.index("## Order") < out.index("## Merge") < out.index("## Sessions")
+    lines = _block(out, "## Merge")
+    assert lines[2].startswith("| 117 | widgets | #1000 | passed | current |")
+    assert "\n\nMerge #1000 first; no other open pull request changes its files.\n" in out
 
 
-def test_the_next_line_names_the_draft_a_blocked_repository_waits_on():
-    """A Draft is not in the order table, so the Next line is the only place its chain can be seen."""
-    found = {story.number: story for story in fleet.stories(_nodes())}
-    draft = replace(found[268], status="Draft")
-    read = fleet.Fleet(
-        stories=[found[257], draft],
-        blockers={found[257].key: [("acme/widgets", 268, "Domains")], draft.key: []},
-        behind=set(),
-        missing=[],
-    )
-
-    assert captain._next_line(read, []) == "Next per repository: widgets: #268 is Draft, unblocking 1 story"
+def test_the_merge_block_can_be_asked_for_alone(fleet_env, capsys):
+    cli.main(["captain", "context", "--only", "merge"])
+    out = capsys.readouterr().out
+    assert _block(out, "## Merge") == ["  nothing in review"]
+    assert "## Fleet" not in out
 
 
 def test_no_sessions_is_a_line_and_not_a_missing_block(fleet_env, capsys):

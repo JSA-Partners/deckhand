@@ -37,7 +37,7 @@ def _plan(*paths: str) -> str:
 
 
 def _fleet(*found: fleet.Story, blockers: fleet.Blockers | None = None) -> fleet.Fleet:
-    return fleet.Fleet(stories=list(found), blockers=blockers or {}, behind=set(), missing=[])
+    return fleet.Fleet(stories=list(found), blockers=blockers or {}, missing=[])
 
 
 def _row(lines: list[str], number: int) -> list[str]:

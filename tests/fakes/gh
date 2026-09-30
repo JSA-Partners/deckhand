@@ -228,6 +228,7 @@ elif head == "api graphql":
                     "state": pr_state,
                     "merged": pr_state == "MERGED",
                     "mergeStateStatus": os.environ.get("GH_PR_MERGE_STATE", "CLEAN"),
+                    "files": {"nodes": [{"path": path} for path in json.loads(os.environ.get("GH_PR_FILES", "[]"))]},
                     "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
                 }
             ]

@@ -256,14 +256,18 @@ def anomalies(
 
 @dataclass(frozen=True)
 class Fleet:
-    """One reading of the project: its stories, its Backlog's blockers, what is behind main, what is off it."""
+    """One reading of the project: its stories, its Backlog's blockers, its open pull requests, what is off it."""
 
     stories: list[Story]
     blockers: Blockers
-    behind: set[Key]
     missing: list[tuple[str, int, str]]
     me: str = ""
     archived: list[Story] = field(default_factory=list)
+    pulls: dict[Key, issue.PullRequest] = field(default_factory=dict)
+
+    @property
+    def behind(self) -> set[Key]:
+        return {key for key, pull in self.pulls.items() if pull.behind}
 
 
 def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
@@ -286,7 +290,7 @@ def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
 
 
 def read(settings: Settings) -> Fleet:
-    """The whole fleet: one query with every unfinished story's blockers, a merge state per open pull request.
+    """The whole fleet: one query with every unfinished story's blockers, every open pull request it links to.
 
     Archived items are read so an archived story can be named, and held apart from the rest, because
     the project archives finished work by itself and those closed items would bury the stories.
@@ -296,7 +300,7 @@ def read(settings: Settings) -> Fleet:
     blockers: Blockers = {
         story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE
     }
-    behind: set[Key] = set()
+    pulls: dict[Key, issue.PullRequest] = {}
     for story in found:
         if story.status not in (columns.IN_PROGRESS, columns.IN_REVIEW):
             continue
@@ -304,12 +308,12 @@ def read(settings: Settings) -> Fleet:
             found_pr = issue.pull_request_for(story.repo, story.number)
         except gh.GhError:
             continue  # a pull request gh cannot read says nothing about main; the row stands without it
-        if found_pr is not None and found_pr.behind:
-            behind.add(story.key)
+        if found_pr is not None and found_pr.state == "OPEN":
+            pulls[story.key] = found_pr
     return Fleet(
         stories=found,
         blockers=blockers,
-        behind=behind,
+        pulls=pulls,
         missing=_missing(every),  # archived included: an archived story is on the board, not off it
         me=gh.login(),
         archived=[story for story in every if story.archived],
