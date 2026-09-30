@@ -15,7 +15,21 @@ import argparse
 import os
 import time
 
-from deckhand import board, checklist, columns, config, edges, fleet, forecast, gh, order, sessions, since, transcript
+from deckhand import (
+    board,
+    candidates,
+    checklist,
+    columns,
+    config,
+    edges,
+    fleet,
+    forecast,
+    gh,
+    order,
+    sessions,
+    since,
+    transcript,
+)
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -217,7 +231,7 @@ def _anomaly_rows(settings: Settings, found: list[fleet.Anomaly], standing: set[
 
 
 BLOCKS = ("fleet", "order", "sessions", "anomalies")
-ON_REQUEST = ("forecast",)  # a simulation is not worth paying for on every rerun of the context
+ON_REQUEST = ("forecast", "candidates")  # neither is worth paying for on every rerun of the context
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
@@ -309,6 +323,8 @@ def context(args: argparse.Namespace) -> int:
             live = len([beat for beat in pulses if beat.live])
             at_once, source = forecast.parallel(args.sessions, read, live=live)
             block("## Forecast", lambda: forecast.rows(read, at_once, source))
+        if "candidates" in wanted:
+            block("## Candidates", lambda: candidates.rows(read, gh.repo_slug()))
         if after:
             try:
                 since.save(since.path(settings), after)

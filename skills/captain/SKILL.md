@@ -27,3 +27,9 @@ step, never touch a branch, never commit. An edge the board is missing is writte
 `captain apply --block N --by M`, and taken away with `--unblock N --by M`; both refuse a blocker
 that is closed. A row whose fix names a command is the person's to run in the session that owns
 that story, so name it and leave it.
+
+When the person states a priority or asks how many sessions to open, run
+`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context --only candidates` and answer with lanes, one
+per session, each naming its repository and its `/deckhand:next N` commands in order. Two stories
+whose files overlap never run in parallel lanes. Ask about a "named, no edge" pair before relying
+on the board's order.
