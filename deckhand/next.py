@@ -65,6 +65,8 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
     if f.closed and f.pull_requested and f.after_merge_left:
         items = "item is" if f.after_merge_left == 1 else "items are"
         return "after", f"#{number} is merged; {f.after_merge_left} after-the-merge {items} left."
+    if f.closed and f.pull_requested and f.status not in (None, columns.DONE):
+        return "after", f"#{number} is merged; its column still says {f.status}."
     if f.closed:
         return "done", f"#{number} is closed."
     if f.unavailable:
