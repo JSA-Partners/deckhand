@@ -8,7 +8,7 @@ license = { text = "MIT" }
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest>=9", "pymarkdownlnt>=0.9", "gitlint>=0.19", "pre-commit>=4", "ruff>=0.14"]
+dev = ["pytest>=9", "pymarkdownlnt>=0.9", "gitlint-core>=0.19", "pre-commit>=4", "ruff>=0.14"]
 
 [tool.ruff]
 # The two launchers carry a shebang instead of an extension, and ruff finds files by name.
