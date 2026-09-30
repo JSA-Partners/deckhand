@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.1](https://github.com/JSA-Partners/deckhand/compare/v4.1.0...v4.1.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* relink an unlinked pull request and read any After the merge heading ([#28](https://github.com/JSA-Partners/deckhand/issues/28)) ([45276a5](https://github.com/JSA-Partners/deckhand/commit/45276a57b52879cf61c655acd959980ef0370d81))
+
 ## [4.1.0](https://github.com/JSA-Partners/deckhand/compare/v4.0.0...v4.1.0) (2026-09-30)
 
 
