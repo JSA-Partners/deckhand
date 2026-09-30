@@ -99,72 +99,6 @@ def _waiting_rows(pulses: list[sessions.Pulse]) -> list[str]:
     ] or ["  nobody"]
 
 
-def _ranked(read: fleet.Fleet) -> list[order.Ranked]:
-    return order.ranked([story for story in read.stories if story.status == columns.BACKLOG], read.blockers)
-
-
-def _order_rows(read: fleet.Fleet) -> list[str]:
-    ranked = _ranked(read)
-    if not ranked:
-        return ["  nothing in Backlog"]
-    rows = ["| Rank | # | Repo | Pts | Why |", "| --- | --- | --- | --- | --- |"]
-    for place, row in enumerate(ranked, start=1):
-        points = "-" if row.story.points is None else str(row.story.points)
-        rows.append(f"| {place} | {row.story.number} | {_name(row.story.repo)} | {points} | {row.why} |")
-    return rows
-
-
-def _head(read: fleet.Fleet, repo: str) -> str | None:
-    """The open story at the top of this repository's waiting chains, and how much it holds up.
-
-    A blocker that is not in Backlog is nowhere in the order table, so a repository whose whole
-    Backlog waits has nothing to show without it.
-    """
-    backlog = {story.key for story in read.stories if story.status == columns.BACKLOG}
-    seen: set[fleet.Key] = set()
-    roots: set[fleet.Key] = set()
-    stack = [(w, n) for key, holds in read.blockers.items() if key[0] == repo and key in backlog for w, n, _ in holds]
-    while stack:
-        key = stack.pop()
-        if key in seen:
-            continue
-        seen.add(key)
-        above = [(w, n) for w, n, _ in read.blockers.get(key) or []]
-        if above:
-            stack.extend(above)
-        elif key not in backlog:
-            roots.add(key)
-    if not roots:
-        return None
-    waits = order.waiting(read.blockers)
-    best = max(sorted(roots), key=lambda key: len(order.downstream(key, waits)))
-    count = len(order.downstream(best, waits))
-    story = next((row for row in read.stories if row.key == best), None)
-    status = story.status if story and story.status else "off the board"
-    stories = "story" if count == 1 else "stories"
-    return f"{ref_label(best[0], best[1], repo)} is {status}, unblocking {count} {stories}"
-
-
-def _next_line(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> str:
-    """Each repository's top-ranked story in the ranked order, and whether a session is open to run it."""
-    free = {beat.repo for beat in pulses if beat.story == sessions.FREE}
-    seen: dict[str, str] = {}
-    waiting: set[str] = set()
-    for row in _ranked(read):
-        if row.why.startswith("waits"):
-            waiting.add(row.story.repo)
-            continue
-        if row.story.repo in seen:
-            continue
-        where = "a session is free" if row.story.repo in free else "no session open"
-        seen[row.story.repo] = f"{_name(row.story.repo)} {row.story.number} ({where})"
-    for repo in sorted(waiting - set(seen)):
-        head = _head(read, repo)
-        if head is not None:
-            seen[repo] = f"{_name(repo)}: {head}"
-    return "Next per repository: " + (", ".join(seen.values()) if seen else "nothing ready")
-
-
 def _thousands(count: int) -> str:
     return f"{count / 1000:.0f}k" if count >= 1000 else str(count)
 
@@ -307,7 +241,7 @@ def context(args: argparse.Namespace) -> int:
             block("## Fleet", lambda: _fleet_rows(read))
             print()
         if "order" in wanted:
-            block("## Order", lambda: [*_order_rows(read), "", _next_line(read, pulses)])
+            block("## Order", lambda: [*order.rows(read), "", order.next_line(read, pulses)])
             print()
         if "sessions" in wanted:
             block("## Sessions", lambda: _session_rows(pulses, args.since))
@@ -343,7 +277,7 @@ def _configure_apply(parser: argparse.ArgumentParser) -> None:
 
 
 def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
-    ranked = _ranked(read)
+    ranked = order.backlog(read)
     if len(ranked) < 2:
         raise Refusal("fewer than two stories in Backlog, so there is no order to write")
     project = gh.project_id(settings)

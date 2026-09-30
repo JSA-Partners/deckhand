@@ -1,4 +1,4 @@
-"""The build order the blocker graph implies: what can start first, and what waits on what.
+"""The build order the blocker graph implies: what can start first, what waits on what, and its table.
 
 The order is derived and never stored. The edges live on GitHub as issue dependencies and the fleet
 reads them, so nothing here calls out, nothing here writes, and the same fleet always ranks the same.
@@ -9,7 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from deckhand.fleet import Blockers, Key, Story
+from deckhand import columns, sessions
+from deckhand.fleet import Blockers, Fleet, Key, Story
 from deckhand.step import ref_label
 
 
@@ -91,3 +92,75 @@ def ranked(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
         Ranked(story=story, why=_why(story, blockers.get(story.key) or [], weights[story.key], points))
         for story in placed
     ]
+
+
+def _name(repo: str) -> str:
+    return repo.partition("/")[2] or repo
+
+
+def backlog(read: Fleet) -> list[Ranked]:
+    """The Backlog of this reading, ranked."""
+    return ranked([story for story in read.stories if story.status == columns.BACKLOG], read.blockers)
+
+
+def rows(read: Fleet) -> list[str]:
+    """The order table, one row per Backlog story in its rank."""
+    placed = backlog(read)
+    if not placed:
+        return ["  nothing in Backlog"]
+    table = ["| Rank | # | Repo | Pts | Why |", "| --- | --- | --- | --- | --- |"]
+    for place, row in enumerate(placed, start=1):
+        points = "-" if row.story.points is None else str(row.story.points)
+        table.append(f"| {place} | {row.story.number} | {_name(row.story.repo)} | {points} | {row.why} |")
+    return table
+
+
+def _head(read: Fleet, repo: str) -> str | None:
+    """The open story at the top of this repository's waiting chains, and how much it holds up.
+
+    A blocker that is not in Backlog is nowhere in the order table, so a repository whose whole
+    Backlog waits has nothing to show without it.
+    """
+    queued = {story.key for story in read.stories if story.status == columns.BACKLOG}
+    seen: set[Key] = set()
+    roots: set[Key] = set()
+    stack = [(w, n) for key, holds in read.blockers.items() if key[0] == repo and key in queued for w, n, _ in holds]
+    while stack:
+        key = stack.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        above = [(w, n) for w, n, _ in read.blockers.get(key) or []]
+        if above:
+            stack.extend(above)
+        elif key not in queued:
+            roots.add(key)
+    if not roots:
+        return None
+    waits = waiting(read.blockers)
+    best = max(sorted(roots), key=lambda key: len(downstream(key, waits)))
+    count = len(downstream(best, waits))
+    story = next((row for row in read.stories if row.key == best), None)
+    status = story.status if story and story.status else "off the board"
+    stories = "story" if count == 1 else "stories"
+    return f"{ref_label(best[0], best[1], repo)} is {status}, unblocking {count} {stories}"
+
+
+def next_line(read: Fleet, pulses: list[sessions.Pulse]) -> str:
+    """Each repository's top-ranked story in the ranked order, and whether a session is open to run it."""
+    free = {beat.repo for beat in pulses if beat.story == sessions.FREE}
+    seen: dict[str, str] = {}
+    held: set[str] = set()
+    for row in backlog(read):
+        if row.why.startswith("waits"):
+            held.add(row.story.repo)
+            continue
+        if row.story.repo in seen:
+            continue
+        where = "a session is free" if row.story.repo in free else "no session open"
+        seen[row.story.repo] = f"{_name(row.story.repo)} {row.story.number} ({where})"
+    for repo in sorted(held - set(seen)):
+        head = _head(read, repo)
+        if head is not None:
+            seen[repo] = f"{_name(repo)}: {head}"
+    return "Next per repository: " + (", ".join(seen.values()) if seen else "nothing ready")
