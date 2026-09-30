@@ -512,6 +512,26 @@ def test_a_pull_request_closed_without_merging_is_not_one(fake_gh, repo, tmp_pat
     _briefing(result, "stop", "#248 is In Review with no open pull request; nothing decided.")
 
 
+def test_a_closed_story_merged_through_an_unlinked_pull_request_walks_the_after_step(fake_gh, repo, tmp_path):
+    """GitHub sometimes misses the Closes footer, so the head lookup finds the merge the issue does not link."""
+    story = _story(tmp_path, "unlinked.json", state="CLOSED")
+    merged = json.dumps([{"url": PR_URL, "state": "MERGED"}])
+    env = {**story, **fieldvalues(tmp_path, "In Review"), "GH_PR_LIST_BODY": merged}
+
+    result = _next(repo, env=env)
+
+    _briefing(result, "after", "#248 is merged; its column still says In Review.")
+
+
+def test_an_open_story_merged_through_an_unlinked_pull_request_says_to_close_it(fake_gh, repo, tmp_path):
+    merged = json.dumps([{"url": PR_URL, "state": "MERGED"}])
+    env = {**fieldvalues(tmp_path, "In Review"), "GH_PR_LIST_BODY": merged}
+
+    result = _next(repo, env=env)
+
+    _briefing(result, "stop", "#248 has a merged pull request and an open issue; close the issue on GitHub.")
+
+
 def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, repo, tmp_path):
     body = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))["body"]
     body = body.replace("### Notes", f"{AFTER_MERGE_ONE_TICKED}\n### Notes")

@@ -11,6 +11,8 @@ from deckhand import naming, reviewed
 from tests.conftest import FIXTURES, run_deckhand
 
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
+# GitHub links a pull request to the issue its footer closes, so every apply finds the link unless told otherwise.
+LINKED = {"GH_PR_STATE": "OPEN"}
 BRANCH = "feat/248-guest-users-see-only"
 TITLE = "Guest users see only their granted collections"
 SUBJECT = "guest users see only their granted collections"  # the title as a commit subject reads
@@ -21,7 +23,7 @@ STORY = (
 )
 SUMMARY = "Guests reach only the collections granted to them, on every collection-scoped route."
 BODY = f"{SUMMARY}\n\nCloses #248\n"
-PR_LIST = f"pr list --repo acme/widgets --head {BRANCH} --state open --json url"
+PR_LIST = f"pr list --repo acme/widgets --head {BRANCH} --state all --json url,state"
 PR_URL = "https://github.com/acme/widgets/pull/1000"
 PENDING = (
     "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
@@ -148,7 +150,7 @@ def _apply(
     if "--check" not in args:
         args += ["--check", "true"]
     _mark_reviewed(repo, reviewed_sha or _sha(repo, "HEAD"))
-    return _finish("apply", repo, *args, env=env or {})
+    return _finish("apply", repo, *args, env={**LINKED, **(env or {})})
 
 
 # --- context ----------------------------------------------------------------
@@ -694,6 +696,16 @@ def test_apply_reuses_a_pull_request_the_branch_already_has(fake_gh, gh_calls, r
     assert [call for call in gh_calls() if "item-edit" in call] == [PENDING]
 
 
+def test_apply_opens_a_new_pull_request_when_the_branch_only_has_a_merged_one(fake_gh, gh_calls, repo, origin, branch):
+    merged = json.dumps([{"url": "https://github.com/acme/widgets/pull/9", "state": "MERGED"}])
+
+    result = _apply(repo, env={"GH_PR_LIST_BODY": merged})
+
+    assert result.returncode == 0, result.stderr
+    assert f"Opened {PR_URL}" in result.stdout.splitlines()
+    assert "Reusing" not in result.stdout
+
+
 def test_apply_assigns_the_pull_request_it_reuses(fake_gh, gh_calls, repo, origin, branch):
     """The run that opened it may have failed before it was assigned, so the reuse assigns it too."""
     _git(repo, "push", "-q", "-u", "origin", BRANCH)
@@ -703,6 +715,46 @@ def test_apply_assigns_the_pull_request_it_reuses(fake_gh, gh_calls, repo, origi
     assert result.returncode == 0, result.stderr
     assert [call for call in gh_calls() if call.startswith("pr edit")] == [
         f"pr edit {PR_URL} --repo acme/widgets --add-assignee @me"
+    ]
+
+
+def test_apply_resaves_the_body_when_github_did_not_link_it(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    copy = tmp_path / "bodies.md"
+
+    result = _apply(repo, env={"GH_PR_UNLINKED_CALLS": "1", "GH_BODY_FILE_COPY": str(copy)})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-4:] == [
+        f"Opened {PR_URL}",
+        "Relinked #248",
+        "Logged Pull request",
+        "Status=In Review",
+    ]
+    edits = [call for call in gh_calls() if call.startswith("pr edit")]
+    assert len(edits) == 1
+    assert edits[0].startswith(f"pr edit {PR_URL} --repo acme/widgets --body-file ")
+    assert f"--- pr edit\n{BODY}" in copy.read_text(encoding="utf-8")
+
+
+def test_apply_leaves_a_linked_pull_request_alone(fake_gh, gh_calls, repo, origin, branch):
+    result = _apply(repo)
+
+    assert result.returncode == 0, result.stderr
+    assert "Relinked" not in result.stdout
+    assert [call for call in gh_calls() if call.startswith("pr edit")] == []
+
+
+def test_apply_says_so_when_the_resave_did_not_link_it_either(fake_gh, gh_calls, repo, origin, branch):
+    """The pull request exists by now, so refusing would strand it; the person hears and it carries on."""
+    result = _apply(repo, env={"GH_PR_UNLINKED_CALLS": "2"})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-5:] == [
+        f"Opened {PR_URL}",
+        "Relinked #248",
+        f"GitHub has not linked {PR_URL} to #248; re-save its body on GitHub if it stays unlinked",
+        "Logged Pull request",
+        "Status=In Review",
     ]
 
 

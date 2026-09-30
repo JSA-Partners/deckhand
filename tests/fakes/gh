@@ -196,8 +196,12 @@ elif head == "pr list":
         print("could not list pull requests", file=sys.stderr)
         sys.exit(1)
     if os.environ.get("GH_PR_EXISTS"):
-        respond(json.dumps([{"url": f"https://github.com/{repo}/pull/1000"}]))
-    respond(os.environ.get("GH_PR_LIST_BODY", "[]"))
+        respond(json.dumps([{"url": f"https://github.com/{repo}/pull/1000", "state": "OPEN"}]))
+    listed = json.loads(os.environ.get("GH_PR_LIST_BODY", "[]"))
+    wanted = argv[argv.index("--state") + 1].upper() if "--state" in argv else "ALL"
+    if isinstance(listed, list) and wanted != "ALL":
+        listed = [item for item in listed if item.get("state", wanted) == wanted]
+    respond(json.dumps(listed))
 elif head == "label list":
     # Real gh prints nothing at all for a repository holding no labels, not an empty list.
     respond(os.environ.get("GH_LABELS", ""))
@@ -218,6 +222,9 @@ elif head == "api graphql":
             asked = next((f for f in fields if f.startswith("number=")), "")
             if asked.partition("=")[2] not in only.split(","):
                 pr_state = ""
+        # $GH_PR_UNLINKED_CALLS is how many reads find no link before GitHub makes one.
+        if os.environ.get("GH_PR_UNLINKED_CALLS") and bump("link") <= int(os.environ["GH_PR_UNLINKED_CALLS"]):
+            pr_state = ""
         pr_nodes = []
         if pr_state:
             rollup = {"contexts": {"nodes": json.loads(os.environ.get("GH_PR_CHECKS", "[]"))}}
