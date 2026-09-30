@@ -1,8 +1,9 @@
 """How long finished stories took, and how long a batch of them will take.
 
 Nothing here reads GitHub or prints: it takes stories, their blockers and a session count, and
-returns numbers. The durations are measured rather than estimated, from the timestamps the log has
-always carried, so a point value selects which history is relevant instead of predicting a time.
+returns numbers and the lines of the captain's Forecast block. The durations are measured rather
+than estimated, from the timestamps the log has always carried, so a point value selects which
+history is relevant instead of predicting a time.
 
 A stall is never trimmed. The longest story in a band is in that band at the rate stalls actually
 happen, and discarding it would produce exactly the optimistic estimate this exists to avoid.
@@ -18,6 +19,8 @@ from datetime import datetime
 from deckhand import fleet, log, order
 
 PERCENTILES = (50, 85, 95, 100)
+THIN = 10  # samples in a band below which a percentile is a fit to noise, so the worst run is used
+HOURS_A_DAY = 24.0  # the durations are elapsed wall clock, including the hours a story waited
 POINT = "A point groups stories that take about as long as each other. It is not hours."
 
 
@@ -129,3 +132,63 @@ def simulate(
 
     makespans = sorted(_schedule(placed, blockers, sessions, _draw()) for _ in range(runs))
     return {p: _percentile(makespans, p) for p in PERCENTILES}
+
+
+def _days(hours: float) -> int:
+    return math.ceil(hours / HOURS_A_DAY)
+
+
+def _row(label: str, hours: float, note: str) -> str:
+    return f"  {label:<12}{_days(hours):>3} days   {note}"
+
+
+def parallel(given: int | None, read: fleet.Fleet, live: int) -> tuple[int, str]:
+    """How many stories the forecast runs at once, and where that number came from."""
+    if given is not None:
+        return given, "given"
+    measured = concurrency(read.stories)
+    if measured is not None:
+        return measured, "measured"
+    return max(live, 1), "open sessions"
+
+
+def rows(read: fleet.Fleet, at_once: int, source: str) -> list[str]:
+    """The floor, the commitment, and the control that pools points away, over what is not yet Done."""
+    left = [story for story in read.stories if not story.closed]
+    if not left:
+        return ["  nothing left to forecast"]
+
+    points = sum(story.points or 0 for story in left)
+    story_word = "story" if len(left) == 1 else "stories"
+    header = f"  {len(left)} {story_word}, {points} points, {at_once} at once, {source}"
+
+    history = durations(read.stories)
+    if not history:
+        return [f"{header}: no finished stories, so no Floor and no Commitment."]
+
+    pooled = sorted(hours for band in history.values() for hours in band)
+    thin = any(len(band) < THIN for band in history.values())
+    commitment_p = 100 if thin else 85
+    worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
+    medians = {band: statistics.median(hours) for band, hours in history.items()}
+
+    floor_hours = floor(left, read.blockers, at_once, medians)
+    banded = simulate(left, read.blockers, at_once, history)
+    unbanded = simulate(left, read.blockers, at_once, {None: pooled})
+    commitment_note = ("worst run" if thin else "85th percentile") + ", banded by points"
+
+    lines = [
+        header,
+        "",
+        _row("Floor", floor_hours, "critical path, nothing stalls"),
+        _row("Commitment", banded[commitment_p], commitment_note),
+        _row("Worst seen", banded[worst_p], f"{worst_p}th percentile"),
+        "",
+        _row("Unbanded", unbanded[commitment_p], "the same, points ignored"),
+        "",
+        f"  From {len(pooled)} finished stories, the longest {pooled[-1]:.1f} hours against a median "
+        f"of {statistics.median(pooled):.1f}.",
+    ]
+    if thin:
+        lines.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
+    return [*lines, "", f"  {POINT}"]

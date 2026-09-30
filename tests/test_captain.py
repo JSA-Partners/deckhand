@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from deckhand import captain, cli, fleet
+from deckhand import captain, cli, fleet, forecast
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -341,7 +342,7 @@ def test_a_thin_band_reports_the_worst_run_and_says_so(fleet_env, monkeypatch, c
 def test_a_full_band_reports_a_percentile_and_drops_the_warning(fleet_env, monkeypatch, capsys):
     """The label must track the number it describes: an 85th percentile is not the observed maximum."""
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
-    monkeypatch.setattr(captain, "THIN", 1)  # the fixture's bands are enough once the bar is this low
+    monkeypatch.setattr(forecast, "THIN", 1)  # the fixture's bands are enough once the bar is this low
 
     assert cli.main(["captain", "context", "--only", "forecast"]) == 0
 
@@ -417,3 +418,199 @@ def test_thin_history_forecasts_across_the_open_sessions(fleet_env, monkeypatch,
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
     cli.main(["captain", "context", "--only", "forecast"])
     assert "1 at once, open sessions" in capsys.readouterr().out
+
+
+def _waiting(fleet_env, monkeypatch, records) -> None:
+    live = fleet_env / "live"
+    live.mkdir()
+    (live / "1.json").write_text(json.dumps({"pid": os.getpid(), "sessionId": "one", "status": "waiting"}))
+    monkeypatch.setenv("DECKHAND_LIVE", str(live))
+    _session(
+        fleet_env / "sessions", "one", [{"type": "user", "cwd": "/x/widgets", "message": {"content": "hi"}}, *records]
+    )
+
+
+def _block(out: str, heading: str) -> list[str]:
+    lines = out.split("\n\n")
+    return next(chunk.splitlines()[1:] for chunk in lines if chunk.startswith(heading))
+
+
+def test_a_full_read_opens_with_who_is_waiting(fleet_env, capsys):
+    cli.main(["captain", "context"])
+    chunks = capsys.readouterr().out.split("\n\n")
+    assert chunks[0].startswith("Project:")
+    assert chunks[1].splitlines() == ["## Waiting on you", "  nobody"]
+
+
+def test_a_waiting_session_says_what_it_asks(fleet_env, monkeypatch, capsys):
+    ask = {"type": "tool_use", "id": "q1", "name": "AskUserQuestion"}
+    ask["input"] = {"questions": [{"question": "Ship it?", "options": [{"label": "yes"}, {"label": "no"}]}]}
+    on_story = {"cwd": "/x/widgets", "gitBranch": "feat/253-ship"}
+    _waiting(fleet_env, monkeypatch, [{"type": "assistant", **on_story, "message": {"content": [ask]}}])
+
+    cli.main(["captain", "context"])
+
+    (line,) = _block(capsys.readouterr().out, "## Waiting on you")
+    assert re.fullmatch(r"  one #253, \d+[mhd]: Ship it\? \[yes, no\]", line)
+
+
+def test_a_waiting_session_on_no_story_is_free(fleet_env, monkeypatch, capsys):
+    _waiting(
+        fleet_env, monkeypatch, [{"type": "assistant", "message": {"content": [{"type": "text", "text": "Next?"}]}}]
+    )
+
+    cli.main(["captain", "context"])
+
+    (line,) = _block(capsys.readouterr().out, "## Waiting on you")
+    assert re.fullmatch(r"  one free, \d+[mhd]: Next\?", line)
+
+
+def test_a_first_read_has_no_since_block_and_leaves_a_snapshot(fleet_env, tmp_path, monkeypatch, capsys):
+    cache = tmp_path / "snapshots"
+    monkeypatch.setenv("DECKHAND_CACHE", str(cache))
+
+    cli.main(["captain", "context"])
+
+    assert "## Since you last looked" not in capsys.readouterr().out
+    assert list(cache.glob("captain-*.json"))
+
+
+def _rerun_after(fleet_env, tmp_path, monkeypatch, capsys, nodes=None) -> str:
+    monkeypatch.setenv("DECKHAND_CACHE", str(tmp_path / "snapshots"))
+    cli.main(["captain", "context"])
+    capsys.readouterr()
+    if nodes is not None:
+        for name, value in _items(tmp_path, "moved.json", nodes).items():
+            monkeypatch.setenv(name, value)
+    cli.main(["captain", "context"])
+    return capsys.readouterr().out
+
+
+def test_a_second_read_says_what_moved(fleet_env, tmp_path, monkeypatch, capsys):
+    nodes = _nodes()
+    moved = json.loads(json.dumps(nodes))
+    for field in moved[0]["fieldValues"]["nodes"]:
+        if field["field"]["name"] == "Status":
+            was, field["name"] = field["name"], "Ready"
+    number = moved[0]["content"]["number"]
+
+    out = _rerun_after(fleet_env, tmp_path, monkeypatch, capsys, moved)
+
+    assert _block(out, "## Since you last looked")[1] == f"    #{number} {was} -> Ready"
+    assert _block(out, "## Since you last looked")[0].startswith("  Since ")
+
+
+def test_an_unchanged_board_says_nothing_moved(fleet_env, tmp_path, monkeypatch, capsys):
+    out = _rerun_after(fleet_env, tmp_path, monkeypatch, capsys)
+    (line,) = _block(out, "## Since you last looked")
+    assert line.startswith("  Nothing moved since ")
+
+
+def test_one_block_reads_nothing_and_writes_nothing(fleet_env, tmp_path, monkeypatch, capsys):
+    cache = tmp_path / "snapshots"
+    monkeypatch.setenv("DECKHAND_CACHE", str(cache))
+    cli.main(["captain", "context"])
+    (snapshot,) = cache.glob("captain-*.json")
+    snapshot.unlink()
+
+    cli.main(["captain", "context", "--only", "fleet"])
+
+    assert not list(cache.glob("captain-*.json"))
+    cli.main(["captain", "context"])
+    capsys.readouterr()
+    cli.main(["captain", "context", "--only", "fleet"])
+    assert "## Since you last looked" not in capsys.readouterr().out
+
+
+def test_other_peoples_issues_are_counted_not_listed(fleet_env, tmp_path, monkeypatch, capsys):
+    for name, value in _items(tmp_path, "mixed.json", [*_nodes(), _foreign("In Review")]).items():
+        monkeypatch.setenv(name, value)
+
+    cli.main(["captain", "context", "--only", "fleet"])
+
+    out = capsys.readouterr().out
+    assert "Client-side CSV export" not in out
+    assert "| 96 |" not in out
+    assert out.count("1 item on the board is not deckhand's.") == 1
+    assert out.index("| 253 |") < out.index("1 item on the board is not deckhand's.")
+
+
+def test_an_anomaly_is_in_full_once_then_standing(fleet_env, tmp_path, monkeypatch, capsys):
+    nodes = _nodes()
+    nodes[0] = json.loads(json.dumps(nodes[0]))
+    nodes[0]["content"]["state"], nodes[0]["content"]["closedAt"] = "CLOSED", "2026-09-12T00:00:00Z"
+    number = nodes[0]["content"]["number"]
+    for name, value in _items(tmp_path, "anomaly.json", nodes).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("DECKHAND_CACHE", str(tmp_path / "snapshots"))
+
+    cli.main(["captain", "context"])
+    first = _block(capsys.readouterr().out, "## Anomalies")
+    cli.main(["captain", "context"])
+    second = _block(capsys.readouterr().out, "## Anomalies")
+
+    assert any(row.startswith(f"| {number} |") for row in first)
+    assert not any(row.startswith(f"| {number} |") for row in second)
+    assert any(row.startswith(f"Standing: #{number} ") for row in second)
+
+
+def test_a_named_session_read_leaves_no_snapshot(fleet_env, tmp_path, monkeypatch, capsys):
+    cache = tmp_path / "snapshots"
+    monkeypatch.setenv("DECKHAND_CACHE", str(cache))
+
+    assert cli.main(["captain", "context", "--session", "z"]) == 0
+
+    assert not list(cache.glob("captain-*.json"))
+
+
+def test_an_unwritable_cache_costs_only_the_snapshot(fleet_env, tmp_path, monkeypatch, capsys):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("", encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CACHE", str(blocker))
+
+    assert cli.main(["captain", "context"]) == 0
+
+    out = capsys.readouterr().out
+    for heading in ("## Waiting on you", "## Fleet", "## Order", "## Sessions", "## Anomalies"):
+        assert heading in out
+    (line,) = _block(out, "## Snapshot")
+    assert line.startswith("  not saved, so the next read cannot say what moved (")
+
+
+def test_a_snapshot_that_cannot_be_read_says_so_in_its_block(fleet_env, monkeypatch, capsys):
+    def unreadable(settings):
+        raise RuntimeError("no cache here")
+
+    monkeypatch.setattr(captain.since, "path", unreadable)
+
+    assert cli.main(["captain", "context"]) == 0
+
+    out = capsys.readouterr().out
+    assert _block(out, "## Since you last looked") == ["  what moved could not be read (no cache here)"]
+    assert "## Fleet" in out
+
+
+def test_a_board_of_only_other_peoples_issues_says_so(fleet_env, tmp_path, monkeypatch, capsys):
+    for name, value in _items(tmp_path, "foreign.json", [_foreign("In Review")]).items():
+        monkeypatch.setenv(name, value)
+
+    cli.main(["captain", "context", "--only", "fleet"])
+
+    rows = capsys.readouterr().out.split("## Fleet\n")[1].splitlines()
+    assert rows[:3] == ["  nothing of deckhand's on the board", "", "1 item on the board is not deckhand's."]
+
+
+def test_a_full_read_finds_the_anomalies_once(fleet_env, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_CACHE", str(tmp_path / "snapshots"))
+    calls = []
+    found = fleet.anomalies
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return found(*args, **kwargs)
+
+    monkeypatch.setattr(fleet, "anomalies", counted)
+
+    cli.main(["captain", "context"])
+
+    assert len(calls) == 1
