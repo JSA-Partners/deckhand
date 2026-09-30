@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.1.0](https://github.com/JSA-Partners/deckhand/compare/v4.0.0...v4.1.0) (2026-09-30)
+
+
+### Features
+
+* brief the plan at the board and walk the code at the handoff ([#21](https://github.com/JSA-Partners/deckhand/issues/21)) ([e11c45d](https://github.com/JSA-Partners/deckhand/commit/e11c45d8545bda0a6b989be3f061e903639e0fba))
+* give the captain the facts a lane plan needs ([#24](https://github.com/JSA-Partners/deckhand/issues/24)) ([d33a22d](https://github.com/JSA-Partners/deckhand/commit/d33a22dd3ab5e1e6fa00b11d3371d933c517c9b7))
+* say what to merge first when the captain reads ([#25](https://github.com/JSA-Partners/deckhand/issues/25)) ([fc71661](https://github.com/JSA-Partners/deckhand/commit/fc71661b19bb6a911c98c60cacedc9cb340de497))
+* say who is waiting and what changed when the captain reads ([#22](https://github.com/JSA-Partners/deckhand/issues/22)) ([2e6fbaf](https://github.com/JSA-Partners/deckhand/commit/2e6fbaf377b193c37d9270acc38588a659e446b4))
+
+
+### Bug Fixes
+
+* label every issue created and review every amend ([#19](https://github.com/JSA-Partners/deckhand/issues/19)) ([ef2eb18](https://github.com/JSA-Partners/deckhand/commit/ef2eb1875ea6673f6786880af0bc585b9ab5dc27))
+* move a merged story to Done when nothing is left after the merge ([#27](https://github.com/JSA-Partners/deckhand/issues/27)) ([0967a21](https://github.com/JSA-Partners/deckhand/commit/0967a21a5df6ab595177557bfa04b8d1eac13d09))
+
+
+### Documentation
+
+* the contract names the modules this release adds ([#26](https://github.com/JSA-Partners/deckhand/issues/26)) ([75b6ac0](https://github.com/JSA-Partners/deckhand/commit/75b6ac02049b047c9b892ca9c2d9e6af47fe2c8c))
+
 ## [4.0.0](https://github.com/JSA-Partners/deckhand/compare/v3.12.1...v4.0.0) (2026-09-28)
 
 
