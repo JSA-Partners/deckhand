@@ -15,7 +15,7 @@ import math
 import os
 import statistics
 
-from deckhand import board, checklist, columns, config, edges, fleet, forecast, gh, order, sessions
+from deckhand import board, checklist, columns, config, edges, fleet, forecast, gh, order, sessions, transcript
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -267,7 +267,7 @@ def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
     if beat is None:
         print(f"no session {label}; run captain context for the ones there are")
         return 0
-    read = sessions.deep(beat.path)
+    read = transcript.deep(beat.path)
     spent = _thousands(beat.tokens)
     print(f"Session {beat.label}: {beat.repo} story {beat.story}, idle {_since(beat.idle)}, {spent} tokens")
     print(f"Last prompt: {read.prompt or 'none'}")

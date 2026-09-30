@@ -189,18 +189,6 @@ def test_a_transcript_older_than_the_window_is_left_alone(tmp_path, monkeypatch)
     assert sessions.discover(REPOS, since=24, exclude="") == []
 
 
-def test_a_deep_read_gives_the_last_prompt_and_the_last_word(tmp_path):
-    records = [
-        {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
-        {"type": "last-prompt", "lastPrompt": "proceed"},
-        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Which kind is it?"}]}},
-    ]
-    path = _write(tmp_path / "s.jsonl", records)
-    read = sessions.deep(path, limit=5)
-    assert read.prompt == "proceed"
-    assert read.lines[-1] == "assistant: Which kind is it?"
-
-
 def test_a_file_path_argument_is_not_a_story_number(tmp_path):
     records = [
         {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
@@ -324,34 +312,3 @@ def test_tokens_include_the_sessions_subagents(tmp_path):
     _write(tmp_path / "s" / "subagents" / "agent-a.jsonl", [_said("a1", output_tokens=7)])
 
     assert sessions.tokens(path) == 12
-
-
-def test_a_deep_read_shows_a_question_and_its_answer(tmp_path):
-    """A question with options is a tool call, not text, so it was invisible to the captain."""
-    question = {"question": "Split or fold?", "options": [{"label": "Split"}, {"label": "Fold"}]}
-    asked = {
-        "type": "assistant",
-        "message": {
-            "content": [{"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [question]}}]
-        },
-    }
-    answered = {
-        "type": "user",
-        "message": {"content": [{"type": "tool_result", "tool_use_id": "q1", "content": "Fold"}]},
-    }
-    path = _write(tmp_path / "s.jsonl", [asked, answered])
-
-    assert sessions.deep(path, limit=5).lines == ["asked: Split or fold? [Split, Fold]", "answered: Fold"]
-
-
-def test_a_deep_read_shows_a_question_still_waiting(tmp_path):
-    question = {"question": "Board it?", "options": [{"label": "Yes"}, {"label": "Not yet"}]}
-    asked = {
-        "type": "assistant",
-        "message": {
-            "content": [{"type": "tool_use", "id": "q2", "name": "AskUserQuestion", "input": {"questions": [question]}}]
-        },
-    }
-    path = _write(tmp_path / "s.jsonl", [asked])
-
-    assert sessions.deep(path, limit=5).lines == ["asked: Board it? [Yes, Not yet]"]
