@@ -230,6 +230,19 @@ def _log_block(story: issue.Issue | None) -> None:
         print("  none")
 
 
+def _notes_block(story: issue.Issue) -> None:
+    """Every `Noted:` entry in full: a parked feature's notes are the research it was parked with."""
+    notes = [entry for entry in log.entries(story) if entry.prefix == "Noted:"]
+    if not notes:
+        return
+    print("Notes:")
+    for entry in notes:
+        first, *rest = entry.body.strip("\n").splitlines()
+        print(f"  {entry.created_at[:10] or 'undated'} {first}")
+        for line in rest:
+            print(f"  {line}" if line.strip() else "")
+
+
 def _context(name: str, number: int) -> None:
     """The context of the step's own command, under one heading; a failure inside is one line."""
     print()
@@ -366,6 +379,8 @@ def context(args: argparse.Namespace) -> int:
         for blocker in facts.blockers:
             print(f"  {blocker}")
     _log_block(story)
+    if name == "settle" and story:
+        _notes_block(story)
     if repo and story and not facts.closed:
         _related_block(repo, number, story, printed)
     if name in CONTEXT_OF:

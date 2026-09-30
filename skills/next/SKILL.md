@@ -40,6 +40,10 @@ When they approve something, tell the story plainly first: what a user gets when
 will know, and the work as numbered steps of one sentence. The technical body stays on the issue;
 give it or explain any line on request.
 
+A feature this work turns up that belongs in a later story: write it as requirements and park it
+with `new apply --park <file> --title "<name>" --from $issue`, adding `--after $issue` when it
+waits on this one, and name the number it prints.
+
 ## Write
 
 A draft: dispatch the deckhand:author agent with the number and the path to deckhand, say in a
@@ -47,8 +51,9 @@ sentence what it wrote, and carry on to the review.
 
 ## Settle
 
-A parked feature: settle its requirements with them from the context above, as new does. One
-outcome: dispatch deckhand:author as for a draft. Several: propose the split as one story per line
+A parked feature: run superpowers:brainstorming with them from the context above, and its Notes,
+until the requirements say what a user gets, what is in and out, and how we will know it is done.
+One outcome: dispatch deckhand:author as for a draft. Several: propose the split as one story per line
 in dependency order, each opening with `owner/name:` when it belongs elsewhere, confirm it in one
 question, write the split file, run `new apply --split <file> --from $issue`, and dispatch one
 author per draft it prints, all at once, then carry on to each one's review.
@@ -82,9 +87,12 @@ and run `amend apply $issue <file> --new-issue "<title>"`; work that must land f
 
 ## Board
 
-From the ready context (above, or run it), tell the story plainly, propose kind, and points by naming
-the reference story it is most like and why, and ask one question: board it, review it again, or not
-yet. A story whose plan waits on other stories
+From the ready context (above, or run it), brief the story in three sentences: what it changes, as
+behavior rather than files; what it leaves alone, from Scope Out; and the one judgment call the
+plan makes, an approach over another, a trade-off, or an accepted review finding, with the
+alternative named. When there is none, the third sentence says so. Propose kind, and points by
+naming the reference story it is most like and why, and ask one question about that call: "The
+plan does X rather than Y; board it that way, review it again, or not yet?" A story whose plan waits on other stories
 boards with them as blockers rather than waiting unboarded.
 Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
@@ -120,7 +128,10 @@ When the plan is done, run one superpowers code-review subagent over `origin/mai
 story, plan, and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
 line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
 idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
-and what you fixed, name only a finding you are unsure of, with a recommendation, and give them
+and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk them
+through the change with technical depth: the files and functions in the order a reviewer should
+read them, what each does and why, the acceptance criterion each serves, and every Deviation with
+its reason. Then give them
 `cd "<the worktree>" && tuicr -r origin/main..HEAD` as a plain message for a terminal of their own;
 they paste the export or say there are no comments. On comments: fix every
 one, commit with deckhand:commit, run the same review over
