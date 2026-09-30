@@ -1,8 +1,9 @@
 """The captain: one reading of every story, every working session, the build order, and what slipped.
 
-`context` prints six blocks and never fails, because it is what an open session reruns every time a
-person asks where things stand: who is waiting, what moved since the last read, then the fleet, the
-order, the sessions and the anomalies; `--only` prints one of the last four, or the forecast, alone.
+`context` prints seven blocks and never fails, because it is what an open session reruns every time
+a person asks where things stand: who is waiting, what moved since the last read, then the fleet, the
+order, what to merge, the sessions and the anomalies; `--only` prints one of the last five, or the
+forecast or the candidates, alone.
 `apply` writes the board and no more: the order onto it, a Status the board holds that the story's
 log does not allow, the label that says a story is this process's business, and a blocker added to
 or dropped from a boarded story. Everything else it finds is reported with the command that would
@@ -25,6 +26,7 @@ from deckhand import (
     fleet,
     forecast,
     gh,
+    merges,
     order,
     sessions,
     since,
@@ -164,7 +166,7 @@ def _anomaly_rows(settings: Settings, found: list[fleet.Anomaly], standing: set[
     return [*table, *([""] if table and old else []), *old]
 
 
-BLOCKS = ("fleet", "order", "sessions", "anomalies")
+BLOCKS = ("fleet", "order", "merge", "sessions", "anomalies")
 ON_REQUEST = ("forecast", "candidates")  # neither is worth paying for on every rerun of the context
 
 
@@ -242,6 +244,9 @@ def context(args: argparse.Namespace) -> int:
             print()
         if "order" in wanted:
             block("## Order", lambda: [*order.rows(read), "", order.next_line(read, pulses)])
+            print()
+        if "merge" in wanted:
+            block("## Merge", lambda: merges.rows(read, gh.repo_slug()))
             print()
         if "sessions" in wanted:
             block("## Sessions", lambda: _session_rows(pulses, args.since))

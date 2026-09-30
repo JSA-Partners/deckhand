@@ -105,6 +105,24 @@ def test_the_order_names_what_to_run_per_repository(fleet_env, capsys):
     assert "Next per repository:" in capsys.readouterr().out
 
 
+def test_the_merge_block_follows_the_order_and_ranks_the_open_pull_requests(fleet_env, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+    monkeypatch.setenv("GH_PR_ISSUES", "117")
+    cli.main(["captain", "context"])
+    out = capsys.readouterr().out
+    assert out.index("## Order") < out.index("## Merge") < out.index("## Sessions")
+    lines = _block(out, "## Merge")
+    assert lines[2].startswith("| 117 | widgets | #1000 | passed | current |")
+    assert "\n\nMerge #1000 first; no other open pull request changes its files.\n" in out
+
+
+def test_the_merge_block_can_be_asked_for_alone(fleet_env, capsys):
+    cli.main(["captain", "context", "--only", "merge"])
+    out = capsys.readouterr().out
+    assert _block(out, "## Merge") == ["  nothing in review"]
+    assert "## Fleet" not in out
+
+
 def test_no_sessions_is_a_line_and_not_a_missing_block(fleet_env, capsys):
     cli.main(["captain", "context"])
     out = capsys.readouterr().out

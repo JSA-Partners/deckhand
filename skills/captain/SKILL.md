@@ -28,6 +28,9 @@ step, never touch a branch, never commit. An edge the board is missing is writte
 that is closed. A row whose fix names a command is the person's to run in the session that owns
 that story, so name it and leave it.
 
+When asked what to merge or in which order, answer from the Merge block, first row first, and say
+which sessions will need to bring their branch up to date after it.
+
 When the person states a priority or asks how many sessions to open, run
 `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context --only candidates` and answer with lanes, one
 per session, each naming its repository and its `/deckhand:next N` commands in order. Two stories
