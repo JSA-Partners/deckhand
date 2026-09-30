@@ -22,7 +22,12 @@
   names; `gates.py` what must be true before a branch becomes a pull request, run only from
   `finish.apply`; `findings.py` reads the findings, verdicts or decisions document into data, for
   `review.py` to join; `forecast.py` measures what a finished story took and how many run at once,
-  and simulates what a batch of open ones will
+  and simulates what a batch of open ones will; `related.py` the issues a story names, with their
+  column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
+  which Claude Code sessions are open and on what, `transcript.py` what one of them says;
+  `since.py` the snapshot a full captain read leaves, and what changed against the last;
+  `candidates.py` what to open next and which plans touch the same files; `merges.py` which pull
+  request to merge first
 - Skills: `skills/<name>/SKILL.md` with YAML frontmatter; the `next` skill carries the guidance for
   every step; lenses in `skills/next/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
