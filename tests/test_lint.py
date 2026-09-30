@@ -282,3 +282,12 @@ def test_headroom_measures_the_body_as_lint_does():
     body = sections.replace(VALID, "Notes", "note\r\n" * (BODY_LIMIT // 5))
 
     assert f"Body is {len(body.replace(chr(13), ''))} of" in (lint.headroom(body) or "")
+
+
+def test_within_scope_drops_the_out_subsection():
+    scope = "#### In\n- Sessions, as #3 left them.\n#### Out\n- Webhooks, which are #2.\n"
+    assert lint.within_scope(scope) == "#### In\n- Sessions, as #3 left them."
+
+
+def test_within_scope_without_an_out_is_the_whole_scope():
+    assert lint.within_scope("#### In\n- Sessions.") == "#### In\n- Sessions."

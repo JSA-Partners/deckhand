@@ -522,6 +522,22 @@ def test_one_block_reads_nothing_and_writes_nothing(fleet_env, tmp_path, monkeyp
     assert "## Since you last looked" not in capsys.readouterr().out
 
 
+def test_the_candidates_print_on_request_and_leave_no_snapshot(fleet_env, tmp_path, monkeypatch, capsys):
+    cache = tmp_path / "snapshots"
+    monkeypatch.setenv("DECKHAND_CACHE", str(cache))
+    cli.main(["captain", "context"])
+    assert "## Candidates" not in capsys.readouterr().out
+    (snapshot,) = cache.glob("captain-*.json")
+    snapshot.unlink()
+
+    assert cli.main(["captain", "context", "--only", "candidates"]) == 0
+
+    out = capsys.readouterr().out
+    assert "| # | Repo | Title | Status | Pts | Next | Waits on | Named, no edge | Files |" in out
+    assert "| 257 | widgets |" in out
+    assert not list(cache.glob("captain-*.json"))
+
+
 def test_other_peoples_issues_are_counted_not_listed(fleet_env, tmp_path, monkeypatch, capsys):
     for name, value in _items(tmp_path, "mixed.json", [*_nodes(), _foreign("In Review")]).items():
         monkeypatch.setenv(name, value)

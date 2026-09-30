@@ -80,6 +80,13 @@ def _bullets(lines: list[str], start: int, headings: list[int]) -> list[str]:
     return [line for line in lines[start + 1 : end] if line.startswith("- ")]
 
 
+def within_scope(scope: str) -> str:
+    """The Scope section less its `#### Out` subsection, which names what the story is not."""
+    lines = scope.split("\n")
+    out_at = _heading(lines, _SCOPE_OUT)
+    return scope if out_at is None else "\n".join(lines[:out_at])
+
+
 def _fold_bullets(text: str) -> list[str]:
     """Group each `- ` bullet with its wrapped continuation and indented sub-bullet lines into one line."""
     bullets: list[str] = []
