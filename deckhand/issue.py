@@ -278,7 +278,7 @@ BEHIND = {"BEHIND", "DIRTY"}  # main moved on, or the merge would conflict; both
 PR_QUERY = (
     "query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ "
     "issue(number:$number){ closedByPullRequestsReferences(first:5, includeClosedPrs:true){ nodes{ "
-    "number url state merged mergeStateStatus "
+    "number url state merged mergeStateStatus files(first:100){ nodes{ path } } "
     "commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:20){ nodes{ "
     "... on CheckRun{ name conclusion status } ... on StatusContext{ context state } "
     "} } } } } } } } } } }"
@@ -298,6 +298,7 @@ class PullRequest:
     behind: bool | None  # None while GitHub has not worked the mergeability out yet
     failed_checks: tuple[str, ...]
     pending_checks: int
+    files: tuple[str, ...] = ()
 
 
 def _rollup_contexts(node: dict[str, Any]) -> list[Any]:
@@ -348,4 +349,5 @@ def pull_request_for(repo: str, number: int) -> PullRequest | None:
         behind=behind,
         failed_checks=tuple(failed),
         pending_checks=pending,
+        files=tuple(str(file.get("path") or "") for file in (node.get("files") or {}).get("nodes") or []),
     )

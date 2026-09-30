@@ -112,7 +112,6 @@ def test_the_next_line_keeps_the_ranked_order_of_the_repositories():
     read = fleet.Fleet(
         stories=found,
         blockers={story.key: list(story.blocked_by) for story in found if story.status != "Done"},
-        behind=set(),
         missing=[],
     )
 
@@ -128,7 +127,6 @@ def test_the_next_line_names_the_draft_a_blocked_repository_waits_on():
     read = fleet.Fleet(
         stories=[found[257], draft],
         blockers={found[257].key: [("acme/widgets", 268, "Domains")], draft.key: []},
-        behind=set(),
         missing=[],
     )
 

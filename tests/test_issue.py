@@ -324,13 +324,14 @@ PR_URL = "https://github.com/acme/widgets/pull/1000"
 # --- pull_request_for --------------------------------------------------------
 
 
-def _pr_node(number=1000, state="OPEN", merged=False, merge_state="CLEAN", contexts=None):
+def _pr_node(number=1000, state="OPEN", merged=False, merge_state="CLEAN", contexts=None, files=()):
     return {
         "number": number,
         "url": f"https://github.com/acme/widgets/pull/{number}",
         "state": state,
         "merged": merged,
         "mergeStateStatus": merge_state,
+        "files": {"nodes": [{"path": path} for path in files]},
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": contexts or []}}}}]},
     }
 
@@ -452,6 +453,25 @@ def test_pull_request_for_names_the_failed_check_and_counts_the_running_one(fake
 
     assert result.failed_checks == ("Unit tests",)
     assert result.pending_checks == 1
+
+
+def test_pull_request_for_reads_the_files_it_changes(fake_gh, gh_calls, tmp_path, monkeypatch):
+    path = _pr_reference_fixture(tmp_path, _pr_node(files=("api/auth.go", "api/auth_test.go")))
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    result = issue.pull_request_for(REPO, 248)
+
+    assert result.files == ("api/auth.go", "api/auth_test.go")
+    assert "files(first:100){ nodes{ path } }" in gh_calls()[-1]
+
+
+def test_pull_request_for_changes_no_files_when_the_node_has_none(fake_gh, tmp_path, monkeypatch):
+    node = _pr_node()
+    del node["files"]
+    path = _pr_reference_fixture(tmp_path, node)
+    monkeypatch.setenv("GH_GRAPHQL_FILE", str(path))
+
+    assert issue.pull_request_for(REPO, 248).files == ()
 
 
 # --- a dependency GitHub already holds ----------------------------------------

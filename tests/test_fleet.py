@@ -6,7 +6,7 @@ import dataclasses
 import json
 from pathlib import Path
 
-from deckhand import fleet, sessions
+from deckhand import fleet, issue, sessions
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -207,6 +207,36 @@ def test_a_read_gathers_the_stories_the_blockers_and_the_behind_set(fake_gh, set
     assert read.behind == {("acme/widgets", 117)}
     assert read.missing == []
     assert read.me == "mjm"
+
+
+def test_a_read_keeps_every_open_pull_request_it_read(fake_gh, settings, monkeypatch):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    monkeypatch.setenv("GH_PR_STATE", "OPEN")
+    monkeypatch.setenv("GH_PR_ISSUES", "117")
+    monkeypatch.setenv("GH_PR_FILES", json.dumps(["api/auth.go"]))
+    read = fleet.read(settings)
+    assert list(read.pulls) == [("acme/widgets", 117)]
+    assert read.pulls[("acme/widgets", 117)].files == ("api/auth.go",)
+    assert read.behind == set()
+
+
+def test_a_read_keeps_no_pull_request_that_is_no_longer_open(fake_gh, settings, monkeypatch):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    monkeypatch.setenv("GH_PR_STATE", "CLOSED")
+    monkeypatch.setenv("GH_PR_MERGE_STATE", "DIRTY")
+    read = fleet.read(settings)
+    assert read.pulls == {}
+    assert read.behind == set()
+
+
+def _pull(number: int, behind: bool | None) -> issue.PullRequest:
+    url = f"https://github.com/acme/widgets/pull/{number}"
+    return issue.PullRequest(number, url, "OPEN", False, behind, (), 0)
+
+
+def test_behind_is_every_pull_request_main_moved_past_and_no_other():
+    pulls = {(REPO, 1): _pull(11, True), (REPO, 2): _pull(12, False), (REPO, 3): _pull(13, None)}
+    assert fleet.Fleet(stories=[], blockers={}, missing=[], pulls=pulls).behind == {(REPO, 1)}
 
 
 def test_a_read_asks_for_no_blockers_one_story_at_a_time(fake_gh, gh_calls, settings, monkeypatch):
