@@ -233,7 +233,7 @@ def test_a_draft_story_is_reviewed_with_the_review_context(fake_gh, repo, tmp_pa
 
     lines = _briefing(result, "review", "Not reviewed.")
     assert lines[5] == "  2026-09-01 Drafted: from a brainstorm"
-    assert _context(lines)[0].startswith("Body: ")
+    assert _context(lines)[5].startswith("Body: ")
 
 
 def test_an_undated_entry_says_so(fake_gh, repo, tmp_path):
@@ -555,7 +555,8 @@ def test_a_merged_story_with_items_left_walks_the_after_merge_block(fake_gh, rep
     ]
     assert "  1. [x] Prove the script on main" in lines
     assert "  2. [ ] Revoke the token" in lines
-    assert lines[-2:] == ["Apply: deckhand after apply 248 --item 2", "Clear: 1 after-the-merge item left"]
+    assert _context(lines)[0] == "Apply: deckhand after apply 248 --item 2"
+    assert lines[-1] == "Clear: 1 after-the-merge item left"
 
 
 def test_the_items_left_come_from_the_boxes_without_any_log_entry(fake_gh, repo, tmp_path):
@@ -578,7 +579,8 @@ def test_the_items_left_come_from_the_boxes_without_any_log_entry(fake_gh, repo,
     # about the first anywhere on the issue.
     assert "  1. [x] Prove the script on main" in lines
     assert "  2. [ ] Revoke the token" in lines
-    assert lines[-2:] == ["Apply: deckhand after apply 248 --item 2", "Clear: 1 after-the-merge item left"]
+    assert _context(lines)[0] == "Apply: deckhand after apply 248 --item 2"
+    assert lines[-1] == "Clear: 1 after-the-merge item left"
 
 
 def test_a_merged_story_with_every_item_ticked_is_done(fake_gh, repo, tmp_path):

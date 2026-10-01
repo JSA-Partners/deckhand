@@ -170,8 +170,8 @@ def test_context_prints_the_commits_before_the_stat_and_the_checks(fake_gh, repo
     assert any("store.py" in line for line in stat)
     assert any("store_test.py" in line for line in stat)
     assert not any(FIRST in line or SECOND in line for line in stat)
-    assert lines[lines.index("## Checks detected") + 1 : -2] == ["  none detected"]
-    assert lines[-2].startswith("Summary: ")
+    assert lines[lines.index("## Checks detected") + 1 :] == ["  none detected"]
+    assert lines[1].startswith("Summary: ")
 
 
 def test_context_prints_the_commits_the_pull_request_will_carry(fake_gh, repo):
@@ -262,15 +262,15 @@ def test_context_detects_checks_from_project_files(fake_gh, repo, branch):
     result = _finish("context", repo)
 
     lines = result.stdout.splitlines()
-    assert lines[lines.index("## Checks detected") + 1 : -2] == [
+    assert lines[lines.index("## Checks detected") + 1 :] == [
         "  uv run pre-commit run --all-files",
         "  uv run pytest -q",
         "  npm run test",
         "  npm run lint",
         "  make test",
     ]
-    assert lines[-2].startswith("Summary: ")
-    assert lines[-1] == (
+    assert lines[1].startswith("Summary: ")
+    assert lines[0] == (
         'Apply: deckhand finish apply 248 <summary> --check "uv run pre-commit run --all-files" '
         '--check "uv run pytest -q" --check "npm run test" --check "npm run lint" --check "make test"'
     )
@@ -310,16 +310,17 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
     assert result.stderr == ""
     lines = result.stdout.splitlines()
     assert [line for line in lines if not line.startswith("  ")] == [
+        'Apply: deckhand finish apply 248 <summary> --check "<cmd>"',
+        lines[1],  # the summary path, which without gh is one line saying why it could not be built
+        "",
         "## Commits",
         "## Diff stat",
         "## Pull request",
         "## Recent pull requests",
         "## Checks detected",
-        lines[-2],  # the summary path, which without gh is one line saying why it could not be built
-        'Apply: deckhand finish apply 248 <summary> --check "<cmd>"',
     ]
-    assert lines[-2].startswith("Summary: ")
-    assert lines[1].startswith("  unavailable (")
+    assert lines[1].startswith("Summary: ")
+    assert lines[4].startswith("  unavailable (")
 
 
 # --- the gates --------------------------------------------------------------
@@ -925,10 +926,10 @@ def test_context_names_the_apply_with_every_detected_check(fake_gh, repo):
 
     result = _finish("context", repo)
 
-    assert result.stdout.splitlines()[-1] == 'Apply: deckhand finish apply 248 <summary> --check "make test"'
+    assert result.stdout.splitlines()[0] == 'Apply: deckhand finish apply 248 <summary> --check "make test"'
 
 
 def test_context_without_a_detected_check_still_names_the_flag(fake_gh, repo):
     result = _finish("context", repo)
 
-    assert result.stdout.splitlines()[-1] == 'Apply: deckhand finish apply 248 <summary> --check "<cmd>"'
+    assert result.stdout.splitlines()[0] == 'Apply: deckhand finish apply 248 <summary> --check "<cmd>"'

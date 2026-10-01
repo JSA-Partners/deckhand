@@ -190,21 +190,22 @@ def _recent_block() -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the branch's diff stat, the pull request message, and the checks it would run.
+    """Print the apply and the summary path, then the commits, diff stat, message, and checks.
 
     The branch review is this step's first act and runs before any of this is acted on: what is
     printed here is read against a branch a person has already been through comment by comment.
     """
     base = trunk()
+    detected = checks(Path.cwd())
+    flags = [f'--check "{command}"' for command in detected] or ['--check "<cmd>"']
+    print(invoke.apply_line("finish", str(args.issue), "<summary>", *flags))
+    print(file_line("Summary", f"{args.issue}-summary.md"))
+    print()
     block("## Commits", lambda: _commits_block(base))
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))
     block("## Recent pull requests", _recent_block)
-    detected = checks(Path.cwd())
     block("## Checks detected", lambda: indented(detected, "none detected"))
-    print(file_line("Summary", f"{args.issue}-summary.md"))
-    flags = [f'--check "{command}"' for command in detected] or ['--check "<cmd>"']
-    print(invoke.apply_line("finish", str(args.issue), "<summary>", *flags))
     return 0
 
 

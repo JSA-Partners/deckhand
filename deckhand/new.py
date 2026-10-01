@@ -91,10 +91,8 @@ def _split_name(number: int) -> str:
     return f"{number}-split.json"
 
 
-def _split_block(name: str) -> None:
-    """Where the split file goes and the shape it takes; the feature path starts here."""
-    print(file_line("Split file", name))
-    print()
+def _split_block() -> None:
+    """The shape the split file takes; the feature path starts here."""
     print(draft.split_skeleton())
 
 
@@ -107,29 +105,32 @@ def _rules() -> int:
 
 
 def _tail(name: str, split: str | None = None, park: bool = False, number: int | None = None) -> int:
-    """Where the draft goes, the shape it takes, the rules it has to meet, and what to run.
+    """What to run and where the draft goes, then the shape it takes and the rules it has to meet.
 
     `split` names the split file to offer after the rules, for a starting point that may yet turn
     out to be a whole feature; `park` shows the park shape, for a request that may shed one. `number`
     is the draft being written, which the body goes into rather than opening an issue of its own.
     """
     source = ("--from", str(number)) if number else ()
+    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ())))
     print(file_line("Body", name))
+    if park:
+        print(invoke.apply_line("new", "<file>", "--park", *source, '--title "<title>"'))
+    if split is not None:
+        print(invoke.apply_line("new", "<split>", "--split", *source))
+        print(file_line("Split file", split))
     print()
     print(skeleton())
     print()
     if park:
-        parking = invoke.apply_line("new", "<file>", "--park", *source, '--title "<title>"')
-        block("Park shape:", lambda: indented([*draft.skeleton().splitlines(), parking]))
+        block("Park shape:", lambda: indented(draft.skeleton().splitlines()))
         print()
     _rules()
     if split is not None:
         print()
         print(SPLIT_NOTE)
-        _split_block(split)
-        print(invoke.apply_line("new", "<split>", "--split", *source))
-    print()
-    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ())))
+        print()
+        _split_block()
     return 0
 
 

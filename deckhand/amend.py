@@ -130,7 +130,7 @@ def _review_lines(story: issue.Issue | Exception) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the title, the column, where the body was written, the latest review, and where the draft goes."""
+    """Print the apply and where the draft goes, then the title, the column, the body, and the latest review."""
     try:
         repo: str | Exception = _repo(args.repo)
     except Exception as error:
@@ -139,29 +139,31 @@ def context(args: argparse.Namespace) -> int:
     a_draft = not isinstance(story, Exception) and draft.is_draft(story.body)
     status = _status_line(repo, args.issue)
     elsewhere = ("--repo", args.repo) if args.repo else ()
+    frozen = status.removeprefix("Status: ") in STARTED
+    if frozen:
+        print(invoke.apply_line("amend", str(args.issue), '--title "<title>"', *elsewhere, '--note "<why>"'))
+    else:
+        print(invoke.apply_line("amend", str(args.issue), "<file>", *elsewhere, '--note "<why>"'))
+        print(file_line("Rewrite", _draft_name(args.issue), args.repo))
+        if not isinstance(story, Exception):
+            bare = sections.bare(story.body)
+            print(f"Budget: the file may be {lint.budget(bare)} characters; the body is {len(bare)} now")
+        print(DRAFT_RULE if a_draft else BODY_RULE)
+    print()
     print(f"Title: {story.title}" if not isinstance(story, Exception) else f"Title: unavailable ({reason(story)})")
     print(status)
     print()
     print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body), args.repo))
     print()
-    if status.removeprefix("Status: ") in STARTED:
+    if frozen:
         print(FROZEN_CONTEXT)
         print()
         block(REVIEW_HEADING, lambda: _review_lines(story))
-        print()
-        print(invoke.apply_line("amend", str(args.issue), '--title "<title>"', *elsewhere, '--note "<why>"'))
         return 0
     if not a_draft:  # a draft's shape is the body above, and its stories are not the file's to change
         block("Shape:", lambda: indented(skeleton().splitlines()))
         print()
     block(REVIEW_HEADING, lambda: _review_lines(story))
-    print()
-    if not isinstance(story, Exception):
-        bare = sections.bare(story.body)
-        print(f"Budget: the file may be {lint.budget(bare)} characters; the body is {len(bare)} now")
-    print(file_line("Rewrite", _draft_name(args.issue), args.repo))
-    print(DRAFT_RULE if a_draft else BODY_RULE)
-    print(invoke.apply_line("amend", str(args.issue), "<file>", *elsewhere, '--note "<why>"'))
     return 0
 
 
@@ -193,7 +195,11 @@ def _note(note: str) -> str:
 
 
 def _write(repo: str, number: int, body: str, title: str | None, note: str, story: issue.Issue) -> None:
-    """Put the body and title on the issue and log the amend, printing each write as it lands."""
+    """Put the body and title on the issue and log the amend, printing each write as it lands.
+
+    The body file the contexts spill is written again from what was saved, so a review that runs
+    next reads the amended body whether or not a context ran in between.
+    """
     issue.update_body(repo, number, body)
     # Flushed as it is printed: the body is already on GitHub, and a comment that fails below has to
     # leave the edit where the user can see it rather than in a buffer that never reaches the screen.
@@ -203,6 +209,7 @@ def _write(repo: str, number: int, body: str, title: str | None, note: str, stor
         print(f"Title: {title}", flush=True)
     issue.comment(repo, number, log.checked(f"Amended: {note}"))
     print("Logged Amended")
+    print(spill("Body", f"{number}-issue.md", lambda: sections.bare(body), repo))
 
 
 def _retitle(repo: str, number: int, note: str, title_flag: str | None, story: issue.Issue) -> int:

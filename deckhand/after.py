@@ -31,17 +31,17 @@ def _next_unticked(items: list[tuple[str, bool]]) -> int | None:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the story, what it still owes after the merge, and the item the next apply ticks."""
+    """Print the item the next apply ticks, then the story and what it still owes after the merge."""
     story = issue.view(gh.repo_slug(), args.issue)
     items = sections.after_merge_items(story.body)
+    position = _next_unticked(items)
+    parts = ("--item", str(position)) if position is not None else ()
+    print(invoke.apply_line("after", str(args.issue), *parts))
+    print()
     print(f"Title: {story.title}")
     print(f"Issue: {story.url}")
     print()
     block(OWED, lambda: indented(_lines(items)))
-    print()
-    position = _next_unticked(items)
-    parts = ("--item", str(position)) if position is not None else ()
-    print(invoke.apply_line("after", str(args.issue), *parts))
     return 0
 
 

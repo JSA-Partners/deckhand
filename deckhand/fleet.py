@@ -228,7 +228,7 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, "Done, but the issue is open", "close it or move it back"))
         if story.closed and story.status and story.status not in (columns.DONE, columns.VERIFICATION):
             what = f"closed, but {story.status}"
-            out.append(Anomaly(story.number, story.repo, what, f"Status {columns.VERIFICATION} or {columns.DONE}"))
+            out.append(Anomaly(story.number, story.repo, what, f"run next {story.number}"))
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
         if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):

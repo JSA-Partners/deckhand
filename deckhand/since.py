@@ -72,10 +72,16 @@ def _story(story: str) -> str:
     return story if story == FREE else f"#{story}"
 
 
+def _column(status: str) -> str:
+    """The column as a person reads it; an item the board has not given one yet has none."""
+    return status or "no column"
+
+
 def _moved(name: str, was: dict, now: dict) -> str | None:
     flip = "closed" if now["closed"] else "reopened"
     if now["status"] != was["status"]:
-        return f"{name} {was['status']} -> {now['status']}" + (f", {flip}" if now["closed"] != was["closed"] else "")
+        moved = f"{name} {_column(was['status'])} -> {_column(now['status'])}"
+        return moved + (f", {flip}" if now["closed"] != was["closed"] else "")
     return f"{name} {flip}" if now["closed"] != was["closed"] else None
 
 
@@ -97,9 +103,10 @@ def changes(before: dict, after: dict, repo: str) -> list[str]:
         now, was = new.get(key), old.get(key)
         name = _label(key, repo)
         if was is None:
-            lines.append(f"{name} appeared in {now['status']}")
+            where = f"in {now['status']}" if now["status"] else "without a column"
+            lines.append(f"{name} appeared {where}")
         elif now is None:
-            lines.append(f"{name} left the board (was {was['status']})")
+            lines.append(f"{name} left the board (was {_column(was['status'])})")
         else:
             lines.append(_moved(name, was, now))
     held, holds = before["sessions"], after["sessions"]

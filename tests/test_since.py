@@ -32,6 +32,15 @@ def test_a_new_story_is_named():
     assert "#299 appeared in Draft" in since.changes(BEFORE, _after(stories=stories), "acme/widgets")
 
 
+def test_a_story_seen_before_its_column_was_written_says_so():
+    """A park adds the item, then writes Draft; a read between the two sees no column."""
+    stories = {**BEFORE["stories"], "acme/widgets#306": {"status": "", "closed": False}}
+    after = _after(stories=stories)
+    assert "#306 appeared without a column" in since.changes(BEFORE, after, "acme/widgets")
+    later = _after(stories={**stories, "acme/widgets#306": {"status": "Draft", "closed": False}})
+    assert since.changes(after, later, "acme/widgets") == ["#306 no column -> Draft"]
+
+
 def test_a_story_that_left_the_board_names_its_column():
     assert "#259 left the board (was In Review)" in since.changes(BEFORE, _after(stories={}), "acme/widgets")
 

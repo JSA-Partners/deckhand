@@ -309,8 +309,8 @@ def step(
     against the context subparser once the issue positional is on it, so a step reads its own
     arguments in the order it declared them.
 
-    `rules` names the gates `apply` holds, printed by `context` under a `Rules:` heading before its
-    own output, so the writer reads a rule before it is refused by one.
+    `rules` names the gates `apply` holds, printed under a `Rules:` heading after the context, which
+    opens with what to run, so the writer reads a rule before it is refused by one.
 
     Decorates a module-level pair: the decorated function is `apply(args) -> int`, and `context` is
     looked up by that name in the same module when the verb runs, so the two stay plain functions a
@@ -377,16 +377,17 @@ def _context(
     behind = newer_installed()
     if behind:
         print(f"deckhand {__version__} is running and {behind} is installed. Restart this session to pick it up.")
-    if rules:  # the gates the apply below will hold, said before the writer starts rather than after
-        block("Rules:", lambda: indented(rules))
-        print()
     tail = "Say what could not be read and stop."
     try:
         with gh.cached(), git.cached():  # one fact is read once; a git write empties the git block
-            return context(args) or 0
+            code = context(args) or 0
     except Exception as error:  # a skill injects this output; one line beats a failed prompt
         print(f"(deckhand {name} context failed: {error}. {tail})")
-        return 0
+        code = 0
+    if rules:  # reference, after the action block every context opens with
+        print()
+        block("Rules:", lambda: indented(rules))
+    return code
 
 
 def _apply(name: str, apply: Handler, args: argparse.Namespace) -> int:

@@ -327,7 +327,7 @@ def test_context_prints_branch_blockers_plan_commits_and_drift(fake_gh, gh_calls
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:3] == [f"Branch: {BRANCH} (none)", "Blockers:", "  #240  Grant store"]
+    assert lines[2:5] == [f"Branch: {BRANCH} (none)", "Blockers:", "  #240  Grant store"]
     # The skill judges whether the Story and the Scope still hold, so both come before the plan.
     assert [line for line in lines if line.startswith("## ")] == [
         "## Story",
@@ -340,7 +340,7 @@ def test_context_prints_branch_blockers_plan_commits_and_drift(fake_gh, gh_calls
     assert lines[lines.index("## Story") + 1].startswith("  As a guest user, I want")
     assert lines[lines.index("## Scope") + 1] == "  #### In"
     assert lines[lines.index("## Commits") : lines.index("## Plan drift")] == ["## Commits", "  none"]
-    assert lines[lines.index("## Plan drift") : -2] == ["## Plan drift", *DRIFT, *NO_REVIEW]
+    assert lines[lines.index("## Plan drift") :] == ["## Plan drift", *DRIFT, *NO_REVIEW]
     assert _branches(repo) == ["main"]
     assert _writes(gh_calls) == []
 
@@ -369,7 +369,7 @@ def test_context_reports_a_branch_checked_out_nowhere_as_local(fake_gh, repo, or
 
     result = _start("context", repo)
 
-    assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (local)"
+    assert result.stdout.splitlines()[2] == f"Branch: {BRANCH} (local)"
 
 
 def test_context_reports_a_branch_checked_out_here(fake_gh, repo, origin):
@@ -377,7 +377,7 @@ def test_context_reports_a_branch_checked_out_here(fake_gh, repo, origin):
 
     result = _start("context", repo)
 
-    assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (here)"
+    assert result.stdout.splitlines()[2] == f"Branch: {BRANCH} (here)"
 
 
 def test_context_reports_where_a_branch_is_checked_out_elsewhere(fake_gh, repo, origin, tmp_path):
@@ -386,7 +386,7 @@ def test_context_reports_where_a_branch_is_checked_out_elsewhere(fake_gh, repo, 
 
     result = _start("context", repo)
 
-    assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (at {elsewhere})"
+    assert result.stdout.splitlines()[2] == f"Branch: {BRANCH} (at {elsewhere})"
 
 
 def _titled(tmp_path: Path, title: str) -> dict[str, str]:
@@ -403,14 +403,14 @@ def test_context_reports_the_branch_of_a_retitled_story(fake_gh, repo, origin, t
 
     result = _start("context", repo, _titled(tmp_path, "Guests see granted collections only"))
 
-    assert result.stdout.splitlines()[0] == "Branch: feat/248-old-name (local)"
+    assert result.stdout.splitlines()[2] == "Branch: feat/248-old-name (local)"
 
 
 def test_context_names_the_branch_without_an_origin(fake_gh, repo):
     result = _start("context", repo)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[0] == f"Branch: {BRANCH} (none)"
+    assert result.stdout.splitlines()[2] == f"Branch: {BRANCH} (none)"
 
 
 def test_context_prints_what_landed_on_main_since_the_review(fake_gh, repo, origin):
@@ -421,7 +421,7 @@ def test_context_prints_what_landed_on_main_since_the_review(fake_gh, repo, orig
     result = _start("context", repo, REVIEWED)
 
     lines = result.stdout.splitlines()
-    assert lines[lines.index(LANDED) : -2] == [LANDED, f"  {sha} feat: landed later"]
+    assert lines[lines.index(LANDED) :] == [LANDED, f"  {sha} feat: landed later"]
 
 
 def test_context_points_past_thirty_landed_commits(fake_gh, repo, origin):
@@ -432,7 +432,7 @@ def test_context_points_past_thirty_landed_commits(fake_gh, repo, origin):
     result = _start("context", repo, REVIEWED)
 
     lines = result.stdout.splitlines()
-    landed = lines[lines.index(LANDED) + 1 : -2]
+    landed = lines[lines.index(LANDED) + 1 :]
     assert len(landed) == 31
     assert landed[0].endswith(" feat: step 30")
     assert landed[-1] == f"  ... more: git log --since={REVIEW_DATE} origin/main"
@@ -455,11 +455,13 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
     assert result.returncode == 0
     assert result.stderr == ""
     lines = result.stdout.splitlines()
-    assert lines[0].startswith("Branch: unavailable (")
+    assert lines[2].startswith("Branch: unavailable (")
     plan = next(line for line in lines if line.startswith("Plan: "))
     assert plan.startswith("Plan: unavailable (")
     assert [line for line in lines if not line.startswith("  ")] == [
-        lines[0],
+        'Apply: deckhand start apply 248 --note "<what the check concluded>"',
+        "",
+        lines[2],
         "Blockers:",
         "## Story",
         "## Scope",
@@ -467,8 +469,6 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
         "## Commits",
         "## Plan drift",
         LANDED,
-        "",
-        'Apply: deckhand start apply 248 --note "<what the check concluded>"',
     ]
 
 
@@ -490,4 +490,4 @@ def test_context_prints_a_blocker_in_another_repository_with_its_repository(fake
 def test_context_names_the_apply(fake_gh, repo, origin):
     result = _start("context", repo)
 
-    assert result.stdout.splitlines()[-1] == 'Apply: deckhand start apply 248 --note "<what the check concluded>"'
+    assert result.stdout.splitlines()[0] == 'Apply: deckhand start apply 248 --note "<what the check concluded>"'

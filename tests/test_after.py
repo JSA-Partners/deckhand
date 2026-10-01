@@ -79,6 +79,13 @@ def test_apply_refuses_an_item_already_ticked(fake_gh, gh_calls, tmp_path):
     assert not any("item-edit" in call for call in gh_calls())
 
 
+def test_context_opens_with_the_apply(fake_gh, tmp_path):
+    result = run_deckhand("after", "context", "248", env=_story(tmp_path, ONE_DONE))
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Apply: deckhand after apply 248 --item 2"
+
+
 def test_context_lists_the_items_and_their_boxes(fake_gh, tmp_path):
     result = run_deckhand("after", "context", "248", env=_story(tmp_path, ONE_DONE))
 
