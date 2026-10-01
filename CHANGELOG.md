@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.1.2](https://github.com/JSA-Partners/deckhand/compare/v4.1.1...v4.1.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* keep merged stories and amended bodies in step ([#30](https://github.com/JSA-Partners/deckhand/issues/30)) ([6ee7fc5](https://github.com/JSA-Partners/deckhand/commit/6ee7fc5c1df493be3c7c67daaf3144574fc7f356))
+* show the line that names a story with no edge to it ([#32](https://github.com/JSA-Partners/deckhand/issues/32)) ([a25d453](https://github.com/JSA-Partners/deckhand/commit/a25d453cd66cbee9794a51f53b728ce0e8dd7dd5))
+
 ## [4.1.1](https://github.com/JSA-Partners/deckhand/compare/v4.1.0...v4.1.1) (2026-09-30)
 
 
