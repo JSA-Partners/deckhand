@@ -231,6 +231,7 @@ def test_apply_amends_a_stubs_requirements_and_keeps_its_stories(fake_gh, gh_cal
     changed = requirements.replace("granted.", "granted, and nothing else.")
     assert _bodies(copy)["edit"] == draft.render(changed, entries)
     assert _writes(gh_calls) == ["issue edit 57 --repo acme/widgets", "issue comment 57 --repo acme/widgets"]
+    assert "granted, and nothing else." in spilled(result.stdout, "Body")
 
 
 def test_apply_amends_a_stub_in_another_repository(fake_gh, gh_calls, tmp_path):
@@ -250,7 +251,9 @@ def test_apply_amends_a_stub_in_another_repository(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["Updated #60 https://github.com/acme/widgets/issues/60", "Logged Amended"]
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Updated #60 https://github.com/acme/widgets/issues/60", "Logged Amended"]
+    assert lines[2].startswith(f"Body: {tmp_path / 'cache' / 'gadgets' / '60-issue.md'} (")
     assert _bodies(copy)["edit"] == draft.render(
         "Guests should be able to share a collection with another guest, with the owner's approval.", []
     )
@@ -359,11 +362,10 @@ def test_apply_writes_the_body_then_posts_the_amend_as_a_comment(fake_gh, gh_cal
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [
-        "Updated #248 https://github.com/acme/widgets/issues/248",
-        "Logged Amended",
-        "Status=Refinement",
-    ]
+    lines = result.stdout.splitlines()
+    assert lines[:2] == ["Updated #248 https://github.com/acme/widgets/issues/248", "Logged Amended"]
+    assert lines[2].startswith(f"Body: {tmp_path / 'cache' / 'widgets' / '248-issue.md'} (")
+    assert lines[3:] == ["Status=Refinement"]
     bodies = _bodies(copy)
     assert bodies["edit"] == sections.render(*sections.parse(BODY))
     assert bodies["comment"] == f"Amended: {NOTE}"
@@ -371,6 +373,21 @@ def test_apply_writes_the_body_then_posts_the_amend_as_a_comment(fake_gh, gh_cal
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
     ]
+
+
+def test_apply_refreshes_the_body_file_the_review_reads(fake_gh, gh_calls, tmp_path):
+    """A reviewer sent to the body file after an amend reads the amended body, never the one before."""
+    stale = tmp_path / "cache" / "widgets" / "248-issue.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("the body before the amend\n", encoding="utf-8")
+
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path, CHANGED_PLAN), "--note", NOTE)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[2].startswith(f"Body: {stale} (")
+    fresh = stale.read_text(encoding="utf-8")
+    assert "### Task 1: A different approach" in fresh
+    assert "before the amend" not in fresh
 
 
 def test_apply_names_the_edited_issue_before_the_comment_write(fake_gh, gh_calls, tmp_path):
@@ -416,7 +433,7 @@ def test_apply_accepts_any_change_off_the_board(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Logged Amended"
+    assert result.stdout.splitlines()[-2] == "Logged Amended"
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -434,7 +451,7 @@ def test_apply_accepts_any_change_when_the_status_read_fails(fake_gh, gh_calls, 
     result = run_deckhand("amend", "apply", "248", _draft(tmp_path, CHANGED_PLAN), "--note", NOTE, env=env)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Logged Amended"
+    assert result.stdout.splitlines()[-2] == "Logged Amended"
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -498,7 +515,10 @@ def test_amend_accepts_a_plan_change_when_backlog(fake_gh, gh_calls, tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[1:] == ["Logged Amended", "Status=Refinement"]
+    lines = result.stdout.splitlines()
+    assert lines[1] == "Logged Amended"
+    assert lines[2].startswith("Body: ")
+    assert lines[3:] == ["Status=Refinement"]
     assert _writes(gh_calls) == [
         "issue edit 248 --repo acme/widgets",
         "issue comment 248 --repo acme/widgets",
@@ -756,8 +776,9 @@ def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Updated #248 https://github.com/acme/widgets/issues/248", "Logged Amended"]
-    assert lines[2] == "Status=Refinement"
-    assert lines[3].startswith("Body is ")
+    assert lines[2].startswith("Body: ")
+    assert lines[3] == "Status=Refinement"
+    assert lines[4].startswith("Body is ")
 
 
 # --- which way a split runs ----------------------------------------------------

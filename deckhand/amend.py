@@ -193,7 +193,11 @@ def _note(note: str) -> str:
 
 
 def _write(repo: str, number: int, body: str, title: str | None, note: str, story: issue.Issue) -> None:
-    """Put the body and title on the issue and log the amend, printing each write as it lands."""
+    """Put the body and title on the issue and log the amend, printing each write as it lands.
+
+    The body file the contexts spill is written again from what was saved, so a review that runs
+    next reads the amended body whether or not a context ran in between.
+    """
     issue.update_body(repo, number, body)
     # Flushed as it is printed: the body is already on GitHub, and a comment that fails below has to
     # leave the edit where the user can see it rather than in a buffer that never reaches the screen.
@@ -203,6 +207,7 @@ def _write(repo: str, number: int, body: str, title: str | None, note: str, stor
         print(f"Title: {title}", flush=True)
     issue.comment(repo, number, log.checked(f"Amended: {note}"))
     print("Logged Amended")
+    print(spill("Body", f"{number}-issue.md", lambda: sections.bare(body), repo))
 
 
 def _retitle(repo: str, number: int, note: str, title_flag: str | None, story: issue.Issue) -> int:
