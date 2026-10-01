@@ -111,9 +111,10 @@ def test_context_prints_title_status_body_and_the_latest_review_entry(fake_gh, t
     review = REVIEW["comments"][-1]["body"].strip("\n").splitlines()
     assert lines[lines.index("## Latest review") + 1 :][: len(review)] == review
     assert "## Feedback" not in lines
-    assert lines[-3] == f"Rewrite: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
-    assert lines[-2] == "Write the whole edited body to the file it names; keep every section heading."
-    assert lines[-1] == 'Apply: deckhand amend apply 248 <file> --note "<why>"'
+    assert lines[0] == 'Apply: deckhand amend apply 248 <file> --note "<why>"'
+    assert lines[1] == f"Rewrite: {tmp_path / 'cache' / 'widgets' / '248-body.md'}"
+    assert lines[2].startswith("Budget: ")
+    assert lines[3] == "Write the whole edited body to the file it names; keep every section heading."
 
 
 def test_context_leaves_an_unapplied_new_draft_alone(fake_gh, tmp_path):
@@ -321,9 +322,9 @@ def test_context_on_a_stub_elsewhere_prints_its_body_and_the_stub_rule(fake_gh, 
     body = spilled(result.stdout, "Body").splitlines()
     assert "Guests should be able to share a collection with another guest, without an admin in the loop." in body
     assert "Shape:" not in lines
-    assert lines[-3] == f"Rewrite: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
-    assert lines[-2] == STUB_RULE
-    assert lines[-1] == 'Apply: deckhand amend apply 60 <file> --repo acme/gadgets --note "<why>"'
+    assert lines[0] == 'Apply: deckhand amend apply 60 <file> --repo acme/gadgets --note "<why>"'
+    assert lines[1] == f"Rewrite: {tmp_path / 'cache' / 'gadgets' / '60-body.md'}"
+    assert STUB_RULE in lines[2:4]
 
 
 def test_apply_refuses_changed_headings(fake_gh, gh_calls, tmp_path):
@@ -915,6 +916,6 @@ def test_a_started_story_in_another_repository_names_the_retitle_there(fake_gh, 
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == (
+    assert result.stdout.splitlines()[0] == (
         'Apply: deckhand amend apply 15 --title "<title>" --repo acme/gadgets --note "<why>"'
     )

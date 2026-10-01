@@ -56,14 +56,14 @@ def _merge_into(branch: str, path: Path) -> None:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the pull request the update would act on, or the branch when the story has none yet."""
+    """Print the apply, then the pull request it would act on, or the branch when there is none yet."""
+    print(invoke.apply_line("update", str(args.issue)))
     url = _open_pull_request(gh.repo_slug(), args.issue)
     if url is not None:
         print(f"Pull request: {url}")
     else:
         here = _branch_here(args.issue)
         print(f"Branch: {here[0]} at {here[1]}" if here else "Branch: none")
-    print(invoke.apply_line("update", str(args.issue)))
     return 0
 
 

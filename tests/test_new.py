@@ -108,8 +108,8 @@ def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert _draft_line(lines[:1], tmp_path, "new")
-    assert lines[1] == ""
+    assert lines[0] == "Apply: deckhand new apply <file>"
+    assert _draft_line(lines[1:2], tmp_path, "new")
     assert [line for line in lines if line.startswith("###")] == [
         "### Story",
         "### Scope",
@@ -139,13 +139,13 @@ def test_context_prints_the_park_shape_without_stories(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     shape = lines.index("Park shape:")
-    assert lines[shape : shape + 5] == [
+    assert lines[shape : shape + 4] == [
         "Park shape:",
         "  ## Requirements",
         "  <what the feature needs, in full>",
-        '  Apply: deckhand new apply <file> --park --title "<title>"',
         "",
     ]
+    assert lines.index('Apply: deckhand new apply <file> --park --title "<title>"') < lines.index("### Story")
     assert "Stub and park shape:" not in lines
 
 
@@ -168,7 +168,7 @@ def test_context_still_prints_when_the_repository_is_unknown(no_real_gh, tmp_pat
     result = run_deckhand("new", "context", env={"DECKHAND_CACHE": str(tmp_path / "cache")})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.startswith("Body: unavailable (")
+    assert result.stdout.splitlines()[1].startswith("Body: unavailable (")
     assert "### Story" in result.stdout
     assert "#### Out" in result.stdout
     assert "Rules:" in result.stdout
@@ -1262,15 +1262,15 @@ def test_a_new_request_names_the_draft_split_and_park_applies(fake_gh):
     result = run_deckhand("new", "context")
 
     lines = result.stdout.splitlines()
-    assert lines[-1] == "Apply: deckhand new apply <file>"
+    assert lines[0] == "Apply: deckhand new apply <file>"
     assert "Apply: deckhand new apply <split> --split" in lines
-    assert '  Apply: deckhand new apply <file> --park --title "<title>"' in lines
+    assert 'Apply: deckhand new apply <file> --park --title "<title>"' in lines
 
 
 def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):
     result = run_deckhand("new", "context", "248", env=DRAFT)
 
     lines = result.stdout.splitlines()
-    assert lines[-1] == "Apply: deckhand new apply <file> --draft 248"
+    assert lines.index("Apply: deckhand new apply <file> --draft 248") < lines.index("### Story")
     assert "Park shape:" in lines
-    assert '  Apply: deckhand new apply <file> --park --from 248 --title "<title>"' in lines
+    assert 'Apply: deckhand new apply <file> --park --from 248 --title "<title>"' in lines

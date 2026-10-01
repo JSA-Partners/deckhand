@@ -40,11 +40,11 @@ def test_context_prints_the_story_the_branch_and_the_commit(fake_gh, repo):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == f"Title: {TITLE}"
-    assert lines[1] == f"Issue: {ISSUE_URL}"
-    assert lines[2] == "Branch: main"
-    assert lines[3] == f"Commit: {_sha(repo, 'HEAD')}"
-    assert lines[-1] == f'Apply: deckhand reviewed apply {NUMBER} "<one line>"'
+    assert lines[1] == f"Title: {TITLE}"
+    assert lines[2] == f"Issue: {ISSUE_URL}"
+    assert lines[3] == "Branch: main"
+    assert lines[4] == f"Commit: {_sha(repo, 'HEAD')}"
+    assert lines[0] == f'Apply: deckhand reviewed apply {NUMBER} "<one line>"'
 
 
 def test_context_never_fails_when_the_issue_cannot_be_read(fake_gh, repo):
@@ -53,9 +53,9 @@ def test_context_never_fails_when_the_issue_cannot_be_read(fake_gh, repo):
     assert result.returncode == 0
     assert result.stderr == ""
     lines = result.stdout.splitlines()
-    assert lines[0].startswith("Title: unavailable (")
-    assert lines[1] == "Branch: main"
-    assert lines[2] == f"Commit: {_sha(repo, 'HEAD')}"
+    assert lines[1].startswith("Title: unavailable (")
+    assert lines[2] == "Branch: main"
+    assert lines[3] == f"Commit: {_sha(repo, 'HEAD')}"
 
 
 def test_context_never_fails_outside_a_git_repository(fake_gh, tmp_path):
@@ -64,10 +64,10 @@ def test_context_never_fails_outside_a_git_repository(fake_gh, tmp_path):
     assert result.returncode == 0
     assert result.stderr == ""
     lines = result.stdout.splitlines()
-    assert lines[0] == f"Title: {TITLE}"
-    assert lines[1] == f"Issue: {ISSUE_URL}"
-    assert lines[2].startswith("Branch: unavailable (")
-    assert lines[3].startswith("Commit: unavailable (")
+    assert lines[1] == f"Title: {TITLE}"
+    assert lines[2] == f"Issue: {ISSUE_URL}"
+    assert lines[3].startswith("Branch: unavailable (")
+    assert lines[4].startswith("Commit: unavailable (")
 
 
 # --- apply ---------------------------------------------------------------

@@ -36,7 +36,8 @@ def _summary(value: str) -> str:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the story, the branch, and the commit an apply would claim as reviewed."""
+    """Print the apply, then the story, the branch, and the commit it would claim as reviewed."""
+    print(invoke.apply_line("reviewed", str(args.issue), '"<one line>"'))
     try:
         story = issue.view(gh.repo_slug(), args.issue)
         print(f"Title: {story.title}")
@@ -52,7 +53,6 @@ def context(args: argparse.Namespace) -> int:
         print(f"Commit: {git.run('rev-parse', '--verify', 'HEAD')}")
     except Exception as error:
         print(f"Commit: unavailable ({reason(error)})")
-    print(invoke.apply_line("reviewed", str(args.issue), '"<one line>"'))
     return 0
 
 

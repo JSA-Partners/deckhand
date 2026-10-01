@@ -170,9 +170,9 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "Rules:"
-    assert lines[4] == "Kinds: feat, fix, chore, refactor, docs, perf"
-    assert lines[6:12] == [
+    assert lines[0] == "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>"
+    assert lines[2] == "Kinds: feat, fix, chore, refactor, docs, perf"
+    assert lines[4:10] == [
         "Fields:",
         "  Kind: feat",
         "  Story Points: 3",
@@ -180,8 +180,8 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
         f"  {POINT}",
         "  none",
     ]
-    assert lines[12] == "## Story"
-    assert lines[13].startswith("As a guest user, I want to see only")
+    assert lines[10] == "## Story"
+    assert lines[11].startswith("As a guest user, I want to see only")
     blockers = lines.index("Blockers:")
     assert lines[blockers : blockers + 4] == [
         "Blockers:",
@@ -189,6 +189,7 @@ def test_context_reports_blockers_fields_and_the_table(fake_gh):
         "Could block this story:",
         "  #300 Backlog Not done yet",
     ]
+    assert lines.index("Rules:") > blockers
 
 
 def test_context_says_nothing_about_approval(fake_gh):
@@ -292,7 +293,7 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert [line for line in lines if not line.startswith("  ")] == [
-        "Rules:",
+        "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>",
         "",
         "Kinds: feat, fix, chore, refactor, docs, perf",
         "",
@@ -304,7 +305,7 @@ def test_context_prints_every_heading_when_gh_is_unusable(fake_gh, tmp_path):
         "Blockers:",
         "Could block this story:",
         "",
-        "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>",
+        "Rules:",
     ]
     assert lines.count("  unavailable (nope)") == 6
 
@@ -576,7 +577,7 @@ def test_a_body_under_the_ceiling_boards_untouched(fake_gh, tmp_path):
 def test_context_names_the_apply(fake_gh):
     result = run_deckhand("ready", "context", "248")
 
-    assert result.stdout.splitlines()[-1] == "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>"
+    assert result.stdout.splitlines()[0] == "Apply: deckhand ready apply 248 --kind <kind> --points <1-3>"
 
 
 def test_context_names_oversized_in_the_apply_when_the_body_is_over_the_gate(fake_gh, tmp_path):
@@ -587,6 +588,6 @@ def test_context_names_oversized_in_the_apply_when_the_body_is_over_the_gate(fak
 
     result = run_deckhand("ready", "context", "248", env={"GH_ISSUE_FILE": str(path)})
 
-    assert result.stdout.splitlines()[-1] == (
+    assert result.stdout.splitlines()[0] == (
         'Apply: deckhand ready apply 248 --kind <kind> --points <1-3> --oversized "<why it is one story>"'
     )

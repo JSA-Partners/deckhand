@@ -252,6 +252,22 @@ def test_a_context_prints_the_rules_its_step_declares(capsys, monkeypatch):
     assert "Rule one." in out
 
 
+def test_the_rules_follow_the_context(capsys, monkeypatch):
+    """A context opens with what to run; the rules are reference, read after it."""
+    monkeypatch.setattr(
+        sys.modules[__name__], "context", lambda args: print("Apply: deckhand demo apply"), raising=False
+    )
+
+    def verb(args):
+        return 0
+
+    verb.__module__ = __name__
+    step_module._context("demo", verb, argparse.Namespace(), issue_bound=False, rules=("Rule one.",))
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines.index("Apply: deckhand demo apply") < lines.index("Rules:")
+
+
 def test_a_context_warns_when_a_newer_deckhand_is_installed(demo, capsys, monkeypatch):
     monkeypatch.setattr(step_module, "newer_installed", lambda: "9.9.9")
 

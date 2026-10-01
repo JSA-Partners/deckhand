@@ -154,7 +154,16 @@ def _brief_text(lenses: dict[str, str], names: list[str]) -> str:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print where the story body and the reviewer brief were written, and where the findings go."""
+    """Print the apply and where the findings go, then where the body and the reviewer brief were written."""
+    print(
+        invoke.apply_line(
+            "review", str(args.issue), "<findings>", "<verdicts>", "<decisions>", '--verdict "<sentence>"'
+        )
+    )
+    print(file_line("Findings", f"{args.issue}-findings.json"))
+    print(file_line("Verdicts", f"{args.issue}-verdicts.json"))
+    print(file_line("Decisions", f"{args.issue}-decisions.json"))
+    print()
     story: issue.Issue | Exception
     try:
         story = issue.view(gh.repo_slug(), args.issue)
@@ -167,17 +176,8 @@ def context(args: argparse.Namespace) -> int:
     print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected)))
     print()
     print(FINDING_FORMAT)
-    print(file_line("Findings", f"{args.issue}-findings.json"))
     print(VERDICT_FORMAT)
-    print(file_line("Verdicts", f"{args.issue}-verdicts.json"))
     print(DECISION_FORMAT)
-    print(file_line("Decisions", f"{args.issue}-decisions.json"))
-    print()
-    print(
-        invoke.apply_line(
-            "review", str(args.issue), "<findings>", "<verdicts>", "<decisions>", '--verdict "<sentence>"'
-        )
-    )
     return 0
 
 

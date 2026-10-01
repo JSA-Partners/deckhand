@@ -149,7 +149,7 @@ def test_context_selects_always_and_signal_lenses(fake_gh):
     result = run_deckhand("review", "context", "248")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[0].startswith("Body: ")
+    assert result.stdout.splitlines()[5].startswith("Body: ")
     brief = spilled(result.stdout, "Brief")
     headings = [line for line in brief.splitlines() if line.startswith("### ")]
     assert headings == ["### coverage", "### pen-test", "### principles", "### red-team", "### unknowns"]
@@ -184,25 +184,25 @@ def test_context_prints_the_three_formats_and_their_paths(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[-8] == (
+    assert lines[-3] == (
         'Report findings as {"kind": "findings", "findings": [{"lens": "<lens>", "ordinal": 1, '
         '"severity": "P1|P2|P3", "claim": "<one sentence>", '
         '"evidence": "<one sentence, citing the section>"}]}; an empty list found nothing'
     )
-    assert lines[-8] == review.FINDING_FORMAT
-    assert lines[-7] == f"Findings: {tmp_path / 'cache' / 'widgets' / '248-findings.json'}"
-    assert lines[-6] == (
+    assert lines[-3] == review.FINDING_FORMAT
+    assert lines[1] == f"Findings: {tmp_path / 'cache' / 'widgets' / '248-findings.json'}"
+    assert lines[-2] == (
         'Report verdicts, one per finding in the reviewer\'s order, as {"kind": "verdicts", "verdicts": '
         '[{"id": "<lens>.<n>", "verdict": "CONFIRMED"}, {"id": "<lens>.<n>", "verdict": "REJECTED", '
         '"reason": "<why>"}]}'
     )
-    assert lines[-5] == f"Verdicts: {tmp_path / 'cache' / 'widgets' / '248-verdicts.json'}"
-    assert lines[-4] == (
+    assert lines[2] == f"Verdicts: {tmp_path / 'cache' / 'widgets' / '248-verdicts.json'}"
+    assert lines[-1] == (
         'Report decisions, one per finding, as {"kind": "decisions", "decisions": '
         '[{"id": "<lens>.<n>", "decision": "accepted|declined|changed", "reason": "<why, optional>"}]}'
     )
-    assert lines[-4] == review.DECISION_FORMAT
-    assert lines[-3] == f"Decisions: {tmp_path / 'cache' / 'widgets' / '248-decisions.json'}"
+    assert lines[-1] == review.DECISION_FORMAT
+    assert lines[3] == f"Decisions: {tmp_path / 'cache' / 'widgets' / '248-decisions.json'}"
     assert not (tmp_path / "cache" / "widgets" / "248-findings.json").exists()
 
 
@@ -211,16 +211,16 @@ def test_context_still_prints_when_the_issue_cannot_be_read(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "Body: unavailable (could not find issue 248)"
+    assert lines[5] == "Body: unavailable (could not find issue 248)"
     brief = spilled(result.stdout, "Brief")
     assert [line for line in brief.splitlines() if line.startswith("### ")] == [
         "### coverage",
         "### principles",
         "### unknowns",
     ]
-    assert lines[-8] == review.FINDING_FORMAT
-    assert lines[-6] == review.VERDICT_FORMAT
-    assert lines[-4] == review.DECISION_FORMAT
+    assert lines[-3] == review.FINDING_FORMAT
+    assert lines[-2] == review.VERDICT_FORMAT
+    assert lines[-1] == review.DECISION_FORMAT
 
 
 def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
@@ -701,4 +701,4 @@ def test_context_names_the_apply(fake_gh):
     result = run_deckhand("review", "context", "248")
 
     expected = 'Apply: deckhand review apply 248 <findings> <verdicts> <decisions> --verdict "<sentence>"'
-    assert result.stdout.splitlines()[-1] == expected
+    assert result.stdout.splitlines()[0] == expected

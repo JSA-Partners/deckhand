@@ -184,15 +184,15 @@ def _agreement(story: issue.Issue | Exception) -> None:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the branch, the blockers, the story and its scope, the plan, the commits, the drift, and what landed."""
+    """Print the apply, then the branch, the blockers, the story and scope, the plan, the commits, the drift."""
+    print(invoke.apply_line("start", str(args.issue), '--note "<what the check concluded>"'))
+    print()
     settings = settings_or_error()
     story = _story(args.issue)
     print(_branch_line(settings, story, args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     _agreement(story)
     _report(story, args.issue)
-    print()
-    print(invoke.apply_line("start", str(args.issue), '--note "<what the check concluded>"'))
     return 0
 
 

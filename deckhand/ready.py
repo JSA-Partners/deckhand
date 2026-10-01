@@ -109,11 +109,13 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the kinds, the fields and reference stories to size by, then the story, plan, review, and blockers.
+    """Print the apply, the kinds, the fields and reference stories, then the story, plan, review, and blockers.
 
     The plan is written to a file and named, because a long one runs past what the reader sees at once.
     """
     settings = settings_or_error()
+    print(invoke.apply_line("ready", str(args.issue), "--kind <kind>", "--points <1-3>", *_oversized(args.issue)))
+    print()
     print(_kinds_line(settings))
     print()
     block("Fields:", lambda: _fields_block(settings, args.issue))
@@ -129,8 +131,6 @@ def context(args: argparse.Namespace) -> int:
     block("Review:", lambda: _review_lines(args.issue))
     block("Blockers:", lambda: blockers_block(gh.repo_slug(), args.issue))
     block("Could block this story:", lambda: _could_block(settings, args.issue))
-    print()
-    print(invoke.apply_line("ready", str(args.issue), "--kind <kind>", "--points <1-3>", *_oversized(args.issue)))
     return 0
 
 
