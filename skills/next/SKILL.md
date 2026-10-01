@@ -65,8 +65,8 @@ agent with the body and brief file paths and write its lines as they are to the 
 If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
 write its lines to the verdicts file. Then speak: a verdict on the story as a whole, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
-story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, blocked
-as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
+story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, with
+`--after` or `--blocks` as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
 ones, each as a sentence on the problem and one on what accepting it would do. Decide the clear ones
 with the skeptic: accept a confirmed finding that improves the story, decline what it rejected, say
@@ -79,8 +79,8 @@ the findings file alone with `--verdict`. Then amend from the accepted findings.
 
 From the amend context (above, or run it), copy the body file it names to the draft it names and
 edit that, keeping every heading, with superpowers:writing-plans for a plan rewrite, and run
-`amend apply $issue <file> --note "<what changed and why>"`, the note saying what changed and
-why and never where it came from, with `--title "<new title>"` when the Story no longer matches
+`amend apply $issue <file> --note "<what changed and why>"`, never where it came from, with
+`--title "<new title>"` when the Story no longer matches
 it. An amend writes Refinement, so the next briefing asks for the review again; say what changed and
 carry on. Work that belongs in its own story: overwrite the draft with its whole body
 and run `amend apply $issue <file> --new-issue "<title>"`; work that must land first takes `--before`.
@@ -99,8 +99,8 @@ then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Wait
 
-The story waits on what the briefing lists: say what it waits on in one sentence and stop. The
-captain picks it up when that closes.
+The story waits on what the briefing lists: say so in one sentence and stop; the captain picks it
+up when that closes.
 
 ## Check and build
 
@@ -116,9 +116,8 @@ alters what the story delivers: say so in one sentence with the diff's size and 
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
 amend step. A decision that changes an issue in another repository before it starts: run
 `amend context N --repo owner/name`, edit its draft, run
-`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. When the briefing says build, the check is done: run the plan. When it says resume, say which tasks the commits cover and ask whether to carry
-on or review what is there, recommending carry on while tasks are left, which skips the tasks the
-commits cover. When the briefing lists `Blocked by:`, say what it waits on, build what does not
+`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. On build, the check is done: run the plan. When it says resume, say which tasks the commits cover and recommend carrying on,
+which skips them, while tasks are left, or reviewing what is there. When the briefing lists `Blocked by:`, say what it waits on, build what does not
 depend on it, then stop. A story that must not start or merge before another: run
 `captain apply --block $issue --by M`, run `log $issue "Noted: <why>"`, and stop.
 
@@ -128,10 +127,10 @@ When the plan is done, run one superpowers code-review subagent over `origin/mai
 story, plan, and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
 line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
 idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
-and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk them
-through the change with technical depth: the files and functions in the order a reviewer should
-read them, what each does and why, the acceptance criterion each serves, and every Deviation with
-its reason. Then give them
+and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk the
+change one group of files at a time, in reading order: in plain terms what it does and why, a short
+snippet, the criterion it serves, and any Deviation it carries; wait for them before the next.
+After the last, give them
 `cd "<the worktree>" && tuicr -r origin/main..HEAD` as a plain message for a terminal of their own;
 they paste the export or say there are no comments. On comments: fix every
 one, commit with deckhand:commit, run the same review over
@@ -164,9 +163,10 @@ request section again: finish pushes and keeps the pull request.
 
 ## After the merge
 
-On a merged story with items left, walk them one at a time, doing what can be done here and asking
-for what is theirs. Run `after apply $issue --item <n>` as each is done, which ticks the box and
-logs `After the merge:`. With none left, run `after apply $issue`, which moves the column to Done.
+On a merged story, run `after apply $issue` first, which sets the column from the boxes:
+Verification while any is left, Done when none is. Then walk the items one at a time, doing what
+can be done here and asking for what is theirs; park one that is a change of its own as above,
+adding `--repo owner/name`. Run `after apply $issue --item <n>` as each is done, ticking its box.
 When nothing is left, say the story is finished and name the next story the briefing gave.
 Read the briefing's `Clear:` line out either way, so they hear what is owed without asking.
 With no story in hand, `/deckhand:captain` says what to pick up next across every repository.

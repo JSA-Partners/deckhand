@@ -315,7 +315,7 @@ def test_a_closed_story_left_in_an_earlier_column_is_an_anomaly():
     """Only a closed story reaches the last two columns, so closed anywhere else is two facts disagreeing."""
     found = fleet.anomalies(fleet.stories(_closed("In Review")), {}, set(), [])
 
-    assert [(a.number, a.what, a.fix) for a in found] == [(301, "closed, but In Review", "Status Verification or Done")]
+    assert [(a.number, a.what, a.fix) for a in found] == [(301, "closed, but In Review", "run next 301")]
 
 
 def test_a_closed_story_in_verification_is_not_an_anomaly():
