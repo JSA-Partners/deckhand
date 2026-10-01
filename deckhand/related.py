@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from deckhand import gh, issue
@@ -35,9 +36,8 @@ class Related:
     title: str
 
 
-def referenced(body: str, repo: str) -> list[tuple[str, int]]:
-    """Every issue `body` names as `#N` or `owner/name#N`, once each in order, outside fenced code and code spans."""
-    found: dict[tuple[str, int], None] = {}
+def naming(body: str, repo: str) -> Iterator[tuple[str, list[tuple[str, int]]]]:
+    """Each line of `body` outside fenced code, with the issues it names outside code spans."""
     fence = ""
     for line in body.splitlines():
         opened = _FENCE.match(line)
@@ -45,8 +45,16 @@ def referenced(body: str, repo: str) -> list[tuple[str, int]]:
             fence = "" if fence else opened.group(1)
             continue
         if not fence:
-            for where, number in _REFERENCE.findall(_CODE_SPAN.sub("", line)):
-                found.setdefault((repo if where.lower() == repo.lower() else where or repo, int(number)))
+            found = _REFERENCE.findall(_CODE_SPAN.sub("", line))
+            yield line, [(repo if where.lower() == repo.lower() else where or repo, int(n)) for where, n in found]
+
+
+def referenced(body: str, repo: str) -> list[tuple[str, int]]:
+    """Every issue `body` names as `#N` or `owner/name#N`, once each in order, outside fenced code and code spans."""
+    found: dict[tuple[str, int], None] = {}
+    for _, keys in naming(body, repo):
+        for key in keys:
+            found.setdefault(key)
     return list(found)
 
 

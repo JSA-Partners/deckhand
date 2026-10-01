@@ -105,6 +105,21 @@ def test_a_board_story_named_without_an_edge_is_listed():
     assert _row(candidates.rows(read, REPO), 1)[NAMED] == "#2"
 
 
+def test_a_named_story_comes_with_the_line_that_names_it():
+    """The line is what a session judges the pair from, so it never has to read the body."""
+    body = "### Story\nA person signs in.\n\n### Notes\n- The token check waits on the answer #2 gives.\n"
+    read = _fleet(_story(1, columns.READY, body), _story(2, columns.BACKLOG))
+    assert "Named: #1 names #2: The token check waits on the answer #2 gives." in candidates.rows(read, REPO)
+
+
+def test_a_long_naming_line_is_trimmed():
+    read = _fleet(_story(1, columns.READY, "Before #2, " + "word " * 60), _story(2, columns.BACKLOG))
+    (line,) = [line for line in candidates.rows(read, REPO) if line.startswith("Named: ")]
+    assert line.startswith("Named: #1 names #2: Before #2, word")
+    assert line.endswith("...")
+    assert len(line) <= len("Named: #1 names #2: ") + candidates.LINE + 3
+
+
 def test_a_named_story_that_is_closed_or_off_the_board_is_not_listed():
     read = _fleet(
         _story(1, columns.READY, "After #2 and #3."),

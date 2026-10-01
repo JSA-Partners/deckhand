@@ -20,6 +20,8 @@ SHOWN = 3
 # A file this many plans name is one every story touches, so pairing on it separates nothing.
 SHARED = 3
 SHARED_SHOWN = 5
+# Long enough for the clause that says why one story names the other, short enough to scan.
+LINE = 160
 
 
 def _name(repo: str) -> str:
@@ -41,18 +43,24 @@ def _files(story: fleet.Story) -> set[str]:
     return {ref.partition(":")[0] for ref in drift.references(plan)}
 
 
-def _named(story: fleet.Story, read: fleet.Fleet, repo: str) -> list[str]:
-    """Open board stories the body names that are no blocker edge either way."""
+def _named(story: fleet.Story, read: fleet.Fleet, repo: str) -> dict[str, str]:
+    """Open board stories the body names that are no blocker edge either way, with the first line naming each."""
     open_keys = {other.key for other in read.stories if not other.closed and other.status != columns.DONE}
     linked = {(where, number) for where, number, _ in read.blockers.get(story.key) or []}
     linked |= {key for key, holds in read.blockers.items() if any((w, n) == story.key for w, n, _ in holds)}
     preamble, parsed = sections.parse(story.issue.body)
     text = "\n".join([preamble, *(lint.within_scope(body) if name == "Scope" else body for name, body in parsed)])
-    return [
-        ref_label(where, number, repo)
-        for where, number in related.referenced(text, story.repo)
-        if (where, number) in open_keys and (where, number) not in linked and (where, number) != story.key
-    ]
+    named: dict[str, str] = {}
+    for line, keys in related.naming(text, story.repo):
+        for key in keys:
+            if key in open_keys and key not in linked and key != story.key:
+                named.setdefault(ref_label(*key, repo), _trimmed(line))
+    return named
+
+
+def _trimmed(line: str) -> str:
+    text = " ".join(line.split()).lstrip("-* ")
+    return text if len(text) <= LINE else text[:LINE].rstrip() + "..."
 
 
 def _shared(stories: list[fleet.Story], files: dict[fleet.Key, set[str]]) -> Counter[tuple[str, str]]:
@@ -101,10 +109,14 @@ def rows(read: fleet.Fleet, repo: str) -> list[str]:
         "| # | Repo | Title | Status | Pts | Next | Waits on | Named, no edge | Files |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+    lines = []
     for story in found:
         blockers = read.blockers.get(story.key) or []
         waits = ", ".join(ref_label(where, number, repo) for where, number, _ in blockers) or "-"
-        named = ", ".join(_named(story, read, repo)) or "-"
+        names = _named(story, read, repo)
+        label = ref_label(story.repo, story.number, repo)
+        lines += [f"Named: {label} names {other}: {line}" for other, line in names.items()]
+        named = ", ".join(names) or "-"
         points = "-" if story.points is None else str(story.points)
         title = story.title.replace("|", "\\|")
         table.append(
@@ -112,4 +124,4 @@ def rows(read: fleet.Fleet, repo: str) -> list[str]:
             f"{_next_step(story, blockers)} | {waits} | {named} | {len(_files(story))} |"
         )
     building = [story for story in mine if story.status == columns.IN_PROGRESS]
-    return [*table, "", *_overlaps(found + building, {story.key for story in found}, read, repo)]
+    return [*table, "", *lines, *_overlaps(found + building, {story.key for story in found}, read, repo)]
