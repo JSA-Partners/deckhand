@@ -516,6 +516,17 @@ def test_a_row_carries_the_parent_the_issue_has():
     assert found[1].parent is None
 
 
+def test_a_story_closed_as_not_planned_reads_as_dropped():
+    dropped = _item(1, ("deckhand",))
+    dropped["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z", "stateReason": "NOT_PLANNED"})
+    finished = _item(2, ("deckhand",))
+    finished["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z"})
+
+    found = fleet.stories([dropped, finished])
+
+    assert [story.dropped for story in found] == [True, False]
+
+
 def test_an_epic_is_the_issue_that_carries_the_epic_label():
     found = fleet.stories([_item(300, ("epic",)), _item(1, ("deckhand",))])
 

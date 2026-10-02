@@ -18,7 +18,7 @@ ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
     "projectV2(number:$number){ items(first:100, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
     "pageInfo{ hasNextPage endCursor } nodes{ id isArchived "
-    "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
+    "content{ ... on Issue{ number title url state stateReason closedAt body repository{ nameWithOwner } "
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
@@ -50,6 +50,7 @@ class Story:
     blocked_by: tuple[tuple[str, int, str], ...] = ()
     archived: bool = False
     parent: tuple[str, int] | None = None
+    dropped: bool = False
 
     @property
     def key(self) -> tuple[str, int]:
@@ -124,6 +125,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                 blocked_by=_open_blockers(content),
                 archived=bool(node.get("isArchived")),
                 parent=_parent(content),
+                dropped=content.get("stateReason") == "NOT_PLANNED",
             )
         )
     return found

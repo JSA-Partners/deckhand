@@ -1,0 +1,138 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "items": {
+          "pageInfo": { "hasNextPage": false, "endCursor": null },
+          "nodes": [
+            {
+              "id": "I_300",
+              "isArchived": false,
+              "content": {
+                "number": 300,
+                "title": "Permission rework",
+                "url": "https://github.com/acme/widgets/issues/300",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "Guests and registry ownership.\n",
+                "repository": { "nameWithOwner": "acme/widgets" },
+                "labels": { "nodes": [{ "name": "epic" }] },
+                "comments": { "nodes": [] }
+              },
+              "fieldValues": { "nodes": [] }
+            },
+            {
+              "id": "I_301",
+              "isArchived": false,
+              "content": {
+                "number": 301,
+                "title": "Grant guests access",
+                "url": "https://github.com/acme/widgets/issues/301",
+                "state": "CLOSED",
+                "closedAt": "2026-09-02T00:00:00Z",
+                "body": "",
+                "repository": { "nameWithOwner": "acme/widgets" },
+                "labels": { "nodes": [{ "name": "deckhand" }] },
+                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
+                "comments": {
+                  "nodes": [
+                    { "body": "Started: on the branch", "createdAt": "2026-09-01T00:00:00Z", "author": { "login": "mjm" } },
+                    { "body": "Pull request: opened", "createdAt": "2026-09-02T00:00:00Z", "author": { "login": "mjm" } }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Done", "field": { "name": "Status" } },
+                  { "number": 1, "field": { "name": "Story Points" } }
+                ]
+              }
+            },
+            {
+              "id": "I_302",
+              "isArchived": false,
+              "content": {
+                "number": 302,
+                "title": "Scope guests to granted collections",
+                "url": "https://github.com/acme/widgets/issues/302",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": { "nameWithOwner": "acme/widgets" },
+                "labels": { "nodes": [{ "name": "deckhand" }] },
+                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
+                "comments": { "nodes": [] }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Backlog", "field": { "name": "Status" } },
+                  { "number": 1, "field": { "name": "Story Points" } }
+                ]
+              }
+            },
+            {
+              "id": "I_303",
+              "isArchived": false,
+              "content": {
+                "number": 303,
+                "title": "Opened by hand",
+                "url": "https://github.com/acme/widgets/issues/303",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": { "nameWithOwner": "acme/widgets" },
+                "labels": { "nodes": [] },
+                "comments": { "nodes": [] }
+              },
+              "fieldValues": { "nodes": [{ "name": "Backlog", "field": { "name": "Status" } }] }
+            },
+            {
+              "id": "I_304",
+              "isArchived": false,
+              "content": {
+                "number": 304,
+                "title": "Bring the toolchain current",
+                "url": "https://github.com/acme/widgets/issues/304",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": { "nameWithOwner": "acme/widgets" },
+                "labels": { "nodes": [{ "name": "deckhand" }] },
+                "comments": { "nodes": [] }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Backlog", "field": { "name": "Status" } },
+                  { "number": 1, "field": { "name": "Story Points" } }
+                ]
+              }
+            },
+            {
+              "id": "I_305",
+              "isArchived": false,
+              "content": {
+                "number": 305,
+                "title": "Dropped before it began",
+                "url": "https://github.com/acme/widgets/issues/305",
+                "state": "CLOSED",
+                "closedAt": "2026-09-03T00:00:00Z",
+                "stateReason": "NOT_PLANNED",
+                "body": "",
+                "repository": { "nameWithOwner": "acme/widgets" },
+                "labels": { "nodes": [{ "name": "deckhand" }] },
+                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
+                "comments": { "nodes": [] }
+              },
+              "fieldValues": {
+                "nodes": [
+                  { "name": "Done", "field": { "name": "Status" } },
+                  { "number": 1, "field": { "name": "Story Points" } }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
