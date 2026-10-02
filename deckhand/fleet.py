@@ -7,9 +7,10 @@ the board in a single paginated read instead of one read per story.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
-from deckhand import board, columns, draft, gh, issue, sections, sessions, step
+from deckhand import board, columns, draft, gh, issue, log, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -21,6 +22,7 @@ ITEMS_QUERY = (
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
+    "parent{ number repository{ nameWithOwner } } "
     "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
     "fieldValues(first:20){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
@@ -47,6 +49,7 @@ class Story:
     assignees: tuple[str, ...] = ()
     blocked_by: tuple[tuple[str, int, str], ...] = ()
     archived: bool = False
+    parent: tuple[str, int] | None = None
 
     @property
     def key(self) -> tuple[str, int]:
@@ -76,6 +79,13 @@ def _issue(content: dict) -> issue.Issue:
         ],
         labels=tuple(str(node.get("name") or "") for node in (content.get("labels") or {}).get("nodes") or []),
     )
+
+
+def _parent(content: dict) -> tuple[str, int] | None:
+    held = content.get("parent") or {}
+    if "number" not in held:
+        return None
+    return ((held.get("repository") or {}).get("nameWithOwner") or "", int(held["number"]))
 
 
 def _open_blockers(content: dict) -> tuple[tuple[str, int, str], ...]:
@@ -113,6 +123,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                 ),
                 blocked_by=_open_blockers(content),
                 archived=bool(node.get("isArchived")),
+                parent=_parent(content),
             )
         )
     return found
@@ -146,6 +157,34 @@ def touched(story: Story) -> bool:
     every one of them broken.
     """
     return issue.LABEL[0] in story.issue.labels
+
+
+def is_epic(story: Story) -> bool:
+    """Whether this issue is an epic: the issue stories roll up to, and never a story itself."""
+    return issue.EPIC[0] in story.issue.labels
+
+
+def epics(found: list[Story]) -> list[Story]:
+    """Every epic, in the order the board holds them, which is the order they are to be built in."""
+    return [story for story in found if is_epic(story)]
+
+
+def members(found: list[Story], epic: tuple[str, int]) -> list[Story]:
+    """The stories of one epic that are the process's business, in any repository."""
+    return [story for story in found if story.parent == epic and touched(story)]
+
+
+_SHED = re.compile(r"(?:([^\s/#,]+/[^\s/#,]+))?#([0-9]+)")
+
+
+def shed(story: Story) -> list[tuple[str, int]]:
+    """`(repository, number)` of every story this one was split into, as its `Split:` entries name them."""
+    return [
+        (repo or story.repo, int(number))
+        for entry in log.entries(story.issue)
+        if entry.prefix == "Split:"
+        for repo, number in _SHED.findall(entry.text)
+    ]
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:

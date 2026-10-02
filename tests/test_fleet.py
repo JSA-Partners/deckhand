@@ -490,3 +490,87 @@ def test_an_archived_issue_the_process_never_wrote_to_is_not_an_anomaly():
     """A board carries issues that are not deckhand's, and archiving one of those is nobody's business."""
     archived = [dataclasses.replace(fleet.stories(_foreign("Backlog"))[0], archived=True)]
     assert fleet.anomalies([], {}, set(), [], archived=archived) == []
+
+
+# epics
+
+
+def _item(number: int, labels: tuple[str, ...], parent: int | None = None, repo: str = REPO) -> dict:
+    content = {
+        "number": number,
+        "title": f"T{number}",
+        "state": "OPEN",
+        "closedAt": None,
+        "repository": {"nameWithOwner": repo},
+        "labels": {"nodes": [{"name": name} for name in labels]},
+    }
+    if parent is not None:
+        content["parent"] = {"number": parent, "repository": {"nameWithOwner": REPO}}
+    return {"id": f"I_{number}", "content": content, "fieldValues": {"nodes": []}}
+
+
+def test_a_row_carries_the_parent_the_issue_has():
+    found = fleet.stories([_item(1, ("deckhand",), parent=300), _item(2, ("deckhand",))])
+
+    assert found[0].parent == (REPO, 300)
+    assert found[1].parent is None
+
+
+def test_an_epic_is_the_issue_that_carries_the_epic_label():
+    found = fleet.stories([_item(300, ("epic",)), _item(1, ("deckhand",))])
+
+    assert [fleet.is_epic(story) for story in found] == [True, False]
+    assert fleet.touched(found[0]) is False
+
+
+def test_epics_come_back_in_board_order():
+    found = fleet.stories([_item(301, ("epic",)), _item(1, ("deckhand",)), _item(300, ("epic",))])
+
+    assert [story.number for story in fleet.epics(found)] == [301, 300]
+
+
+def test_members_are_the_stories_of_one_epic_and_nothing_foreign():
+    found = fleet.stories(
+        [
+            _item(1, ("deckhand",), parent=300),
+            _item(2, (), parent=300),
+            _item(3, ("deckhand",), parent=301),
+            _item(4, ("deckhand",), parent=300, repo="acme/gadgets"),
+        ]
+    )
+
+    assert [story.number for story in fleet.members(found, (REPO, 300))] == [1, 4]
+
+
+def _logged(number: int, *entries: str, parent: tuple[str, int] | None = None, closed: bool = False) -> fleet.Story:
+    comments = [issue.Comment(author="claude", body=body, created_at="2026-09-01T00:00:00Z") for body in entries]
+    held = issue.Issue(
+        number=number,
+        title=f"T{number}",
+        body="",
+        url="",
+        state="CLOSED" if closed else "OPEN",
+        comments=comments,
+        labels=("deckhand",),
+    )
+    return fleet.Story(
+        number=number,
+        repo=REPO,
+        title=f"T{number}",
+        status="Done" if closed else "Backlog",
+        points=1,
+        closed=closed,
+        item=f"I_{number}",
+        issue=held,
+        parent=parent,
+    )
+
+
+def test_shed_names_every_story_a_split_entry_names():
+    story = _logged(1, "Split: into #2, acme/gadgets#3", "Split: #4 Follow on, blocked by this story.")
+
+    assert fleet.shed(story) == [(REPO, 2), ("acme/gadgets", 3), (REPO, 4)]
+
+
+def test_a_story_that_never_split_shed_nothing():
+    assert fleet.shed(_logged(1, "Started: on the branch")) == []
