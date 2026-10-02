@@ -336,3 +336,47 @@ def test_the_rows_say_how_a_draft_was_counted():
     read = _fleet(_done(1, 1, 24.0), _story(2, None, False, body=DRAFT))
 
     assert "  1 draft counted as 1.0 stories of any size, plus a review." in forecast.rows(read, 1, "given")
+
+
+# idle
+
+
+def test_idle_is_unknown_under_ten_finished_stories():
+    assert forecast.idle([_done(number, 1, 1.0, start=48.0 * number) for number in range(9)]) == 0.0
+
+
+def test_idle_is_the_share_of_days_with_nothing_in_progress():
+    # ten one-hour stories, one every second day: 19 days from first to last, 10 of them worked
+    stories = [_done(number, 1, 1.0, start=48.0 * number) for number in range(10)]
+
+    assert forecast.idle(stories) == 9 / 19
+
+
+def test_a_story_that_spans_days_fills_every_one_of_them():
+    stories = [_done(number, 1, 1.0, start=24.0 * number) for number in range(9)]
+    stories.append(_done(9, 1, 72.0, start=24.0 * 9))
+
+    # days 0 to 8 by the short ones, 9 to 12 by the long one
+    assert forecast.idle(stories) == 0.0
+
+
+def test_idle_never_stretches_past_the_cap():
+    stories = [_done(number, 1, 1.0, start=24.0 * 1000 * number) for number in range(10)]
+
+    assert forecast.idle(stories) == forecast.IDLE_CAP
+
+
+def test_an_outlook_is_stretched_by_the_idle_share(monkeypatch):
+    monkeypatch.setattr(forecast, "idle", lambda stories: 0.5)
+    read = _fleet(_done(1, 1, 24.0), _plain(2, 1))
+
+    found = forecast.outlook(read, 1, seed=1)
+
+    assert (found.idle, found.floor, found.commitment, found.worst, found.unbanded) == (0.5, 48.0, 48.0, 48.0, 48.0)
+
+
+def test_the_rows_say_when_the_forecast_was_stretched(monkeypatch):
+    monkeypatch.setattr(forecast, "idle", lambda stories: 0.5)
+    read = _fleet(_done(1, 1, 24.0), _plain(2, 1))
+
+    assert "  Stretched for the 50% of days on which nothing was in progress." in forecast.rows(read, 1, "given")

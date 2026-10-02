@@ -15,7 +15,7 @@ import math
 import random
 import statistics
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from deckhand import draft, fleet, log, order
 
@@ -114,6 +114,25 @@ def refinements(stories: list[fleet.Story]) -> list[float]:
         if took > 0:
             found.append(took)
     return sorted(found)
+
+
+IDLE_CAP = 0.9  # a history that is nearly all gaps would stretch a forecast without limit
+
+
+def idle(stories: list[fleet.Story]) -> float:
+    """The share of days, first start to last pull request, on which no finished story was in progress."""
+    spans = [span for span in (_span(story) for story in stories) if span is not None]
+    if len(spans) < THIN:
+        return 0.0
+    first = min(start for start, _ in spans).date()
+    last = max(end for _, end in spans).date()
+    days = (last - first).days + 1
+    busy = {
+        start.date() + timedelta(days=offset)
+        for start, end in spans
+        for offset in range((end.date() - start.date()).days + 1)
+    }
+    return min(IDLE_CAP, (days - len(busy)) / days)
 
 
 def _placed(stories: list[fleet.Story], blockers: fleet.Blockers) -> list[fleet.Story]:
@@ -265,6 +284,7 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
     drafts = frozenset(story.key for story in left if draft.is_draft(story.issue.body))
     grown, reviews = growth(every), refinements(every)
     review = statistics.median(reviews) if reviews else 0.0
+    gap = idle(every)
 
     banded = simulate(left, read.blockers, at_once, history, seed=seed, drafts=drafts, growth=grown, reviews=reviews)
     unbanded = simulate(
@@ -277,12 +297,13 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
         longest=pooled[-1],
         median=statistics.median(pooled),
         thin=thin,
-        floor=floor(left, read.blockers, at_once, medians, drafts, grown, review),
-        commitment=banded[commitment_p],
-        worst=banded[worst_p],
-        unbanded=unbanded[commitment_p],
+        floor=floor(left, read.blockers, at_once, medians, drafts, grown, review) / (1 - gap),
+        commitment=banded[commitment_p] / (1 - gap),
+        worst=banded[worst_p] / (1 - gap),
+        unbanded=unbanded[commitment_p] / (1 - gap),
         drafts=len(drafts),
         growth=grown,
+        idle=gap,
     )
 
 
@@ -317,6 +338,8 @@ def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None =
     if found.drafts:
         draft_word = "draft" if found.drafts == 1 else "drafts"
         lines.append(f"  {found.drafts} {draft_word} counted as {found.growth:.1f} stories of any size, plus a review.")
+    if found.idle:
+        lines.append(f"  Stretched for the {found.idle:.0%} of days on which nothing was in progress.")
     if found.thin:
         lines.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
     return [*lines, "", f"  {POINT}"]
