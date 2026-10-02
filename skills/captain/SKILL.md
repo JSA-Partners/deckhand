@@ -36,3 +36,7 @@ When the person states a priority or asks how many sessions to open, run
 per session, each naming its repository and its `/deckhand:next N` commands in order. Two stories
 whose files overlap never run in parallel lanes. Judge a "named, no edge" pair from its `Named:` line,
 asking only when the line leaves it open.
+
+When asked how long the board will take, run `captain context --only forecast`. For one epic, run
+`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" epic forecast <epic>`, and `epic list` names them. Give the
+floor and the commitment as dates, and never a date between them.

@@ -22,7 +22,8 @@
   names; `gates.py` what must be true before a branch becomes a pull request, run only from
   `finish.apply`; `findings.py` reads the findings, verdicts or decisions document into data, for
   `review.py` to join; `forecast.py` measures what a finished story took and how many run at once,
-  and simulates what a batch of open ones will; `related.py` the issues a story names, with their
+  and simulates what a batch of open ones will; `epic.py` the issue a feature's stories roll up to,
+  opened, filled, listed and forecast in dates; `related.py` the issues a story names, with their
   column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
   which Claude Code sessions are open and on what, `transcript.py` what one of them says;
   `since.py` the snapshot a full captain read leaves, and what changed against the last;
@@ -100,6 +101,8 @@ install reaches them when the next fix or feature does.
   manifests and the install commands carry them
 - A blocker is `owner/name#M`; a bare number is this repository
 - A parked feature is written in place and becomes the story; only finished work closes an issue
+- A parked feature is a draft that becomes a story; an epic is the issue stories roll up to, carries
+  the `epic` label, and is never a story
 - The build happens in the story's worktree, which `start` makes and `next` names; a branch is
   never checked out by hand, and the clone stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec

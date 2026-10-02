@@ -145,6 +145,29 @@ commitment that is deliberately pessimistic. Both are measured rather than estim
 finished stories actually took, so the numbers get better as the board fills and the forecast says
 how thin its history still is.
 
+### Epics
+
+An epic is the issue a feature's stories roll up to. It carries the `epic` label, it is never a
+story, and its stories are its sub-issues, from any repository of the project. The order of the
+epics on the board is the order they are built in.
+
+```text
+deckhand epic open "Let guests into a collection" --about "A client sees their own collection and nothing else."
+deckhand epic add 300 261 259 owner/front-end#133
+deckhand epic list
+deckhand epic forecast 300
+```
+
+`new` offers the epics when it boards a story. A story split from an epic's story does not join
+the epic by itself, so the captain lists it under Anomalies with the command that adds it.
+
+`epic forecast` is the captain's forecast over one epic's open stories, as dates with `--json`.
+It draws from every finished story on the project, except one closed as not planned. A draft has no
+points, so it draws from finished stories of every size. A draft with no stories listed yet counts
+as several, as many as finished parked features really became, and each adds a measured review.
+The result is divided by measured utilization, the share of the hours available that stories were
+in progress, because the hours between stories are in no story's duration.
+
 | Command | What it does |
 | --- | --- |
 | `/deckhand:setup` | Links the repository to a GitHub Project and fixes the board's fields |
