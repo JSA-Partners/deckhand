@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from datetime import UTC, datetime, timedelta
 
-from deckhand import fleet, forecast, issue
+from deckhand import draft, fleet, forecast, issue
 
 REPO = "acme/widgets"
 EPIC = (REPO, 300)
@@ -276,25 +276,73 @@ def test_the_rows_say_so_when_a_scope_has_nothing_left():
 # drafts
 
 
-def test_growth_is_one_until_five_finished_roots():
-    assert forecast.growth([_done(number, 1, 1.0) for number in range(1, 5)]) == 1.0
+def _parked(number: int, *kids: int, closed: bool = True, review: bool = False) -> fleet.Story:
+    log = [("Drafted:", _at(0), f"parked from {REPO}#900")]
+    if kids:
+        log.append(("Split:", _at(0), "into " + ", ".join(f"#{kid}" for kid in kids)))
+    if review:
+        log.append(("Review:", _at(1)))
+    return _story(number, 1, closed, *log, ("Started:", _at(1)), ("Pull request:", _at(3)))
 
 
-def test_growth_is_the_mean_size_of_a_finished_split_tree():
-    root = _story(1, 1, True, ("Split:", _at(0), "into #2, acme/gadgets#3"))
+def _trees(*sizes: int) -> list[fleet.Story]:
+    found: list[fleet.Story] = []
+    for size in sizes:
+        root = len(found) + 1
+        kids = range(root + 1, root + size)
+        found += [_parked(root, *kids, review=True), *(_done(kid, 1, 2.0, start=1.0) for kid in kids)]
+    return found
+
+
+def test_splits_ignore_a_story_written_from_a_request():
+    root = _story(
+        1, 1, True, ("Drafted:", _at(0), "the story and its plan, from the request."), ("Split:", _at(1), "into #2")
+    )
+
+    assert forecast.splits([root, _done(2, 1, 1.0)]) == []
+
+
+def test_splits_measure_a_parked_feature_split_into_stories():
+    root = _story(
+        1, 1, True, ("Drafted:", _at(0), f"parked from {REPO}#900"), ("Split:", _at(1), "into #2, acme/gadgets#3")
+    )
     shed = [_done(2, 1, 1.0), _done(3, 1, 1.0, repo="acme/gadgets")]
-    alone = [_done(number, 1, 1.0) for number in range(4, 8)]
 
-    # five roots of sizes 3, 1, 1, 1 and 1
-    assert forecast.growth([root, *shed, *alone]) == 1.4
+    assert forecast.splits([root, *shed, _parked(4)]) == [1, 3]
 
 
-def test_growth_ignores_a_root_that_has_not_finished():
-    open_root = _story(1, 1, False, ("Split:", _at(0), "into #2, #3"))
-    finished = [_done(number, 1, 1.0) for number in range(2, 9)]
+def test_splits_count_a_story_shed_later():
+    root = _story(
+        1, 1, True, ("Drafted:", _at(0), f"parked from {REPO}#900"), ("Split:", _at(1), "#2 The other half, moved out.")
+    )
 
-    # 2 and 3 were shed, so the roots are 4 to 8, each of size 1
-    assert forecast.growth([open_root, *finished]) == 1.0
+    assert forecast.splits([root, _done(2, 1, 1.0)]) == [2]
+
+
+def test_splits_count_a_tree_two_levels_deep():
+    shed = _story(2, 1, True, ("Split:", _at(1), "#3 The other half, moved out."))
+
+    assert forecast.splits([_parked(1, 2), shed, _done(3, 1, 1.0)]) == [3]
+
+
+def test_splits_ignore_a_parked_feature_that_has_not_finished():
+    assert forecast.splits([_parked(1, 2, closed=False), _done(2, 1, 1.0)]) == []
+
+
+def test_splits_do_not_count_a_shed_story_as_its_own_root():
+    assert forecast.splits([_parked(1, 2), _parked(2)]) == [2]
+
+
+def test_thin_splits_draw_the_worst_seen():
+    assert forecast._sizes([1, 1, 2, 4]) == [4]
+
+
+def test_no_splits_draw_one_story():
+    assert forecast._sizes([]) == [1]
+
+
+def test_five_splits_are_drawn_as_measured():
+    assert forecast._sizes([1, 1, 2, 2, 4]) == [1, 1, 2, 2, 4]
 
 
 def test_a_review_is_measured_from_the_latest_draft_to_the_latest_review():
@@ -307,20 +355,37 @@ def test_a_story_without_both_entries_measures_no_review():
     assert forecast.refinements([_story(1, 1, True, ("Drafted:", _at(0)))]) == []
 
 
-def test_a_draft_draws_from_the_pool_grown_and_reviewed():
+def test_a_draft_draws_from_the_pool_past_an_unpointed_band():
     story = _story(1, None, False, body=DRAFT)
+    samples = {None: [1.0], 1: [10.0]}
+    only = frozenset({story.key})
 
-    found = forecast.simulate(
-        [story], {}, 1, {1: [2.0]}, runs=20, seed=1, drafts=frozenset({story.key}), growth=1.5, reviews=[3.0]
+    found = forecast.simulate([story], {}, 1, samples, runs=200, seed=1, drafts=only, grown=only, sizes=[1])
+
+    assert found[100] == 10.0
+    assert forecast.simulate([_plain(2, None)], {}, 1, samples, runs=200, seed=1)[100] == 1.0
+
+
+def test_a_grown_draft_is_every_story_it_becomes_each_reviewed():
+    story = _story(1, None, False, body=DRAFT)
+    only = frozenset({story.key})
+
+    grown = forecast.simulate(
+        [story], {}, 1, {1: [2.0]}, runs=20, seed=1, drafts=only, grown=only, sizes=[3], reviews=[1.0]
     )
+    settled = forecast.simulate([story], {}, 1, {1: [2.0]}, runs=20, seed=1, drafts=only, sizes=[3], reviews=[1.0])
 
-    assert found[100] == 6.0
+    assert grown == {50: 9.0, 85: 9.0, 95: 9.0, 100: 9.0}
+    assert settled == {50: 3.0, 85: 3.0, 95: 3.0, 100: 3.0}
 
 
-def test_the_floor_counts_a_draft_grown_and_reviewed():
+def test_the_floor_counts_a_grown_draft_from_the_pool_each_story_reviewed():
     story = _story(1, None, False, body=DRAFT)
+    only = frozenset({story.key})
+    hours = {None: 50.0, 1: 2.0}
 
-    assert forecast.floor([story], {}, 1, {1: 2.0}, frozenset({story.key}), 1.5, 3.0) == 6.0
+    assert forecast.floor([story], {}, 1, hours, only, only, size=3, review=1.0, pooled=2.0) == 9.0
+    assert forecast.floor([story], {}, 1, hours, only, size=3, review=1.0, pooled=2.0) == 3.0
 
 
 def test_an_outlook_counts_its_drafts():
@@ -328,14 +393,48 @@ def test_an_outlook_counts_its_drafts():
 
     found = forecast.outlook(read, 1, seed=1)
 
-    assert found.drafts == 1
+    assert (found.drafts, found.growth) == (1, 1.0)
     assert found.commitment == 48.0
+
+
+def test_an_outlook_grows_a_draft_by_the_splits_parked_features_had():
+    read = _fleet(*_trees(3, 3, 3, 3, 3), _story(20, None, False, body=DRAFT))
+
+    found = forecast.outlook(read, 1, seed=1)
+
+    assert (found.drafts, found.growth, found.thin) == (1, 3.0, False)
+    assert (found.floor, found.commitment) == (9.0, 9.0)
+
+
+def test_an_outlook_with_few_splits_grows_a_draft_by_the_worst_seen():
+    read = _fleet(*_trees(2, 4), _story(20, None, False, body=DRAFT))
+
+    found = forecast.outlook(read, 1, seed=1)
+
+    assert (found.drafts, found.growth, found.commitment) == (1, 4.0, 12.0)
+
+
+def test_an_outlook_does_not_grow_a_draft_that_lists_its_stories():
+    settled = draft.render("What it needs.", [draft.Entry(title="A", sentence="B", after=())])
+    read = _fleet(*_trees(3, 3, 3, 3, 3), _story(20, None, False, body=settled))
+
+    found = forecast.outlook(read, 1, seed=1)
+
+    assert (found.drafts, found.growth, found.commitment) == (1, 3.0, 3.0)
 
 
 def test_the_rows_say_how_a_draft_was_counted():
     read = _fleet(_done(1, 1, 24.0), _story(2, None, False, body=DRAFT))
 
-    assert "  1 draft counted as 1.0 stories of any size, plus a review." in forecast.rows(read, 1, "given")
+    line = "  1 draft counted as 1.0 stories of any size on average, each with a review."
+    assert line in forecast.rows(read, 1, "given")
+
+
+def test_the_rows_count_several_drafts():
+    read = _fleet(*_trees(2, 4), _story(20, None, False, body=DRAFT), _story(21, None, False, body=DRAFT))
+
+    line = "  2 drafts counted as 4.0 stories of any size on average, each with a review."
+    assert line in forecast.rows(read, 1, "given")
 
 
 # idle
