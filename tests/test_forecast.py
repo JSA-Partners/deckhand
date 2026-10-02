@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from deckhand import draft, fleet, forecast, issue
 
 REPO = "acme/widgets"
@@ -437,45 +439,106 @@ def test_the_rows_count_several_drafts():
     assert line in forecast.rows(read, 1, "given")
 
 
-# idle
+# utilization
 
 
-def test_idle_is_unknown_under_ten_finished_stories():
-    assert forecast.idle([_done(number, 1, 1.0, start=48.0 * number) for number in range(9)]) == 0.0
+def _daily(count: int = 30) -> list[fleet.Story]:
+    return [_done(number, 1, 2.0, start=24.0 * number) for number in range(count)]
 
 
-def test_idle_is_the_share_of_days_with_nothing_in_progress():
-    # ten one-hour stories, one every second day: 19 days from first to last, 10 of them worked
-    stories = [_done(number, 1, 1.0, start=48.0 * number) for number in range(10)]
-
-    assert forecast.idle(stories) == 9 / 19
+def _half_used() -> list[fleet.Story]:
+    return [_done(1, 1, 2.0), _done(2, 1, 2.0, start=6.0)]
 
 
-def test_a_story_that_spans_days_fills_every_one_of_them():
-    stories = [_done(number, 1, 1.0, start=24.0 * number) for number in range(9)]
-    stories.append(_done(9, 1, 72.0, start=24.0 * 9))
-
-    # days 0 to 8 by the short ones, 9 to 12 by the long one
-    assert forecast.idle(stories) == 0.0
+def test_utilization_is_the_hours_worked_over_the_hours_in_the_window():
+    # thirty spans of 2 hours, the first starting at hour 0 and the last ending at hour 698
+    assert forecast.utilization(_daily(), 1) == pytest.approx(60 / (29 * 24 + 2))
 
 
-def test_idle_never_stretches_past_the_cap():
-    stories = [_done(number, 1, 1.0, start=24.0 * 1000 * number) for number in range(10)]
-
-    assert forecast.idle(stories) == forecast.IDLE_CAP
+def test_utilization_halves_when_two_sessions_share_the_same_history():
+    assert forecast.utilization(_daily(), 2) == pytest.approx(60 / (29 * 24 + 2) / 2)
 
 
-def test_an_outlook_is_stretched_by_the_idle_share(monkeypatch):
-    monkeypatch.setattr(forecast, "idle", lambda stories: 0.5)
-    read = _fleet(_done(1, 1, 24.0), _plain(2, 1))
+def test_no_sessions_measure_as_one():
+    assert forecast.utilization(_daily(), 0) == forecast.utilization(_daily(), 1)
+
+
+def test_two_sessions_busy_the_whole_window_are_fully_used():
+    stories = [_done(1, 1, 10.0), _done(2, 1, 10.0)]
+
+    assert forecast.utilization(stories, 2) == 1.0
+
+
+def test_utilization_never_passes_one():
+    stories = [_done(1, 1, 10.0), _done(2, 1, 10.0)]
+
+    assert forecast.utilization(stories, 1) == 1.0
+
+
+def test_utilization_is_one_under_two_spans():
+    assert forecast.utilization([], 1) == 1.0
+    assert forecast.utilization([_done(1, 1, 2.0), _plain(2, 1)], 1) == 1.0
+
+
+def test_utilization_is_one_over_a_window_of_no_length():
+    assert forecast.utilization([_done(1, 1, 0.0), _done(2, 1, 0.0)], 1) == 1.0
+
+
+def test_utilization_never_falls_below_the_floor():
+    stories = [_done(1, 1, 1.0), _done(2, 1, 1.0, start=24.0 * 1000)]
+
+    assert forecast.utilization(stories, 1) == forecast.UTILIZATION_FLOOR
+
+
+def test_utilization_does_not_depend_on_the_date_a_span_falls_on():
+    across_midnight = [_done(1, 1, 4.0, start=22.0), _done(2, 1, 2.0, start=48.0)]
+    inside_one_day = [_done(1, 1, 4.0, start=26.0), _done(2, 1, 2.0, start=52.0)]
+
+    found = forecast.utilization(across_midnight, 1)
+
+    assert found == pytest.approx(6 / 28)
+    assert found == forecast.utilization(inside_one_day, 1)
+
+
+def test_an_outlook_is_stretched_by_the_measured_utilization():
+    # two 2-hour stories in a window of 8 hours: half the time was used
+    read = _fleet(*_half_used(), _plain(3, 1), _plain(4, 1))
 
     found = forecast.outlook(read, 1, seed=1)
 
-    assert (found.idle, found.floor, found.commitment, found.worst, found.unbanded) == (0.5, 48.0, 48.0, 48.0, 48.0)
+    # unstretched, two stories of 2 hours back to back are 4 hours on every line
+    assert (found.idle, found.floor, found.commitment, found.worst, found.unbanded) == (0.5, 8.0, 8.0, 8.0, 8.0)
 
 
-def test_the_rows_say_when_the_forecast_was_stretched(monkeypatch):
-    monkeypatch.setattr(forecast, "idle", lambda stories: 0.5)
-    read = _fleet(_done(1, 1, 24.0), _plain(2, 1))
+def test_ten_short_stories_forecast_at_the_measured_pace_not_back_to_back():
+    read = _fleet(*_daily(), *(_plain(100 + number, 1) for number in range(10)))
 
-    assert "  Stretched for the 50% of days on which nothing was in progress." in forecast.rows(read, 1, "given")
+    assert forecast.outlook(read, 1, seed=1).commitment >= 9 * 24
+
+
+def test_the_rows_say_when_the_forecast_was_stretched():
+    read = _fleet(*_half_used(), _plain(3, 1), _plain(4, 1))
+
+    lines = forecast.rows(read, 1, "given")
+
+    assert "  Stretched for the 50% of the time nothing was in progress." in lines
+    assert "  Floor         1 days   critical path at the measured pace" in lines
+
+
+def test_the_rows_of_a_fully_used_history_claim_no_stretch():
+    read = _fleet(_done(1, 1, 24.0), _done(2, 1, 24.0), _plain(3, 1))
+
+    lines = forecast.rows(read, 2, "given")
+
+    assert not any("Stretched" in line for line in lines)
+    assert "  Floor         1 days   critical path, nothing stalls" in lines
+
+
+def test_the_rows_ignore_a_stretch_too_small_to_print():
+    # 999 of 1000 hours used, an idle share that would print as 0%
+    read = _fleet(_done(1, 1, 499.0), _done(2, 1, 500.0, start=500.0), _plain(3, 1))
+
+    lines = forecast.rows(read, 1, "given")
+
+    assert not any("Stretched" in line for line in lines)
+    assert any(line.endswith("critical path, nothing stalls") for line in lines)

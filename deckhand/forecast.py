@@ -15,7 +15,7 @@ import math
 import random
 import statistics
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from deckhand import draft, fleet, log, order
 
@@ -126,23 +126,20 @@ def refinements(stories: list[fleet.Story]) -> list[float]:
     return sorted(found)
 
 
-IDLE_CAP = 0.9  # a history that is nearly all gaps would stretch a forecast without limit
+UTILIZATION_FLOOR = 0.01  # a history that is nearly all gaps would stretch a forecast without limit
+NEGLIGIBLE = 0.005  # an idle share below this prints as 0%, so the rows claim no stretch for it
 
 
-def idle(stories: list[fleet.Story]) -> float:
-    """The share of days, first start to last pull request, on which no finished story was in progress."""
+def utilization(stories: list[fleet.Story], at_once: int) -> float:
+    """The share of session hours, first start to last pull request, that finished stories filled."""
     spans = [span for span in (_span(story) for story in stories) if span is not None]
-    if len(spans) < THIN:
-        return 0.0
-    first = min(start for start, _ in spans).date()
-    last = max(end for _, end in spans).date()
-    days = (last - first).days + 1
-    busy = {
-        start.date() + timedelta(days=offset)
-        for start, end in spans
-        for offset in range((end.date() - start.date()).days + 1)
-    }
-    return min(IDLE_CAP, (days - len(busy)) / days)
+    if len(spans) < 2:
+        return 1.0
+    window = (max(end for _, end in spans) - min(start for start, _ in spans)).total_seconds()
+    if window <= 0:
+        return 1.0
+    worked = sum((end - start).total_seconds() for start, end in spans)
+    return min(1.0, max(UTILIZATION_FLOOR, worked / (max(at_once, 1) * window)))
 
 
 def _placed(stories: list[fleet.Story], blockers: fleet.Blockers) -> list[fleet.Story]:
@@ -304,7 +301,7 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
     grown = frozenset(story.key for story in left if story.key in drafts and not draft.read(story.issue.body)[1])
     drawn, reviews = _sizes(splits(every)), refinements(every)
     review = statistics.median(reviews) if reviews else 0.0
-    gap = idle(every)
+    used = utilization(every, at_once)
 
     grow = {"drafts": drafts, "grown": grown, "sizes": drawn, "reviews": reviews}
     banded = simulate(left, read.blockers, at_once, history, seed=seed, **grow)
@@ -318,13 +315,13 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
         longest=pooled[-1],
         median=middle,
         thin=thin,
-        floor=least / (1 - gap),
-        commitment=banded[commitment_p] / (1 - gap),
-        worst=banded[worst_p] / (1 - gap),
-        unbanded=unbanded[commitment_p] / (1 - gap),
+        floor=least / used,
+        commitment=banded[commitment_p] / used,
+        worst=banded[worst_p] / used,
+        unbanded=unbanded[commitment_p] / used,
         drafts=len(drafts),
         growth=statistics.fmean(drawn),
-        idle=gap,
+        idle=1 - used,
     )
 
 
@@ -344,10 +341,12 @@ def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None =
 
     commitment_note = ("worst run" if found.thin else "85th percentile") + ", banded by points"
     worst_p = 100 if found.thin else 95
+    stretched = found.idle >= NEGLIGIBLE
+    floor_note = "critical path at the measured pace" if stretched else "critical path, nothing stalls"
     lines = [
         header,
         "",
-        _row("Floor", found.floor, "critical path, nothing stalls"),
+        _row("Floor", found.floor, floor_note),
         _row("Commitment", found.commitment, commitment_note),
         _row("Worst seen", found.worst, f"{worst_p}th percentile"),
         "",
@@ -360,8 +359,8 @@ def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None =
         draft_word = "draft" if found.drafts == 1 else "drafts"
         counted = f"counted as {found.growth:.1f} stories of any size on average, each with a review."
         lines.append(f"  {found.drafts} {draft_word} {counted}")
-    if found.idle:
-        lines.append(f"  Stretched for the {found.idle:.0%} of days on which nothing was in progress.")
+    if stretched:
+        lines.append(f"  Stretched for the {found.idle:.0%} of the time nothing was in progress.")
     if found.thin:
         lines.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
     return [*lines, "", f"  {POINT}"]
