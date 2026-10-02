@@ -19,6 +19,8 @@ from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
 
 ACTIONS = ("open", "add", "list", "forecast")
 REF_FORM = "an epic or a story is owner/name#M, or M for this repository"
+# A fixed draw, so two forecasts of an unchanged board give a report the same dates.
+SEED = 0
 
 
 def _today() -> date:
@@ -59,11 +61,26 @@ def _add(args: argparse.Namespace, repo: str) -> int:
         raise Refusal("epic add takes the epic, then each story: epic add <epic> <story>...")
     where, number = _ref(args.refs[0], repo)
     stories = [_ref(value, repo) for value in args.refs[1:]]
+    named = ref_label(where, number, repo)
     if issue.EPIC[0] not in issue.view(where, number).labels:
-        raise Refusal(f"{ref_label(where, number, repo)} is not an epic; open one with epic open")
+        raise Refusal(f"{named} is not an epic; open one with epic open")
+    joined: set[tuple[str, int]] = set()
     for story in stories:
+        labels = issue.view(*story).labels
+        if issue.EPIC[0] in labels:
+            raise Refusal(f"{ref_label(*story, repo)} is an epic, and an epic is never a story")
+        if issue.LABEL[0] not in labels:
+            raise Refusal(f"{ref_label(*story, repo)} is not a deckhand story; write one with new")
+        if issue.parent(*story) == (where, number):
+            joined.add(story)
+        # Looked up again by the write, but resolved here so a story the API cannot find leaves the epic alone.
+        gh.issue_id(*story)
+    for story in stories:
+        if story in joined:
+            print(f"{ref_label(*story, repo)} already in {named}", flush=True)
+            continue
         issue.add_sub_issue(where, number, story)
-        print(f"{ref_label(*story, repo)} joined {ref_label(where, number, repo)}", flush=True)
+        print(f"{ref_label(*story, repo)} joined {named}", flush=True)
     return 0
 
 
@@ -81,7 +98,8 @@ def _row(read: fleet.Fleet, epic: fleet.Story) -> dict:
     }
 
 
-def _list(args: argparse.Namespace, repo: str, read: fleet.Fleet) -> int:
+def _list(args: argparse.Namespace, repo: str) -> int:
+    read = fleet.read(resolved_settings())
     found = fleet.epics(read.stories)
     if args.json:
         print(json.dumps([_row(read, epic) for epic in found]))
@@ -102,7 +120,7 @@ def _on(hours: float) -> str:
 def _dated(found: forecast.Outlook | None) -> dict:
     if found is None:
         nothing = {"floor": None, "commitment": None, "worst": None}
-        return {**nothing, "samples": 0, "thin": True, "growth": 1.0, "idle": 0.0}
+        return {**nothing, "samples": 0, "thin": True, "growth": 1.0, "idle": 0.0, "pace": None}
     return {
         "floor": _on(found.floor),
         "commitment": _on(found.commitment),
@@ -111,23 +129,29 @@ def _dated(found: forecast.Outlook | None) -> dict:
         "thin": found.thin,
         "growth": round(found.growth, 2),
         "idle": round(found.idle, 2),
+        "pace": found.pace,
     }
 
 
-def _forecast(args: argparse.Namespace, repo: str, read: fleet.Fleet) -> int:
+def _forecast(args: argparse.Namespace, repo: str) -> int:
     if len(args.refs) != 1:
         raise Refusal("epic forecast takes one epic: epic forecast <epic>")
+    if args.sessions is not None and args.sessions < 1:
+        raise Refusal(f"--sessions is how many stories run at once, so at least 1, got {args.sessions}")
     key = _ref(args.refs[0], repo)
-    epic = next((story for story in fleet.epics(read.stories) if story.key == key), None)
+    read = fleet.read(resolved_settings())
+    # The board archives finished work, and a finished epic is still asked about.
+    every = fleet.epics([*read.stories, *read.archived])
+    epic = next((story for story in every if story.key == key), None)
     if epic is None:
         raise Refusal(f"{ref_label(*key, repo)} is not an epic on the board")
     at_once, source = forecast.parallel(args.sessions, read, live=1)
     if args.json:
-        found = forecast.outlook(read, at_once, scope=key)
+        found = forecast.outlook(read, at_once, scope=key, seed=SEED)
         print(json.dumps({**_row(read, epic), "at_once": at_once, **_dated(found)}))
         return 0
     print(f"## Forecast: {epic.title}")
-    for line in forecast.rows(read, at_once, source, scope=key):
+    for line in forecast.rows(read, at_once, source, scope=key, seed=SEED):
         print(line)
     return 0
 
@@ -141,7 +165,6 @@ def run(args: argparse.Namespace) -> int:
     if args.action == "add":
         return _add(args, repo)
     with gh.cached():
-        read = fleet.read(resolved_settings())
         if args.action == "list":
-            return _list(args, repo, read)
-        return _forecast(args, repo, read)
+            return _list(args, repo)
+        return _forecast(args, repo)

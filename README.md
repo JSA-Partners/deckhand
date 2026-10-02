@@ -161,12 +161,14 @@ deckhand epic forecast 300
 `new` offers the epics when it boards a story. A story split from an epic's story does not join
 the epic by itself, so the captain lists it under Anomalies with the command that adds it.
 
+`epic add` refuses an issue that is not a deckhand story, and writes nothing until every one passes.
+
 `epic forecast` is the captain's forecast over one epic's open stories, as dates with `--json`.
-It draws from every finished story on the project, except one closed as not planned. A draft has no
-points, so it draws from finished stories of every size. A draft with no stories listed yet counts
-as several, as many as finished parked features really became, and each adds a measured review.
-The result is divided by measured utilization, the share of the hours available that stories were
-in progress, because the hours between stories are in no story's duration.
+It draws from every finished story on the project. A draft has no points, so it draws from finished
+stories of every size. A draft with no stories listed yet counts as several, as many as finished
+parked features became, and each adds a measured review. The result is paced by the epic's own
+finished stories once it has five, and by the whole project before that. Pace is the share of the
+hours available that stories were in progress. A story closed as not planned is not a piece.
 
 | Command | What it does |
 | --- | --- |

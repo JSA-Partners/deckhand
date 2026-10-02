@@ -87,9 +87,10 @@ def splits(stories: list[fleet.Story]) -> list[int]:
 
     A root is a finished story that began as a parked feature and that no other story shed. Its tree
     is itself and everything its `Split:` entries name, however deep, counted among the stories given.
+    A story closed as not planned is no piece of what a feature became, so it is neither.
     """
-    held = {story.key: story for story in stories}
-    kids = {story.key: [key for key in fleet.shed(story) if key in held] for story in stories}
+    held = {story.key: story for story in stories if not story.dropped}
+    kids = {key: [kid for kid in fleet.shed(story) if kid in held] for key, story in held.items()}
     was_shed = {key for found in kids.values() for key in found}
 
     def _size(key: fleet.Key, seen: set[fleet.Key]) -> int:
@@ -100,7 +101,7 @@ def splits(stories: list[fleet.Story]) -> list[int]:
 
     return sorted(
         _size(story.key, set())
-        for story in stories
+        for story in held.values()
         if story.closed and fleet.touched(story) and story.key not in was_shed and _was_parked(story)
     )
 
@@ -268,6 +269,7 @@ class Outlook:
     drafts: int = 0
     growth: float = 1.0
     idle: float = 0.0
+    pace: str = "project"
 
 
 def remaining(read: fleet.Fleet, scope: fleet.Key | None = None) -> list[fleet.Story]:
@@ -279,11 +281,20 @@ def remaining(read: fleet.Fleet, scope: fleet.Key | None = None) -> list[fleet.S
     ]
 
 
+PACED = 5  # an epic's finished stories below which its own pace is noise, so the project's is used
+
+
+def _paced(every: list[fleet.Story], scope: fleet.Key) -> list[fleet.Story]:
+    return [story for story in fleet.members(every, scope) if not story.dropped and _span(story) is not None]
+
+
 def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, seed: int | None = None) -> Outlook | None:
     """The forecast over what is left in `scope`, or None when nothing is left or nothing has finished.
 
-    The history is every finished story the project holds, archived ones too, whatever the scope:
-    an epic's own stories are too few to measure from, and the board archives finished work.
+    The durations are every finished story the project holds, archived ones too, whatever the scope:
+    an epic's own stories are too few to measure from, and the board archives finished work. The
+    pace is the epic's own once it has `PACED` finished stories, because the work outside any epic
+    competes for the same hours and the project's pace would forecast the epic too early.
     """
     left = remaining(read, scope)
     every = [*read.stories, *read.archived]
@@ -301,7 +312,9 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
     grown = frozenset(story.key for story in left if story.key in drafts and not draft.read(story.issue.body)[1])
     drawn, reviews = _sizes(splits(every)), refinements(every)
     review = statistics.median(reviews) if reviews else 0.0
-    used = utilization(every, at_once)
+    mine = [] if scope is None else _paced(every, scope)
+    paced = len(mine) >= PACED
+    used = utilization(mine if paced else every, at_once)
 
     grow = {"drafts": drafts, "grown": grown, "sizes": drawn, "reviews": reviews}
     banded = simulate(left, read.blockers, at_once, history, seed=seed, **grow)
@@ -322,10 +335,13 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
         drafts=len(drafts),
         growth=statistics.fmean(drawn),
         idle=1 - used,
+        pace="epic" if paced else "project",
     )
 
 
-def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None = None) -> list[str]:
+def rows(
+    read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None = None, seed: int | None = None
+) -> list[str]:
     """The floor, the commitment, and the control that pools points away, over what is left in `scope`."""
     left = remaining(read, scope)
     if not left:
@@ -335,7 +351,7 @@ def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None =
     story_word = "story" if len(left) == 1 else "stories"
     header = f"  {len(left)} {story_word}, {points} points, {at_once} at once, {source}"
 
-    found = outlook(read, at_once, scope)
+    found = outlook(read, at_once, scope, seed)
     if found is None:
         return [f"{header}: no finished stories, so no Floor and no Commitment."]
 
@@ -359,6 +375,11 @@ def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None =
         draft_word = "draft" if found.drafts == 1 else "drafts"
         counted = f"counted as {found.growth:.1f} stories of any size on average, each with a review."
         lines.append(f"  {found.drafts} {draft_word} {counted}")
+    if scope is not None and found.pace == "epic":
+        count = len(_paced([*read.stories, *read.archived], scope))
+        lines.append(f"  Paced by this epic's own {count} finished stories.")
+    elif scope is not None:
+        lines.append(f"  Paced by the whole project: this epic has under {PACED} finished stories.")
     if stretched:
         lines.append(f"  Stretched for the {found.idle:.0%} of the time nothing was in progress.")
     if found.thin:

@@ -542,3 +542,87 @@ def test_the_rows_ignore_a_stretch_too_small_to_print():
 
     assert not any("Stretched" in line for line in lines)
     assert any(line.endswith("critical path, nothing stalls") for line in lines)
+
+
+# pace
+
+
+def _epic_days(count: int) -> list[fleet.Story]:
+    # the epic's stories take 2 hours once a day while work outside it fills the other 22
+    members = [_done(number, 1, 2.0, start=24.0 * number, parent=EPIC) for number in range(count)]
+    others = [_done(100 + number, 1, 22.0, start=24.0 * number + 2.0) for number in range(5)]
+    return [*members, *others]
+
+
+def test_an_epic_with_five_finished_stories_is_paced_by_its_own_history():
+    read = _fleet(*_epic_days(5), _story(50, 1, False, parent=EPIC))
+
+    found = forecast.outlook(read, 1, scope=EPIC, seed=1)
+
+    # the worst run is 22 hours, at the epic's 10 hours of work in a window of 98
+    assert found.pace == "epic"
+    assert found.commitment == pytest.approx(22.0 * 98 / 10)
+
+
+def test_an_epic_under_five_finished_stories_is_paced_by_the_whole_project():
+    stories = _epic_days(4)
+    read = _fleet(*stories, _story(50, 1, False, parent=EPIC))
+
+    found = forecast.outlook(read, 1, scope=EPIC, seed=1)
+
+    assert found.pace == "project"
+    assert found.commitment == pytest.approx(22.0 / forecast.utilization(stories, 1))
+
+
+def test_a_dropped_story_does_not_pace_an_epic():
+    stories = _epic_days(5)
+    stories[0] = dataclasses.replace(stories[0], dropped=True)
+    read = _fleet(*stories, _story(50, 1, False, parent=EPIC))
+
+    assert forecast.outlook(read, 1, scope=EPIC, seed=1).pace == "project"
+
+
+def test_an_unscoped_outlook_is_paced_by_the_whole_project():
+    read = _fleet(*_epic_days(5), _plain(50, 1))
+
+    assert forecast.outlook(read, 1, seed=1).pace == "project"
+
+
+def test_the_rows_say_an_epic_was_paced_by_its_own_stories():
+    read = _fleet(*_epic_days(5), _story(50, 1, False, parent=EPIC))
+
+    assert "  Paced by this epic's own 5 finished stories." in forecast.rows(read, 1, "given", scope=EPIC)
+
+
+def test_the_rows_say_an_epic_was_paced_by_the_whole_project():
+    read = _fleet(*_epic_days(4), _story(50, 1, False, parent=EPIC))
+
+    line = "  Paced by the whole project: this epic has under 5 finished stories."
+    assert line in forecast.rows(read, 1, "given", scope=EPIC)
+
+
+def test_the_rows_of_the_whole_project_say_nothing_of_pace():
+    read = _fleet(*_epic_days(5), _plain(50, 1))
+
+    assert not any("Paced" in line for line in forecast.rows(read, 1, "given"))
+
+
+def test_a_seed_makes_two_rows_identical():
+    read = _fleet(*_trees(2, 4), _story(20, None, False, body=DRAFT), _plain(21, 1))
+
+    assert forecast.rows(read, 2, "given", seed=0) == forecast.rows(read, 2, "given", seed=0)
+
+
+# dropped stories
+
+
+def test_splits_do_not_count_a_dropped_story_in_a_tree():
+    dropped = dataclasses.replace(_done(3, 1, 1.0), dropped=True)
+
+    assert forecast.splits([_parked(1, 2, 3), _done(2, 1, 1.0), dropped]) == [2]
+
+
+def test_splits_do_not_count_a_dropped_parked_feature_as_a_root():
+    dropped = dataclasses.replace(_parked(1, 2), dropped=True)
+
+    assert forecast.splits([dropped, _done(2, 1, 1.0), _parked(3)]) == [1]

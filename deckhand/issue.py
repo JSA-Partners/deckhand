@@ -207,6 +207,19 @@ def add_sub_issue(repo: str, number: int, child: tuple[str, int]) -> None:
     )
 
 
+def parent(repo: str, number: int) -> tuple[str, int] | None:
+    """`(repository, number)` of the issue `number` is a sub-issue of, or None when it has none."""
+    gh.split_repo(repo)
+    try:
+        held = gh.json_out("api", f"repos/{repo}/issues/{number}/parent")
+    except gh.GhError as error:
+        # GitHub answers an issue with no parent with a 404, unlike a network, auth, or rate limit failure.
+        if "not found" in str(error).lower():
+            return None
+        raise
+    return str(held.get("repository_url") or "").rpartition("/repos/")[2] or repo, int(held["number"])
+
+
 def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
     """`(repository, number, title)` of every open issue blocking `number`; the repository may be another."""
     gh.split_repo(repo)

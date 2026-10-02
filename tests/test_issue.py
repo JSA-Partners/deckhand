@@ -549,3 +549,22 @@ def test_add_sub_issue_looks_the_child_up_in_its_own_repository(fake_gh, gh_call
     issue.add_sub_issue(REPO, 300, ("acme/gadgets", 9))
 
     assert gh_calls()[0] == "api repos/acme/gadgets/issues/9"
+
+
+def test_parent_names_the_issue_a_sub_issue_belongs_to(fake_gh, gh_calls, monkeypatch):
+    held = {"number": 300, "repository_url": "https://api.github.com/repos/acme/gadgets"}
+    monkeypatch.setenv("GH_PARENT", json.dumps({"248": held}))
+
+    assert issue.parent(REPO, 248) == ("acme/gadgets", 300)
+    assert gh_calls() == ["api repos/acme/widgets/issues/248/parent"]
+
+
+def test_parent_is_none_for_an_issue_with_no_parent(fake_gh):
+    assert issue.parent(REPO, 248) is None
+
+
+def test_parent_raises_a_failure_that_is_not_a_missing_parent(fake_gh, monkeypatch):
+    monkeypatch.setenv("GH_PARENT_FAILS", "1")
+
+    with pytest.raises(gh.GhError, match="HTTP 502"):
+        issue.parent(REPO, 248)

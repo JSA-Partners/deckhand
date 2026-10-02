@@ -141,6 +141,7 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, capsys)
         "thin": True,
         "growth": 1.0,
         "idle": 0.0,
+        "pace": "project",
     }
 
 
@@ -164,3 +165,122 @@ def test_a_story_closed_as_not_planned_is_not_a_piece(board_env, capsys):
 
     [row] = json.loads(capsys.readouterr().out)
     assert (row["pieces"], row["done"], row["drafts"]) == (2, 1, 0)
+
+
+def _in_epic(monkeypatch, *numbers: int) -> None:
+    parent = {"number": 300, "repository_url": f"https://api.github.com/repos/{REPO}"}
+    monkeypatch.setenv("GH_PARENT", json.dumps({str(number): parent for number in numbers}))
+
+
+def test_add_refuses_a_bad_story_ref_before_any_write(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+
+    assert cli.main(["epic", "add", "300", "302", "not-a-ref"]) == 1
+
+    assert "not-a-ref" in capsys.readouterr().err
+    assert not any("POST" in call for call in gh_calls())
+
+
+def test_add_refuses_an_issue_that_is_not_a_deckhand_story_before_any_write(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    _issue_file(board_env, monkeypatch, 302, "bug")
+
+    assert cli.main(["epic", "add", "300", "301", "302"]) == 1
+
+    assert "#302 is not a deckhand story" in capsys.readouterr().err
+    assert not any("POST" in call for call in gh_calls())
+
+
+def test_add_refuses_an_epic_as_a_story_before_any_write(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    _issue_file(board_env, monkeypatch, 302, "epic")
+
+    assert cli.main(["epic", "add", "300", "301", "302"]) == 1
+
+    assert "#302 is an epic" in capsys.readouterr().err
+    assert not any("POST" in call for call in gh_calls())
+
+
+def test_add_skips_a_story_already_in_the_epic(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    _in_epic(monkeypatch, 302)
+
+    assert cli.main(["epic", "add", "300", "302"]) == 0
+
+    assert "#302 already in #300" in capsys.readouterr().out
+    assert not any("POST" in call for call in gh_calls())
+
+
+def test_add_writes_only_the_stories_not_yet_in_the_epic(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    _in_epic(monkeypatch, 302)
+
+    assert cli.main(["epic", "add", "300", "301", "302"]) == 0
+
+    assert [call for call in gh_calls() if "POST" in call] == [
+        "api -X POST repos/acme/widgets/issues/300/sub_issues -F sub_issue_id=5099965156 -F replace_parent=true",
+    ]
+    out = capsys.readouterr().out
+    assert "#301 joined #300" in out
+    assert "#302 already in #300" in out
+
+
+def test_forecast_says_how_the_epic_was_paced(board_env, capsys):
+    assert cli.main(["epic", "forecast", "300"]) == 0
+
+    assert "  Paced by the whole project: this epic has under 5 finished stories." in capsys.readouterr().out
+
+
+def test_two_forecasts_of_an_unchanged_board_give_the_same_dates(board_env, capsys, monkeypatch):
+    seeds = []
+    real = epic.forecast.outlook
+
+    def _outlook(*args, **kwargs):
+        seeds.append(kwargs.get("seed"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(epic.forecast, "outlook", _outlook)
+
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+    first = capsys.readouterr().out
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == json.loads(first)
+    assert seeds == [epic.SEED, epic.SEED]
+
+
+def test_forecast_refuses_fewer_than_one_session_before_reading_the_board(board_env, gh_calls, capsys):
+    assert cli.main(["epic", "forecast", "300", "--sessions", "0"]) == 1
+
+    assert "--sessions" in capsys.readouterr().err
+    assert not any(call.startswith("api graphql") for call in gh_calls())
+
+
+def _archived_and_closed(tmp_path, monkeypatch) -> None:
+    items = json.loads((FIXTURES / "epic-items.json").read_text(encoding="utf-8"))
+    for node in items["data"]["organization"]["projectV2"]["items"]["nodes"]:
+        if node["content"]["number"] in (300, 302):
+            node["content"].update(state="CLOSED", closedAt="2026-09-20T00:00:00Z")
+        if node["content"]["number"] == 300:
+            node["isArchived"] = True
+    path = tmp_path / "archived-epic.json"
+    path.write_text(json.dumps(items), encoding="utf-8")
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(path))
+
+
+def test_forecast_reads_a_finished_epic_the_board_archived(board_env, monkeypatch, capsys):
+    _archived_and_closed(board_env, monkeypatch)
+
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+
+    found = json.loads(capsys.readouterr().out)
+    assert (found["closed"], found["pieces"], found["done"]) == (True, 2, 2)
+    assert (found["floor"], found["commitment"], found["worst"], found["pace"]) == (None, None, None, None)
+
+
+def test_list_leaves_out_an_archived_epic(board_env, monkeypatch, capsys):
+    _archived_and_closed(board_env, monkeypatch)
+
+    assert cli.main(["epic", "list", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == []
