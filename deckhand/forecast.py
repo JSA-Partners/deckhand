@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import random
 import statistics
+from dataclasses import dataclass
 from datetime import datetime
 
 from deckhand import fleet, log, order
@@ -152,19 +153,44 @@ def parallel(given: int | None, read: fleet.Fleet, live: int) -> tuple[int, str]
     return max(live, 1), "open sessions"
 
 
-def rows(read: fleet.Fleet, at_once: int, source: str) -> list[str]:
-    """The floor, the commitment, and the control that pools points away, over what is not yet Done."""
-    left = [story for story in read.stories if not story.closed]
-    if not left:
-        return ["  nothing left to forecast"]
+@dataclass(frozen=True)
+class Outlook:
+    """One forecast in hours: what is left, the history it draws from, and each line's number."""
 
-    points = sum(story.points or 0 for story in left)
-    story_word = "story" if len(left) == 1 else "stories"
-    header = f"  {len(left)} {story_word}, {points} points, {at_once} at once, {source}"
+    left: int
+    points: int
+    samples: int
+    longest: float
+    median: float
+    thin: bool
+    floor: float
+    commitment: float
+    worst: float
+    unbanded: float
+    drafts: int = 0
+    growth: float = 1.0
+    idle: float = 0.0
 
-    history = durations(read.stories)
-    if not history:
-        return [f"{header}: no finished stories, so no Floor and no Commitment."]
+
+def remaining(read: fleet.Fleet, scope: fleet.Key | None = None) -> list[fleet.Story]:
+    """Every open story the process owns, inside the epic `scope` names when one is given."""
+    return [
+        story
+        for story in read.stories
+        if not story.closed and fleet.touched(story) and (scope is None or story.parent == scope)
+    ]
+
+
+def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, seed: int | None = None) -> Outlook | None:
+    """The forecast over what is left in `scope`, or None when nothing is left or nothing has finished.
+
+    The history is every finished story the project holds, archived ones too, whatever the scope:
+    an epic's own stories are too few to measure from, and the board archives finished work.
+    """
+    left = remaining(read, scope)
+    history = durations([*read.stories, *read.archived])
+    if not left or not history:
+        return None
 
     pooled = sorted(hours for band in history.values() for hours in band)
     thin = any(len(band) < THIN for band in history.values())
@@ -172,23 +198,50 @@ def rows(read: fleet.Fleet, at_once: int, source: str) -> list[str]:
     worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
     medians = {band: statistics.median(hours) for band, hours in history.items()}
 
-    floor_hours = floor(left, read.blockers, at_once, medians)
-    banded = simulate(left, read.blockers, at_once, history)
-    unbanded = simulate(left, read.blockers, at_once, {None: pooled})
-    commitment_note = ("worst run" if thin else "85th percentile") + ", banded by points"
+    banded = simulate(left, read.blockers, at_once, history, seed=seed)
+    unbanded = simulate(left, read.blockers, at_once, {None: pooled}, seed=seed)
+    return Outlook(
+        left=len(left),
+        points=sum(story.points or 0 for story in left),
+        samples=len(pooled),
+        longest=pooled[-1],
+        median=statistics.median(pooled),
+        thin=thin,
+        floor=floor(left, read.blockers, at_once, medians),
+        commitment=banded[commitment_p],
+        worst=banded[worst_p],
+        unbanded=unbanded[commitment_p],
+    )
 
+
+def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None = None) -> list[str]:
+    """The floor, the commitment, and the control that pools points away, over what is left in `scope`."""
+    left = remaining(read, scope)
+    if not left:
+        return ["  nothing left to forecast"]
+
+    points = sum(story.points or 0 for story in left)
+    story_word = "story" if len(left) == 1 else "stories"
+    header = f"  {len(left)} {story_word}, {points} points, {at_once} at once, {source}"
+
+    found = outlook(read, at_once, scope)
+    if found is None:
+        return [f"{header}: no finished stories, so no Floor and no Commitment."]
+
+    commitment_note = ("worst run" if found.thin else "85th percentile") + ", banded by points"
+    worst_p = 100 if found.thin else 95
     lines = [
         header,
         "",
-        _row("Floor", floor_hours, "critical path, nothing stalls"),
-        _row("Commitment", banded[commitment_p], commitment_note),
-        _row("Worst seen", banded[worst_p], f"{worst_p}th percentile"),
+        _row("Floor", found.floor, "critical path, nothing stalls"),
+        _row("Commitment", found.commitment, commitment_note),
+        _row("Worst seen", found.worst, f"{worst_p}th percentile"),
         "",
-        _row("Unbanded", unbanded[commitment_p], "the same, points ignored"),
+        _row("Unbanded", found.unbanded, "the same, points ignored"),
         "",
-        f"  From {len(pooled)} finished stories, the longest {pooled[-1]:.1f} hours against a median "
-        f"of {statistics.median(pooled):.1f}.",
+        f"  From {found.samples} finished stories, the longest {found.longest:.1f} hours against a median "
+        f"of {found.median:.1f}.",
     ]
-    if thin:
+    if found.thin:
         lines.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
     return [*lines, "", f"  {POINT}"]

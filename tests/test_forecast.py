@@ -2,24 +2,39 @@
 
 from __future__ import annotations
 
+import dataclasses
+from datetime import UTC, datetime, timedelta
+
 from deckhand import fleet, forecast, issue
 
 REPO = "acme/widgets"
+EPIC = (REPO, 300)
+DRAFT = "## Requirements\n\nWhat it needs.\n"
 
 
-def _entry(prefix: str, at: str) -> issue.Comment:
-    return issue.Comment(author="claude", body=f"{prefix} noted", created_at=at)
+def _entry(prefix: str, at: str, text: str = "noted") -> issue.Comment:
+    return issue.Comment(author="claude", body=f"{prefix} {text}", created_at=at)
 
 
-def _story(number: int, points: int | None, closed: bool, *log: tuple[str, str], repo: str = REPO) -> fleet.Story:
-    comments = [_entry(prefix, at) for prefix, at in log]
+def _story(
+    number: int,
+    points: int | None,
+    closed: bool,
+    *log: tuple[str, ...],
+    repo: str = REPO,
+    labels: tuple[str, ...] = ("deckhand",),
+    parent: tuple[str, int] | None = None,
+    body: str = "",
+) -> fleet.Story:
+    comments = [_entry(*entry) for entry in log]
     ish = issue.Issue(
         number=number,
         title="T",
-        body="",
+        body=body,
         url="",
         state="CLOSED" if closed else "OPEN",
         comments=comments,
+        labels=labels,
     )
     return fleet.Story(
         number=number,
@@ -30,11 +45,24 @@ def _story(number: int, points: int | None, closed: bool, *log: tuple[str, str],
         closed=closed,
         item=f"I_{number}",
         issue=ish,
+        parent=parent,
     )
 
 
 def _plain(number: int, points: int | None, repo: str = REPO) -> fleet.Story:
     return _story(number, points, False)
+
+
+def _at(hours: float) -> str:
+    return (datetime(2026, 9, 1, tzinfo=UTC) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _done(number: int, points: int | None, hours: float, start: float = 0.0, **kwargs) -> fleet.Story:
+    return _story(number, points, True, ("Started:", _at(start)), ("Pull request:", _at(start + hours)), **kwargs)
+
+
+def _fleet(*stories: fleet.Story) -> fleet.Fleet:
+    return fleet.Fleet(stories=list(stories), blockers={}, missing=[])
 
 
 # durations
@@ -185,3 +213,48 @@ def test_concurrency_is_unknown_under_five_overlapping_stories():
         _ran(2, "2026-09-02T00:00:00Z", "2026-09-02T01:00:00Z"),
     ]
     assert forecast.concurrency(stories) is None
+
+
+# scope
+
+
+def test_an_issue_the_process_does_not_own_is_not_forecast():
+    read = _fleet(_plain(1, 1), _story(2, 1, False, labels=()))
+
+    assert [story.number for story in forecast.remaining(read)] == [1]
+
+
+def test_a_scope_keeps_only_that_epics_stories():
+    read = _fleet(_story(1, 1, False, parent=EPIC), _plain(2, 1))
+
+    assert [story.number for story in forecast.remaining(read, EPIC)] == [1]
+
+
+def test_an_outlook_measures_only_the_scope_from_the_whole_history():
+    read = _fleet(
+        _done(1, 1, 24.0),
+        _story(2, 1, False, parent=EPIC),
+        _story(3, 1, False, parent=EPIC),
+        _plain(4, 1),
+    )
+
+    found = forecast.outlook(read, 1, scope=EPIC, seed=1)
+
+    assert (found.left, found.points, found.samples) == (2, 2, 1)
+    assert (found.floor, found.commitment, found.worst) == (48.0, 48.0, 48.0)
+
+
+def test_an_archived_story_still_counts_as_history():
+    read = dataclasses.replace(_fleet(_plain(2, 1)), archived=[_done(1, 1, 24.0)])
+
+    assert forecast.outlook(read, 1, seed=1).commitment == 24.0
+
+
+def test_no_history_is_no_outlook():
+    assert forecast.outlook(_fleet(_plain(1, 1)), 1) is None
+
+
+def test_the_rows_say_so_when_a_scope_has_nothing_left():
+    read = _fleet(_done(1, 1, 24.0, parent=EPIC), _plain(2, 1))
+
+    assert forecast.rows(read, 1, "given", scope=EPIC) == ["  nothing left to forecast"]
