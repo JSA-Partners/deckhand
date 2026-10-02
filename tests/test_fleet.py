@@ -572,5 +572,11 @@ def test_shed_names_every_story_a_split_entry_names():
     assert fleet.shed(story) == [(REPO, 2), ("acme/gadgets", 3), (REPO, 4)]
 
 
+def test_shed_ignores_an_issue_a_split_title_mentions():
+    story = _logged(1, "Split: #45 Fix the crash from #12, blocked by this story.")
+
+    assert fleet.shed(story) == [(REPO, 45)]
+
+
 def test_a_story_that_never_split_shed_nothing():
     assert fleet.shed(_logged(1, "Started: on the branch")) == []

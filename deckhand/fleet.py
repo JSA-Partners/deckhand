@@ -179,12 +179,20 @@ _SHED = re.compile(r"(?:([^\s/#,]+/[^\s/#,]+))?#([0-9]+)")
 
 def shed(story: Story) -> list[tuple[str, int]]:
     """`(repository, number)` of every story this one was split into, as its `Split:` entries name them."""
-    return [
-        (repo or story.repo, int(number))
-        for entry in log.entries(story.issue)
-        if entry.prefix == "Split:"
-        for repo, number in _SHED.findall(entry.text)
-    ]
+    found = []
+    for entry in log.entries(story.issue):
+        if entry.prefix != "Split:":
+            continue
+        # A split's title is free text and may name an issue, so only the references the process wrote are read.
+        if entry.text.startswith("into "):
+            named = entry.text.removeprefix("into ").split(", ")
+        else:
+            named = entry.text.split()[:1]
+        for token in named:
+            match = _SHED.fullmatch(token)
+            if match is not None:
+                found.append((match.group(1) or story.repo, int(match.group(2))))
+    return found
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
