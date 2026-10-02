@@ -521,3 +521,31 @@ def test_a_dependency_that_failed_for_another_reason_raises(fake_gh, monkeypatch
 
     with pytest.raises(gh.GhError):
         issue.add_dependency(REPO, 8, blocked_by=(REPO, 7))
+
+
+# --- epics -------------------------------------------------------------------
+
+
+def test_create_can_carry_the_epic_label(fake_gh, gh_calls):
+    number, _ = issue.create(REPO, "Permission rework", "Guests and registry ownership.\n", label=issue.EPIC)
+
+    calls = gh_calls()
+    assert number == 999
+    assert any(call.startswith("label create") and "epic" in call for call in calls)
+    assert calls[-1].startswith("issue create")
+    assert calls[-1].endswith("--label epic")
+
+
+def test_add_sub_issue_posts_the_child_issue_id(fake_gh, gh_calls):
+    issue.add_sub_issue(REPO, 300, (REPO, 248))
+
+    assert gh_calls() == [
+        "api repos/acme/widgets/issues/248",
+        "api -X POST repos/acme/widgets/issues/300/sub_issues -F sub_issue_id=5099965156 -F replace_parent=true",
+    ]
+
+
+def test_add_sub_issue_looks_the_child_up_in_its_own_repository(fake_gh, gh_calls):
+    issue.add_sub_issue(REPO, 300, ("acme/gadgets", 9))
+
+    assert gh_calls()[0] == "api repos/acme/gadgets/issues/9"

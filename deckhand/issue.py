@@ -18,6 +18,8 @@ from deckhand import gh
 VIEW_FIELDS = "number,title,body,url,state,comments,labels"
 # The board cannot say an issue is deckhand's, because it carries issues that are not; this label does.
 LABEL = ("deckhand", "5319e7", "A story deckhand runs")
+# An epic is not a story, so it carries its own label and never the one above.
+EPIC = ("epic", "0e8a16", "The issue a feature's stories roll up to")
 
 _ISSUE_URL = re.compile(r"https://\S+/issues/([0-9]+)(?:#\S+)?")
 
@@ -101,19 +103,19 @@ def list_open(repo: str) -> list[int]:
     return [item["number"] for item in data or [] if isinstance(item, dict) and "number" in item]
 
 
-def create(repo: str, title: str, body: str) -> tuple[int, str]:
-    """Create an issue carrying the marker label; returns its `(number, url)`."""
+def create(repo: str, title: str, body: str, label: tuple[str, str, str] = LABEL) -> tuple[int, str]:
+    """Create an issue carrying `label`, the marker label unless told otherwise; returns its `(number, url)`."""
     gh.split_repo(repo)
-    ensure_label(repo)
+    ensure_label(repo, label=label)
     with _body_file(body) as path:
-        output = gh.run("issue", "create", "--repo", repo, "--title", title, "--body-file", path, "--label", LABEL[0])
+        output = gh.run("issue", "create", "--repo", repo, "--title", title, "--body-file", path, "--label", label[0])
     return _parsed_url(output, "issue create")
 
 
 @functools.cache
-def ensure_label(repo: str, known: tuple[str, ...] | None = None) -> bool:
-    """Create the marker label in `repo` unless it is there, `known` being the names already read; True when created."""
-    name, color, description = LABEL
+def ensure_label(repo: str, known: tuple[str, ...] | None = None, label: tuple[str, str, str] = LABEL) -> bool:
+    """Create `label` in `repo` unless it is there, `known` being the names already read; True when created."""
+    name, color, description = label
     if name in (gh.labels(repo) if known is None else known):
         return False
     gh.create_label(repo, name, color, description)
@@ -187,6 +189,22 @@ def remove_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> No
     blocker_repo, blocker = blocked_by
     blocker_id = gh.issue_id(blocker_repo, blocker)
     gh.run("api", "-X", "DELETE", f"repos/{repo}/issues/{number}/dependencies/blocked_by/{blocker_id}")
+
+
+def add_sub_issue(repo: str, number: int, child: tuple[str, int]) -> None:
+    """Make `child`, `(repository, number)`, a sub-issue of `number`, taking it from any parent it had."""
+    gh.split_repo(repo)
+    child_id = gh.issue_id(*child)
+    gh.run(
+        "api",
+        "-X",
+        "POST",
+        f"repos/{repo}/issues/{number}/sub_issues",
+        "-F",
+        f"sub_issue_id={child_id}",
+        "-F",
+        "replace_parent=true",
+    )
 
 
 def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
