@@ -163,12 +163,15 @@ the epic by itself, so the captain lists it under Anomalies with the command tha
 
 `epic add` refuses an issue that is not a deckhand story, and writes nothing until every one passes.
 
-`epic forecast` is the captain's forecast over one epic's open stories, as dates with `--json`.
-It draws from every finished story on the project. A draft has no points, so it draws from finished
-stories of every size. A draft with no stories listed yet counts as several, as many as finished
-parked features became, and each adds a measured review. The result is paced by the epic's own
-finished stories once it has five, and by the whole project before that. Pace is the share of the
-hours available that stories were in progress. A story closed as not planned is not a piece.
+`epic forecast` says how many weeks the epic's open stories will take, and gives dates with `--json`.
+It counts how many stories finished each week and draws whole weeks from those counts, the method
+of Daniel Vacanti's "When Will It Be Done?". A week with nothing finished counts as zero, so client
+work, weekends and stalls are already in the numbers. The epic is paced by its own weeks once it
+has five finished stories and four weeks since the first. Before that it is paced by the whole
+project's last twelve weeks, which include work outside the epic. A draft with no stories listed
+yet counts as several, as many as finished parked features became. The floor is the 50th
+percentile and the commitment the 85th. A story closed as not planned or as a duplicate is not a
+piece.
 
 | Command | What it does |
 | --- | --- |

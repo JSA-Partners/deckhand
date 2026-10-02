@@ -17,7 +17,7 @@ import statistics
 from dataclasses import dataclass
 from datetime import datetime
 
-from deckhand import draft, fleet, log, order
+from deckhand import draft, fleet, log, order, throughput
 
 PERCENTILES = (50, 85, 95, 100)
 THIN = 10  # samples in a band below which a percentile is a fit to noise, so the worst run is used
@@ -73,41 +73,6 @@ def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
         if took is not None:
             found.setdefault(story.points, []).append(took)
     return {points: sorted(found[points]) for points in sorted(found, key=lambda p: (p is None, p))}
-
-
-ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
-
-
-def _was_parked(story: fleet.Story) -> bool:
-    return any(e.prefix == "Drafted:" and e.text.startswith("parked from") for e in log.entries(story.issue))
-
-
-def splits(stories: list[fleet.Story]) -> list[int]:
-    """How many stories each finished parked feature turned out to be: the size of its split tree, ascending.
-
-    A root is a finished story that began as a parked feature and that no other story shed. Its tree
-    is itself and everything its `Split:` entries name, however deep, counted among the stories given.
-    A story closed as not planned is no piece of what a feature became, so it is neither.
-    """
-    held = {story.key: story for story in stories if not story.dropped}
-    kids = {key: [kid for kid in fleet.shed(story) if kid in held] for key, story in held.items()}
-    was_shed = {key for found in kids.values() for key in found}
-
-    def _size(key: fleet.Key, seen: set[fleet.Key]) -> int:
-        if key in seen:
-            return 0
-        seen.add(key)
-        return 1 + sum(_size(kid, seen) for kid in kids[key])
-
-    return sorted(
-        _size(story.key, set())
-        for story in held.values()
-        if story.closed and fleet.touched(story) and story.key not in was_shed and _was_parked(story)
-    )
-
-
-def _sizes(measured: list[int]) -> list[int]:
-    return measured if len(measured) >= ROOTS else [max(measured, default=1)]
 
 
 def refinements(stories: list[fleet.Story]) -> list[float]:
@@ -310,7 +275,7 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
 
     drafts = frozenset(story.key for story in left if draft.is_draft(story.issue.body))
     grown = frozenset(story.key for story in left if story.key in drafts and not draft.read(story.issue.body)[1])
-    drawn, reviews = _sizes(splits(every)), refinements(every)
+    drawn, reviews = throughput._sizes(throughput.splits(every)), refinements(every)
     review = statistics.median(reviews) if reviews else 0.0
     mine = [] if scope is None else _paced(every, scope)
     paced = len(mine) >= PACED

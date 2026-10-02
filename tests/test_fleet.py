@@ -527,6 +527,22 @@ def test_a_story_closed_as_not_planned_reads_as_dropped():
     assert [story.dropped for story in found] == [True, False]
 
 
+def test_a_story_closed_as_a_duplicate_reads_as_dropped():
+    duplicate = _item(1, ("deckhand",))
+    duplicate["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z", "stateReason": "DUPLICATE"})
+
+    assert fleet.stories([duplicate])[0].dropped is True
+
+
+def test_a_row_carries_when_the_issue_closed():
+    finished = _item(1, ("deckhand",))
+    finished["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z"})
+
+    found = fleet.stories([finished, _item(2, ("deckhand",))])
+
+    assert [story.closed_at for story in found] == ["2026-09-02T00:00:00Z", ""]
+
+
 def test_an_epic_is_the_issue_that_carries_the_epic_label():
     found = fleet.stories([_item(300, ("epic",)), _item(1, ("deckhand",))])
 
@@ -553,7 +569,14 @@ def test_members_are_the_stories_of_one_epic_and_nothing_foreign():
     assert [story.number for story in fleet.members(found, (REPO, 300))] == [1, 4]
 
 
-def _logged(number: int, *entries: str, parent: tuple[str, int] | None = None, closed: bool = False) -> fleet.Story:
+def _logged(
+    number: int,
+    *entries: str,
+    parent: tuple[str, int] | None = None,
+    closed: bool = False,
+    labels: tuple[str, ...] = ("deckhand",),
+    repo: str = REPO,
+) -> fleet.Story:
     comments = [issue.Comment(author="claude", body=body, created_at="2026-09-01T00:00:00Z") for body in entries]
     held = issue.Issue(
         number=number,
@@ -562,11 +585,11 @@ def _logged(number: int, *entries: str, parent: tuple[str, int] | None = None, c
         url="",
         state="CLOSED" if closed else "OPEN",
         comments=comments,
-        labels=("deckhand",),
+        labels=labels,
     )
     return fleet.Story(
         number=number,
-        repo=REPO,
+        repo=repo,
         title=f"T{number}",
         status="Done" if closed else "Backlog",
         points=1,
@@ -593,30 +616,56 @@ def test_a_story_that_never_split_shed_nothing():
     assert fleet.shed(_logged(1, "Started: on the branch")) == []
 
 
+EPIC = _logged(300, labels=("epic",))
+
+
 def test_a_story_shed_by_an_epics_story_and_left_out_is_a_stray():
     parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
     kid = _logged(2)
 
-    assert fleet.strays([parent, kid]) == [(kid, (REPO, 300))]
+    assert fleet.strays([EPIC, parent, kid]) == [(kid, (REPO, 300))]
+
+
+def test_a_story_shed_under_a_parent_that_is_not_an_epic_is_not_a_stray():
+    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+    plain = _logged(300)
+
+    assert fleet.strays([plain, parent, _logged(2)]) == []
+    assert fleet.strays([parent, _logged(2)]) == []
 
 
 def test_a_shed_story_already_in_an_epic_is_not_a_stray():
     parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
 
-    assert fleet.strays([parent, _logged(2, parent=(REPO, 301))]) == []
+    assert fleet.strays([EPIC, parent, _logged(2, parent=(REPO, 301))]) == []
 
 
 def test_a_finished_shed_story_is_not_a_stray():
     parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
 
-    assert fleet.strays([parent, _logged(2, closed=True)]) == []
+    assert fleet.strays([EPIC, parent, _logged(2, closed=True)]) == []
 
 
 def test_a_stray_is_an_anomaly_that_names_its_fix():
     parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
 
-    found = fleet.anomalies([parent, _logged(2)], {}, set(), [])
+    found = fleet.anomalies([EPIC, parent, _logged(2)], {}, set(), [])
 
     assert [(item.number, item.what, item.fix) for item in found] == [
-        (2, "split from a story of epic #300, but in no epic", "epic add 300 2")
+        (2, "split from a story of epic #300, but in no epic", "epic add acme/widgets#300 acme/widgets#2")
     ]
+
+
+def test_a_stray_in_another_repository_names_both_refs_in_full():
+    gadgets = _logged(4, parent=(REPO, 300), repo="acme/gadgets")
+    gadgets = dataclasses.replace(
+        gadgets,
+        issue=dataclasses.replace(
+            gadgets.issue,
+            comments=[issue.Comment(author="claude", body="Split: #5 Follow on.", created_at="2026-09-01T00:00:00Z")],
+        ),
+    )
+
+    found = fleet.anomalies([EPIC, gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
+
+    assert [item.fix for item in found] == ["epic add acme/widgets#300 acme/gadgets#5"]

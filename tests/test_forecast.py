@@ -296,57 +296,6 @@ def _trees(*sizes: int) -> list[fleet.Story]:
     return found
 
 
-def test_splits_ignore_a_story_written_from_a_request():
-    root = _story(
-        1, 1, True, ("Drafted:", _at(0), "the story and its plan, from the request."), ("Split:", _at(1), "into #2")
-    )
-
-    assert forecast.splits([root, _done(2, 1, 1.0)]) == []
-
-
-def test_splits_measure_a_parked_feature_split_into_stories():
-    root = _story(
-        1, 1, True, ("Drafted:", _at(0), f"parked from {REPO}#900"), ("Split:", _at(1), "into #2, acme/gadgets#3")
-    )
-    shed = [_done(2, 1, 1.0), _done(3, 1, 1.0, repo="acme/gadgets")]
-
-    assert forecast.splits([root, *shed, _parked(4)]) == [1, 3]
-
-
-def test_splits_count_a_story_shed_later():
-    root = _story(
-        1, 1, True, ("Drafted:", _at(0), f"parked from {REPO}#900"), ("Split:", _at(1), "#2 The other half, moved out.")
-    )
-
-    assert forecast.splits([root, _done(2, 1, 1.0)]) == [2]
-
-
-def test_splits_count_a_tree_two_levels_deep():
-    shed = _story(2, 1, True, ("Split:", _at(1), "#3 The other half, moved out."))
-
-    assert forecast.splits([_parked(1, 2), shed, _done(3, 1, 1.0)]) == [3]
-
-
-def test_splits_ignore_a_parked_feature_that_has_not_finished():
-    assert forecast.splits([_parked(1, 2, closed=False), _done(2, 1, 1.0)]) == []
-
-
-def test_splits_do_not_count_a_shed_story_as_its_own_root():
-    assert forecast.splits([_parked(1, 2), _parked(2)]) == [2]
-
-
-def test_thin_splits_draw_the_worst_seen():
-    assert forecast._sizes([1, 1, 2, 4]) == [4]
-
-
-def test_no_splits_draw_one_story():
-    assert forecast._sizes([]) == [1]
-
-
-def test_five_splits_are_drawn_as_measured():
-    assert forecast._sizes([1, 1, 2, 2, 4]) == [1, 1, 2, 2, 4]
-
-
 def test_a_review_is_measured_from_the_latest_draft_to_the_latest_review():
     story = _story(1, 1, True, ("Drafted:", _at(0)), ("Drafted:", _at(96)), ("Review:", _at(102)))
 
@@ -611,18 +560,3 @@ def test_a_seed_makes_two_rows_identical():
     read = _fleet(*_trees(2, 4), _story(20, None, False, body=DRAFT), _plain(21, 1))
 
     assert forecast.rows(read, 2, "given", seed=0) == forecast.rows(read, 2, "given", seed=0)
-
-
-# dropped stories
-
-
-def test_splits_do_not_count_a_dropped_story_in_a_tree():
-    dropped = dataclasses.replace(_done(3, 1, 1.0), dropped=True)
-
-    assert forecast.splits([_parked(1, 2, 3), _done(2, 1, 1.0), dropped]) == [2]
-
-
-def test_splits_do_not_count_a_dropped_parked_feature_as_a_root():
-    dropped = dataclasses.replace(_parked(1, 2), dropped=True)
-
-    assert forecast.splits([dropped, _done(2, 1, 1.0), _parked(3)]) == [1]

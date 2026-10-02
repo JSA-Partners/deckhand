@@ -51,6 +51,7 @@ class Story:
     archived: bool = False
     parent: tuple[str, int] | None = None
     dropped: bool = False
+    closed_at: str = ""
 
     @property
     def key(self) -> tuple[str, int]:
@@ -125,7 +126,8 @@ def stories(nodes: list[dict]) -> list[Story]:
                 blocked_by=_open_blockers(content),
                 archived=bool(node.get("isArchived")),
                 parent=_parent(content),
-                dropped=content.get("stateReason") == "NOT_PLANNED",
+                dropped=content.get("stateReason") in ("NOT_PLANNED", "DUPLICATE"),
+                closed_at=content.get("closedAt") or "",
             )
         )
     return found
@@ -200,9 +202,10 @@ def shed(story: Story) -> list[tuple[str, int]]:
 def strays(found: list[Story]) -> list[tuple[Story, tuple[str, int]]]:
     """Every open story in no epic that a story of an epic shed, with the epic it fell out of."""
     held = {story.key: story for story in found}
+    named = {story.key for story in epics(found)}
     out = []
     for story in found:
-        if story.parent is None:
+        if story.parent not in named:
             continue
         for key in shed(story):
             kid = held.get(key)
@@ -307,9 +310,10 @@ def anomalies(
             fix = "captain apply --unblock on one edge"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
     for story, (where, number) in strays(found):
-        epic = step.ref_label(where, number, story.repo)
-        what = f"split from a story of epic {epic}, but in no epic"
-        out.append(Anomaly(story.number, story.repo, what, f"epic add {epic.lstrip('#')} {story.number}"))
+        what = f"split from a story of epic {step.ref_label(where, number, story.repo)}, but in no epic"
+        # epic add reads a bare number as the repository it runs in, which may be neither of these.
+        fix = f"epic add {where}#{number} {story.repo}#{story.number}"
+        out.append(Anomaly(story.number, story.repo, what, fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
     for story in archived or []:

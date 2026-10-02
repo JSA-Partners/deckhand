@@ -69,13 +69,26 @@ def test_add_makes_each_story_a_sub_issue_of_the_epic(board_env, gh_calls, monke
 
     assert cli.main(["epic", "add", "300", "302", "acme/gadgets#9"]) == 0
 
-    assert [call for call in gh_calls() if "sub_issues" in call] == [
+    calls = gh_calls()
+    assert [call for call in calls if "sub_issues" in call] == [
         "api -X POST repos/acme/widgets/issues/300/sub_issues -F sub_issue_id=5099965156 -F replace_parent=true",
         "api -X POST repos/acme/widgets/issues/300/sub_issues -F sub_issue_id=5099965156 -F replace_parent=true",
     ]
+    # The fake answers one id for every issue, so only the paths show each story was the one looked up.
+    assert "api repos/acme/widgets/issues/302" in calls
+    assert "api repos/acme/gadgets/issues/9" in calls
     out = capsys.readouterr().out
     assert "#302 joined #300" in out
     assert "acme/gadgets#9 joined #300" in out
+
+
+def test_add_names_a_story_given_twice_once(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+
+    assert cli.main(["epic", "add", "300", "302", "302", "acme/widgets#302"]) == 0
+
+    assert len([call for call in gh_calls() if "POST" in call]) == 1
+    assert capsys.readouterr().out.splitlines() == ["#302 joined #300"]
 
 
 def test_add_refuses_an_issue_that_is_not_an_epic(board_env, gh_calls, monkeypatch, capsys):
@@ -133,15 +146,14 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, capsys)
         "pieces": 2,
         "done": 1,
         "drafts": 0,
-        "at_once": 1,
-        "floor": "2026-10-03",
-        "commitment": "2026-10-03",
-        "worst": "2026-10-03",
-        "samples": 1,
-        "thin": True,
-        "growth": 1.0,
-        "idle": 0.0,
+        "floor": "2026-10-30",
+        "commitment": "2026-12-04",
+        "worst": "2027-01-08",
         "pace": "project",
+        "weeks": 5,
+        "per_week": 0.0,
+        "unsplit": 0,
+        "split_size": 1.0,
     }
 
 
@@ -149,9 +161,17 @@ def test_forecast_prints_the_block_for_one_epic(board_env, capsys):
     assert cli.main(["epic", "forecast", "300"]) == 0
 
     out = capsys.readouterr().out
-    assert out.splitlines()[0] == "## Forecast: Permission rework"
-    assert "  1 story, 1 points, 1 at once, open sessions" in out
-    assert "Commitment" in out
+    assert out.splitlines() == [
+        "## Forecast: Permission rework",
+        "  1 piece left",
+        "",
+        "  Floor         4 weeks   50th percentile",
+        "  Commitment    9 weeks   85th percentile",
+        "  Worst seen   14 weeks   95th percentile",
+        "",
+        "  Paced by the whole project's last 5 weeks, a median of 0.0 stories a week.",
+        "  That includes work outside this epic, so it leans early.",
+    ]
 
 
 def test_forecast_refuses_an_issue_that_is_not_an_epic_on_the_board(board_env, capsys):
@@ -160,7 +180,7 @@ def test_forecast_refuses_an_issue_that_is_not_an_epic_on_the_board(board_env, c
     assert "#304 is not an epic on the board" in capsys.readouterr().err
 
 
-def test_a_story_closed_as_not_planned_is_not_a_piece(board_env, capsys):
+def test_a_story_closed_as_not_planned_or_duplicate_is_not_a_piece(board_env, capsys):
     assert cli.main(["epic", "list", "--json"]) == 0
 
     [row] = json.loads(capsys.readouterr().out)
@@ -225,21 +245,15 @@ def test_add_writes_only_the_stories_not_yet_in_the_epic(board_env, gh_calls, mo
     assert "#302 already in #300" in out
 
 
-def test_forecast_says_how_the_epic_was_paced(board_env, capsys):
-    assert cli.main(["epic", "forecast", "300"]) == 0
-
-    assert "  Paced by the whole project: this epic has under 5 finished stories." in capsys.readouterr().out
-
-
 def test_two_forecasts_of_an_unchanged_board_give_the_same_dates(board_env, capsys, monkeypatch):
     seeds = []
-    real = epic.forecast.outlook
+    real = epic.throughput.outlook
 
     def _outlook(*args, **kwargs):
         seeds.append(kwargs.get("seed"))
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(epic.forecast, "outlook", _outlook)
+    monkeypatch.setattr(epic.throughput, "outlook", _outlook)
 
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
     first = capsys.readouterr().out
@@ -247,13 +261,6 @@ def test_two_forecasts_of_an_unchanged_board_give_the_same_dates(board_env, caps
 
     assert json.loads(capsys.readouterr().out) == json.loads(first)
     assert seeds == [epic.SEED, epic.SEED]
-
-
-def test_forecast_refuses_fewer_than_one_session_before_reading_the_board(board_env, gh_calls, capsys):
-    assert cli.main(["epic", "forecast", "300", "--sessions", "0"]) == 1
-
-    assert "--sessions" in capsys.readouterr().err
-    assert not any(call.startswith("api graphql") for call in gh_calls())
 
 
 def _archived_and_closed(tmp_path, monkeypatch) -> None:

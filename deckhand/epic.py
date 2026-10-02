@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from datetime import date, timedelta
 
-from deckhand import board, draft, fleet, forecast, gh, issue
+from deckhand import board, draft, fleet, gh, issue, throughput
 from deckhand.cli import command
 from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
 
@@ -32,7 +31,6 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("refs", nargs="*", help="open: the title; add: the epic, then each story; forecast: the epic")
     parser.add_argument("--about", default="", help="open: what the epic delivers, in one plain sentence")
     parser.add_argument("--json", action="store_true", help="list and forecast: print JSON instead of lines")
-    parser.add_argument("--sessions", type=int, help="forecast: stories to run at once; defaults to what history shows")
 
 
 def _ref(value: str, repo: str) -> tuple[str, int]:
@@ -60,7 +58,7 @@ def _add(args: argparse.Namespace, repo: str) -> int:
     if len(args.refs) < 2:
         raise Refusal("epic add takes the epic, then each story: epic add <epic> <story>...")
     where, number = _ref(args.refs[0], repo)
-    stories = [_ref(value, repo) for value in args.refs[1:]]
+    stories = list(dict.fromkeys(_ref(value, repo) for value in args.refs[1:]))
     named = ref_label(where, number, repo)
     if issue.EPIC[0] not in issue.view(where, number).labels:
         raise Refusal(f"{named} is not an epic; open one with epic open")
@@ -113,31 +111,26 @@ def _list(args: argparse.Namespace, repo: str) -> int:
     return 0
 
 
-def _on(hours: float) -> str:
-    return (_today() + timedelta(days=math.ceil(hours / forecast.HOURS_A_DAY))).isoformat()
+def _on(weeks: int | None) -> str | None:
+    return None if weeks is None else (_today() + timedelta(days=7 * weeks)).isoformat()
 
 
-def _dated(found: forecast.Outlook | None) -> dict:
-    if found is None:
-        nothing = {"floor": None, "commitment": None, "worst": None}
-        return {**nothing, "samples": 0, "thin": True, "growth": 1.0, "idle": 0.0, "pace": None}
+def _dated(found: throughput.Outlook) -> dict:
     return {
-        "floor": _on(found.floor),
-        "commitment": _on(found.commitment),
-        "worst": _on(found.worst),
-        "samples": found.samples,
-        "thin": found.thin,
-        "growth": round(found.growth, 2),
-        "idle": round(found.idle, 2),
+        "floor": _on(found.floor_weeks),
+        "commitment": _on(found.commitment_weeks),
+        "worst": _on(found.worst_weeks),
         "pace": found.pace,
+        "weeks": found.weeks,
+        "per_week": found.per_week,
+        "unsplit": found.unsplit,
+        "split_size": round(found.split_size, 2),
     }
 
 
 def _forecast(args: argparse.Namespace, repo: str) -> int:
     if len(args.refs) != 1:
         raise Refusal("epic forecast takes one epic: epic forecast <epic>")
-    if args.sessions is not None and args.sessions < 1:
-        raise Refusal(f"--sessions is how many stories run at once, so at least 1, got {args.sessions}")
     key = _ref(args.refs[0], repo)
     read = fleet.read(resolved_settings())
     # The board archives finished work, and a finished epic is still asked about.
@@ -145,13 +138,12 @@ def _forecast(args: argparse.Namespace, repo: str) -> int:
     epic = next((story for story in every if story.key == key), None)
     if epic is None:
         raise Refusal(f"{ref_label(*key, repo)} is not an epic on the board")
-    at_once, source = forecast.parallel(args.sessions, read, live=1)
+    found = throughput.outlook(read, key, _today(), seed=SEED)
     if args.json:
-        found = forecast.outlook(read, at_once, scope=key, seed=SEED)
-        print(json.dumps({**_row(read, epic), "at_once": at_once, **_dated(found)}))
+        print(json.dumps({**_row(read, epic), **_dated(found)}))
         return 0
     print(f"## Forecast: {epic.title}")
-    for line in forecast.rows(read, at_once, source, scope=key, seed=SEED):
+    for line in throughput.rows(found):
         print(line)
     return 0
 
