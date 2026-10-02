@@ -215,6 +215,19 @@ def test_concurrency_is_unknown_under_five_overlapping_stories():
     assert forecast.concurrency(stories) is None
 
 
+def test_parallel_measures_concurrency_from_archived_stories_too():
+    archived = [
+        _ran(1, "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z"),
+        _ran(2, "2026-09-01T01:00:00Z", "2026-09-01T10:00:00Z"),
+        _ran(3, "2026-09-01T02:00:00Z", "2026-09-01T10:00:00Z"),
+        _ran(4, "2026-09-02T00:00:00Z", "2026-09-02T10:00:00Z"),
+        _ran(5, "2026-09-02T01:00:00Z", "2026-09-02T10:00:00Z"),
+    ]
+    read = dataclasses.replace(_fleet(_plain(6, 1)), archived=archived)
+
+    assert forecast.parallel(None, read, live=1) == (2, "measured")
+
+
 # scope
 
 
@@ -258,3 +271,68 @@ def test_the_rows_say_so_when_a_scope_has_nothing_left():
     read = _fleet(_done(1, 1, 24.0, parent=EPIC), _plain(2, 1))
 
     assert forecast.rows(read, 1, "given", scope=EPIC) == ["  nothing left to forecast"]
+
+
+# drafts
+
+
+def test_growth_is_one_until_five_finished_roots():
+    assert forecast.growth([_done(number, 1, 1.0) for number in range(1, 5)]) == 1.0
+
+
+def test_growth_is_the_mean_size_of_a_finished_split_tree():
+    root = _story(1, 1, True, ("Split:", _at(0), "into #2, acme/gadgets#3"))
+    shed = [_done(2, 1, 1.0), _done(3, 1, 1.0, repo="acme/gadgets")]
+    alone = [_done(number, 1, 1.0) for number in range(4, 8)]
+
+    # five roots of sizes 3, 1, 1, 1 and 1
+    assert forecast.growth([root, *shed, *alone]) == 1.4
+
+
+def test_growth_ignores_a_root_that_has_not_finished():
+    open_root = _story(1, 1, False, ("Split:", _at(0), "into #2, #3"))
+    finished = [_done(number, 1, 1.0) for number in range(2, 9)]
+
+    # 2 and 3 were shed, so the roots are 4 to 8, each of size 1
+    assert forecast.growth([open_root, *finished]) == 1.0
+
+
+def test_a_review_is_measured_from_the_latest_draft_to_the_latest_review():
+    story = _story(1, 1, True, ("Drafted:", _at(0)), ("Drafted:", _at(96)), ("Review:", _at(102)))
+
+    assert forecast.refinements([story]) == [6.0]
+
+
+def test_a_story_without_both_entries_measures_no_review():
+    assert forecast.refinements([_story(1, 1, True, ("Drafted:", _at(0)))]) == []
+
+
+def test_a_draft_draws_from_the_pool_grown_and_reviewed():
+    story = _story(1, None, False, body=DRAFT)
+
+    found = forecast.simulate(
+        [story], {}, 1, {1: [2.0]}, runs=20, seed=1, drafts=frozenset({story.key}), growth=1.5, reviews=[3.0]
+    )
+
+    assert found[100] == 6.0
+
+
+def test_the_floor_counts_a_draft_grown_and_reviewed():
+    story = _story(1, None, False, body=DRAFT)
+
+    assert forecast.floor([story], {}, 1, {1: 2.0}, frozenset({story.key}), 1.5, 3.0) == 6.0
+
+
+def test_an_outlook_counts_its_drafts():
+    read = _fleet(_done(1, 1, 24.0), _story(2, None, False, body=DRAFT), _plain(3, 1))
+
+    found = forecast.outlook(read, 1, seed=1)
+
+    assert found.drafts == 1
+    assert found.commitment == 48.0
+
+
+def test_the_rows_say_how_a_draft_was_counted():
+    read = _fleet(_done(1, 1, 24.0), _story(2, None, False, body=DRAFT))
+
+    assert "  1 draft counted as 1.0 stories of any size, plus a review." in forecast.rows(read, 1, "given")

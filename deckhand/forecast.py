@@ -17,7 +17,7 @@ import statistics
 from dataclasses import dataclass
 from datetime import datetime
 
-from deckhand import fleet, log, order
+from deckhand import draft, fleet, log, order
 
 PERCENTILES = (50, 85, 95, 100)
 THIN = 10  # samples in a band below which a percentile is a fit to noise, so the worst run is used
@@ -75,6 +75,47 @@ def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
     return {points: sorted(found[points]) for points in sorted(found, key=lambda p: (p is None, p))}
 
 
+ROOTS = 5  # finished pieces of work below which their mean size is noise, so nothing is grown
+
+
+def growth(stories: list[fleet.Story]) -> float:
+    """How many stories one finished piece of work turned out to be: the mean size of a split tree.
+
+    A root is a finished story no other story shed. Its tree is itself and everything its `Split:`
+    entries name, however deep, counted among the stories given.
+    """
+    held = {story.key: story for story in stories}
+    kids = {story.key: [key for key in fleet.shed(story) if key in held] for story in stories}
+    was_shed = {key for found in kids.values() for key in found}
+
+    def _size(key: fleet.Key, seen: set[fleet.Key]) -> int:
+        if key in seen:
+            return 0
+        seen.add(key)
+        return 1 + sum(_size(kid, seen) for kid in kids[key])
+
+    sizes = [
+        _size(story.key, set())
+        for story in stories
+        if story.closed and fleet.touched(story) and story.key not in was_shed
+    ]
+    return sum(sizes) / len(sizes) if len(sizes) >= ROOTS else 1.0
+
+
+def refinements(stories: list[fleet.Story]) -> list[float]:
+    """Hours from the latest `Drafted:` to the latest `Review:` for every finished story with both."""
+    found = []
+    for story in stories:
+        drafted = log.last(story.issue, "Drafted:")
+        reviewed = log.last(story.issue, "Review:")
+        if not story.closed or drafted is None or reviewed is None:
+            continue
+        took = (_stamp(reviewed.created_at) - _stamp(drafted.created_at)).total_seconds() / 3600
+        if took > 0:
+            found.append(took)
+    return sorted(found)
+
+
 def _placed(stories: list[fleet.Story], blockers: fleet.Blockers) -> list[fleet.Story]:
     return order.topological(stories, blockers, lambda story: (story.number, story.number, story.number))
 
@@ -84,10 +125,23 @@ def _waits(story: fleet.Story, blockers: fleet.Blockers, finish: dict[fleet.Key,
     return max((finish.get((where, number), 0.0) for where, number, _ in holds), default=0.0)
 
 
-def floor(stories: list[fleet.Story], blockers: fleet.Blockers, sessions: int, hours: dict[int | None, float]) -> float:
+def floor(
+    stories: list[fleet.Story],
+    blockers: fleet.Blockers,
+    sessions: int,
+    hours: dict[int | None, float],
+    drafts: frozenset[fleet.Key] = frozenset(),
+    growth: float = 1.0,
+    review: float = 0.0,
+) -> float:
     """`max(critical path, total work / sessions)`, both proven lower bounds on the makespan."""
     fallback = statistics.median(hours.values())
-    duration = {story.key: hours.get(story.points, fallback) for story in stories}
+
+    def _took(story: fleet.Story) -> float:
+        took = hours.get(story.points, fallback)
+        return took * growth + review if story.key in drafts else took
+
+    duration = {story.key: _took(story) for story in stories}
     finish: dict[fleet.Key, float] = {}
     path = 0.0
     for story in _placed(stories, blockers):
@@ -122,6 +176,9 @@ def simulate(
     samples: dict[int | None, list[float]],
     runs: int = 10_000,
     seed: int | None = None,
+    drafts: frozenset[fleet.Key] = frozenset(),
+    growth: float = 1.0,
+    reviews: list[float] | None = None,
 ) -> dict[int, float]:
     """The makespan at `PERCENTILES`, from `runs` schedules drawn from `samples`."""
     rng = random.Random(seed)
@@ -129,7 +186,13 @@ def simulate(
     placed = _placed(stories, blockers)
 
     def _draw() -> dict[fleet.Key, float]:
-        return {story.key: rng.choice(samples.get(story.points) or pool) for story in stories}
+        drawn: dict[fleet.Key, float] = {}
+        for story in stories:
+            took = rng.choice(samples.get(story.points) or pool)
+            if story.key in drafts:
+                took = took * growth + (rng.choice(reviews) if reviews else 0.0)
+            drawn[story.key] = took
+        return drawn
 
     makespans = sorted(_schedule(placed, blockers, sessions, _draw()) for _ in range(runs))
     return {p: _percentile(makespans, p) for p in PERCENTILES}
@@ -147,7 +210,7 @@ def parallel(given: int | None, read: fleet.Fleet, live: int) -> tuple[int, str]
     """How many stories the forecast runs at once, and where that number came from."""
     if given is not None:
         return given, "given"
-    measured = concurrency(read.stories)
+    measured = concurrency([*read.stories, *read.archived])
     if measured is not None:
         return measured, "measured"
     return max(live, 1), "open sessions"
@@ -188,7 +251,8 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
     an epic's own stories are too few to measure from, and the board archives finished work.
     """
     left = remaining(read, scope)
-    history = durations([*read.stories, *read.archived])
+    every = [*read.stories, *read.archived]
+    history = durations(every)
     if not left or not history:
         return None
 
@@ -198,8 +262,14 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
     worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
     medians = {band: statistics.median(hours) for band, hours in history.items()}
 
-    banded = simulate(left, read.blockers, at_once, history, seed=seed)
-    unbanded = simulate(left, read.blockers, at_once, {None: pooled}, seed=seed)
+    drafts = frozenset(story.key for story in left if draft.is_draft(story.issue.body))
+    grown, reviews = growth(every), refinements(every)
+    review = statistics.median(reviews) if reviews else 0.0
+
+    banded = simulate(left, read.blockers, at_once, history, seed=seed, drafts=drafts, growth=grown, reviews=reviews)
+    unbanded = simulate(
+        left, read.blockers, at_once, {None: pooled}, seed=seed, drafts=drafts, growth=grown, reviews=reviews
+    )
     return Outlook(
         left=len(left),
         points=sum(story.points or 0 for story in left),
@@ -207,10 +277,12 @@ def outlook(read: fleet.Fleet, at_once: int, scope: fleet.Key | None = None, see
         longest=pooled[-1],
         median=statistics.median(pooled),
         thin=thin,
-        floor=floor(left, read.blockers, at_once, medians),
+        floor=floor(left, read.blockers, at_once, medians, drafts, grown, review),
         commitment=banded[commitment_p],
         worst=banded[worst_p],
         unbanded=unbanded[commitment_p],
+        drafts=len(drafts),
+        growth=grown,
     )
 
 
@@ -242,6 +314,9 @@ def rows(read: fleet.Fleet, at_once: int, source: str, scope: fleet.Key | None =
         f"  From {found.samples} finished stories, the longest {found.longest:.1f} hours against a median "
         f"of {found.median:.1f}.",
     ]
+    if found.drafts:
+        draft_word = "draft" if found.drafts == 1 else "drafts"
+        lines.append(f"  {found.drafts} {draft_word} counted as {found.growth:.1f} stories of any size, plus a review.")
     if found.thin:
         lines.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
     return [*lines, "", f"  {POINT}"]
