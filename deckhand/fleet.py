@@ -195,6 +195,20 @@ def shed(story: Story) -> list[tuple[str, int]]:
     return found
 
 
+def strays(found: list[Story]) -> list[tuple[Story, tuple[str, int]]]:
+    """Every open story in no epic that a story of an epic shed, with the epic it fell out of."""
+    held = {story.key: story for story in found}
+    out = []
+    for story in found:
+        if story.parent is None:
+            continue
+        for key in shed(story):
+            kid = held.get(key)
+            if kid is not None and kid.parent is None and not kid.closed and touched(kid):
+                out.append((kid, story.parent))
+    return out
+
+
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
     """The one thing worth saying about this story beyond its column."""
     if not touched(story):
@@ -290,6 +304,10 @@ def anomalies(
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
             fix = "captain apply --unblock on one edge"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
+    for story, (where, number) in strays(found):
+        epic = step.ref_label(where, number, story.repo)
+        what = f"split from a story of epic {epic}, but in no epic"
+        out.append(Anomaly(story.number, story.repo, what, f"epic add {epic.lstrip('#')} {story.number}"))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
     for story in archived or []:

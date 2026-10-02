@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import captain, cli, fleet, forecast
+from deckhand import captain, cli, fleet, forecast, issue
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -618,3 +618,17 @@ def test_a_full_read_finds_the_anomalies_once(fleet_env, tmp_path, monkeypatch, 
     cli.main(["captain", "context"])
 
     assert len(calls) == 1
+
+
+def test_an_epic_is_not_counted_as_a_foreign_item():
+    def _made(number: int, label: str) -> fleet.Story:
+        held = issue.Issue(number=number, title="T", body="", url="", state="OPEN", comments=[], labels=(label,))
+        return fleet.Story(
+            number=number, repo=REPO, title="T", status="", points=None, closed=False, item="I", issue=held
+        )
+
+    read = fleet.Fleet(stories=[_made(300, "epic"), _made(7, "elsewhere")], blockers={}, missing=[])
+
+    rows = captain._fleet_rows(read)
+
+    assert rows[-1] == "1 item on the board is not deckhand's."

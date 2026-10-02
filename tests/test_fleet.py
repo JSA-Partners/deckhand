@@ -580,3 +580,32 @@ def test_shed_ignores_an_issue_a_split_title_mentions():
 
 def test_a_story_that_never_split_shed_nothing():
     assert fleet.shed(_logged(1, "Started: on the branch")) == []
+
+
+def test_a_story_shed_by_an_epics_story_and_left_out_is_a_stray():
+    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+    kid = _logged(2)
+
+    assert fleet.strays([parent, kid]) == [(kid, (REPO, 300))]
+
+
+def test_a_shed_story_already_in_an_epic_is_not_a_stray():
+    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+
+    assert fleet.strays([parent, _logged(2, parent=(REPO, 301))]) == []
+
+
+def test_a_finished_shed_story_is_not_a_stray():
+    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+
+    assert fleet.strays([parent, _logged(2, closed=True)]) == []
+
+
+def test_a_stray_is_an_anomaly_that_names_its_fix():
+    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+
+    found = fleet.anomalies([parent, _logged(2)], {}, set(), [])
+
+    assert [(item.number, item.what, item.fix) for item in found] == [
+        (2, "split from a story of epic #300, but in no epic", "epic add 300 2")
+    ]
