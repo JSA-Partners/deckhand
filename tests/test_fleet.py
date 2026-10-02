@@ -669,3 +669,28 @@ def test_a_stray_in_another_repository_names_both_refs_in_full():
     found = fleet.anomalies([EPIC, gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
 
     assert [item.fix for item in found] == ["epic add acme/widgets#300 acme/gadgets#5"]
+
+
+def test_an_archived_story_that_shed_still_reports_its_open_kid():
+    parent = dataclasses.replace(
+        _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300), closed=True), archived=True
+    )
+    kid = _logged(2)
+
+    assert fleet.strays([EPIC, kid], [parent]) == [(kid, (REPO, 300))]
+    assert [item.number for item in fleet.anomalies([EPIC, kid], {}, set(), [], archived=[parent])] == [2]
+
+
+def test_an_archived_kid_is_not_a_stray():
+    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+    kid = dataclasses.replace(_logged(2), archived=True)
+
+    assert fleet.strays([EPIC, parent], [kid]) == []
+
+
+def test_a_kid_shed_by_two_stories_of_an_epic_is_one_stray():
+    first = _logged(1, "Split: #3 Follow on, blocked by this story.", parent=(REPO, 300))
+    second = _logged(2, "Split: #3 Follow on, blocked by this story.", parent=(REPO, 300))
+    kid = _logged(3)
+
+    assert fleet.strays([EPIC, first, second, kid]) == [(kid, (REPO, 300))]

@@ -199,19 +199,20 @@ def shed(story: Story) -> list[tuple[str, int]]:
     return found
 
 
-def strays(found: list[Story]) -> list[tuple[Story, tuple[str, int]]]:
-    """Every open story in no epic that a story of an epic shed, with the epic it fell out of."""
+def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, tuple[str, int]]]:
+    """Every open story on the board in no epic that a story of an epic shed, archived or not, with its epic."""
+    every = [*found, *(archived or [])]
     held = {story.key: story for story in found}
-    named = {story.key for story in epics(found)}
-    out = []
-    for story in found:
+    named = {story.key for story in epics(every)}
+    out: dict[tuple[str, int], tuple[Story, tuple[str, int]]] = {}
+    for story in every:
         if story.parent not in named:
             continue
         for key in shed(story):
             kid = held.get(key)
             if kid is not None and kid.parent is None and not kid.closed and touched(kid):
-                out.append((kid, story.parent))
-    return out
+                out.setdefault(key, (kid, story.parent))
+    return list(out.values())
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
@@ -309,7 +310,7 @@ def anomalies(
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
             fix = "captain apply --unblock on one edge"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
-    for story, (where, number) in strays(found):
+    for story, (where, number) in strays(found, archived):
         what = f"split from a story of epic {step.ref_label(where, number, story.repo)}, but in no epic"
         # epic add reads a bare number as the repository it runs in, which may be neither of these.
         fix = f"epic add {where}#{number} {story.repo}#{story.number}"

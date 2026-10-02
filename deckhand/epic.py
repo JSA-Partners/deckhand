@@ -33,9 +33,14 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="list and forecast: print JSON instead of lines")
 
 
+def _key(found: tuple[str, int]) -> tuple[str, int]:
+    """A reference as GitHub matches one, whose repository part ignores case."""
+    return found[0].lower(), found[1]
+
+
 def _ref(value: str, repo: str) -> tuple[str, int]:
     try:
-        return issue_ref(value, repo)
+        return _key(issue_ref(value, repo))
     except ValueError as error:
         raise Refusal(f"{REF_FORM}, got {value!r}") from error
 
@@ -63,14 +68,18 @@ def _add(args: argparse.Namespace, repo: str) -> int:
     if issue.EPIC[0] not in issue.view(where, number).labels:
         raise Refusal(f"{named} is not an epic; open one with epic open")
     joined: set[tuple[str, int]] = set()
+    moved: dict[tuple[str, int], tuple[str, int]] = {}
     for story in stories:
         labels = issue.view(*story).labels
         if issue.EPIC[0] in labels:
             raise Refusal(f"{ref_label(*story, repo)} is an epic, and an epic is never a story")
         if issue.LABEL[0] not in labels:
             raise Refusal(f"{ref_label(*story, repo)} is not a deckhand story; write one with new")
-        if issue.parent(*story) == (where, number):
+        held = issue.parent(*story)
+        if held is not None and _key(held) == (where, number):
             joined.add(story)
+        elif held is not None:
+            moved[story] = _key(held)
         # Looked up again by the write, but resolved here so a story the API cannot find leaves the epic alone.
         gh.issue_id(*story)
     for story in stories:
@@ -78,7 +87,10 @@ def _add(args: argparse.Namespace, repo: str) -> int:
             print(f"{ref_label(*story, repo)} already in {named}", flush=True)
             continue
         issue.add_sub_issue(where, number, story)
-        print(f"{ref_label(*story, repo)} joined {named}", flush=True)
+        if story in moved:
+            print(f"{ref_label(*story, repo)} moved from {ref_label(*moved[story], repo)} to {named}", flush=True)
+        else:
+            print(f"{ref_label(*story, repo)} joined {named}", flush=True)
     return 0
 
 
@@ -104,7 +116,7 @@ def _list(args: argparse.Namespace, repo: str) -> int:
         return 0
     for epic in found:
         row = _row(read, epic)
-        label = ref_label(epic.repo, epic.number, repo)
+        label = ref_label(*_key(epic.key), repo)
         print(f"{label} {epic.title}: {row['done']} of {row['pieces']} pieces done, {row['drafts']} drafts")
     if not found:
         print("no epics on the board")
@@ -125,6 +137,8 @@ def _dated(found: throughput.Outlook) -> dict:
         "per_week": found.per_week,
         "unsplit": found.unsplit,
         "split_size": round(found.split_size, 2),
+        "split_basis": found.split_basis,
+        "reason": found.reason,
     }
 
 
@@ -135,10 +149,10 @@ def _forecast(args: argparse.Namespace, repo: str) -> int:
     read = fleet.read(resolved_settings())
     # The board archives finished work, and a finished epic is still asked about.
     every = fleet.epics([*read.stories, *read.archived])
-    epic = next((story for story in every if story.key == key), None)
+    epic = next((story for story in every if _key(story.key) == key), None)
     if epic is None:
         raise Refusal(f"{ref_label(*key, repo)} is not an epic on the board")
-    found = throughput.outlook(read, key, _today(), seed=SEED)
+    found = throughput.outlook(read, epic.key, _today(), seed=SEED)
     if args.json:
         print(json.dumps({**_row(read, epic), **_dated(found)}))
         return 0
@@ -151,7 +165,7 @@ def _forecast(args: argparse.Namespace, repo: str) -> int:
 @command("epic", _configure)
 def run(args: argparse.Namespace) -> int:
     """Open an epic, add stories to it, list every epic in board order, or forecast one in dates."""
-    repo = gh.repo_slug()
+    repo = gh.repo_slug().lower()
     if args.action == "open":
         return _open(args, repo)
     if args.action == "add":

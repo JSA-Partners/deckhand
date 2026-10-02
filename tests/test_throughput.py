@@ -136,15 +136,15 @@ def test_splits_do_not_count_a_dropped_parked_feature_as_a_root():
 
 
 def test_thin_splits_draw_the_worst_seen():
-    assert throughput._sizes([1, 1, 2, 4]) == [4]
+    assert throughput._sizes([1, 1, 2, 4]) == ("largest", [4])
 
 
 def test_no_splits_draw_one_story():
-    assert throughput._sizes([]) == [1]
+    assert throughput._sizes([]) == ("assumed", [1])
 
 
 def test_five_splits_are_drawn_as_measured():
-    assert throughput._sizes([1, 1, 2, 2, 4]) == [1, 1, 2, 2, 4]
+    assert throughput._sizes([1, 1, 2, 2, 4]) == ("measured", [1, 1, 2, 2, 4])
 
 
 # weekly
@@ -183,7 +183,7 @@ def test_an_epic_with_five_finished_stories_over_four_weeks_is_paced_by_its_own(
     members = _members(5, 28)
     others = [_finished(100 + day, day) for day in range(28)]
 
-    assert throughput.pace([*members, *others], EPIC, TODAY) == ("epic", [1, 1, 1, 1, 1])
+    assert throughput.pace([*members, *others], EPIC, TODAY) == ("epic", [1, 1, 1, 1, 1], True)
 
 
 def test_an_epic_under_four_weeks_old_is_paced_by_the_project():
@@ -197,10 +197,38 @@ def test_an_epic_under_five_finished_stories_is_paced_by_the_project():
     assert throughput.pace(_members(4, 60), EPIC, TODAY)[0] == "project"
 
 
+def test_an_epic_settles_on_the_twenty_eighth_day_after_its_first_finish():
+    def _epic(first: int) -> list[fleet.Story]:
+        return [_finished(10 + index, day, parent=EPIC) for index, day in enumerate([first, 0, 0, 0, 0])]
+
+    assert throughput.pace(_epic(27), EPIC, TODAY)[::2] == ("project", False)
+    assert throughput.pace(_epic(28), EPIC, TODAY)[::2] == ("epic", True)
+
+
+def test_an_epic_whose_finishes_are_older_than_twelve_weeks_is_paced_by_the_project():
+    burst = [_finished(10 + index, 200, parent=EPIC) for index in range(5)]
+    project = [_finished(100 + day, day) for day in range(0, 84, 2)]
+
+    paced, samples, settled = throughput.pace([*burst, *project], EPIC, TODAY)
+
+    assert (paced, len(samples), settled) == ("project", 12, True)
+    assert round(sum(samples) / len(samples), 1) == 3.5
+
+
 def test_the_project_pace_is_its_last_twelve_weeks():
     stories = [_finished(number, 7 * number) for number in range(20)]
 
-    assert throughput.pace(stories, EPIC, TODAY) == ("project", [1] * 12)
+    assert throughput.pace(stories, EPIC, TODAY) == ("project", [1] * 12, True)
+
+
+def test_the_epic_pace_is_its_last_twelve_weeks():
+    members = [_finished(10 + week, 7 * week, parent=EPIC) for week in range(20)]
+
+    assert throughput.pace(members, EPIC, TODAY) == ("epic", [1] * 12, True)
+
+
+def test_a_project_under_four_weeks_old_has_not_settled():
+    assert throughput.pace([_finished(1, 0)], EPIC, TODAY) == ("project", [1], False)
 
 
 # remaining
@@ -245,8 +273,9 @@ def test_empty_weeks_reach_the_pessimistic_percentiles():
     assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 85: 2, 95: 3}
 
 
-def test_a_run_stops_counting_at_ten_years():
-    assert throughput.simulate(10_000, 0, [1], [1], runs=5) == {50: 520, 85: 520, 95: 520}
+def test_a_commitment_two_years_out_is_no_forecast():
+    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 85: 103, 95: 103}
+    assert throughput.simulate(104, 0, [1], [1], runs=5) is None
 
 
 def test_a_seed_makes_two_runs_identical():
@@ -272,6 +301,9 @@ def test_an_outlook_is_paced_by_the_project_before_the_epic_has_its_own():
         per_week=1.0,
         unsplit=0,
         split_size=1.0,
+        split_basis=None,
+        measured=0,
+        reason=None,
     )
 
 
@@ -284,15 +316,107 @@ def test_an_outlook_is_paced_by_the_epic_once_it_has_its_own():
     assert (found.pace, found.weeks, found.per_week, found.commitment_weeks) == ("epic", 5, 1.0, 1)
 
 
-def test_an_outlook_counts_an_unsplit_draft_by_the_splits_parked_features_had():
-    trees = []
-    for root in (1, 3, 5, 7, 9):
-        trees += [dataclasses.replace(_parked(root, root + 1), closed_at=_ago(root)), _finished(root + 1, root)]
-    read = _fleet(*trees, _open(20, parent=EPIC, body=DRAFT))
+def test_an_outlook_paces_an_epic_finished_long_ago_by_the_project():
+    burst = [_finished(10 + index, 200, parent=EPIC) for index in range(5)]
+    project = [_finished(100 + day, day) for day in range(0, 84, 2)]
+    read = _fleet(*burst, *project, *[_open(50 + index, parent=EPIC) for index in range(3)])
 
     found = throughput.outlook(read, EPIC, TODAY)
 
-    assert (found.left, found.unsplit, found.split_size) == (1, 1, 2.0)
+    assert (found.pace, found.weeks, found.per_week, found.commitment_weeks) == ("project", 12, 3.5, 1)
+
+
+def test_the_pace_is_the_average_week():
+    read = _fleet(_finished(1, 30), _open(2, parent=EPIC))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.weeks, found.per_week) == (5, 0.2)
+
+
+def test_one_story_finished_today_is_no_forecast():
+    read = _fleet(_finished(1, 0), *[_open(10 + index, parent=EPIC) for index in range(10)])
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks, found.pace) == (
+        10,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert (found.weeks, found.reason) == (1, throughput.THIN)
+
+
+def test_an_outlook_two_years_out_is_no_forecast():
+    history = [_finished(100 + week, 7 * week) for week in range(12)]
+    read = _fleet(*[_open(index, parent=EPIC) for index in range(1, 201)], *history)
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks, found.pace) == (
+        200,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert (found.weeks, found.per_week, found.reason) == (12, 1.0, throughput.FAR)
+
+
+def test_an_outlook_with_no_finish_in_twelve_weeks_is_no_forecast():
+    read = _fleet(_finished(1, 7 * 20), _open(2, parent=EPIC))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.commitment_weeks, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
+
+
+def _trees(count: int, size: int = 2, start: int = 100) -> list[fleet.Story]:
+    trees = []
+    for index in range(count):
+        root = start + 10 * index
+        kids = range(root + 1, root + size)
+        trees.append(dataclasses.replace(_parked(root, *kids), closed_at=_ago(index)))
+        trees += [_finished(kid, index) for kid in kids]
+    return trees
+
+
+def test_an_outlook_counts_an_unsplit_draft_by_the_splits_parked_features_had():
+    read = _fleet(*_trees(5), _open(20, parent=EPIC, body=DRAFT))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.left, found.unsplit, found.split_size, found.split_basis, found.measured) == (
+        1,
+        1,
+        2.0,
+        "measured",
+        5,
+    )
+
+
+def test_an_outlook_counts_an_unsplit_draft_as_the_largest_of_a_few_splits():
+    read = _fleet(*_trees(1, size=3), *_trees(1, start=200), _open(20, parent=EPIC, body=DRAFT))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.split_size, found.split_basis, found.measured) == (3.0, "largest", 2)
+
+
+def test_an_outlook_counts_an_unsplit_draft_as_one_story_before_any_split():
+    read = _fleet(_finished(1, 0), _open(20, parent=EPIC, body=DRAFT))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.split_size, found.split_basis, found.measured) == (1.0, "assumed", 0)
+
+
+def test_an_outlook_with_no_unsplit_draft_has_no_split_basis():
+    found = throughput.outlook(_fleet(*_trees(5), _open(20, parent=EPIC)), EPIC, TODAY)
+
+    assert (found.split_size, found.split_basis) == (1.0, None)
 
 
 def test_an_epic_with_nothing_left_has_no_forecast():
@@ -310,7 +434,14 @@ def test_an_epic_with_nothing_left_has_no_forecast():
 def test_an_outlook_with_no_finished_story_has_no_forecast():
     found = throughput.outlook(_fleet(_open(1, parent=EPIC)), EPIC, TODAY)
 
-    assert (found.left, found.commitment_weeks, found.pace, found.weeks, found.per_week) == (1, None, None, 0, 0.0)
+    assert (found.left, found.commitment_weeks, found.pace, found.weeks, found.per_week, found.reason) == (
+        1,
+        None,
+        None,
+        0,
+        0.0,
+        throughput.THIN,
+    )
 
 
 # rows
@@ -327,8 +458,15 @@ def _outlook(**changes) -> throughput.Outlook:
         per_week=1.5,
         unsplit=0,
         split_size=1.0,
+        split_basis=None,
+        measured=0,
+        reason=None,
     )
     return dataclasses.replace(base, **changes)
+
+
+def _none(reason: str) -> throughput.Outlook:
+    return _outlook(floor_weeks=None, commitment_weeks=None, worst_weeks=None, pace=None, reason=reason)
 
 
 def test_the_rows_give_each_line_in_weeks():
@@ -339,7 +477,7 @@ def test_the_rows_give_each_line_in_weeks():
         "  Commitment    4 weeks   85th percentile",
         "  Worst seen    6 weeks   95th percentile",
         "",
-        "  Paced by the whole project's last 12 weeks, a median of 1.5 stories a week.",
+        "  Paced by the whole project's last 12 weeks, an average of 1.5 stories a week.",
         "  That includes work outside this epic, so it leans early.",
     ]
 
@@ -347,23 +485,53 @@ def test_the_rows_give_each_line_in_weeks():
 def test_the_rows_say_an_epic_was_paced_by_its_own_weeks():
     lines = throughput.rows(_outlook(pace="epic", weeks=5, left=1, floor_weeks=1))
 
-    assert "  Paced by this epic's own 5 weeks, a median of 1.5 stories a week." in lines
+    assert "  Paced by this epic's own 5 weeks, an average of 1.5 stories a week." in lines
     assert "  1 piece left" in lines
     assert "  Floor         1 week    50th percentile" in lines
     assert not any("leans early" in line for line in lines)
 
 
-def test_the_rows_say_how_an_unsplit_draft_was_counted():
-    lines = throughput.rows(_outlook(unsplit=2, split_size=2.5))
+def test_the_rows_say_an_unsplit_draft_was_counted_as_the_measured_average():
+    lines = throughput.rows(_outlook(unsplit=2, split_size=2.4, split_basis="measured", measured=7))
 
-    assert lines[-1] == "  2 unsplit drafts counted as 2.5 stories each, the average a finished parked feature became."
+    assert lines[-1] == (
+        "  2 drafts not yet split, each counted as 2.4 stories, the average of 7 finished parked features."
+    )
+
+
+def test_the_rows_say_an_unsplit_draft_was_counted_as_the_largest_seen():
+    lines = throughput.rows(_outlook(unsplit=2, split_size=3.0, split_basis="largest", measured=2))
+
+    assert lines[-1] == (
+        "  2 drafts not yet split, each counted as 3 stories, the largest of 2 finished parked features."
+    )
+
+
+def test_the_rows_say_an_unsplit_draft_was_counted_as_one_story_by_assumption():
+    lines = throughput.rows(_outlook(unsplit=1, split_size=1.0, split_basis="assumed"))
+
+    assert lines[-1] == "  1 draft not yet split, counted as 1 story, since no parked feature has finished yet."
 
 
 def test_the_rows_say_so_when_nothing_is_left():
     assert throughput.rows(_outlook(left=0, floor_weeks=None, pace=None)) == ["  nothing left to forecast"]
 
 
-def test_the_rows_say_so_when_no_pace_was_measured():
-    found = _outlook(floor_weeks=None, commitment_weeks=None, worst_weeks=None, pace=None, weeks=0, per_week=0.0)
+def test_the_rows_say_so_when_the_history_is_too_short():
+    assert throughput.rows(_none(throughput.THIN)) == [
+        "  3 pieces left",
+        "",
+        "  Fewer than 4 weeks of finished stories, so there is no date range yet.",
+    ]
 
-    assert throughput.rows(found) == ["  3 pieces left, and no story finished in the weeks measured, so no forecast."]
+
+def test_the_rows_say_so_when_nothing_finished_in_the_weeks_measured():
+    assert throughput.rows(_none(throughput.IDLE))[-1] == (
+        "  No story finished in the last 12 weeks, so there is no date range."
+    )
+
+
+def test_the_rows_say_so_when_the_pace_would_take_over_two_years():
+    assert throughput.rows(_none(throughput.FAR))[-1] == (
+        "  The measured pace would take over two years, so there is no date range."
+    )

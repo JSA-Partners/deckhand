@@ -18,10 +18,14 @@ from deckhand import draft, fleet, log
 
 PERCENTILES = (50, 85, 95)
 ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
-PACED = 5  # an epic's finished stories below which its own weeks are noise, so the project's are used
-SETTLED = 4  # weeks since an epic's first finish below which its own pace has not settled
-LOOKBACK = 12  # weeks of the project's history, so a pace from long ago does not outvote this quarter's
-HORIZON = 520  # weeks, ten years, after which a run that has not finished stops counting
+PACED = 5  # an epic's finishes in its last LOOKBACK weeks below which its own weeks are noise
+SETTLED = 4  # weeks since the first finish counted below which a pace has not settled
+LOOKBACK = 12  # weeks of history drawn from, so a pace from long ago does not outvote this quarter's
+HORIZON = 104  # weeks, two years, at which a commitment says nothing a stakeholder can plan on
+
+THIN = "too little history"
+IDLE = "nothing finished in the weeks measured"
+FAR = "over two years"
 
 
 def _was_parked(story: fleet.Story) -> bool:
@@ -52,8 +56,13 @@ def splits(stories: list[fleet.Story]) -> list[int]:
     )
 
 
-def _sizes(measured: list[int]) -> list[int]:
-    return measured if len(measured) >= ROOTS else [max(measured, default=1)]
+def _sizes(measured: list[int]) -> tuple[str, list[int]]:
+    """How the split size was obtained, "measured", "largest" or "assumed", and the sizes to draw from."""
+    if len(measured) >= ROOTS:
+        return "measured", measured
+    if measured:
+        return "largest", [max(measured)]
+    return "assumed", [1]
 
 
 def _finished_on(stories: list[fleet.Story]) -> list[date]:
@@ -75,18 +84,23 @@ def weekly(stories: list[fleet.Story], today: date) -> list[int]:
     return counts[::-1]
 
 
-def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[str, list[int]]:
-    """Which history paces the epic, "epic" or "project", and its weekly counts.
+def _settled(stories: list[fleet.Story], today: date) -> bool:
+    done = _finished_on(stories)
+    return bool(done) and (today - min(done)).days >= 7 * SETTLED
 
-    The epic's own once it has `PACED` finished stories over `SETTLED` weeks, because the project's
-    count holds work outside the epic and would forecast it early; the project's last `LOOKBACK`
-    weeks before that.
+
+def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[str, list[int], bool]:
+    """Which history paces the epic, "epic" or "project", its last `LOOKBACK` weekly counts, and whether it settled.
+
+    The epic's own once it has `PACED` finished stories in those weeks and `SETTLED` weeks since its
+    first, because the project's count holds work outside the epic and would forecast it early; the
+    project's before that. Either pace is settled only `SETTLED` weeks after the first finish it counts.
     """
     mine = fleet.members(every, epic)
-    done = _finished_on(mine)
-    if len(done) >= PACED and (today - min(done)).days >= 7 * SETTLED:
-        return "epic", weekly(mine, today)
-    return "project", weekly(every, today)[-LOOKBACK:]
+    own = weekly(mine, today)[-LOOKBACK:]
+    if sum(own) >= PACED and _settled(mine, today):
+        return "epic", own, True
+    return "project", weekly(every, today)[-LOOKBACK:], _settled(every, today)
 
 
 def remaining(read: fleet.Fleet, epic: fleet.Key) -> tuple[int, int]:
@@ -110,7 +124,7 @@ def simulate(
 ) -> dict[int, int] | None:
     """The weeks to finish at `PERCENTILES`, each run drawing a week's count from `samples` until nothing is left.
 
-    None when nothing is left or no week in `samples` finished anything.
+    None when nothing is left, no week in `samples` finished anything, or the commitment reaches `HORIZON`.
     """
     if items + unsplit == 0 or not any(samples):
         return None
@@ -124,12 +138,13 @@ def simulate(
             weeks += 1
         taken.append(weeks)
     taken.sort()
-    return {p: _percentile(taken, p) for p in PERCENTILES}
+    found = {p: _percentile(taken, p) for p in PERCENTILES}
+    return None if found[85] >= HORIZON else found
 
 
 @dataclass(frozen=True)
 class Outlook:
-    """One epic's forecast in weeks, and the history it was drawn from; the weeks are None without one."""
+    """One epic's forecast in weeks and the history it was drawn from; without one, None weeks and a `reason`."""
 
     left: int
     floor_weeks: int | None
@@ -140,15 +155,22 @@ class Outlook:
     per_week: float
     unsplit: int
     split_size: float
+    split_basis: str | None
+    measured: int
+    reason: str | None
 
 
 def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> Outlook:
     """The forecast over what is left of `epic`, drawn from every finished story, archived ones too."""
     every = [*read.stories, *read.archived]
     items, unsplit = remaining(read, epic)
-    paced, samples = pace(every, epic, today)
-    sizes = _sizes(splits(every))
-    found = simulate(items, unsplit, samples, sizes, seed=seed)
+    paced, samples, settled = pace(every, epic, today)
+    measured = splits(every)
+    basis, sizes = _sizes(measured)
+    found = simulate(items, unsplit, samples, sizes, seed=seed) if settled else None
+    reason = None
+    if found is None and items + unsplit:
+        reason = THIN if not settled else IDLE if not any(samples) else FAR
     return Outlook(
         left=items + unsplit,
         floor_weeks=None if found is None else found[50],
@@ -156,10 +178,20 @@ def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> O
         worst_weeks=None if found is None else found[95],
         pace=None if found is None else paced,
         weeks=len(samples),
-        per_week=float(statistics.median(samples)) if samples else 0.0,
+        per_week=round(statistics.fmean(samples), 2) if samples else 0.0,
         unsplit=unsplit,
         split_size=statistics.fmean(sizes) if unsplit else 1.0,
+        split_basis=basis if unsplit else None,
+        measured=len(measured),
+        reason=reason,
     )
+
+
+_WHY = {
+    THIN: f"Fewer than {SETTLED} weeks of finished stories, so there is no date range yet.",
+    IDLE: f"No story finished in the last {LOOKBACK} weeks, so there is no date range.",
+    FAR: "The measured pace would take over two years, so there is no date range.",
+}
 
 
 def _plural(count: int, word: str) -> str:
@@ -177,7 +209,7 @@ def rows(found: Outlook) -> list[str]:
         return ["  nothing left to forecast"]
     header = f"  {_plural(found.left, 'piece')} left"
     if found.floor_weeks is None or found.commitment_weeks is None or found.worst_weeks is None:
-        return [f"{header}, and no story finished in the weeks measured, so no forecast."]
+        return [header, "", f"  {_WHY[found.reason or IDLE]}"]
     lines = [
         header,
         "",
@@ -186,15 +218,23 @@ def rows(found: Outlook) -> list[str]:
         _row("Worst seen", found.worst_weeks, "95th percentile"),
         "",
     ]
-    rate = f"a median of {found.per_week:.1f} stories a week."
+    rate = f"an average of {found.per_week:.1f} stories a week."
     if found.pace == "epic":
         lines.append(f"  Paced by this epic's own {_plural(found.weeks, 'week')}, {rate}")
     else:
         lines.append(f"  Paced by the whole project's last {_plural(found.weeks, 'week')}, {rate}")
         lines.append("  That includes work outside this epic, so it leans early.")
     if found.unsplit:
-        drafts = _plural(found.unsplit, "unsplit draft")
-        lines.append(
-            f"  {drafts} counted as {found.split_size:.1f} stories each, the average a finished parked feature became."
-        )
+        lines.append(_drafts(found))
     return lines
+
+
+def _drafts(found: Outlook) -> str:
+    drafts = f"  {_plural(found.unsplit, 'draft')} not yet split, {'each ' if found.unsplit > 1 else ''}counted as"
+    parked = _plural(found.measured, "finished parked feature")
+    if found.split_basis == "measured":
+        return f"{drafts} {found.split_size:.1f} stories, the average of {parked}."
+    if found.split_basis == "largest":
+        size = int(found.split_size)
+        return f"{drafts} {size} {'story' if size == 1 else 'stories'}, the largest of {parked}."
+    return f"{drafts} 1 story, since no parked feature has finished yet."

@@ -87,3 +87,16 @@ def test_the_backlog_leaves_out_an_issue_deckhand_does_not_own():
     read = fleet.Fleet(stories=[epic, found[1], found[2], foreign], blockers={}, missing=[])
 
     assert sorted(row.story.number for row in order.backlog(read)) == [257, 258]
+
+
+def test_the_next_line_names_a_blocker_deckhand_does_not_own_in_backlog():
+    """A foreign Backlog issue is not in the order table, so the Next line is the only place it shows."""
+    found = {story.number: story for story in fleet.stories(_nodes())}
+    foreign = replace(found[268], status="Backlog", issue=replace(found[268].issue, labels=()))
+    read = fleet.Fleet(
+        stories=[found[257], foreign],
+        blockers={found[257].key: [("acme/widgets", 268, "Domains")], foreign.key: []},
+        missing=[],
+    )
+
+    assert order.next_line(read, []) == "Next per repository: widgets: #268 is Backlog, unblocking 1 story"

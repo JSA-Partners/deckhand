@@ -332,6 +332,9 @@ elif argv and argv[0] == "api":
         print("gh: Not Found (HTTP 404)", file=sys.stderr)
         sys.exit(1)
     if "/issues/" in path:
+        if path.rpartition("/")[2] == os.environ.get("GH_ISSUE_ID_FAILS"):
+            print("gh: Not Found (HTTP 404)", file=sys.stderr)
+            sys.exit(1)
         respond('{"id":5099965156,"number":246,"title":"T","state":"open"}')
     if path == f"repos/{repo}":
         respond(fixture("GH_REPO_SETTINGS_FILE", "repo-settings.json"))

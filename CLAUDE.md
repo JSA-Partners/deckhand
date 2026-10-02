@@ -102,8 +102,7 @@ install reaches them when the next fix or feature does.
   manifests and the install commands carry them
 - A blocker is `owner/name#M`; a bare number is this repository
 - A parked feature is written in place and becomes the story; only finished work closes an issue
-- A parked feature is a draft that becomes a story; an epic is the issue stories roll up to, carries
-  the `epic` label, and is never a story
+- An epic is the issue stories roll up to, carries the `epic` label, and is never a story
 - The build happens in the story's worktree, which `start` makes and `next` names; a branch is
   never checked out by hand, and the clone stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec

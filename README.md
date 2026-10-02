@@ -166,12 +166,17 @@ the epic by itself, so the captain lists it under Anomalies with the command tha
 `epic forecast` says how many weeks the epic's open stories will take, and gives dates with `--json`.
 It counts how many stories finished each week and draws whole weeks from those counts, the method
 of Daniel Vacanti's "When Will It Be Done?". A week with nothing finished counts as zero, so client
-work, weekends and stalls are already in the numbers. The epic is paced by its own weeks once it
-has five finished stories and four weeks since the first. Before that it is paced by the whole
-project's last twelve weeks, which include work outside the epic. A draft with no stories listed
-yet counts as several, as many as finished parked features became. The floor is the 50th
-percentile and the commitment the 85th. A story closed as not planned or as a duplicate is not a
-piece.
+work, weekends and stalls are already in the numbers. Both paces draw from the last twelve weeks,
+or fewer when the history is shorter. The epic is paced by its own weeks once five of its stories
+finished in them and four weeks have passed since its first. Before that it is paced by the whole
+project, which includes work outside the epic. A draft with no stories listed yet counts as the
+average a finished parked feature became once five have finished, as the largest seen before that,
+and as one story before any has. The floor is the 50th percentile and the commitment the 85th.
+
+There is no date range with fewer than four weeks of finished stories, with nothing finished in the
+weeks measured, or when the commitment would be over two years out, and the forecast says which.
+A piece is one issue, so a draft not yet split is one piece even though the forecast counts it as
+several. A story closed as not planned or as a duplicate is not a piece.
 
 | Command | What it does |
 | --- | --- |

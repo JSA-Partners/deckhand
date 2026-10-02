@@ -122,7 +122,7 @@ def _head(read: Fleet, repo: str) -> str | None:
     A blocker that is not in Backlog is nowhere in the order table, so a repository whose whole
     Backlog waits has nothing to show without it.
     """
-    queued = {story.key for story in read.stories if story.status == columns.BACKLOG}
+    queued = {story.key for story in read.stories if story.status == columns.BACKLOG and touched(story)}
     seen: set[Key] = set()
     roots: set[Key] = set()
     stack = [(w, n) for key, holds in read.blockers.items() if key[0] == repo and key in queued for w, n, _ in holds]

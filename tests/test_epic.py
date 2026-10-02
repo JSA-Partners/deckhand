@@ -151,9 +151,11 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, capsys)
         "worst": "2027-01-08",
         "pace": "project",
         "weeks": 5,
-        "per_week": 0.0,
+        "per_week": 0.2,
         "unsplit": 0,
         "split_size": 1.0,
+        "split_basis": None,
+        "reason": None,
     }
 
 
@@ -169,7 +171,7 @@ def test_forecast_prints_the_block_for_one_epic(board_env, capsys):
         "  Commitment    9 weeks   85th percentile",
         "  Worst seen   14 weeks   95th percentile",
         "",
-        "  Paced by the whole project's last 5 weeks, a median of 0.0 stories a week.",
+        "  Paced by the whole project's last 5 weeks, an average of 0.2 stories a week.",
         "  That includes work outside this epic, so it leans early.",
     ]
 
@@ -180,11 +182,75 @@ def test_forecast_refuses_an_issue_that_is_not_an_epic_on_the_board(board_env, c
     assert "#304 is not an epic on the board" in capsys.readouterr().err
 
 
-def test_a_story_closed_as_not_planned_or_duplicate_is_not_a_piece(board_env, capsys):
-    assert cli.main(["epic", "list", "--json"]) == 0
+def test_a_dropped_story_is_neither_a_piece_nor_left_to_forecast(board_env, capsys):
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["pieces"] == 2
 
-    [row] = json.loads(capsys.readouterr().out)
-    assert (row["pieces"], row["done"], row["drafts"]) == (2, 1, 0)
+    assert cli.main(["epic", "forecast", "300"]) == 0
+    assert "  1 piece left" in capsys.readouterr().out.splitlines()
+
+
+def _member(number: int, repo: str = REPO) -> dict:
+    return {
+        "id": f"I_{number}",
+        "isArchived": False,
+        "content": {
+            "number": number,
+            "title": "More",
+            "url": f"https://github.com/{repo}/issues/{number}",
+            "state": "OPEN",
+            "closedAt": None,
+            "body": "",
+            "repository": {"nameWithOwner": repo},
+            "labels": {"nodes": [{"name": "deckhand"}]},
+            "parent": {"number": 300, "repository": {"nameWithOwner": REPO}},
+            "comments": {"nodes": []},
+        },
+        "fieldValues": {"nodes": [{"name": "Backlog", "field": {"name": "Status"}}]},
+    }
+
+
+def _with_members(tmp_path, monkeypatch, *nodes: dict) -> None:
+    items = json.loads((FIXTURES / "epic-items.json").read_text(encoding="utf-8"))
+    items["data"]["organization"]["projectV2"]["items"]["nodes"].extend(nodes)
+    path = tmp_path / "more-items.json"
+    path.write_text(json.dumps(items), encoding="utf-8")
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(path))
+
+
+def test_forecast_counts_a_member_in_another_repository(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, _member(7, repo="acme/gadgets"))
+
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert (found["pieces"], found["done"], found["pace"]) == (3, 1, "project")
+    assert found["commitment"] > "2026-12-04"
+
+    assert cli.main(["epic", "forecast", "300"]) == 0
+    assert "  2 pieces left" in capsys.readouterr().out.splitlines()
+
+
+def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, *[_member(400 + index) for index in range(30)])
+
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert (found["floor"], found["commitment"], found["worst"], found["pace"]) == (None, None, None, None)
+    assert (found["pieces"], found["per_week"], found["reason"]) == (32, 0.2, "over two years")
+
+    assert cli.main(["epic", "forecast", "300"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "## Forecast: Permission rework",
+        "  31 pieces left",
+        "",
+        "  The measured pace would take over two years, so there is no date range.",
+    ]
+
+
+def test_forecast_finds_an_epic_named_in_another_case(board_env, capsys):
+    assert cli.main(["epic", "forecast", "Acme/Widgets#300", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["epic"] == "acme/widgets#300"
 
 
 def _in_epic(monkeypatch, *numbers: int) -> None:
@@ -228,6 +294,41 @@ def test_add_skips_a_story_already_in_the_epic(board_env, gh_calls, monkeypatch,
     assert cli.main(["epic", "add", "300", "302"]) == 0
 
     assert "#302 already in #300" in capsys.readouterr().out
+    assert not any("POST" in call for call in gh_calls())
+
+
+def test_add_names_the_epic_a_story_moved_from(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    parent = {"number": 400, "repository_url": f"https://api.github.com/repos/{REPO}"}
+    elsewhere = {"number": 12, "repository_url": "https://api.github.com/repos/acme/gadgets"}
+    monkeypatch.setenv("GH_PARENT", json.dumps({"302": parent, "9": elsewhere}))
+
+    assert cli.main(["epic", "add", "300", "302", "acme/gadgets#9"]) == 0
+
+    assert len([call for call in gh_calls() if "POST" in call]) == 2
+    assert capsys.readouterr().out.splitlines() == [
+        "#302 moved from #400 to #300",
+        "acme/gadgets#9 moved from acme/gadgets#12 to #300",
+    ]
+
+
+def test_add_refuses_a_story_the_api_cannot_find_before_any_write(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    monkeypatch.setenv("GH_ISSUE_ID_FAILS", "9")
+
+    assert cli.main(["epic", "add", "300", "302", "acme/gadgets#9"]) == 1
+
+    assert "Not Found" in capsys.readouterr().err
+    assert not any("POST" in call for call in gh_calls())
+
+
+def test_add_finds_an_epic_named_in_another_case(board_env, gh_calls, monkeypatch, capsys):
+    _issue_file(board_env, monkeypatch, 300, "epic")
+    _in_epic(monkeypatch, 302)
+
+    assert cli.main(["epic", "add", "Acme/Widgets#300", "302"]) == 0
+
+    assert capsys.readouterr().out.splitlines() == ["#302 already in #300"]
     assert not any("POST" in call for call in gh_calls())
 
 
