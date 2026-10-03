@@ -329,7 +329,7 @@ elif argv and argv[0] == "api":
         held = json.loads(os.environ.get("GH_PARENT", "{}")).get(parts[parts.index("issues") + 1])
         if held:
             respond(json.dumps(held))
-        print("gh: Not Found (HTTP 404)", file=sys.stderr)
+        print("gh: No parent issue found (HTTP 404)", file=sys.stderr)
         sys.exit(1)
     if "/issues/" in path:
         if path.rpartition("/")[2] == os.environ.get("GH_ISSUE_ID_FAILS"):

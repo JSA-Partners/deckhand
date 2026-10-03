@@ -214,7 +214,7 @@ def parent(repo: str, number: int) -> tuple[str, int] | None:
         held = gh.json_out("api", f"repos/{repo}/issues/{number}/parent")
     except gh.GhError as error:
         # GitHub answers an issue with no parent with a 404, unlike a network, auth, or rate limit failure.
-        if "not found" in str(error).lower():
+        if "(HTTP 404)" in str(error):
             return None
         raise
     return str(held.get("repository_url") or "").rpartition("/repos/")[2] or repo, int(held["number"])
