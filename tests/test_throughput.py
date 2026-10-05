@@ -516,6 +516,96 @@ def test_an_outlook_with_no_finished_story_has_no_forecast():
     )
 
 
+# early estimate
+
+OTHER = "OPT_OTHER"
+
+
+def _feature_work() -> list[fleet.Story]:
+    """Another feature's finishes: one 28 days ago starts the weeks, and the four full ones since count 1, 1, 1, 2."""
+    return [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([28, 21, 14, 7, 0, 0])]
+
+
+def _early(found: throughput.Outlook) -> tuple:
+    return found.early_floor_weeks, found.early_commitment_weeks, found.early_weeks, found.early_per_week
+
+
+def test_a_feature_a_week_old_gets_an_early_estimate_from_the_pace_of_all_feature_work():
+    read = _fleet(_started(1, 7), _open(2, feature=FEATURE), *_feature_work())
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert (found.reason, found.floor_weeks, found.commitment_weeks) == (throughput.THIN, None, None)
+    assert _early(found) == (2, 2, 4, 1.25)
+
+
+def test_a_feature_with_too_few_finishes_gets_an_early_estimate():
+    read = _fleet(*_members(2, 28), _open(2, feature=FEATURE), *_feature_work())
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert found.reason == throughput.FEW
+    assert _early(found) == (1, 1, 4, 1.5)
+
+
+def test_a_feature_with_its_own_range_gets_no_early_estimate():
+    read = _fleet(_open(1, feature=FEATURE), *_varied_members(), *_feature_work())
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert found.commitment_weeks is not None
+    assert _early(found) == (None, None, 0, 0.0)
+
+
+def test_no_feature_work_at_all_gives_no_early_estimate():
+    others = [_finished(500 + day, day) for day in range(60)]
+    read = _fleet(_started(1, 7), *others)
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert found.reason == throughput.THIN
+    assert _early(found) == (None, None, 0, 0.0)
+
+
+def test_feature_work_that_has_not_settled_gives_no_early_estimate():
+    recent = [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([20, 13, 6, 6, 0, 0])]
+    read = _fleet(_started(1, 7), *recent)
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert _early(found) == (None, None, 0, 0.0)
+
+
+def test_the_early_estimate_is_paced_by_feature_work_alone():
+    others = [_finished(500 + day, day) for day in range(60)]
+    read = _fleet(_started(1, 7), _open(2, feature=FEATURE), *_feature_work(), *others)
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert _early(found) == (2, 2, 4, 1.25)
+
+
+def test_the_early_estimate_counts_an_unsplit_draft_by_the_splits_parked_features_had():
+    settled = throughput.outlook(_fleet(*_trees(5), _open(20, feature=FEATURE), *_feature_work()), FEATURE, TODAY)
+    unsplit = throughput.outlook(
+        _fleet(*_trees(5), _open(20, feature=FEATURE, body=DRAFT), *_feature_work()), FEATURE, TODAY
+    )
+
+    assert (settled.unsplit, unsplit.unsplit, unsplit.split_size) == (0, 1, 2.0)
+    assert (settled.early_floor_weeks, settled.early_commitment_weeks) == (1, 1)
+    assert (unsplit.early_floor_weeks, unsplit.early_commitment_weeks) == (2, 2)
+
+
+def test_the_board_outlook_has_no_early_estimate():
+    steadying = [_finished(300 + index, day) for index, day in enumerate([21, 14, 7])]
+    read = _fleet(_open(1, feature=FEATURE), *_feature_work(), *steadying)
+
+    found = throughput.board(read, TODAY)
+
+    assert found.reason == throughput.FLAT
+    assert _early(found) == (None, None, 0, 0.0)
+
+
 # rows
 
 
@@ -610,6 +700,28 @@ def test_the_rows_say_so_when_the_weekly_pace_has_not_varied():
     assert throughput.rows(_none(throughput.FLAT))[-1] == (
         "  This feature's weekly pace has not varied yet, so a date range would be falsely precise."
     )
+
+
+def test_the_rows_give_the_early_estimate_after_the_reason():
+    found = _none(throughput.THIN)
+    found = dataclasses.replace(
+        found, early_floor_weeks=1, early_commitment_weeks=3, early_weeks=8, early_per_week=1.25
+    )
+
+    assert throughput.rows(found) == [
+        "  3 pieces left",
+        "",
+        "  Work on this feature began fewer than 4 weeks ago, so there is no date range yet.",
+        "  Early estimate   likely by 3 weeks, possibly 1 week, from the pace of all feature work "
+        "(8 weeks, 1.2 stories a week).",
+        "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
+    ]
+
+
+def test_the_rows_give_no_early_estimate_beside_a_range():
+    found = _outlook(early_floor_weeks=1, early_commitment_weeks=3, early_weeks=8, early_per_week=1.25)
+
+    assert not any("Early estimate" in line for line in throughput.rows(found))
 
 
 def test_the_rows_say_a_worst_case_past_two_years_is_beyond_them():

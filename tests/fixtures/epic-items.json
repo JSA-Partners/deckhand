@@ -343,6 +343,294 @@
                   }
                 ]
               }
+            },
+            {
+              "id": "I_311",
+              "isArchived": true,
+              "content": {
+                "number": 311,
+                "title": "Billing piece 1",
+                "url": "https://github.com/acme/widgets/issues/311",
+                "state": "CLOSED",
+                "closedAt": "2026-09-10T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_312",
+              "isArchived": true,
+              "content": {
+                "number": 312,
+                "title": "Billing piece 2",
+                "url": "https://github.com/acme/widgets/issues/312",
+                "state": "CLOSED",
+                "closedAt": "2026-09-10T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_313",
+              "isArchived": true,
+              "content": {
+                "number": 313,
+                "title": "Billing piece 3",
+                "url": "https://github.com/acme/widgets/issues/313",
+                "state": "CLOSED",
+                "closedAt": "2026-09-17T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_314",
+              "isArchived": true,
+              "content": {
+                "number": 314,
+                "title": "Billing piece 4",
+                "url": "https://github.com/acme/widgets/issues/314",
+                "state": "CLOSED",
+                "closedAt": "2026-09-24T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_315",
+              "isArchived": true,
+              "content": {
+                "number": 315,
+                "title": "Billing piece 5",
+                "url": "https://github.com/acme/widgets/issues/315",
+                "state": "CLOSED",
+                "closedAt": "2026-09-24T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_316",
+              "isArchived": true,
+              "content": {
+                "number": 316,
+                "title": "Billing piece 6",
+                "url": "https://github.com/acme/widgets/issues/316",
+                "state": "CLOSED",
+                "closedAt": "2026-10-01T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
             }
           ]
         }

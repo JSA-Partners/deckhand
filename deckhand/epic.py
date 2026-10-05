@@ -207,6 +207,10 @@ def _dated(found: throughput.Outlook) -> dict:
         "split_size": round(found.split_size, 2),
         "split_basis": found.split_basis,
         "reason": found.reason,
+        "early_floor": _on(found.early_floor_weeks),
+        "early_commitment": _on(found.early_commitment_weeks),
+        "early_weeks": found.early_weeks,
+        "early_per_week": found.early_per_week,
     }
 
 

@@ -130,6 +130,11 @@ def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int]
     return _paced(fleet.members(every, feature), today)
 
 
+def featured(every: list[fleet.Story]) -> list[fleet.Story]:
+    """Every story in any feature: one in flight alone gets all of that pace, so two side by side lean early."""
+    return [story for story in every if story.feature is not None]
+
+
 def _left(stories: list[fleet.Story]) -> tuple[int, int]:
     left = [story for story in stories if not story.closed]
     unsplit = sum(1 for story in left if draft.is_draft(story.issue.body) and not draft.read(story.issue.body)[1])
@@ -192,6 +197,10 @@ class Outlook:
     split_basis: str | None
     measured: int
     reason: str | None
+    early_floor_weeks: int | None = None
+    early_commitment_weeks: int | None = None
+    early_weeks: int = 0
+    early_per_week: float = 0.0
 
 
 def _short(samples: list[int], settled: bool) -> str | None:
@@ -206,9 +215,12 @@ def _short(samples: list[int], settled: bool) -> str | None:
 
 
 def outlook(read: fleet.Fleet, feature: str, today: date, seed: int = 0) -> Outlook:
-    """The forecast over what is left of `feature`, drawn from its own stories, archived ones too."""
+    """The forecast over what is left of `feature`, drawn from its own stories, archived ones too.
+
+    Before its own stories can pace it, the pace of all feature work gives an early estimate instead.
+    """
     every = [*read.stories, *read.archived]
-    return _outlook(every, fleet.members(every, feature), today, seed)
+    return _outlook(every, fleet.members(every, feature), today, seed, prior=featured(every))
 
 
 def board(read: fleet.Fleet, today: date, seed: int = 0) -> Outlook:
@@ -217,7 +229,20 @@ def board(read: fleet.Fleet, today: date, seed: int = 0) -> Outlook:
     return _outlook(every, _held(every), today, seed)
 
 
-def _outlook(every: list[fleet.Story], stories: list[fleet.Story], today: date, seed: int) -> Outlook:
+def _early(
+    items: int, unsplit: int, sizes: list[int], prior: list[fleet.Story], today: date, seed: int
+) -> tuple[dict[int, int | None] | None, list[int]]:
+    """The weeks drawn from `prior` instead, and the weekly counts drawn from, when `prior` can pace a forecast."""
+    samples, settled = _paced(prior, today)
+    if _short(samples, settled):
+        return None, []
+    found = simulate(items, unsplit, samples, sizes, seed=seed)
+    return found, samples if found else []
+
+
+def _outlook(
+    every: list[fleet.Story], stories: list[fleet.Story], today: date, seed: int, prior: list[fleet.Story] | None = None
+) -> Outlook:
     items, unsplit = _left(stories)
     samples, settled = _paced(stories, today)
     measured = splits(every)
@@ -225,6 +250,9 @@ def _outlook(every: list[fleet.Story], stories: list[fleet.Story], today: date, 
     short = _short(samples, settled)
     found = None if short else simulate(items, unsplit, samples, sizes, seed=seed)
     reason = None if found is not None or not items + unsplit else short or FAR
+    early, early_samples = None, []
+    if reason in (THIN, FEW, FLAT):
+        early, early_samples = _early(items, unsplit, sizes, prior or [], today, seed)
     return Outlook(
         left=items + unsplit,
         floor_weeks=None if found is None else found[FLOOR],
@@ -237,6 +265,10 @@ def _outlook(every: list[fleet.Story], stories: list[fleet.Story], today: date, 
         split_basis=basis if unsplit else None,
         measured=len(measured),
         reason=reason,
+        early_floor_weeks=None if early is None else early[FLOOR],
+        early_commitment_weeks=None if early is None else early[COMMITMENT],
+        early_weeks=len(early_samples),
+        early_per_week=round(statistics.fmean(early_samples), 2) if early_samples else 0.0,
     )
 
 
@@ -265,7 +297,7 @@ def rows(found: Outlook) -> list[str]:
         return ["  nothing left to forecast"]
     header = f"  {plural(found.left, 'piece')} left"
     if found.floor_weeks is None or found.commitment_weeks is None:
-        return [header, "", f"  {_WHY[found.reason or IDLE]}"]
+        return [header, "", f"  {_WHY[found.reason or IDLE]}", *early(found)]
     worst = (
         f"  {'Worst case':<12}beyond two years"
         if found.worst_weeks is None
@@ -284,6 +316,19 @@ def rows(found: Outlook) -> list[str]:
     if found.unsplit:
         lines.append(drafts(found))
     return lines
+
+
+def early(found: Outlook) -> list[str]:
+    """The early estimate as two lines, or none when the feature has no estimate from the pace of all feature work."""
+    if found.early_floor_weeks is None or found.early_commitment_weeks is None:
+        return []
+    likely = plural(found.early_commitment_weeks, "week")
+    possibly = plural(found.early_floor_weeks, "week")
+    paced = f"{plural(found.early_weeks, 'week')}, {found.early_per_week:.1f} stories a week"
+    return [
+        f"  Early estimate   likely by {likely}, possibly {possibly}, from the pace of all feature work ({paced}).",
+        "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
+    ]
 
 
 def drafts(found: Outlook) -> str:

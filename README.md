@@ -193,7 +193,10 @@ forecast a feature gets met its commitment 89 percent of the time, and 87 percen
 There is no date range until four weeks have passed since the feature's work began and five of its
 stories have finished in the weeks measured, nor when every week measured finished the same number,
 nor when the commitment would be over two years out, and the forecast says which. A worst case
-past two years reads as beyond two years.
+past two years reads as beyond two years. Until then the forecast gives an early estimate drawn the
+same way from the weekly finishes of every story in any feature, once that pace has settled. It is
+not a commitment: a feature in flight alone gets all of that pace, so the estimate leans early when
+two features run side by side.
 
 | Command | What it does |
 | --- | --- |
