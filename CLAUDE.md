@@ -95,9 +95,12 @@ install reaches them when the next fix or feature does.
 - A status is set only by a step's `apply`, never by prose
 - A step is reached through `next` and nowhere else; nothing a person reads names a step command
 - Nothing a person writes on GitHub is read; every decision comes from the session
+- The Feature field's options, their descriptions and their order are the one thing a person sets
+  on GitHub that deckhand reads
 - The log is written and never decided from: the column says where a story is, the `deckhand` label
   says whose it is, and a git ref says which commit the review passed. Reading prose to print prose
   stays fine
+- The timestamps of log entries may be measured for a forecast, which prints and decides nothing
 - Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
 - Do not hardcode organization, project, or repository values in code or tests; only the plugin
   manifests and the install commands carry them

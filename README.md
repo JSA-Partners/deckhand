@@ -143,7 +143,7 @@ Ask it for a forecast and it says in weeks when everything left on the board is 
 from how many stories the board finished each week, the way a feature is forecast below. The method
 was chosen on a short history, so it is worth checking again as the history grows.
 
-### Epics
+### Features
 
 A feature is an option of the project's single-select Feature field, never an issue, so the board
 holds only units of work and a feature spans every repository of the project. The option's name is
@@ -158,7 +158,8 @@ deckhand epic forecast "Let guests into a collection"
 ```
 
 `epic open` creates the Feature field the first time and adds each later feature at the end. A
-feature is named by its full name, by the start of one name alone, in any case, or by its option id.
+feature is named by its option id, by its name in any case and spacing, or by the start of one name
+alone. A name that matches two features refuses and lists each with its option id.
 
 To reorder the features, drag the options in the project's settings for the Feature field. Deleting
 an option clears that feature from every story that held it.
@@ -169,25 +170,30 @@ the feature by itself, so the captain lists it under Anomalies with the command 
 `epic add` refuses a story that is off the board, not a deckhand story, or closed as not planned or
 as a duplicate, and writes nothing until every one passes. A story already in another feature moves.
 
-`epic forecast` says how many weeks the feature's open stories will take, and gives dates with `--json`.
-It counts how many of the feature's own stories finished each week and draws whole weeks from those
-counts, the method of Daniel Vacanti's "When Will It Be Done?". A week with nothing finished counts
-as zero, so client work, weekends and stalls are already in the numbers. Each simulated run first
-resamples the measured weeks, so a short history gives a wider range, and a resample with no
-finished week is drawn again. The weeks start when the first of the feature's stories started, a first week that began
-partway through is left out, and the forecast draws from the last twelve full weeks. A draft with no stories listed yet counts as the
-average a finished parked feature became once five have finished, as the largest seen before that,
-and as one story before any has. The floor is the 50th percentile, the commitment the 90th and the
-worst case the 99th. On this project's history the commitment was met 86 percent of the time. In
-simulated steady work, the first forecast a feature gets met its commitment 89 percent of the time,
-and 87 percent in the worst case.
+`epic forecast` says how many weeks the feature's open stories will take, and with `--json` gives
+dates and the day the feature's work began. It counts how many of the feature's own stories finished
+each week and draws whole weeks from those counts, the method of Daniel Vacanti's "When Will It Be
+Done?". A week with nothing finished counts as zero, so client work, weekends and stalls are
+already in the numbers.
+
+Each simulated run first resamples the measured weeks, so a short history gives a wider range, and
+a resample with no finished week is drawn again. The weeks start when the first of the feature's
+stories started, a first week that began partway through is left out, and the forecast draws from
+the last twelve full weeks.
+
+A draft with no stories listed yet counts as the average a finished parked feature became once five
+have finished, as the largest seen before that, and as one story before any has. A piece is one
+issue, so a draft not yet split is one piece even though the forecast counts it as several. A story
+closed as not planned or as a duplicate is not a piece.
+
+The floor is the 50th percentile, the commitment the 90th and the worst case the 99th. On a real
+board's history the commitment was met 86 percent of the time. In simulated steady work, the first
+forecast a feature gets met its commitment 89 percent of the time, and 87 percent in the worst case.
 
 There is no date range until four weeks have passed since the feature's work began and five of its
 stories have finished in the weeks measured, nor when every week measured finished the same number,
 nor when the commitment would be over two years out, and the forecast says which. A worst case
 past two years reads as beyond two years.
-A piece is one issue, so a draft not yet split is one piece even though the forecast counts it as
-several. A story closed as not planned or as a duplicate is not a piece.
 
 | Command | What it does |
 | --- | --- |
