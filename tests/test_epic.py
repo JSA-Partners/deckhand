@@ -697,3 +697,98 @@ def test_forecast_reads_a_finished_feature_the_board_archived(board_env, monkeyp
     found = json.loads(capsys.readouterr().out)
     assert (found["closed"], found["pieces"], found["done"]) == (True, 2, 2)
     assert (found["floor"], found["commitment"], found["worst"]) == (None, None, None)
+
+
+# close
+
+
+def test_close_removes_the_option_and_resends_every_other_one_by_id(board_env, gh_calls, monkeypatch, capsys):
+    _archived_and_closed(board_env, monkeypatch)
+
+    assert cli.main(["epic", "close", "Permission rework"]) == 0
+
+    (updated,) = [call for call in gh_calls() if "updateProjectV2Field(" in call]
+    assert _payload(updated)["variables"] == {"field": "PVTSSF_FEATURE", "options": [EXISTING[0], EXISTING[2]]}
+    assert _writes(gh_calls()) == [updated]
+    assert capsys.readouterr().out.splitlines() == [
+        "Closed Permission rework: removed from the Feature field. 2 finished stories no longer carry it."
+    ]
+
+
+def test_close_removes_a_feature_nothing_ever_joined(board_env, gh_calls, capsys):
+    assert cli.main(["epic", "close", "Permission audit"]) == 0
+
+    (updated,) = [call for call in gh_calls() if "updateProjectV2Field(" in call]
+    assert _payload(updated)["variables"] == {"field": "PVTSSF_FEATURE", "options": [EXISTING[0], EXISTING[1]]}
+    assert _writes(gh_calls()) == [updated]
+    assert capsys.readouterr().out.splitlines() == [
+        "Closed Permission audit: removed from the Feature field. Nothing carried it."
+    ]
+
+
+def test_close_says_one_finished_story_carried_it(board_env, gh_calls, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, _member(320, closed_at="2026-09-20T12:00:00Z", feature="OPT_AUDIT"))
+
+    assert cli.main(["epic", "close", "Permission audit"]) == 0
+
+    assert len(_writes(gh_calls())) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Closed Permission audit: removed from the Feature field. 1 finished story no longer carries it."
+    ]
+
+
+def test_close_reads_the_field_back_after_the_write(board_env, gh_calls, monkeypatch):
+    _archived_and_closed(board_env, monkeypatch)
+
+    assert cli.main(["epic", "close", "Permission rework"]) == 0
+
+    calls = gh_calls()
+    written = next(index for index, call in enumerate(calls) if "updateProjectV2Field(" in call)
+    assert any("fields(first" in call for call in calls[written + 1 :])
+
+
+def test_close_refuses_loudly_when_the_write_dropped_another_option(board_env, gh_calls, monkeypatch, capsys):
+    _options_file(board_env, monkeypatch, [EXISTING[0]], env="GH_PROJECT_FIELDS_WRITTEN_FILE")
+
+    assert cli.main(["epic", "close", "Permission audit"]) == 1
+
+    err = capsys.readouterr().err
+    assert "the write dropped Permission rework (OPT_PERMISSION), and every story that held one lost its feature" in err
+    assert len(_writes(gh_calls())) == 1
+
+
+def test_close_refuses_a_feature_with_open_pieces_and_names_them(board_env, gh_calls, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, _member(9, repo="acme/gadgets"))
+
+    assert cli.main(["epic", "close", "Permission rework"]) == 1
+
+    assert "Permission rework still has open pieces: #302, acme/gadgets#9; close it once they are done" in (
+        capsys.readouterr().err
+    )
+    assert _writes(gh_calls()) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "said"),
+    [
+        (["Shipping"], "no feature matches Shipping; the features are Billing, Permission rework, Permission audit"),
+        (["Permission"], "Permission matches Permission rework (OPT_PERMISSION) and Permission audit (OPT_AUDIT)"),
+        (["Billing"], "Billing still has open pieces: #307"),
+        ([], "epic close <feature>"),
+        (["Billing", "Permission audit"], "epic close <feature>"),
+    ],
+)
+def test_close_refuses_before_any_write(board_env, gh_calls, capsys, args, said):
+    assert cli.main(["epic", "close", *args]) == 1
+
+    assert said in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_close_refuses_when_no_feature_was_ever_opened(board_env, gh_calls, monkeypatch, capsys):
+    monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(FIXTURES / "project-fields.json"))
+
+    assert cli.main(["epic", "close", "Billing"]) == 1
+
+    assert "no Feature field yet; open a feature with epic open" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []

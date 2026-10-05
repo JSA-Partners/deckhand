@@ -1,8 +1,8 @@
 """A feature: an option of the project's Feature field, the stories that hold it, and what is left of it in dates.
 
 The option's place in the field is the feature's place in the pipeline, and a story of any repository
-belongs to it by its Feature value. This is the one place that opens one, adds a story to one, and
-reads one back, as lines for a person or as JSON for a report that is not a session.
+belongs to it by its Feature value. This is the one place that opens one, adds a story to one, closes
+one, and reads one back, as lines for a person or as JSON for a report that is not a session.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from deckhand.cli import command
 from deckhand.config import Settings
 from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
 
-ACTIONS = ("open", "add", "list", "forecast")
+ACTIONS = ("open", "add", "list", "forecast", "close")
 REF_FORM = "a story is owner/name#M, or M for this repository"
 COLOR = "GRAY"
 MOST_OPTIONS = 50
@@ -31,7 +31,9 @@ def _today() -> date:
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("action", choices=ACTIONS, help="what to do")
     parser.add_argument(
-        "refs", nargs="*", help="open: the name; add: the feature, then each story; forecast: the feature"
+        "refs",
+        nargs="*",
+        help="open: the name; add: the feature, then each story; forecast and close: the feature",
     )
     parser.add_argument("--about", default="", help="open: what the feature delivers, in one plain sentence")
     parser.add_argument("--json", action="store_true", help="list and forecast: print JSON instead of lines")
@@ -110,18 +112,51 @@ def _open(args: argparse.Namespace) -> int:
         raise Refusal(f"{taken['name']} is already a feature; add stories to it with epic add")
     if len(options) >= MOST_OPTIONS:
         raise Refusal(f"{board.FEATURE} already holds {MOST_OPTIONS} options, the most GitHub allows a single select")
-    # The write replaces the whole list, and an option sent without its id clears it from every story.
-    kept = [
+    kept = _kept(options)
+    _write_options(settings, str(found["id"]), kept, [*kept, new])
+    print(f"Opened feature {name}, last of {len(kept) + 1}")
+    return 0
+
+
+def _kept(options: list[dict]) -> list[dict]:
+    """Every option as the write must resend it: one sent without its id clears it from every story."""
+    return [
         {"id": option["id"], "name": option["name"], "color": option["color"], "description": option["description"]}
         for option in options
     ]
-    gh.update_single_select(settings, str(found["id"]), [*kept, new])
+
+
+def _write_options(settings: Settings, field: str, kept: list[dict], options: list[dict]) -> None:
+    """Replace the field's options, then read them back and refuse loudly if one of `kept` is gone."""
+    gh.update_single_select(settings, field, options)
     after = {option["id"] for option in (_field(settings) or {}).get("options") or []}
-    lost = [option for option in options if option["id"] not in after]
+    lost = [option for option in kept if option["id"] not in after]
     if lost:
         raise Refusal(f"the write dropped {', '.join(_named(lost))}, and every story that held one lost its feature")
-    print(f"Opened feature {name}, last of {len(kept) + 1}")
+
+
+def _close(args: argparse.Namespace, repo: str) -> int:
+    if len(args.refs) != 1:
+        raise Refusal("epic close takes one feature: epic close <feature>")
+    settings = resolved_settings()
+    field, options = _options(settings)
+    option = _find(options, args.refs[0])
+    mine = fleet.members(fleet.load(settings, archived=True), option["id"])
+    still_open = [ref_label(*_key(story.key), repo) for story in mine if not story.closed]
+    if still_open:
+        raise Refusal(f"{option['name']} still has open pieces: {', '.join(still_open)}; close it once they are done")
+    kept = _kept([other for other in options if other["id"] != option["id"]])
+    _write_options(settings, field, kept, kept)
+    print(f"Closed {option['name']}: removed from the {board.FEATURE} field. {_carried(len(mine))}")
     return 0
+
+
+def _carried(count: int) -> str:
+    if count == 0:
+        return "Nothing carried it."
+    if count == 1:
+        return "1 finished story no longer carries it."
+    return f"{count} finished stories no longer carry it."
 
 
 def _story(held: dict[tuple[str, int], fleet.Story], ref: tuple[str, int], repo: str) -> fleet.Story:
@@ -232,11 +267,13 @@ def _forecast(args: argparse.Namespace) -> int:
 
 @command("epic", _configure)
 def run(args: argparse.Namespace) -> int:
-    """Open a feature, add stories to it, list every feature in pipeline order, or forecast one in dates."""
+    """Open a feature, add stories to it, list every feature in pipeline order, forecast one in dates, or close one."""
     if args.action == "open":
         return _open(args)
     if args.action == "add":
         return _add(args, gh.repo_slug().lower())
+    if args.action == "close":
+        return _close(args, gh.repo_slug().lower())
     with gh.cached():
         if args.action == "list":
             return _list(args)

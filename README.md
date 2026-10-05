@@ -155,6 +155,7 @@ deckhand epic open "Let guests into a collection" --about "A client sees their o
 deckhand epic add "Let guests" 261 259 owner/front-end#133
 deckhand epic list
 deckhand epic forecast "Let guests into a collection"
+deckhand epic close "Let guests into a collection"
 ```
 
 `epic open` creates the Feature field the first time and adds each later feature at the end. A
@@ -197,6 +198,10 @@ past two years reads as beyond two years. Until then the forecast gives an early
 same way from the weekly finishes of every story in any feature, once that pace has settled. It is
 not a commitment: a feature in flight alone gets all of that pace, so the estimate leans early when
 two features run side by side.
+
+`epic close` removes a feature once everything in it is done, or when nothing in it will be started,
+and refuses while any of its stories is open. Its finished stories drop the label, which nothing
+reads, so the option list holds only live features.
 
 | Command | What it does |
 | --- | --- |

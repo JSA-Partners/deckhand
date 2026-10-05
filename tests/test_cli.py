@@ -194,7 +194,7 @@ def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
         "log": [],
         "commit": ["context"],
         "document": ["context"],
-        "epic": ["add", "forecast", "list", "open"],
+        "epic": ["add", "close", "forecast", "list", "open"],
         "finish": ["apply", "context"],
         "new": ["apply", "context"],
         "next": ["context"],
