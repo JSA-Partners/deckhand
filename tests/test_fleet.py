@@ -319,6 +319,17 @@ def test_a_closed_story_left_in_an_earlier_column_is_an_anomaly():
     assert [(a.number, a.what, a.fix) for a in found] == [(301, "closed, but In Review", "run next 301")]
 
 
+def test_a_story_closed_as_not_planned_is_sent_to_withdraw():
+    nodes = _closed("Draft")
+    nodes[0]["content"]["stateReason"] = "NOT_PLANNED"
+
+    found = fleet.anomalies(fleet.stories(nodes), {}, set(), [])
+
+    assert [(a.what, a.fix) for a in found] == [
+        ("closed, but Draft", 'captain apply --withdraw acme/widgets#301 --note "<why>"')
+    ]
+
+
 def test_a_closed_story_in_verification_is_not_an_anomaly():
     assert fleet.anomalies(fleet.stories(_closed("Verification")), {}, set(), []) == []
 

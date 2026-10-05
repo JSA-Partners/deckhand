@@ -136,8 +136,9 @@ then what to run next and where, and which open pull request to merge first.
 After that, ask it anything: what is blocked, what a session is up to, what to pick up. Give it a
 priority and it plans lanes, one session each, keeping stories whose plans touch the same files
 apart. It writes
-to the board only, to put the backlog in build order, add a blocker a story gained late, or board a
-story it owns that never reached the board.
+to the board only, to put the backlog in build order, add a blocker a story gained late, board a
+story it owns that never reached the board, or withdraw a duplicate or a story that will not be
+built, which closes it as not planned and takes it off the board.
 
 Ask it for a forecast and it says in weeks when everything left on the board is likely done, drawn
 from how many stories the board finished each week, the way a feature is forecast below. The method
