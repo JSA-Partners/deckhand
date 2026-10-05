@@ -432,10 +432,10 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
         "split_size": 1.0,
         "split_basis": None,
         "reason": "too few finished",
-        "early_floor": "2026-10-09",
-        "early_commitment": "2026-10-09",
+        "early_floor": "2026-10-16",
+        "early_commitment": "2026-10-16",
         "early_weeks": 4,
-        "early_per_week": 1.75,
+        "early_per_week": 0.88,
     }
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
@@ -444,8 +444,8 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
         "  1 piece left",
         "",
         "  Fewer than 5 of this feature's stories have finished in the weeks measured, so there is no date range yet.",
-        "  Early estimate   likely by 1 week, possibly 1 week, from the pace of all feature work "
-        "(4 weeks, 1.8 stories a week).",
+        "  Early estimate   likely by 2 weeks, possibly 2 weeks, from one feature's share of the feature work "
+        "(4 weeks, 0.9 stories a week).",
         "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
     ]
 
@@ -510,7 +510,7 @@ def test_forecast_gives_an_early_estimate_before_the_feature_s_own_pace_settles(
         "  1 piece left",
         "",
         "  Work on this feature began fewer than 4 weeks ago, so there is no date range yet.",
-        "  Early estimate   likely by 1 week, possibly 1 week, from the pace of all feature work "
+        "  Early estimate   likely by 1 week, possibly 1 week, from one feature's share of the feature work "
         "(4 weeks, 1.5 stories a week).",
         "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
     ]

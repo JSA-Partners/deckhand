@@ -12,7 +12,7 @@ import math
 import random
 import statistics
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from deckhand import draft, fleet, log
 
@@ -219,7 +219,7 @@ def _short(samples: list[int], settled: bool) -> str | None:
 def outlook(read: fleet.Fleet, feature: str, today: date, seed: int = 0) -> Outlook:
     """The forecast over what is left of `feature`, drawn from its own stories, archived ones too.
 
-    Before its own stories can pace it, the pace of all feature work gives an early estimate instead.
+    Before its own stories can pace it, one feature's share of the feature work gives an early estimate instead.
     """
     every = [*read.stories, *read.archived]
     return _outlook(every, fleet.members(every, feature), today, seed, prior=featured(every))
@@ -235,11 +235,24 @@ def _early(
     items: int, unsplit: int, sizes: list[int], prior: list[fleet.Story], today: date, seed: int
 ) -> tuple[dict[int, int | None] | None, list[int]]:
     """The weeks drawn from `prior` instead, and the weekly counts drawn from, when `prior` can pace a forecast."""
-    samples, settled = _paced(prior, today, EARLY_SETTLED)
-    if _short(samples, settled):
+    counts, settled = _paced(prior, today, EARLY_SETTLED)
+    if _short(counts, settled):
         return None, []
+    # Pooled weeks hold every feature run side by side, and one feature gets only its share of them.
+    samples = [count / _active(prior, today, len(counts)) for count in counts]
     found = simulate(items, unsplit, samples, sizes, seed=seed)
     return found, samples if found else []
+
+
+def _active(prior: list[fleet.Story], today: date, weeks: int) -> int:
+    """How many features finished anything in the last `weeks` weeks, one at least."""
+    since = today - timedelta(days=7 * weeks)
+    finished = {
+        story.feature
+        for story in _held(prior)
+        if story.closed and story.closed_at and since < _day(story.closed_at) <= today
+    }
+    return max(1, len(finished))
 
 
 def _outlook(
@@ -321,14 +334,15 @@ def rows(found: Outlook) -> list[str]:
 
 
 def early(found: Outlook) -> list[str]:
-    """The early estimate as two lines, or none when the feature has no estimate from the pace of all feature work."""
+    """The early estimate as two lines, or none when the feature has no estimate from the feature work."""
     if found.early_floor_weeks is None or found.early_commitment_weeks is None:
         return []
     likely = plural(found.early_commitment_weeks, "week")
     possibly = plural(found.early_floor_weeks, "week")
     paced = f"{plural(found.early_weeks, 'week')}, {found.early_per_week:.1f} stories a week"
     return [
-        f"  Early estimate   likely by {likely}, possibly {possibly}, from the pace of all feature work ({paced}).",
+        f"  Early estimate   likely by {likely}, possibly {possibly}, from one feature's share of the feature work "
+        f"({paced}).",
         "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
     ]
 

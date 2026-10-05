@@ -545,7 +545,17 @@ def test_a_feature_with_too_few_finishes_gets_an_early_estimate():
     found = throughput.outlook(read, FEATURE, TODAY)
 
     assert found.reason == throughput.FEW
-    assert _early(found) == (1, 1, 4, 1.5)
+    assert _early(found) == (2, 2, 4, 0.75)
+
+
+def test_the_early_estimate_is_one_feature_s_share_of_the_feature_work():
+    beside = [_finished(300 + index, day, feature="OPT_BESIDE") for index, day in enumerate([28, 21, 14, 7, 0, 0])]
+    read = _fleet(_started(1, 7), _open(2, feature=FEATURE), *_feature_work(), *beside)
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert found.early_per_week == 1.25
+    assert _early(found) == (2, 2, 4, 1.25)
 
 
 def test_a_feature_with_its_own_range_gets_no_early_estimate():
@@ -722,7 +732,7 @@ def test_the_rows_give_the_early_estimate_after_the_reason():
         "  3 pieces left",
         "",
         "  Work on this feature began fewer than 4 weeks ago, so there is no date range yet.",
-        "  Early estimate   likely by 3 weeks, possibly 1 week, from the pace of all feature work "
+        "  Early estimate   likely by 3 weeks, possibly 1 week, from one feature's share of the feature work "
         "(8 weeks, 1.2 stories a week).",
         "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
     ]
