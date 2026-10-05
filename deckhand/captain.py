@@ -32,6 +32,7 @@ from deckhand import (
     sessions,
     since,
     transcript,
+    withdraw,
 )
 from deckhand.config import Settings
 from deckhand.step import (
@@ -41,6 +42,7 @@ from deckhand.step import (
     issue_number,
     reason,
     ref_label,
+    resolved_settings,
     settings_or_error,
     step,
     usable,
@@ -281,6 +283,8 @@ def _configure_apply(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--block", type=issue_number, metavar="N", help="the boarded story that gains a blocker")
     parser.add_argument("--unblock", type=issue_number, metavar="N", help="the boarded story that loses one")
     parser.add_argument("--by", metavar="REF", help="the blocker, owner/name#M or M for this repository")
+    parser.add_argument("--withdraw", metavar="REF", help="the story to close as not planned and take off the board")
+    parser.add_argument("--note", metavar="TEXT", help="with --withdraw: why, logged on the issue")
 
 
 def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
@@ -314,17 +318,21 @@ def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
 
 @step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)
 def apply(args: argparse.Namespace) -> int:
-    """Write the build order, set a Status the log allows, or add or drop a blocker on a boarded story."""
+    """Write the build order, board what is owed, add or drop a blocker, or withdraw a story."""
     if args.block is not None and args.unblock is not None:
         raise Refusal("--block and --unblock are one at a time, not both")
     if (args.block is not None or args.unblock is not None) and not args.by:
         raise Refusal("--block and --unblock each need --by, naming the blocker")
-    if not args.order and not args.repair and args.block is None and args.unblock is None:
-        raise Refusal("say what to write: --order, --repair, --block, or --unblock")
+    if args.withdraw is not None and not args.note:
+        raise Refusal("--withdraw needs --note, saying why")
+    if not args.order and not args.repair and args.block is None and args.unblock is None and args.withdraw is None:
+        raise Refusal("say what to write: --order, --repair, --block, --unblock, or --withdraw")
     if args.block is not None:
         edges.block(gh.repo_slug(), args.block, args.by)
     if args.unblock is not None:
         edges.unblock(gh.repo_slug(), args.unblock, args.by)
+    if args.withdraw is not None:
+        withdraw.withdraw(resolved_settings(), gh.repo_slug(), args.withdraw, args.note)
     if args.order or args.repair:
         settings = config.load()
         read = fleet.read(settings)
