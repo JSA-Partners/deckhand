@@ -567,8 +567,18 @@ def test_no_feature_work_at_all_gives_no_early_estimate():
     assert _early(found) == (None, None, 0, 0.0)
 
 
-def test_feature_work_that_has_not_settled_gives_no_early_estimate():
+def test_two_weeks_of_feature_work_are_enough_for_an_early_estimate():
     recent = [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([20, 13, 6, 6, 0, 0])]
+    read = _fleet(_started(1, 7), *recent)
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert found.early_commitment_weeks is not None
+    assert found.early_weeks >= 2
+
+
+def test_feature_work_under_two_weeks_old_gives_no_early_estimate():
+    recent = [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([13, 6, 6, 0, 0])]
     read = _fleet(_started(1, 7), *recent)
 
     found = throughput.outlook(read, FEATURE, TODAY)

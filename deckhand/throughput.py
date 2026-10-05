@@ -24,6 +24,8 @@ ROOTS = 5
 PACED = 5
 # Below this many weeks since a feature's work began, its pace has not settled.
 SETTLED = 4
+# An early estimate is no commitment, so two weeks of feature work are enough to draw it from.
+EARLY_SETTLED = 2
 # Weeks of history drawn from, so a pace from long ago does not outvote this quarter's.
 LOOKBACK = 12
 # Two years in weeks, past which a commitment says nothing a stakeholder can plan on.
@@ -111,8 +113,8 @@ def began(stories: list[fleet.Story], today: date) -> date | None:
     return min([*started, *_finished_on(stories, today)], default=None)
 
 
-def _paced(stories: list[fleet.Story], today: date) -> tuple[list[int], bool]:
-    """The last `LOOKBACK` full weekly counts since work on `stories` began, and whether `SETTLED` weeks passed.
+def _paced(stories: list[fleet.Story], today: date, settled: int = SETTLED) -> tuple[list[int], bool]:
+    """The last `LOOKBACK` full weekly counts since work on `stories` began, and whether `settled` weeks passed.
 
     The oldest week is left out when work began partway through it, since it would count a few days as seven.
     """
@@ -122,7 +124,7 @@ def _paced(stories: list[fleet.Story], today: date) -> tuple[list[int], bool]:
     days = (today - start).days
     counts = weekly(stories, today, start)
     full = counts if days % 7 == 6 else counts[1:]
-    return full[-LOOKBACK:], days >= 7 * SETTLED
+    return full[-LOOKBACK:], days >= 7 * settled
 
 
 def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int], bool]:
@@ -233,7 +235,7 @@ def _early(
     items: int, unsplit: int, sizes: list[int], prior: list[fleet.Story], today: date, seed: int
 ) -> tuple[dict[int, int | None] | None, list[int]]:
     """The weeks drawn from `prior` instead, and the weekly counts drawn from, when `prior` can pace a forecast."""
-    samples, settled = _paced(prior, today)
+    samples, settled = _paced(prior, today, EARLY_SETTLED)
     if _short(samples, settled):
         return None, []
     found = simulate(items, unsplit, samples, sizes, seed=seed)
