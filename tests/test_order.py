@@ -82,9 +82,9 @@ def test_the_next_line_names_the_draft_a_blocked_repository_waits_on():
 
 def test_the_backlog_leaves_out_an_issue_deckhand_does_not_own():
     found = list(fleet.stories(_nodes()))
-    epic = replace(found[0], issue=replace(found[0].issue, labels=("epic",)))
+    bug = replace(found[0], issue=replace(found[0].issue, labels=("bug",)))
     foreign = replace(found[3], issue=replace(found[3].issue, labels=()))
-    read = fleet.Fleet(stories=[epic, found[1], found[2], foreign], blockers={}, missing=[])
+    read = fleet.Fleet(stories=[bug, found[1], found[2], foreign], blockers={}, missing=[])
 
     assert sorted(row.story.number for row in order.backlog(read)) == [257, 258]
 

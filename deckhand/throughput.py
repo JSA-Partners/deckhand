@@ -16,13 +16,18 @@ from datetime import date, datetime
 
 from deckhand import draft, fleet, log
 
-# Synthetic first forecasts flatter the method, so the commitment is the 90th, which real history met 86 percent.
+# The commitment is the 90th percentile, which a real board's history met 86 percent of the time.
 PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 90, 99)
-ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
-PACED = 5  # a feature's finishes in its last LOOKBACK weeks below which its own weeks are noise
-SETTLED = 4  # weeks since a feature's work began below which its pace has not settled
-LOOKBACK = 12  # weeks of history drawn from, so a pace from long ago does not outvote this quarter's
-HORIZON = 104  # weeks, two years, at which a commitment says nothing a stakeholder can plan on
+# Below this many finished split trees a draw is noise, so the largest is used.
+ROOTS = 5
+# Below this many finishes in the weeks measured, a feature's own weeks are noise.
+PACED = 5
+# Below this many weeks since a feature's work began, its pace has not settled.
+SETTLED = 4
+# Weeks of history drawn from, so a pace from long ago does not outvote this quarter's.
+LOOKBACK = 12
+# Two years in weeks, past which a commitment says nothing a stakeholder can plan on.
+HORIZON = 104
 
 THIN = "too little history"
 FEW = "too few finished"

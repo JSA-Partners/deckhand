@@ -1,4 +1,4 @@
-"""How many stories finish a week, and how many weeks what is left of an epic will take."""
+"""How many stories finish a week, and how many weeks what is left of a feature will take."""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def test_splits_do_not_count_a_dropped_parked_feature_as_a_root():
     assert throughput.splits([dropped, _done(2), _parked(3)]) == [1]
 
 
-def test_thin_splits_draw_the_worst_seen():
+def test_thin_splits_draw_the_largest():
     assert throughput._sizes([1, 1, 2, 4]) == ("largest", [4])
 
 
@@ -213,19 +213,19 @@ def _started(number: int, began: int, finished: int | None = None) -> fleet.Stor
     return _story(number, True, log, feature=FEATURE, closed_at=_ago(finished))
 
 
-def test_an_epic_is_paced_by_its_own_finishes_alone():
+def test_a_feature_is_paced_by_its_own_finishes_alone():
     members = _members(5, 28)
     others = [_finished(100 + day, day) for day in range(28)]
 
     assert throughput.pace([*members, *others], FEATURE, TODAY) == ([1, 1, 1, 1], True)
 
 
-def test_an_epic_settles_on_the_twenty_eighth_day_after_its_first_finish():
-    def _epic(first: int) -> list[fleet.Story]:
+def test_a_feature_settles_on_the_twenty_eighth_day_after_its_first_finish():
+    def _feature(first: int) -> list[fleet.Story]:
         return [_finished(10 + index, day, feature=FEATURE) for index, day in enumerate([first, 0, 0, 0, 0])]
 
-    assert throughput.pace(_epic(27), FEATURE, TODAY)[1] is False
-    assert throughput.pace(_epic(28), FEATURE, TODAY)[1] is True
+    assert throughput.pace(_feature(27), FEATURE, TODAY)[1] is False
+    assert throughput.pace(_feature(28), FEATURE, TODAY)[1] is True
 
 
 def test_the_history_starts_when_the_first_member_started():
@@ -244,7 +244,7 @@ def test_an_open_member_started_long_ago_starts_the_history():
     assert throughput.pace([_started(10, 35)], FEATURE, TODAY) == ([0] * 5, True)
 
 
-def test_the_epic_pace_is_its_last_twelve_weeks():
+def test_the_feature_pace_is_its_last_twelve_weeks():
     members = [_finished(10 + week, 7 * week, feature=FEATURE) for week in range(20)]
 
     assert throughput.pace(members, FEATURE, TODAY) == ([1] * 12, True)
@@ -262,7 +262,7 @@ def test_the_oldest_week_counts_when_work_began_on_its_first_day():
     assert throughput.pace(members, FEATURE, TODAY)[0] == [1, 1, 1, 1, 1]
 
 
-def test_an_epic_with_no_member_worked_on_has_no_history():
+def test_a_feature_with_no_member_worked_on_has_no_history():
     assert throughput.pace([_finished(1, 60), _open(2, feature=FEATURE)], FEATURE, TODAY) == ([], False)
 
 
@@ -317,14 +317,6 @@ def test_a_resample_of_only_empty_weeks_is_drawn_again():
     assert throughput.simulate(3, 0, [0, 0, 0, 3], [1], runs=2000) is not None
 
 
-def test_the_floor_commitment_and_worst_are_the_50th_90th_and_99th():
-    assert throughput.PERCENTILES == (50, 90, 99)
-
-
-def test_an_epic_settles_four_weeks_after_its_work_began():
-    assert throughput.SETTLED == 4
-
-
 def test_a_commitment_two_years_out_is_no_forecast():
     assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 90: 103, 99: 103}
     assert throughput.simulate(104, 0, [1], [1], runs=5) is None
@@ -355,7 +347,7 @@ def _varied_members() -> list[fleet.Story]:
     return [*_weekly_members(13), _finished(99, 3, feature=FEATURE)]
 
 
-def test_an_outlook_is_paced_by_the_epic_alone():
+def test_an_outlook_is_paced_by_the_feature_alone():
     others = [_finished(500 + day, day) for day in range(84)]
     read = _fleet(_open(1, feature=FEATURE), _open(2, feature=FEATURE), *others, archived=tuple(_varied_members()))
 
@@ -417,7 +409,7 @@ def test_an_outlook_is_settled_four_weeks_after_a_member_started():
     assert (found.pace, found.weeks, found.per_week, found.reason) == ("epic", 4, 1.25, None)
 
 
-def test_an_outlook_of_an_epic_finished_long_ago_is_no_forecast():
+def test_an_outlook_of_a_feature_finished_long_ago_is_no_forecast():
     burst = [_finished(10 + index, 200, feature=FEATURE) for index in range(5)]
     project = [_finished(500 + day, day) for day in range(0, 84, 2)]
     read = _fleet(*burst, *project, *[_open(50 + index, feature=FEATURE) for index in range(3)])
@@ -519,7 +511,7 @@ def test_an_outlook_with_no_unsplit_draft_has_no_split_basis():
     assert (found.split_size, found.split_basis) == (1.0, None)
 
 
-def test_an_epic_with_nothing_left_has_no_forecast():
+def test_a_feature_with_nothing_left_has_no_forecast():
     found = throughput.outlook(_fleet(_finished(1, 0, feature=FEATURE)), FEATURE, TODAY)
 
     assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks, found.pace) == (

@@ -6,7 +6,7 @@ import dataclasses
 import json
 from pathlib import Path
 
-from deckhand import fleet, issue, sessions
+from deckhand import board, fleet, issue, sessions
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -513,6 +513,13 @@ def test_the_items_query_asks_for_the_option_id_of_a_single_select():
     assert "parent{" not in fleet.ITEMS_QUERY
 
 
+def test_the_items_query_reads_as_many_field_values_as_the_board_read():
+    def _first(query: str) -> str:
+        return query.split("fieldValues(first:", 1)[1].split(")", 1)[0]
+
+    assert _first(fleet.ITEMS_QUERY) == _first(board.ITEMS_QUERY)
+
+
 def test_a_row_carries_the_feature_option_its_item_holds():
     found = fleet.stories([_item(1, ("deckhand",), feature="OPT_A"), _item(2, ("deckhand",))])
 
@@ -615,9 +622,9 @@ SPLIT = "Split: #2 Follow on, blocked by this story."
 
 
 def test_a_story_shed_by_a_feature_s_story_and_left_out_is_a_stray():
-    kid = _logged(2)
+    shedder, kid = _logged(1, SPLIT, feature="OPT_A"), _logged(2)
 
-    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), kid]) == [(kid, "Alpha")]
+    assert fleet.strays([shedder, kid]) == [(kid, shedder)]
 
 
 def test_a_story_shed_by_a_story_in_no_feature_is_not_a_stray():
@@ -640,8 +647,17 @@ def test_a_stray_is_an_anomaly_that_names_its_fix():
     found = fleet.anomalies([_logged(1, SPLIT, feature="OPT_A"), _logged(2)], {}, set(), [])
 
     assert [(item.number, item.what, item.fix) for item in found] == [
-        (2, "split from a story of Alpha, but in no feature", 'epic add "Alpha" acme/widgets#2')
+        (2, "split from a story of Alpha, but in no feature", "epic add OPT_A acme/widgets#2")
     ]
+
+
+def test_a_stray_fix_names_the_option_id_whatever_the_feature_is_called():
+    shedder = dataclasses.replace(_logged(1, SPLIT, feature="OPT_A"), feature_name='Say "hi" | $HOME `id`')
+
+    (found,) = fleet.anomalies([shedder, _logged(2)], {}, set(), [])
+
+    assert found.what == 'split from a story of Say "hi" \\| $HOME `id`, but in no feature'
+    assert found.fix == "epic add OPT_A acme/widgets#2"
 
 
 def test_a_stray_in_another_repository_names_its_ref_in_full():
@@ -649,14 +665,14 @@ def test_a_stray_in_another_repository_names_its_ref_in_full():
 
     found = fleet.anomalies([gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
 
-    assert [item.fix for item in found] == ['epic add "Alpha" acme/gadgets#5']
+    assert [item.fix for item in found] == ["epic add OPT_A acme/gadgets#5"]
 
 
 def test_an_archived_story_that_shed_still_reports_its_open_kid():
     shedder = dataclasses.replace(_logged(1, SPLIT, feature="OPT_A", closed=True), archived=True)
     kid = _logged(2)
 
-    assert fleet.strays([kid], [shedder]) == [(kid, "Alpha")]
+    assert fleet.strays([kid], [shedder]) == [(kid, shedder)]
     assert [item.number for item in fleet.anomalies([kid], {}, set(), [], archived=[shedder])] == [2]
 
 
@@ -671,4 +687,4 @@ def test_a_kid_shed_by_two_stories_of_a_feature_is_one_stray():
     second = _logged(2, "Split: #3 Follow on, blocked by this story.", feature="OPT_A")
     kid = _logged(3)
 
-    assert fleet.strays([first, second, kid]) == [(kid, "Alpha")]
+    assert fleet.strays([first, second, kid]) == [(kid, first)]

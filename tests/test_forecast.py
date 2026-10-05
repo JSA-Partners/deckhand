@@ -204,7 +204,7 @@ def test_concurrency_is_unknown_under_five_overlapping_stories():
 
 def test_an_issue_the_process_does_not_own_is_not_forecast():
     done = _ran(1, "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z")
-    read = _fleet(done, _plain(2, 1), _story(3, 1, False, labels=()), _story(4, 1, False, labels=("epic",)))
+    read = _fleet(done, _plain(2, 1), _story(3, 1, False, labels=()), _story(4, 1, False, labels=("bug",)))
 
     assert forecast.rows(read, 1, "given")[0] == "  1 story, 1 points, 1 at once, given"
 

@@ -23,7 +23,7 @@ ITEMS_QUERY = (
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
     "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
-    "fieldValues(first:20){ nodes{ "
+    "fieldValues(first:30){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
     "... on ProjectV2ItemFieldSingleSelectValue{ name optionId field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
@@ -183,17 +183,17 @@ def shed(story: Story) -> list[tuple[str, int]]:
     return found
 
 
-def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, str]]:
-    """Every open story on the board in no feature that a story of a feature shed, with that feature's name."""
+def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, Story]]:
+    """Every open story on the board in no feature that a story of a feature shed, with the story that shed it."""
     held = {story.key: story for story in found}
-    out: dict[tuple[str, int], tuple[Story, str]] = {}
+    out: dict[tuple[str, int], tuple[Story, Story]] = {}
     for story in [*found, *(archived or [])]:
         if story.feature is None:
             continue
         for key in shed(story):
             kid = held.get(key)
             if kid is not None and kid.feature is None and not kid.closed and touched(kid):
-                out.setdefault(key, (kid, story.feature_name))
+                out.setdefault(key, (kid, story))
     return list(out.values())
 
 
@@ -292,10 +292,11 @@ def anomalies(
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
             fix = "captain apply --unblock on one edge"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
-    for story, name in strays(found, archived):
+    for story, shedder in strays(found, archived):
+        name = shedder.feature_name.replace("|", "\\|")
         what = f"split from a story of {name}, but in no feature"
-        # epic add reads a bare number as the repository it runs in, which may not be this story's.
-        fix = f'epic add "{name}" {story.repo}#{story.number}'
+        # A name may hold quotes or shell characters, and a bare number is the repository epic add runs in.
+        fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
         out.append(Anomaly(story.number, story.repo, what, fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))

@@ -258,6 +258,10 @@ elif head == "api graphql":
     if "projectV2(number" in joined and "workflows(" in joined:
         respond(fixture("GH_WORKFLOWS_FILE", "graphql-workflows.json"))
     if "projectV2(number" in joined and "fields(first" in joined:
+        # $GH_PROJECT_FIELDS_WRITTEN_FILE answers every fields read after an option write.
+        written = os.environ.get("GH_PROJECT_FIELDS_WRITTEN_FILE")
+        if written and calls and os.path.exists(calls) and "updateProjectV2Field(" in open(calls).read():
+            respond(open(written).read())
         respond(fixture("GH_PROJECT_FIELDS_FILE", "project-fields.json"))
     if "fieldValues" in joined:
         respond(fixture("GH_FIELDVALUES_FILE", "graphql-fieldvalues.json"))

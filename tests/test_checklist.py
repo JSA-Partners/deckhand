@@ -94,6 +94,26 @@ def test_kind_update_carries_every_option_by_id_and_keeps_what_a_person_added():
     ]
 
 
+def test_kind_update_resends_each_description_and_keeps_added_options_in_their_order():
+    kind = {
+        "id": "PVTSSF_KIND",
+        "name": "Kind",
+        "dataType": "SINGLE_SELECT",
+        "options": [
+            {"id": "opt_zeta", "name": "zeta", "color": "PINK", "description": "Added first."},
+            {"id": "opt_fix", "name": "fix", "color": "BLUE", "description": "Something broke."},
+            {"id": "opt_alpha", "name": "alpha", "color": "GRAY", "description": "Added second."},
+        ],
+    }
+
+    assert checklist.kind_update(kind, ["feat", "fix"]) == [
+        {"name": "feat", "color": "GREEN", "description": ""},
+        {"id": "opt_fix", "name": "fix", "color": "RED", "description": "Something broke."},
+        {"id": "opt_zeta", "name": "zeta", "color": "PINK", "description": "Added first."},
+        {"id": "opt_alpha", "name": "alpha", "color": "GRAY", "description": "Added second."},
+    ]
+
+
 # --- the items ----------------------------------------------------------
 
 
@@ -176,6 +196,12 @@ def test_board_view_left_names_the_extra_field_too(fake_gh, settings, tmp_path, 
         _item(checklist.checklist(settings, REPO, _fields()), "Board view fields").left
         == "on the Board view turn off Labels"
     )
+
+
+def test_board_view_may_show_the_feature_field(fake_gh, settings, tmp_path, monkeypatch):
+    _views(tmp_path, "feature.json", {"Board": [*checklist.BOARD_FIELDS, "Feature"]}, monkeypatch)
+
+    assert _item(checklist.checklist(settings, REPO, _fields()), "Board view fields").left is None
 
 
 def test_board_view_left_says_there_is_no_board_view(fake_gh, settings, tmp_path, monkeypatch):

@@ -85,6 +85,58 @@ def test_open_refuses_a_name_already_taken_in_any_case(board_env, gh_calls, caps
     assert _writes(gh_calls()) == []
 
 
+def _options_file(tmp_path, monkeypatch, options: list[dict], env: str = "GH_PROJECT_FIELDS_FILE") -> None:
+    data = json.loads((FIXTURES / "feature-fields.json").read_text(encoding="utf-8"))
+    data["data"]["organization"]["projectV2"]["fields"]["nodes"][-1]["options"] = options
+    path = tmp_path / f"{env.lower()}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv(env, str(path))
+
+
+def test_open_refuses_a_name_equal_to_one_with_its_spaces_doubled(board_env, gh_calls, monkeypatch, capsys):
+    _options_file(board_env, monkeypatch, [*EXISTING, {**EXISTING[0], "id": "OPT_SEATS", "name": "Seat  limits"}])
+
+    assert cli.main(["epic", "open", "seat limits", "--about", "Again."]) == 1
+
+    assert "Seat  limits is already a feature" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_open_refuses_a_name_whose_spaces_alone_differ(board_env, gh_calls, capsys):
+    assert cli.main(["epic", "open", "Permission  rework", "--about", "Again."]) == 1
+
+    assert "Permission rework is already a feature" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_open_refuses_before_any_write_when_the_field_holds_fifty_options(board_env, gh_calls, monkeypatch, capsys):
+    full = [{"id": f"OPT_{n}", "name": f"F{n}", "color": "GRAY", "description": ""} for n in range(50)]
+    _options_file(board_env, monkeypatch, full)
+
+    assert cli.main(["epic", "open", "Seat limits", "--about", "Cap seats."]) == 1
+
+    assert "Feature already holds 50 options, the most GitHub allows a single select" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_open_refuses_loudly_when_the_write_dropped_an_option(board_env, gh_calls, monkeypatch, capsys):
+    _options_file(board_env, monkeypatch, [EXISTING[0]], env="GH_PROJECT_FIELDS_WRITTEN_FILE")
+
+    assert cli.main(["epic", "open", "Seat limits", "--about", "Cap seats."]) == 1
+
+    err = capsys.readouterr().err
+    assert "the write dropped Permission rework (OPT_PERMISSION), Permission audit (OPT_AUDIT)" in err
+    assert len(_writes(gh_calls())) == 1
+
+
+def test_open_reads_the_field_back_after_the_write(board_env, gh_calls, capsys):
+    assert cli.main(["epic", "open", "Seat limits", "--about", "Cap seats."]) == 0
+
+    calls = gh_calls()
+    written = next(index for index, call in enumerate(calls) if "updateProjectV2Field(" in call)
+    assert any("fields(first" in call for call in calls[written + 1 :])
+
+
 def test_open_refuses_without_what_the_feature_delivers(board_env, gh_calls, capsys):
     assert cli.main(["epic", "open", "Permission rework"]) == 1
 
@@ -151,6 +203,37 @@ def test_add_prefers_an_exact_name_to_a_longer_one_it_starts(board_env, gh_calls
     assert _writes(gh_calls()) == [_edit("I_304", "OPT_BILL")]
 
 
+def test_add_prefers_the_exact_case_to_a_name_that_differs_in_case_alone(board_env, gh_calls, monkeypatch):
+    bill = {"color": "RED", "description": ""}
+    _options_file(
+        board_env, monkeypatch, [{"id": "OPT_UP", "name": "BILL", **bill}, {"id": "OPT_LOW", "name": "bill", **bill}]
+    )
+
+    assert cli.main(["epic", "add", "bill", "304"]) == 0
+
+    assert _writes(gh_calls()) == [_edit("I_304", "OPT_LOW")]
+
+
+def test_add_refuses_a_name_two_options_match_in_any_case_and_names_their_ids(board_env, gh_calls, monkeypatch, capsys):
+    bill = {"color": "RED", "description": ""}
+    _options_file(
+        board_env, monkeypatch, [{"id": "OPT_UP", "name": "BILL", **bill}, {"id": "OPT_LOW", "name": "bill", **bill}]
+    )
+
+    assert cli.main(["epic", "add", "Bill", "304"]) == 1
+
+    assert "Bill matches BILL (OPT_UP) and bill (OPT_LOW); name one by its id" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_add_matches_an_option_whose_name_holds_doubled_spaces(board_env, gh_calls, monkeypatch):
+    _options_file(board_env, monkeypatch, [{**EXISTING[1], "name": "Permission  rework"}])
+
+    assert cli.main(["epic", "add", " permission   rework ", "304"]) == 0
+
+    assert _writes(gh_calls()) == [_edit("I_304", "OPT_PERMISSION")]
+
+
 def test_add_names_a_story_given_twice_once(board_env, gh_calls, capsys):
     assert cli.main(["epic", "add", "Billing", "304", "304", "acme/widgets#304"]) == 0
 
@@ -184,7 +267,10 @@ def test_add_reaches_a_story_in_another_repository(board_env, gh_calls, monkeypa
             ["Shipping", "304"],
             "no feature matches Shipping; the features are Billing, Permission rework, Permission audit",
         ),
-        (["perm", "304"], "perm matches Permission rework and Permission audit; name one in full"),
+        (
+            ["perm", "304"],
+            "perm matches Permission rework (OPT_PERMISSION) and Permission audit (OPT_AUDIT); name one by its id",
+        ),
         (["Billing", "304", "999"], "#999 is not on the board"),
         (["Billing", "304", "303"], "#303 is not a deckhand story"),
         (["Billing", "304", "305"], "#305 was closed as not planned or a duplicate"),
@@ -392,7 +478,7 @@ def test_forecast_finds_a_feature_by_name_prefix_or_id(board_env, capsys, named)
     ("named", "said"),
     [
         ("Shipping", "no feature matches Shipping"),
-        ("Permission", "Permission matches Permission rework and Permission audit"),
+        ("Permission", "Permission matches Permission rework (OPT_PERMISSION) and Permission audit (OPT_AUDIT)"),
     ],
 )
 def test_forecast_refuses_a_feature_it_cannot_name_one_of(board_env, capsys, named, said):
@@ -492,12 +578,14 @@ def test_two_forecasts_of_an_unchanged_board_give_the_same_dates(board_env, caps
         return real(*args, **kwargs)
 
     monkeypatch.setattr(epic.throughput, "outlook", _outlook)
+    _with_members(board_env, monkeypatch, *PACED)
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
-    first = capsys.readouterr().out
+    first = json.loads(capsys.readouterr().out)
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
-    assert json.loads(capsys.readouterr().out) == json.loads(first)
+    assert first["floor"] is not None and first["commitment"] is not None
+    assert json.loads(capsys.readouterr().out) == first
     assert seeds == [epic.SEED, epic.SEED]
 
 

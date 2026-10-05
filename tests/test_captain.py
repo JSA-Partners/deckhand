@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import captain, cli, fleet, forecast
+from deckhand import captain, cli, fleet, forecast, issue
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -380,6 +380,45 @@ def test_the_anomalies_say_when_setup_is_owed(fleet_env, monkeypatch, capsys, tm
 
 def test_a_board_that_is_current_says_nothing_about_setup(fleet_env, capsys):
     """A row that appears when nothing is owed is noise, and the block is read on every rerun."""
+    assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
+
+    assert "/deckhand:setup" not in capsys.readouterr().out
+
+
+def test_a_stray_row_keeps_the_anomalies_table_four_columns_wide(fleet_env, settings):
+    def _story(number: int, *entries: str, feature: str | None = None) -> fleet.Story:
+        comments = [issue.Comment(author="claude", body=body, created_at="2026-09-01T00:00:00Z") for body in entries]
+        held = issue.Issue(
+            number=number, title="T", body="", url="", state="OPEN", comments=comments, labels=("deckhand",)
+        )
+        return fleet.Story(
+            number=number,
+            repo=REPO,
+            title="T",
+            status="Backlog",
+            points=1,
+            closed=False,
+            item=f"I_{number}",
+            issue=held,
+            feature=feature,
+            feature_name="Pay | refund" if feature else "",
+        )
+
+    found = fleet.anomalies([_story(1, "Split: #2 Follow on.", feature="OPT_PAY"), _story(2)], {}, set(), [])
+
+    (row,) = [line for line in captain._anomaly_rows(settings, found, set()) if line.startswith("| 2 ")]
+    what = "split from a story of Pay \\| refund, but in no feature"
+    assert row == f"| 2 | widgets | {what} | epic add OPT_PAY acme/widgets#2 |"
+    assert len(re.findall(r"(?<!\\)\|", row)) == 5
+
+
+def test_a_board_view_that_shows_the_feature_field_owes_no_setup(fleet_env, monkeypatch, capsys, tmp_path):
+    data = json.loads((FIXTURES / "project-views.json").read_text(encoding="utf-8"))
+    data["data"]["organization"]["projectV2"]["views"]["nodes"][0]["fields"]["nodes"].append({"name": "Feature"})
+    path = tmp_path / "views-feature.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("GH_PROJECT_VIEWS_FILE", str(path))
+
     assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
 
     assert "/deckhand:setup" not in capsys.readouterr().out

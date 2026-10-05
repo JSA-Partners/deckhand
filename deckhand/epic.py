@@ -19,6 +19,7 @@ from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
 ACTIONS = ("open", "add", "list", "forecast")
 REF_FORM = "a story is owner/name#M, or M for this repository"
 COLOR = "GRAY"
+MOST_OPTIONS = 50
 # A fixed draw, so two forecasts of an unchanged board give a report the same dates.
 SEED = 0
 
@@ -63,24 +64,37 @@ def _options(settings: Settings) -> tuple[str, list[dict]]:
     return str(found["id"]), found["options"]
 
 
+def _plain(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _named(options: list[dict]) -> list[str]:
+    return [f"{option['name']} ({option['id']})" for option in options]
+
+
 def _find(options: list[dict], named: str) -> dict:
-    """The option `named` names: by its id, by its name in any case, or by the start of one name alone."""
-    wanted = " ".join(named.split()).casefold()
-    exact = [option for option in options if option["id"] == named or option["name"].casefold() == wanted]
-    found = exact or [option for option in options if wanted and option["name"].casefold().startswith(wanted)]
+    """The option `named` names: by its id or exact name, then its name in any case, then the start of one name."""
+    wanted = _plain(named)
+    folded = wanted.casefold()
+    tiers = (
+        [option for option in options if option["id"] == named or _plain(option["name"]) == wanted],
+        [option for option in options if _plain(option["name"]).casefold() == folded],
+        [option for option in options if folded and _plain(option["name"]).casefold().startswith(folded)],
+    )
+    found = next((tier for tier in tiers if tier), [])
     if len(found) == 1:
         return found[0]
     if found:
-        raise Refusal(f"{named} matches {' and '.join(option['name'] for option in found)}; name one in full")
+        raise Refusal(f"{named} matches {' and '.join(_named(found))}; name one by its id")
     names = ", ".join(option["name"] for option in options) or "none"
     raise Refusal(f"no feature matches {named}; the features are {names}")
 
 
 def _open(args: argparse.Namespace) -> int:
-    name = " ".join(" ".join(args.refs).split())
+    name = _plain(" ".join(args.refs))
     if not name:
         raise Refusal('epic open takes a name: epic open "<name>" --about "<sentence>"')
-    about = " ".join(args.about.split())
+    about = _plain(args.about)
     if not about:
         raise Refusal("--about says what the feature delivers, in one plain sentence")
     settings = resolved_settings()
@@ -90,15 +104,22 @@ def _open(args: argparse.Namespace) -> int:
         gh.create_single_select(settings, board.FEATURE, [new])
         print(f"Created the {board.FEATURE} field with {name}")
         return 0
-    taken = next((option for option in found["options"] if option["name"].casefold() == name.casefold()), None)
+    options = found["options"]
+    taken = next((option for option in options if _plain(option["name"]).casefold() == name.casefold()), None)
     if taken is not None:
         raise Refusal(f"{taken['name']} is already a feature; add stories to it with epic add")
+    if len(options) >= MOST_OPTIONS:
+        raise Refusal(f"{board.FEATURE} already holds {MOST_OPTIONS} options, the most GitHub allows a single select")
     # The write replaces the whole list, and an option sent without its id clears it from every story.
     kept = [
         {"id": option["id"], "name": option["name"], "color": option["color"], "description": option["description"]}
-        for option in found["options"]
+        for option in options
     ]
     gh.update_single_select(settings, str(found["id"]), [*kept, new])
+    after = {option["id"] for option in (_field(settings) or {}).get("options") or []}
+    lost = [option for option in options if option["id"] not in after]
+    if lost:
+        raise Refusal(f"the write dropped {', '.join(_named(lost))}, and every story that held one lost its feature")
     print(f"Opened feature {name}, last of {len(kept) + 1}")
     return 0
 
