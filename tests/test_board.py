@@ -33,6 +33,11 @@ def test_add_puts_the_issue_on_the_project(fake_gh, gh_calls, settings):
     ]
 
 
+def test_remove_takes_the_item_off_the_project(fake_gh, gh_calls, settings):
+    board.remove(settings, "PVTI_TEST_248")
+    assert gh_calls() == ["project item-delete 2 --owner acme --id PVTI_TEST_248"]
+
+
 def test_items_query_names_the_pagination_variable_end_cursor_so_gh_paginate_advances():
     assert "after:$endCursor" in board.ITEMS_QUERY
     assert "$after" not in board.ITEMS_QUERY

@@ -52,6 +52,10 @@ def test_a_prefix_has_to_open_the_comment_and_be_followed_by_text():
     ]
 
 
+def test_withdrawn_is_a_prefix_the_log_reads_back():
+    assert log.checked("Withdrawn: a duplicate of #321") == "Withdrawn: a duplicate of #321"
+
+
 def test_last_is_the_latest_entry_with_that_prefix():
     story = _story("Amended: one", "Review: two", "Amended: three")
 
@@ -87,7 +91,7 @@ def test_the_command_refuses_text_with_no_prefix(fake_gh, gh_calls):
     assert result.returncode == 1
     assert result.stderr == (
         "deckhand log: the text must open with one of: Drafted:, Review:, Amended:, Started:, Deviation:, Noted:, "
-        "Split:, Parked:, Reviewed:, Pull request:, After the merge:\n"
+        "Split:, Parked:, Withdrawn:, Reviewed:, Pull request:, After the merge:\n"
     )
     assert [c for c in gh_calls() if c.startswith("issue comment")] == []
 

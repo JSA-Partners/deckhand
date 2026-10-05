@@ -15,7 +15,9 @@ from typing import Any
 
 from deckhand import gh
 
-VIEW_FIELDS = "number,title,body,url,state,comments,labels"
+VIEW_FIELDS = "number,title,body,url,state,stateReason,comments,labels"
+# GitHub's reasons for an issue closed without finishing its work.
+DROPPED = ("NOT_PLANNED", "DUPLICATE")
 # The board cannot say an issue is deckhand's, because it carries issues that are not; this label does.
 LABEL = ("deckhand", "5319e7", "A story deckhand runs")
 
@@ -42,6 +44,7 @@ class Issue:
     state: str
     comments: list[Comment]
     labels: tuple[str, ...] = ()
+    state_reason: str = ""
 
 
 @contextmanager
@@ -84,6 +87,7 @@ def view(repo: str, number: int) -> Issue:
         state=data.get("state") or "",
         comments=[_comment(raw) for raw in data.get("comments") or []],
         labels=tuple(str(raw.get("name") or "") for raw in data.get("labels") or []),
+        state_reason=data.get("stateReason") or "",
     )
 
 
@@ -142,10 +146,10 @@ def assign(repo: str, number: int, login: str = "@me") -> None:
     gh.run("issue", "edit", str(number), "--repo", repo, "--add-assignee", login)
 
 
-def close(repo: str, number: int) -> None:
-    """Close the issue."""
+def close(repo: str, number: int, reason: str) -> None:
+    """Close the issue with GitHub's `reason`, "completed" or "not planned"."""
     gh.split_repo(repo)
-    gh.run("issue", "close", str(number), "--repo", repo)
+    gh.run("issue", "close", str(number), "--repo", repo, "--reason", reason)
 
 
 def comment(repo: str, number: int, body: str) -> str:

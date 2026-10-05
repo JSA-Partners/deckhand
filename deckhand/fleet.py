@@ -120,7 +120,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                 archived=bool(node.get("isArchived")),
                 feature=board.field_value(node, board.FEATURE, "optionId"),
                 feature_name=board.field_value(node, board.FEATURE, "name") or "",
-                dropped=content.get("stateReason") in ("NOT_PLANNED", "DUPLICATE"),
+                dropped=content.get("stateReason") in issue.DROPPED,
                 closed_at=content.get("closedAt") or "",
             )
         )
