@@ -186,6 +186,13 @@ def test_project_fields_reports_every_field_with_its_data_type(fake_gh, gh_calls
     assert any("organization(login:$owner)" in c and "fields(first:50)" in c for c in gh_calls())
 
 
+def test_project_fields_asks_for_each_option_s_description(fake_gh, gh_calls, settings):
+    """Every option is resent whole when one is added, so a description it was not read with is lost."""
+    gh.project_fields(settings)
+
+    assert any("options{ id name color description }" in c for c in gh_calls())
+
+
 def test_project_fields_is_empty_when_the_owner_root_answers_nothing(fake_gh, tmp_path, monkeypatch, settings):
     empty = tmp_path / "empty.json"
     empty.write_text('{"data": {"organization": null}}')

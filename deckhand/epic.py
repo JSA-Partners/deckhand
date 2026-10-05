@@ -1,9 +1,8 @@
-"""An epic: the issue a feature's stories roll up to, and what is left of it in dates.
+"""A feature: an option of the project's Feature field, the stories that hold it, and what is left of it in dates.
 
-An epic is an issue carrying the `epic` label and never a story: its stories are its sub-issues,
-from any repository of the project, and its place on the board is its place in the pipeline. This
-is the one place that opens one, adds a story to one, and reads one back, as lines for a person or
-as JSON for a report that is not a session.
+The option's place in the field is the feature's place in the pipeline, and a story of any repository
+belongs to it by its Feature value. This is the one place that opens one, adds a story to one, and
+reads one back, as lines for a person or as JSON for a report that is not a session.
 """
 
 from __future__ import annotations
@@ -12,12 +11,14 @@ import argparse
 import json
 from datetime import date, timedelta
 
-from deckhand import board, draft, fleet, gh, issue, throughput
+from deckhand import board, draft, fleet, gh, throughput
 from deckhand.cli import command
+from deckhand.config import Settings
 from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
 
 ACTIONS = ("open", "add", "list", "forecast")
-REF_FORM = "an epic or a story is owner/name#M, or M for this repository"
+REF_FORM = "a story is owner/name#M, or M for this repository"
+COLOR = "GRAY"
 # A fixed draw, so two forecasts of an unchanged board give a report the same dates.
 SEED = 0
 
@@ -28,8 +29,10 @@ def _today() -> date:
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("action", choices=ACTIONS, help="what to do")
-    parser.add_argument("refs", nargs="*", help="open: the title; add: the epic, then each story; forecast: the epic")
-    parser.add_argument("--about", default="", help="open: what the epic delivers, in one plain sentence")
+    parser.add_argument(
+        "refs", nargs="*", help="open: the name; add: the feature, then each story; forecast: the feature"
+    )
+    parser.add_argument("--about", default="", help="open: what the feature delivers, in one plain sentence")
     parser.add_argument("--json", action="store_true", help="list and forecast: print JSON instead of lines")
 
 
@@ -45,81 +48,124 @@ def _ref(value: str, repo: str) -> tuple[str, int]:
         raise Refusal(f"{REF_FORM}, got {value!r}") from error
 
 
-def _open(args: argparse.Namespace, repo: str) -> int:
-    title = " ".join(" ".join(args.refs).split())
-    if not title:
-        raise Refusal('epic open takes a title: epic open "<title>" --about "<sentence>"')
-    if not args.about.strip():
-        raise Refusal("--about says what the epic delivers, in one plain sentence")
+def _field(settings: Settings) -> dict | None:
+    """The Feature field as the project reports it, or None before any feature was opened."""
+    found = next((field for field in gh.project_fields(settings) if field["name"] == board.FEATURE), None)
+    if found is not None and found["dataType"] != "SINGLE_SELECT":
+        raise Refusal(f"{board.FEATURE} is {found['dataType']}, not a single select; fix it in the project settings")
+    return found
+
+
+def _options(settings: Settings) -> tuple[str, list[dict]]:
+    found = _field(settings)
+    if found is None:
+        raise Refusal(f"no {board.FEATURE} field yet; open a feature with epic open")
+    return str(found["id"]), found["options"]
+
+
+def _find(options: list[dict], named: str) -> dict:
+    """The option `named` names: by its id, by its name in any case, or by the start of one name alone."""
+    wanted = " ".join(named.split()).casefold()
+    exact = [option for option in options if option["id"] == named or option["name"].casefold() == wanted]
+    found = exact or [option for option in options if wanted and option["name"].casefold().startswith(wanted)]
+    if len(found) == 1:
+        return found[0]
+    if found:
+        raise Refusal(f"{named} matches {' and '.join(option['name'] for option in found)}; name one in full")
+    names = ", ".join(option["name"] for option in options) or "none"
+    raise Refusal(f"no feature matches {named}; the features are {names}")
+
+
+def _open(args: argparse.Namespace) -> int:
+    name = " ".join(" ".join(args.refs).split())
+    if not name:
+        raise Refusal('epic open takes a name: epic open "<name>" --about "<sentence>"')
+    about = " ".join(args.about.split())
+    if not about:
+        raise Refusal("--about says what the feature delivers, in one plain sentence")
     settings = resolved_settings()
-    number, url = issue.create(repo, title, args.about.strip() + "\n", label=issue.EPIC)
-    print(f"Opened epic #{number} {url}", flush=True)
-    board.add(settings, url)
-    print("Added to the board", flush=True)
+    found = _field(settings)
+    new = {"name": name, "color": COLOR, "description": about}
+    if found is None:
+        gh.create_single_select(settings, board.FEATURE, [new])
+        print(f"Created the {board.FEATURE} field with {name}")
+        return 0
+    taken = next((option for option in found["options"] if option["name"].casefold() == name.casefold()), None)
+    if taken is not None:
+        raise Refusal(f"{taken['name']} is already a feature; add stories to it with epic add")
+    # The write replaces the whole list, and an option sent without its id clears it from every story.
+    kept = [
+        {"id": option["id"], "name": option["name"], "color": option["color"], "description": option["description"]}
+        for option in found["options"]
+    ]
+    gh.update_single_select(settings, str(found["id"]), [*kept, new])
+    print(f"Opened feature {name}, last of {len(kept) + 1}")
     return 0
+
+
+def _story(held: dict[tuple[str, int], fleet.Story], ref: tuple[str, int], repo: str) -> fleet.Story:
+    named = ref_label(*ref, repo)
+    story = held.get(ref)
+    if story is None:
+        raise Refusal(f"{named} is not on the board; a story joins a feature from the board")
+    if not fleet.touched(story):
+        raise Refusal(f"{named} is not a deckhand story; write one with new")
+    if story.dropped:
+        raise Refusal(f"{named} was closed as not planned or a duplicate, so it is no piece of a feature")
+    return story
 
 
 def _add(args: argparse.Namespace, repo: str) -> int:
     if len(args.refs) < 2:
-        raise Refusal("epic add takes the epic, then each story: epic add <epic> <story>...")
-    where, number = _ref(args.refs[0], repo)
-    stories = list(dict.fromkeys(_ref(value, repo) for value in args.refs[1:]))
-    named = ref_label(where, number, repo)
-    if issue.EPIC[0] not in issue.view(where, number).labels:
-        raise Refusal(f"{named} is not an epic; open one with epic open")
-    joined: set[tuple[str, int]] = set()
-    moved: dict[tuple[str, int], tuple[str, int]] = {}
-    for story in stories:
-        labels = issue.view(*story).labels
-        if issue.EPIC[0] in labels:
-            raise Refusal(f"{ref_label(*story, repo)} is an epic, and an epic is never a story")
-        if issue.LABEL[0] not in labels:
-            raise Refusal(f"{ref_label(*story, repo)} is not a deckhand story; write one with new")
-        held = issue.parent(*story)
-        if held is not None and _key(held) == (where, number):
-            joined.add(story)
-        elif held is not None:
-            moved[story] = _key(held)
-        # Looked up again by the write, but resolved here so a story the API cannot find leaves the epic alone.
-        gh.issue_id(*story)
-    for story in stories:
-        if story in joined:
-            print(f"{ref_label(*story, repo)} already in {named}", flush=True)
+        raise Refusal("epic add takes the feature, then each story: epic add <feature> <story>...")
+    refs = list(dict.fromkeys(_ref(value, repo) for value in args.refs[1:]))
+    settings = resolved_settings()
+    field, options = _options(settings)
+    option = _find(options, args.refs[0])
+    held = {_key(story.key): story for story in fleet.load(settings, archived=True)}
+    stories = [(ref_label(*ref, repo), _story(held, ref, repo)) for ref in refs]
+    project = gh.project_id(settings)
+    name = option["name"]
+    for named, story in stories:
+        if story.feature == option["id"]:
+            print(f"{named} already in {name}", flush=True)
             continue
-        issue.add_sub_issue(where, number, story)
-        if story in moved:
-            print(f"{ref_label(*story, repo)} moved from {ref_label(*moved[story], repo)} to {named}", flush=True)
-        else:
-            print(f"{ref_label(*story, repo)} joined {named}", flush=True)
+        flags = ("--project-id", project, "--field-id", field, "--single-select-option-id", option["id"])
+        gh.run("project", "item-edit", "--id", story.item, *flags)
+        moved = f"moved from {story.feature_name} to" if story.feature else "joined"
+        print(f"{named} {moved} {name}", flush=True)
     return 0
 
 
-def _row(read: fleet.Fleet, epic: fleet.Story) -> dict:
-    """One epic and its pieces; archived stories count, because the board archives finished work."""
-    mine = [story for story in fleet.members([*read.stories, *read.archived], epic.key) if not story.dropped]
+def _row(read: fleet.Fleet, option: dict) -> dict:
+    """One feature and its pieces; archived stories count, because the board archives finished work."""
+    mine = fleet.members([*read.stories, *read.archived], option["id"])
+    done = sum(1 for story in mine if story.closed)
     return {
-        "epic": f"{epic.repo}#{epic.number}",
-        "title": epic.title,
-        "about": epic.issue.body.strip(),
-        "closed": epic.closed,
+        "epic": option["id"],
+        "title": option["name"],
+        "about": option["description"],
+        "closed": bool(mine) and done == len(mine),
         "pieces": len(mine),
-        "done": sum(1 for story in mine if story.closed),
+        "done": done,
         "drafts": sum(1 for story in mine if not story.closed and draft.is_draft(story.issue.body)),
     }
 
 
-def _list(args: argparse.Namespace, repo: str) -> int:
-    read = fleet.read(resolved_settings())
-    found = fleet.epics(read.stories)
+def _list(args: argparse.Namespace) -> int:
+    settings = resolved_settings()
+    found = _field(settings)
+    options = found["options"] if found else []
+    read = fleet.read(settings) if options else None
+    rows = [_row(read, option) for option in options] if read else []
     if args.json:
-        print(json.dumps([_row(read, epic) for epic in found]))
+        print(json.dumps(rows))
         return 0
-    for epic in found:
-        row = _row(read, epic)
-        label = ref_label(*_key(epic.key), repo)
-        print(f"{label} {epic.title}: {row['done']} of {row['pieces']} pieces done, {row['drafts']} drafts")
-    if not found:
-        print("no epics on the board")
+    for row in rows:
+        about = f" {row['about']}" if row["about"] else ""
+        print(f"{row['title']}: {row['done']} of {row['pieces']} pieces done, {row['drafts']} drafts.{about}")
+    if not rows:
+        print("no features yet; open one with epic open")
     return 0
 
 
@@ -142,21 +188,17 @@ def _dated(found: throughput.Outlook) -> dict:
     }
 
 
-def _forecast(args: argparse.Namespace, repo: str) -> int:
+def _forecast(args: argparse.Namespace) -> int:
     if len(args.refs) != 1:
-        raise Refusal("epic forecast takes one epic: epic forecast <epic>")
-    key = _ref(args.refs[0], repo)
-    read = fleet.read(resolved_settings())
-    # The board archives finished work, and a finished epic is still asked about.
-    every = fleet.epics([*read.stories, *read.archived])
-    epic = next((story for story in every if _key(story.key) == key), None)
-    if epic is None:
-        raise Refusal(f"{ref_label(*key, repo)} is not an epic on the board")
-    found = throughput.outlook(read, epic.key, _today(), seed=SEED)
+        raise Refusal("epic forecast takes one feature: epic forecast <feature>")
+    settings = resolved_settings()
+    option = _find(_options(settings)[1], args.refs[0])
+    read = fleet.read(settings)
+    found = throughput.outlook(read, option["id"], _today(), seed=SEED)
     if args.json:
-        print(json.dumps({**_row(read, epic), **_dated(found)}))
+        print(json.dumps({**_row(read, option), **_dated(found)}))
         return 0
-    print(f"## Forecast: {epic.title}")
+    print(f"## Forecast: {option['name']}")
     for line in throughput.rows(found):
         print(line)
     return 0
@@ -164,13 +206,12 @@ def _forecast(args: argparse.Namespace, repo: str) -> int:
 
 @command("epic", _configure)
 def run(args: argparse.Namespace) -> int:
-    """Open an epic, add stories to it, list every epic in board order, or forecast one in dates."""
-    repo = gh.repo_slug().lower()
+    """Open a feature, add stories to it, list every feature in pipeline order, or forecast one in dates."""
     if args.action == "open":
-        return _open(args, repo)
+        return _open(args)
     if args.action == "add":
-        return _add(args, repo)
+        return _add(args, gh.repo_slug().lower())
     with gh.cached():
         if args.action == "list":
-            return _list(args, repo)
-        return _forecast(args, repo)
+            return _list(args)
+        return _forecast(args)

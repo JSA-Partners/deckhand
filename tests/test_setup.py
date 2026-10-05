@@ -964,6 +964,24 @@ def test_apply_deletes_nothing_when_the_project_has_only_the_fields_the_process_
     assert "deleted field" not in result.stdout
 
 
+def test_apply_keeps_the_feature_field_and_never_creates_it(repo, fake_gh, gh_calls, tmp_path):
+    nodes = [
+        {"id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTSSF_KIND", "name": "Kind", "dataType": "SINGLE_SELECT"},
+        {"id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER"},
+        {"id": "PVTSSF_FEATURE", "name": "Feature", "dataType": "SINGLE_SELECT"},
+    ]
+    env = {"GH_PROJECT_FIELDS_FILE": _project_fields_file(tmp_path, "feature.json", nodes)}
+
+    kept = run_deckhand("setup", "apply", cwd=repo, env=env)
+    fresh = run_deckhand("setup", "apply", cwd=repo)
+
+    assert kept.returncode == 0, kept.stderr
+    assert fresh.returncode == 0, fresh.stderr
+    assert _deletes(gh_calls) == ["project field-delete --id PVTSSF_PRIORITY"]
+    assert not any("Feature" in call for call in gh_calls() if "ProjectV2Field(" in call or "field-create" in call)
+
+
 def test_apply_deletes_the_actual_field_it_no_longer_reads(repo, fake_gh, gh_calls, tmp_path):
     """Actual was the process's own field until the forecast measured hours; setup now removes it."""
     nodes = [

@@ -73,8 +73,6 @@ def _fleet_rows(read: fleet.Fleet) -> list[str]:
     for story in read.stories:
         if story.status == columns.DONE and story.closed:
             continue
-        if fleet.is_epic(story):
-            continue
         if not fleet.touched(story):
             foreign += 1
             continue

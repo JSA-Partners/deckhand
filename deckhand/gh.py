@@ -21,7 +21,7 @@ OWNER_FIELDS = {"Organization": "organization", "User": "user"}
 FIELDS_QUERY = (
     "query($owner:String!,$number:Int!){ OWNER_ROOT(login:$owner){ projectV2(number:$number){ "
     "fields(first:50){ nodes{ ... on ProjectV2FieldCommon{ id name dataType } "
-    "... on ProjectV2SingleSelectField{ options{ id name color } } } } } } }"
+    "... on ProjectV2SingleSelectField{ options{ id name color description } } } } } } }"
 )
 
 WORKFLOWS_QUERY = """

@@ -99,7 +99,7 @@ def _name(repo: str) -> str:
 
 
 def backlog(read: Fleet) -> list[Ranked]:
-    """The Backlog stories deckhand owns in this reading, ranked; an epic or an issue opened by hand is not one."""
+    """The Backlog stories deckhand owns in this reading, ranked; an issue opened by hand is not one."""
     held = [story for story in read.stories if story.status == columns.BACKLOG and touched(story)]
     return ranked(held, read.blockers)
 

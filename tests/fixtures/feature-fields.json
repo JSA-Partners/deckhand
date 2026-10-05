@@ -1,0 +1,25 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "fields": {
+          "nodes": [
+            { "id": "PVTSSF_STATUS", "name": "Status", "dataType": "SINGLE_SELECT",
+              "options": [
+                { "id": "opt_backlog", "name": "Backlog", "color": "GRAY", "description": "" },
+                { "id": "opt_done", "name": "Done", "color": "GREEN", "description": "" }
+              ] },
+            { "id": "PVTF_POINTS", "name": "Story Points", "dataType": "NUMBER" },
+            { "id": "PVTSSF_FEATURE", "name": "Feature", "dataType": "SINGLE_SELECT",
+              "options": [
+                { "id": "OPT_BILLING", "name": "Billing", "color": "GREEN", "description": "Charge for seats." },
+                { "id": "OPT_PERMISSION", "name": "Permission rework", "color": "BLUE",
+                  "description": "Guests and registry ownership." },
+                { "id": "OPT_AUDIT", "name": "Permission audit", "color": "PURPLE", "description": "Who saw what, logged." }
+              ] }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -34,8 +34,8 @@ Review section. Park any other feature the conversation produced with `... new a
 with `--repo owner/name` for another repository, `--blocks N` for the story here waiting on it, and
 `--after REF` for a story the feature itself waits on.
 
-Once a story or a split is boarded, run `... epic list`. When the work belongs to one of the epics
-it prints, say which and run `... epic add <epic> <number>...` with every story just opened. Work
-that serves no epic joins none.
+Once a story or a split is boarded, run `... epic list`. When the work belongs to one of the
+features it prints, say which and run `... epic add "<feature>" <number>...` with every story just
+opened. Work that serves no feature joins none.
 
 If a command refuses, fix the rule it names and run it again.

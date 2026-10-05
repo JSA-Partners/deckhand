@@ -3,24 +3,11 @@
     "organization": {
       "projectV2": {
         "items": {
-          "pageInfo": { "hasNextPage": false, "endCursor": null },
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
           "nodes": [
-            {
-              "id": "I_300",
-              "isArchived": false,
-              "content": {
-                "number": 300,
-                "title": "Permission rework",
-                "url": "https://github.com/acme/widgets/issues/300",
-                "state": "OPEN",
-                "closedAt": null,
-                "body": "Guests and registry ownership.\n",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [{ "name": "epic" }] },
-                "comments": { "nodes": [] }
-              },
-              "fieldValues": { "nodes": [] }
-            },
             {
               "id": "I_301",
               "isArchived": false,
@@ -31,20 +18,56 @@
                 "state": "CLOSED",
                 "closedAt": "2026-09-02T00:00:00Z",
                 "body": "",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [{ "name": "deckhand" }] },
-                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
                 "comments": {
                   "nodes": [
-                    { "body": "Started: on the branch", "createdAt": "2026-09-01T00:00:00Z", "author": { "login": "mjm" } },
-                    { "body": "Pull request: opened", "createdAt": "2026-09-02T00:00:00Z", "author": { "login": "mjm" } }
+                    {
+                      "body": "Started: on the branch",
+                      "createdAt": "2026-09-01T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Pull request: opened",
+                      "createdAt": "2026-09-02T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
                   ]
                 }
               },
               "fieldValues": {
                 "nodes": [
-                  { "name": "Done", "field": { "name": "Status" } },
-                  { "number": 1, "field": { "name": "Story Points" } }
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
                 ]
               }
             },
@@ -58,15 +81,41 @@
                 "state": "OPEN",
                 "closedAt": null,
                 "body": "",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [{ "name": "deckhand" }] },
-                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
-                "comments": { "nodes": [] }
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
               },
               "fieldValues": {
                 "nodes": [
-                  { "name": "Backlog", "field": { "name": "Status" } },
-                  { "number": 1, "field": { "name": "Story Points" } }
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
                 ]
               }
             },
@@ -80,11 +129,33 @@
                 "state": "OPEN",
                 "closedAt": null,
                 "body": "",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [] },
-                "comments": { "nodes": [] }
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": []
+                },
+                "comments": {
+                  "nodes": []
+                }
               },
-              "fieldValues": { "nodes": [{ "name": "Backlog", "field": { "name": "Status" } }] }
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
             },
             {
               "id": "I_304",
@@ -96,14 +167,34 @@
                 "state": "OPEN",
                 "closedAt": null,
                 "body": "",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [{ "name": "deckhand" }] },
-                "comments": { "nodes": [] }
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
               },
               "fieldValues": {
                 "nodes": [
-                  { "name": "Backlog", "field": { "name": "Status" } },
-                  { "number": 1, "field": { "name": "Story Points" } }
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
                 ]
               }
             },
@@ -118,15 +209,41 @@
                 "closedAt": "2026-09-03T00:00:00Z",
                 "stateReason": "NOT_PLANNED",
                 "body": "",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [{ "name": "deckhand" }] },
-                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
-                "comments": { "nodes": [] }
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
               },
               "fieldValues": {
                 "nodes": [
-                  { "name": "Done", "field": { "name": "Status" } },
-                  { "number": 1, "field": { "name": "Story Points" } }
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
                 ]
               }
             },
@@ -141,15 +258,89 @@
                 "closedAt": "2026-09-04T00:00:00Z",
                 "stateReason": "DUPLICATE",
                 "body": "",
-                "repository": { "nameWithOwner": "acme/widgets" },
-                "labels": { "nodes": [{ "name": "deckhand" }] },
-                "parent": { "number": 300, "repository": { "nameWithOwner": "acme/widgets" } },
-                "comments": { "nodes": [] }
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
               },
               "fieldValues": {
                 "nodes": [
-                  { "name": "Done", "field": { "name": "Status" } },
-                  { "number": 1, "field": { "name": "Story Points" } }
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_307",
+              "isArchived": false,
+              "content": {
+                "number": 307,
+                "title": "Charge per seat",
+                "url": "https://github.com/acme/widgets/issues/307",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
                 ]
               }
             }

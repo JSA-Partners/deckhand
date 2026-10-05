@@ -492,10 +492,10 @@ def test_an_archived_issue_the_process_never_wrote_to_is_not_an_anomaly():
     assert fleet.anomalies([], {}, set(), [], archived=archived) == []
 
 
-# epics
+# features
 
 
-def _item(number: int, labels: tuple[str, ...], parent: int | None = None, repo: str = REPO) -> dict:
+def _item(number: int, labels: tuple[str, ...], feature: str | None = None, repo: str = REPO) -> dict:
     content = {
         "number": number,
         "title": f"T{number}",
@@ -504,16 +504,20 @@ def _item(number: int, labels: tuple[str, ...], parent: int | None = None, repo:
         "repository": {"nameWithOwner": repo},
         "labels": {"nodes": [{"name": name} for name in labels]},
     }
-    if parent is not None:
-        content["parent"] = {"number": parent, "repository": {"nameWithOwner": REPO}}
-    return {"id": f"I_{number}", "content": content, "fieldValues": {"nodes": []}}
+    values = [] if feature is None else [{"name": f"Name {feature}", "optionId": feature, "field": {"name": "Feature"}}]
+    return {"id": f"I_{number}", "content": content, "fieldValues": {"nodes": values}}
 
 
-def test_a_row_carries_the_parent_the_issue_has():
-    found = fleet.stories([_item(1, ("deckhand",), parent=300), _item(2, ("deckhand",))])
+def test_the_items_query_asks_for_the_option_id_of_a_single_select():
+    assert "ProjectV2ItemFieldSingleSelectValue{ name optionId " in fleet.ITEMS_QUERY
+    assert "parent{" not in fleet.ITEMS_QUERY
 
-    assert found[0].parent == (REPO, 300)
-    assert found[1].parent is None
+
+def test_a_row_carries_the_feature_option_its_item_holds():
+    found = fleet.stories([_item(1, ("deckhand",), feature="OPT_A"), _item(2, ("deckhand",))])
+
+    assert (found[0].feature, found[0].feature_name) == ("OPT_A", "Name OPT_A")
+    assert (found[1].feature, found[1].feature_name) == (None, "")
 
 
 def test_a_story_closed_as_not_planned_reads_as_dropped():
@@ -543,36 +547,26 @@ def test_a_row_carries_when_the_issue_closed():
     assert [story.closed_at for story in found] == ["2026-09-02T00:00:00Z", ""]
 
 
-def test_an_epic_is_the_issue_that_carries_the_epic_label():
-    found = fleet.stories([_item(300, ("epic",)), _item(1, ("deckhand",))])
-
-    assert [fleet.is_epic(story) for story in found] == [True, False]
-    assert fleet.touched(found[0]) is False
-
-
-def test_epics_come_back_in_board_order():
-    found = fleet.stories([_item(301, ("epic",)), _item(1, ("deckhand",)), _item(300, ("epic",))])
-
-    assert [story.number for story in fleet.epics(found)] == [301, 300]
-
-
-def test_members_are_the_stories_of_one_epic_and_nothing_foreign():
+def test_members_are_the_owned_stories_of_one_feature_and_nothing_dropped():
+    dropped = _item(5, ("deckhand",), feature="OPT_A")
+    dropped["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z", "stateReason": "NOT_PLANNED"})
     found = fleet.stories(
         [
-            _item(1, ("deckhand",), parent=300),
-            _item(2, (), parent=300),
-            _item(3, ("deckhand",), parent=301),
-            _item(4, ("deckhand",), parent=300, repo="acme/gadgets"),
+            _item(1, ("deckhand",), feature="OPT_A"),
+            _item(2, (), feature="OPT_A"),
+            _item(3, ("deckhand",), feature="OPT_B"),
+            _item(4, ("deckhand",), feature="OPT_A", repo="acme/gadgets"),
+            dropped,
         ]
     )
 
-    assert [story.number for story in fleet.members(found, (REPO, 300))] == [1, 4]
+    assert [story.number for story in fleet.members(found, "OPT_A")] == [1, 4]
 
 
 def _logged(
     number: int,
     *entries: str,
-    parent: tuple[str, int] | None = None,
+    feature: str | None = None,
     closed: bool = False,
     labels: tuple[str, ...] = ("deckhand",),
     repo: str = REPO,
@@ -596,7 +590,8 @@ def _logged(
         closed=closed,
         item=f"I_{number}",
         issue=held,
-        parent=parent,
+        feature=feature,
+        feature_name={"OPT_A": "Alpha", "OPT_B": "Beta"}.get(feature or "", ""),
     )
 
 
@@ -616,81 +611,64 @@ def test_a_story_that_never_split_shed_nothing():
     assert fleet.shed(_logged(1, "Started: on the branch")) == []
 
 
-EPIC = _logged(300, labels=("epic",))
+SPLIT = "Split: #2 Follow on, blocked by this story."
 
 
-def test_a_story_shed_by_an_epics_story_and_left_out_is_a_stray():
-    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+def test_a_story_shed_by_a_feature_s_story_and_left_out_is_a_stray():
     kid = _logged(2)
 
-    assert fleet.strays([EPIC, parent, kid]) == [(kid, (REPO, 300))]
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), kid]) == [(kid, "Alpha")]
 
 
-def test_a_story_shed_under_a_parent_that_is_not_an_epic_is_not_a_stray():
-    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
-    plain = _logged(300)
-
-    assert fleet.strays([plain, parent, _logged(2)]) == []
-    assert fleet.strays([parent, _logged(2)]) == []
+def test_a_story_shed_by_a_story_in_no_feature_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT), _logged(2)]) == []
 
 
-def test_a_shed_story_already_in_an_epic_is_not_a_stray():
-    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
-
-    assert fleet.strays([EPIC, parent, _logged(2, parent=(REPO, 301))]) == []
+def test_a_shed_story_already_in_a_feature_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, feature="OPT_B")]) == []
 
 
 def test_a_finished_shed_story_is_not_a_stray():
-    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, closed=True)]) == []
 
-    assert fleet.strays([EPIC, parent, _logged(2, closed=True)]) == []
+
+def test_a_shed_issue_deckhand_does_not_own_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, labels=())]) == []
 
 
 def test_a_stray_is_an_anomaly_that_names_its_fix():
-    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
-
-    found = fleet.anomalies([EPIC, parent, _logged(2)], {}, set(), [])
+    found = fleet.anomalies([_logged(1, SPLIT, feature="OPT_A"), _logged(2)], {}, set(), [])
 
     assert [(item.number, item.what, item.fix) for item in found] == [
-        (2, "split from a story of epic #300, but in no epic", "epic add acme/widgets#300 acme/widgets#2")
+        (2, "split from a story of Alpha, but in no feature", 'epic add "Alpha" acme/widgets#2')
     ]
 
 
-def test_a_stray_in_another_repository_names_both_refs_in_full():
-    gadgets = _logged(4, parent=(REPO, 300), repo="acme/gadgets")
-    gadgets = dataclasses.replace(
-        gadgets,
-        issue=dataclasses.replace(
-            gadgets.issue,
-            comments=[issue.Comment(author="claude", body="Split: #5 Follow on.", created_at="2026-09-01T00:00:00Z")],
-        ),
-    )
+def test_a_stray_in_another_repository_names_its_ref_in_full():
+    gadgets = _logged(4, "Split: #5 Follow on.", feature="OPT_A", repo="acme/gadgets")
 
-    found = fleet.anomalies([EPIC, gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
+    found = fleet.anomalies([gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
 
-    assert [item.fix for item in found] == ["epic add acme/widgets#300 acme/gadgets#5"]
+    assert [item.fix for item in found] == ['epic add "Alpha" acme/gadgets#5']
 
 
 def test_an_archived_story_that_shed_still_reports_its_open_kid():
-    parent = dataclasses.replace(
-        _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300), closed=True), archived=True
-    )
+    shedder = dataclasses.replace(_logged(1, SPLIT, feature="OPT_A", closed=True), archived=True)
     kid = _logged(2)
 
-    assert fleet.strays([EPIC, kid], [parent]) == [(kid, (REPO, 300))]
-    assert [item.number for item in fleet.anomalies([EPIC, kid], {}, set(), [], archived=[parent])] == [2]
+    assert fleet.strays([kid], [shedder]) == [(kid, "Alpha")]
+    assert [item.number for item in fleet.anomalies([kid], {}, set(), [], archived=[shedder])] == [2]
 
 
 def test_an_archived_kid_is_not_a_stray():
-    parent = _logged(1, "Split: #2 Follow on, blocked by this story.", parent=(REPO, 300))
     kid = dataclasses.replace(_logged(2), archived=True)
 
-    assert fleet.strays([EPIC, parent], [kid]) == []
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A")], [kid]) == []
 
 
-def test_a_kid_shed_by_two_stories_of_an_epic_is_one_stray():
-    first = _logged(1, "Split: #3 Follow on, blocked by this story.", parent=(REPO, 300))
-    second = _logged(2, "Split: #3 Follow on, blocked by this story.", parent=(REPO, 300))
+def test_a_kid_shed_by_two_stories_of_a_feature_is_one_stray():
+    first = _logged(1, "Split: #3 Follow on, blocked by this story.", feature="OPT_A")
+    second = _logged(2, "Split: #3 Follow on, blocked by this story.", feature="OPT_A")
     kid = _logged(3)
 
-    assert fleet.strays([EPIC, first, second, kid]) == [(kid, (REPO, 300))]
+    assert fleet.strays([first, second, kid]) == [(kid, "Alpha")]

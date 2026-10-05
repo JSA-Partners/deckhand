@@ -147,36 +147,44 @@ how thin its history still is.
 
 ### Epics
 
-An epic is the issue a feature's stories roll up to. It carries the `epic` label, it is never a
-story, and its stories are its sub-issues, from any repository of the project. The order of the
-epics on the board is the order they are built in.
+A feature is an option of the project's single-select Feature field, never an issue, so the board
+holds only units of work and a feature spans every repository of the project. The option's name is
+the feature's name, its description says what it delivers, and the order of the options is the
+order the features are built in. A story belongs to a feature by its Feature value.
 
 ```text
 deckhand epic open "Let guests into a collection" --about "A client sees their own collection and nothing else."
-deckhand epic add 300 261 259 owner/front-end#133
+deckhand epic add "Let guests" 261 259 owner/front-end#133
 deckhand epic list
-deckhand epic forecast 300
+deckhand epic forecast "Let guests into a collection"
 ```
 
-`new` offers the epics when it boards a story. A story split from an epic's story does not join
-the epic by itself, so the captain lists it under Anomalies with the command that adds it.
+`epic open` creates the Feature field the first time and adds each later feature at the end. A
+feature is named by its full name, by the start of one name alone, in any case, or by its option id.
 
-`epic add` refuses an issue that is not a deckhand story, and writes nothing until every one passes.
+To reorder the features, drag the options in the project's settings for the Feature field. Deleting
+an option clears that feature from every story that held it.
 
-`epic forecast` says how many weeks the epic's open stories will take, and gives dates with `--json`.
-It counts how many of the epic's own stories finished each week and draws whole weeks from those
+`new` offers the features when it boards a story. A story split from a feature's story does not join
+the feature by itself, so the captain lists it under Anomalies with the command that adds it.
+
+`epic add` refuses a story that is off the board, not a deckhand story, or closed as not planned or
+as a duplicate, and writes nothing until every one passes. A story already in another feature moves.
+
+`epic forecast` says how many weeks the feature's open stories will take, and gives dates with `--json`.
+It counts how many of the feature's own stories finished each week and draws whole weeks from those
 counts, the method of Daniel Vacanti's "When Will It Be Done?". A week with nothing finished counts
 as zero, so client work, weekends and stalls are already in the numbers. Each simulated run first
 resamples the measured weeks, so a short history gives a wider range, and a resample with no
-finished week is drawn again. The weeks start when the first of the epic's stories started, a first week that began
+finished week is drawn again. The weeks start when the first of the feature's stories started, a first week that began
 partway through is left out, and the forecast draws from the last twelve full weeks. A draft with no stories listed yet counts as the
 average a finished parked feature became once five have finished, as the largest seen before that,
 and as one story before any has. The floor is the 50th percentile, the commitment the 90th and the
 worst case the 99th. On this project's history the commitment was met 86 percent of the time. In
-simulated steady work, the first forecast an epic gets met its commitment 89 percent of the time,
+simulated steady work, the first forecast a feature gets met its commitment 89 percent of the time,
 and 87 percent in the worst case.
 
-There is no date range until four weeks have passed since the epic's work began and five of its
+There is no date range until four weeks have passed since the feature's work began and five of its
 stories have finished in the weeks measured, nor when every week measured finished the same number,
 nor when the commitment would be over two years out, and the forecast says which. A worst case
 past two years reads as beyond two years.

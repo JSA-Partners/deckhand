@@ -22,10 +22,10 @@
   names; `gates.py` what must be true before a branch becomes a pull request, run only from
   `finish.apply`; `findings.py` reads the findings, verdicts or decisions document into data, for
   `review.py` to join; `forecast.py` measures what a finished story took and how many run at once,
-  and simulates what a batch of open ones will; `epic.py` the issue a feature's stories roll up to,
-  opened, filled, listed and forecast in dates; `throughput.py` how many stories finish a week, and
-  the weeks an epic's open ones will take; `related.py` the issues a story names, with their
-  column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
+  and simulates what a batch of open ones will; `epic.py` the features, the options of the project's
+  Feature field, opened, filled, listed and forecast in dates; `throughput.py` how many stories
+  finish a week, and the weeks a feature's open ones will take; `related.py` the issues a story
+  names, with their column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
   which Claude Code sessions are open and on what, `transcript.py` what one of them says;
   `since.py` the snapshot a full captain read leaves, and what changed against the last;
   `candidates.py` what to open next and which plans touch the same files; `merges.py` which pull
@@ -102,7 +102,10 @@ install reaches them when the next fix or feature does.
   manifests and the install commands carry them
 - A blocker is `owner/name#M`; a bare number is this repository
 - A parked feature is written in place and becomes the story; only finished work closes an issue
-- An epic is the issue stories roll up to, carries the `epic` label, and is never a story
+- A feature is an option of the project's Feature field, never an issue: the board holds only
+  units of work, and a story of any repository joins one by its Feature value. The option order is
+  the pipeline order, and `updateProjectV2Field` keeps an item's value only for an option resent with
+  its id
 - The build happens in the story's worktree, which `start` makes and `next` names; a branch is
   never checked out by hand, and the clone stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec

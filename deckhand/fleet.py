@@ -22,11 +22,10 @@ ITEMS_QUERY = (
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
-    "parent{ number repository{ nameWithOwner } } "
     "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
     "fieldValues(first:20){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
-    "... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } } "
+    "... on ProjectV2ItemFieldSingleSelectValue{ name optionId field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
 )
 
@@ -49,7 +48,8 @@ class Story:
     assignees: tuple[str, ...] = ()
     blocked_by: tuple[tuple[str, int, str], ...] = ()
     archived: bool = False
-    parent: tuple[str, int] | None = None
+    feature: str | None = None
+    feature_name: str = ""
     dropped: bool = False
     closed_at: str = ""
 
@@ -81,13 +81,6 @@ def _issue(content: dict) -> issue.Issue:
         ],
         labels=tuple(str(node.get("name") or "") for node in (content.get("labels") or {}).get("nodes") or []),
     )
-
-
-def _parent(content: dict) -> tuple[str, int] | None:
-    held = content.get("parent") or {}
-    if "number" not in held:
-        return None
-    return ((held.get("repository") or {}).get("nameWithOwner") or "", int(held["number"]))
 
 
 def _open_blockers(content: dict) -> tuple[tuple[str, int, str], ...]:
@@ -125,7 +118,8 @@ def stories(nodes: list[dict]) -> list[Story]:
                 ),
                 blocked_by=_open_blockers(content),
                 archived=bool(node.get("isArchived")),
-                parent=_parent(content),
+                feature=board.field_value(node, board.FEATURE, "optionId"),
+                feature_name=board.field_value(node, board.FEATURE, "name") or "",
                 dropped=content.get("stateReason") in ("NOT_PLANNED", "DUPLICATE"),
                 closed_at=content.get("closedAt") or "",
             )
@@ -144,13 +138,13 @@ def _nodes(settings: Settings) -> list[dict]:
     return found
 
 
-def load(settings: Settings) -> list[Story]:
-    """Every story on the project with its log, and nothing else read; an archived one is not a story here.
+def load(settings: Settings, archived: bool = False) -> list[Story]:
+    """Every story on the project with its log, and nothing else read; an archived one only when asked for.
 
     The query asks for archived items because `read` reports the archived story the process still owns.
-    Nothing else wants them, so this drops them and every caller sees the board as a person does.
+    Most callers want the board as a person sees it, so archived items are dropped unless asked for.
     """
-    return [story for story in stories(_nodes(settings)) if not story.archived]
+    return [story for story in stories(_nodes(settings)) if archived or not story.archived]
 
 
 def touched(story: Story) -> bool:
@@ -163,19 +157,9 @@ def touched(story: Story) -> bool:
     return issue.LABEL[0] in story.issue.labels
 
 
-def is_epic(story: Story) -> bool:
-    """Whether this issue is an epic: the issue stories roll up to, and never a story itself."""
-    return issue.EPIC[0] in story.issue.labels
-
-
-def epics(found: list[Story]) -> list[Story]:
-    """Every epic, in the order the board holds them, which is the order they are to be built in."""
-    return [story for story in found if is_epic(story)]
-
-
-def members(found: list[Story], epic: tuple[str, int]) -> list[Story]:
-    """The stories of one epic that are the process's business, in any repository."""
-    return [story for story in found if story.parent == epic and touched(story)]
+def members(found: list[Story], feature: str) -> list[Story]:
+    """The stories the process owns whose Feature is the option `feature`, in any repository, none dropped."""
+    return [story for story in found if story.feature == feature and touched(story) and not story.dropped]
 
 
 _SHED = re.compile(r"(?:([^\s/#,]+/[^\s/#,]+))?#([0-9]+)")
@@ -199,19 +183,17 @@ def shed(story: Story) -> list[tuple[str, int]]:
     return found
 
 
-def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, tuple[str, int]]]:
-    """Every open story on the board in no epic that a story of an epic shed, archived or not, with its epic."""
-    every = [*found, *(archived or [])]
+def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, str]]:
+    """Every open story on the board in no feature that a story of a feature shed, with that feature's name."""
     held = {story.key: story for story in found}
-    named = {story.key for story in epics(every)}
-    out: dict[tuple[str, int], tuple[Story, tuple[str, int]]] = {}
-    for story in every:
-        if story.parent not in named:
+    out: dict[tuple[str, int], tuple[Story, str]] = {}
+    for story in [*found, *(archived or [])]:
+        if story.feature is None:
             continue
         for key in shed(story):
             kid = held.get(key)
-            if kid is not None and kid.parent is None and not kid.closed and touched(kid):
-                out.setdefault(key, (kid, story.parent))
+            if kid is not None and kid.feature is None and not kid.closed and touched(kid):
+                out.setdefault(key, (kid, story.feature_name))
     return list(out.values())
 
 
@@ -310,10 +292,10 @@ def anomalies(
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
             fix = "captain apply --unblock on one edge"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
-    for story, (where, number) in strays(found, archived):
-        what = f"split from a story of epic {step.ref_label(where, number, story.repo)}, but in no epic"
-        # epic add reads a bare number as the repository it runs in, which may be neither of these.
-        fix = f"epic add {where}#{number} {story.repo}#{story.number}"
+    for story, name in strays(found, archived):
+        what = f"split from a story of {name}, but in no feature"
+        # epic add reads a bare number as the repository it runs in, which may not be this story's.
+        fix = f'epic add "{name}" {story.repo}#{story.number}'
         out.append(Anomaly(story.number, story.repo, what, fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))

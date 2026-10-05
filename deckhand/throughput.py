@@ -1,4 +1,4 @@
-"""How many stories finish a week, and how many weeks what is left of an epic will take.
+"""How many stories finish a week, and how many weeks what is left of a feature will take.
 
 Nothing here reads GitHub or prints: it takes the fleet and today's date and returns numbers and the
 lines of `epic forecast`. It is Monte Carlo simulation on measured weekly throughput, the method of
@@ -19,8 +19,8 @@ from deckhand import draft, fleet, log
 # Synthetic first forecasts flatter the method, so the commitment is the 90th, which real history met 86 percent.
 PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 90, 99)
 ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
-PACED = 5  # an epic's finishes in its last LOOKBACK weeks below which its own weeks are noise
-SETTLED = 4  # weeks since an epic's work began below which its pace has not settled
+PACED = 5  # a feature's finishes in its last LOOKBACK weeks below which its own weeks are noise
+SETTLED = 4  # weeks since a feature's work began below which its pace has not settled
 LOOKBACK = 12  # weeks of history drawn from, so a pace from long ago does not outvote this quarter's
 HORIZON = 104  # weeks, two years, at which a commitment says nothing a stakeholder can plan on
 
@@ -106,13 +106,13 @@ def began(stories: list[fleet.Story], today: date) -> date | None:
     return min([*started, *_finished_on(stories, today)], default=None)
 
 
-def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[list[int], bool]:
-    """The epic's own last `LOOKBACK` full weekly counts since its work began, and whether `SETTLED` weeks have passed.
+def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int], bool]:
+    """The feature's own last `LOOKBACK` full weekly counts since its work began, and whether `SETTLED` weeks passed.
 
-    Only the epic's stories count: the project's weeks hold work outside the epic and forecast it early.
+    Only the feature's stories count: the project's weeks hold work outside it and forecast it early.
     The oldest week is left out when work began partway through it, since it would count a few days as seven.
     """
-    mine = fleet.members(every, epic)
+    mine = fleet.members(every, feature)
     start = began(mine, today)
     if start is None:
         return [], False
@@ -122,13 +122,9 @@ def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[list[i
     return full[-LOOKBACK:], days >= 7 * SETTLED
 
 
-def remaining(read: fleet.Fleet, epic: fleet.Key) -> tuple[int, int]:
-    """The epic's open stories counted as one each, and apart from them its drafts with no stories listed yet."""
-    left = [
-        story
-        for story in fleet.members([*read.stories, *read.archived], epic)
-        if not story.closed and not story.dropped
-    ]
+def remaining(read: fleet.Fleet, feature: str) -> tuple[int, int]:
+    """The feature's open stories counted as one each, and apart from them its drafts with no stories listed yet."""
+    left = [story for story in fleet.members([*read.stories, *read.archived], feature) if not story.closed]
     unsplit = sum(1 for story in left if draft.is_draft(story.issue.body) and not draft.read(story.issue.body)[1])
     return len(left) - unsplit, unsplit
 
@@ -171,7 +167,7 @@ def simulate(
 
 @dataclass(frozen=True)
 class Outlook:
-    """One epic's forecast in weeks and the history it was drawn from; without one, None weeks and a `reason`."""
+    """One feature's forecast in weeks and the history it was drawn from; without one, None weeks and a `reason`."""
 
     left: int
     floor_weeks: int | None
@@ -188,7 +184,7 @@ class Outlook:
 
 
 def _short(samples: list[int], settled: bool) -> str | None:
-    """Why the epic's own weeks cannot pace a forecast yet, or None when they can."""
+    """Why the feature's own weeks cannot pace a forecast yet, or None when they can."""
     if not settled:
         return THIN
     if not any(samples):
@@ -198,11 +194,11 @@ def _short(samples: list[int], settled: bool) -> str | None:
     return FLAT if len(set(samples)) == 1 else None
 
 
-def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> Outlook:
-    """The forecast over what is left of `epic`, drawn from its own stories, archived ones too."""
+def outlook(read: fleet.Fleet, feature: str, today: date, seed: int = 0) -> Outlook:
+    """The forecast over what is left of `feature`, drawn from its own stories, archived ones too."""
     every = [*read.stories, *read.archived]
-    items, unsplit = remaining(read, epic)
-    samples, settled = pace(every, epic, today)
+    items, unsplit = remaining(read, feature)
+    samples, settled = pace(every, feature, today)
     measured = splits(every)
     basis, sizes = _sizes(measured)
     short = _short(samples, settled)
