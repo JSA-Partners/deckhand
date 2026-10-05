@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+import time
 from datetime import UTC, date, datetime, timedelta
+
+import pytest
 
 from deckhand import draft, fleet, issue, throughput
 
@@ -13,12 +16,22 @@ TODAY = date(2026, 10, 2)
 DRAFT = "## Requirements\n\nWhat it needs.\n"
 
 
+@pytest.fixture
+def pacific(monkeypatch):
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
 def _at(hours: float) -> str:
     return (datetime(2026, 9, 1, tzinfo=UTC) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _ago(days: int) -> str:
-    return f"{(TODAY - timedelta(days=days)).isoformat()}T12:00:00Z"
+    noon = datetime.combine(TODAY - timedelta(days=days), datetime.min.time()) + timedelta(hours=12)
+    return noon.astimezone().isoformat()
 
 
 def _story(
@@ -172,6 +185,20 @@ def test_no_finishes_are_no_weeks():
     assert throughput.weekly([_open(1)], TODAY) == []
 
 
+def test_a_finish_counts_on_its_local_calendar_day(pacific):
+    late_evening = _story(1, True, closed_at="2026-09-26T03:00:00Z")
+
+    assert throughput.weekly([late_evening], TODAY) == [1, 0]
+
+
+def test_a_finish_dated_after_today_is_not_counted():
+    assert throughput.weekly([_finished(1, 7), _finished(2, -1)], TODAY) == [1, 0]
+
+
+def test_the_weeks_start_at_the_week_given():
+    assert throughput.weekly([_finished(1, 7)], TODAY, TODAY - timedelta(days=21)) == [0, 0, 1, 0]
+
+
 # pace
 
 
@@ -179,56 +206,52 @@ def _members(count: int, first: int) -> list[fleet.Story]:
     return [_finished(10 + index, first - 7 * index, parent=EPIC) for index in range(count)]
 
 
-def test_an_epic_with_five_finished_stories_over_four_weeks_is_paced_by_its_own():
+def _started(number: int, began: int, finished: int | None = None) -> fleet.Story:
+    log = ("Started:", _ago(began), "on the branch")
+    if finished is None:
+        return _story(number, False, log, parent=EPIC)
+    return _story(number, True, log, parent=EPIC, closed_at=_ago(finished))
+
+
+def test_an_epic_is_paced_by_its_own_finishes_alone():
     members = _members(5, 28)
     others = [_finished(100 + day, day) for day in range(28)]
 
-    assert throughput.pace([*members, *others], EPIC, TODAY) == ("epic", [1, 1, 1, 1, 1], True)
-
-
-def test_an_epic_under_four_weeks_old_is_paced_by_the_project():
-    members = [_finished(10 + index, 21 - index) for index in range(5)]
-    members = [dataclasses.replace(story, parent=EPIC) for story in members]
-
-    assert throughput.pace(members, EPIC, TODAY)[0] == "project"
-
-
-def test_an_epic_under_five_finished_stories_is_paced_by_the_project():
-    assert throughput.pace(_members(4, 60), EPIC, TODAY)[0] == "project"
+    assert throughput.pace([*members, *others], EPIC, TODAY) == ([1, 1, 1, 1, 1], True)
 
 
 def test_an_epic_settles_on_the_twenty_eighth_day_after_its_first_finish():
     def _epic(first: int) -> list[fleet.Story]:
         return [_finished(10 + index, day, parent=EPIC) for index, day in enumerate([first, 0, 0, 0, 0])]
 
-    assert throughput.pace(_epic(27), EPIC, TODAY)[::2] == ("project", False)
-    assert throughput.pace(_epic(28), EPIC, TODAY)[::2] == ("epic", True)
+    assert throughput.pace(_epic(27), EPIC, TODAY)[1] is False
+    assert throughput.pace(_epic(28), EPIC, TODAY)[1] is True
 
 
-def test_an_epic_whose_finishes_are_older_than_twelve_weeks_is_paced_by_the_project():
-    burst = [_finished(10 + index, 200, parent=EPIC) for index in range(5)]
-    project = [_finished(100 + day, day) for day in range(0, 84, 2)]
+def test_the_history_starts_when_the_first_member_started():
+    members = [_started(20, 35, 14), _finished(21, 14, parent=EPIC), *_members(2, 7)]
 
-    paced, samples, settled = throughput.pace([*burst, *project], EPIC, TODAY)
-
-    assert (paced, len(samples), settled) == ("project", 12, True)
-    assert round(sum(samples) / len(samples), 1) == 3.5
+    assert throughput.pace(members, EPIC, TODAY) == ([0, 0, 0, 2, 1, 1], True)
 
 
-def test_the_project_pace_is_its_last_twelve_weeks():
-    stories = [_finished(number, 7 * number) for number in range(20)]
+def test_without_a_start_the_history_starts_at_the_first_finish():
+    members = [_finished(20, 14, parent=EPIC), _finished(21, 14, parent=EPIC), *_members(2, 7)]
 
-    assert throughput.pace(stories, EPIC, TODAY) == ("project", [1] * 12, True)
+    assert throughput.pace(members, EPIC, TODAY) == ([2, 1, 1], False)
+
+
+def test_an_open_member_started_long_ago_starts_the_history():
+    assert throughput.pace([_started(10, 35)], EPIC, TODAY) == ([0] * 6, True)
 
 
 def test_the_epic_pace_is_its_last_twelve_weeks():
     members = [_finished(10 + week, 7 * week, parent=EPIC) for week in range(20)]
 
-    assert throughput.pace(members, EPIC, TODAY) == ("epic", [1] * 12, True)
+    assert throughput.pace(members, EPIC, TODAY) == ([1] * 12, True)
 
 
-def test_a_project_under_four_weeks_old_has_not_settled():
-    assert throughput.pace([_finished(1, 0)], EPIC, TODAY) == ("project", [1], False)
+def test_an_epic_with_no_member_worked_on_has_no_history():
+    assert throughput.pace([_finished(1, 60), _open(2, parent=EPIC)], EPIC, TODAY) == ([], False)
 
 
 # remaining
@@ -261,20 +284,24 @@ def test_no_measured_pace_is_no_forecast():
 
 
 def test_one_steady_week_makes_every_run_identical():
-    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 85: 2, 95: 2}
-    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 85: 3, 95: 3}
+    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 95: 2, 99: 2}
+    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 95: 3, 99: 3}
 
 
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():
-    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 85: 4, 95: 4}
+    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 95: 4, 99: 4}
 
 
 def test_empty_weeks_reach_the_pessimistic_percentiles():
-    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 85: 2, 95: 3}
+    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 95: 3, 99: 5}
+
+
+def test_the_floor_commitment_and_worst_are_the_50th_95th_and_99th():
+    assert throughput.PERCENTILES == (50, 95, 99)
 
 
 def test_a_commitment_two_years_out_is_no_forecast():
-    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 85: 103, 95: 103}
+    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 95: 103, 99: 103}
     assert throughput.simulate(104, 0, [1], [1], runs=5) is None
 
 
@@ -287,16 +314,20 @@ def test_a_seed_makes_two_runs_identical():
 # outlook
 
 
-def test_an_outlook_is_paced_by_the_project_before_the_epic_has_its_own():
-    history = [_finished(100 + week, 7 * week) for week in range(12)]
-    read = _fleet(_open(1, parent=EPIC), _open(2, parent=EPIC), archived=tuple(history))
+def _weekly_members(weeks: int) -> list[fleet.Story]:
+    return [_finished(100 + week, 7 * week, parent=EPIC) for week in range(weeks)]
+
+
+def test_an_outlook_is_paced_by_the_epic_alone():
+    others = [_finished(500 + day, day) for day in range(84)]
+    read = _fleet(_open(1, parent=EPIC), _open(2, parent=EPIC), *others, archived=tuple(_weekly_members(12)))
 
     assert throughput.outlook(read, EPIC, TODAY) == throughput.Outlook(
         left=2,
         floor_weeks=2,
         commitment_weeks=2,
         worst_weeks=2,
-        pace="project",
+        pace="epic",
         weeks=12,
         per_week=1.0,
         unsplit=0,
@@ -307,27 +338,45 @@ def test_an_outlook_is_paced_by_the_project_before_the_epic_has_its_own():
     )
 
 
-def test_an_outlook_is_paced_by_the_epic_once_it_has_its_own():
-    others = [_finished(100 + day, day) for day in range(35)]
-    read = _fleet(*_members(5, 28), _open(1, parent=EPIC), *others)
+def test_an_outlook_never_falls_back_to_the_project():
+    history = [_finished(500 + week, 7 * week) for week in range(12)]
+    read = _fleet(_open(1, parent=EPIC), _open(2, parent=EPIC), archived=tuple(history))
 
     found = throughput.outlook(read, EPIC, TODAY)
 
-    assert (found.pace, found.weeks, found.per_week, found.commitment_weeks) == ("epic", 5, 1.0, 1)
+    assert (found.commitment_weeks, found.pace, found.weeks, found.reason) == (None, None, 0, throughput.THIN)
 
 
-def test_an_outlook_paces_an_epic_finished_long_ago_by_the_project():
+def test_an_outlook_with_four_finished_members_is_no_forecast():
+    others = [_finished(500 + day, day) for day in range(60)]
+    read = _fleet(*_members(4, 60), _open(1, parent=EPIC), *others)
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.commitment_weeks, found.pace, found.reason) == (None, None, throughput.FEW)
+
+
+def test_an_outlook_is_settled_four_weeks_after_a_member_started():
+    members = [_started(20, 28, 0), *[_finished(21 + index, 0, parent=EPIC) for index in range(4)]]
+    read = _fleet(*members, _open(1, parent=EPIC))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.pace, found.weeks, found.per_week, found.reason) == ("epic", 5, 1.0, None)
+
+
+def test_an_outlook_of_an_epic_finished_long_ago_is_no_forecast():
     burst = [_finished(10 + index, 200, parent=EPIC) for index in range(5)]
-    project = [_finished(100 + day, day) for day in range(0, 84, 2)]
+    project = [_finished(500 + day, day) for day in range(0, 84, 2)]
     read = _fleet(*burst, *project, *[_open(50 + index, parent=EPIC) for index in range(3)])
 
     found = throughput.outlook(read, EPIC, TODAY)
 
-    assert (found.pace, found.weeks, found.per_week, found.commitment_weeks) == ("project", 12, 3.5, 1)
+    assert (found.pace, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
 
 
 def test_the_pace_is_the_average_week():
-    read = _fleet(_finished(1, 30), _open(2, parent=EPIC))
+    read = _fleet(_finished(1, 30, parent=EPIC), _open(2, parent=EPIC))
 
     found = throughput.outlook(read, EPIC, TODAY)
 
@@ -335,7 +384,7 @@ def test_the_pace_is_the_average_week():
 
 
 def test_one_story_finished_today_is_no_forecast():
-    read = _fleet(_finished(1, 0), *[_open(10 + index, parent=EPIC) for index in range(10)])
+    read = _fleet(_finished(1, 0, parent=EPIC), *[_open(10 + index, parent=EPIC) for index in range(10)])
 
     found = throughput.outlook(read, EPIC, TODAY)
 
@@ -350,8 +399,7 @@ def test_one_story_finished_today_is_no_forecast():
 
 
 def test_an_outlook_two_years_out_is_no_forecast():
-    history = [_finished(100 + week, 7 * week) for week in range(12)]
-    read = _fleet(*[_open(index, parent=EPIC) for index in range(1, 201)], *history)
+    read = _fleet(*[_open(index, parent=EPIC) for index in range(1, 201)], *_weekly_members(12))
 
     found = throughput.outlook(read, EPIC, TODAY)
 
@@ -366,7 +414,7 @@ def test_an_outlook_two_years_out_is_no_forecast():
 
 
 def test_an_outlook_with_no_finish_in_twelve_weeks_is_no_forecast():
-    read = _fleet(_finished(1, 7 * 20), _open(2, parent=EPIC))
+    read = _fleet(_finished(1, 7 * 20, parent=EPIC), _open(2, parent=EPIC))
 
     found = throughput.outlook(read, EPIC, TODAY)
 
@@ -453,7 +501,7 @@ def _outlook(**changes) -> throughput.Outlook:
         floor_weeks=2,
         commitment_weeks=4,
         worst_weeks=6,
-        pace="project",
+        pace="epic",
         weeks=12,
         per_week=1.5,
         unsplit=0,
@@ -474,21 +522,19 @@ def test_the_rows_give_each_line_in_weeks():
         "  3 pieces left",
         "",
         "  Floor         2 weeks   50th percentile",
-        "  Commitment    4 weeks   85th percentile",
-        "  Worst seen    6 weeks   95th percentile",
+        "  Commitment    4 weeks   95th percentile",
+        "  Worst seen    6 weeks   99th percentile",
         "",
-        "  Paced by the whole project's last 12 weeks, an average of 1.5 stories a week.",
-        "  That includes work outside this epic, so it leans early.",
+        "  Paced by this feature's own 12 weeks, an average of 1.5 stories a week.",
     ]
 
 
-def test_the_rows_say_an_epic_was_paced_by_its_own_weeks():
-    lines = throughput.rows(_outlook(pace="epic", weeks=5, left=1, floor_weeks=1))
+def test_the_rows_say_one_week_and_one_piece():
+    lines = throughput.rows(_outlook(weeks=5, left=1, floor_weeks=1))
 
-    assert "  Paced by this epic's own 5 weeks, an average of 1.5 stories a week." in lines
+    assert "  Paced by this feature's own 5 weeks, an average of 1.5 stories a week." in lines
     assert "  1 piece left" in lines
     assert "  Floor         1 week    50th percentile" in lines
-    assert not any("leans early" in line for line in lines)
 
 
 def test_the_rows_say_an_unsplit_draft_was_counted_as_the_measured_average():
@@ -521,13 +567,19 @@ def test_the_rows_say_so_when_the_history_is_too_short():
     assert throughput.rows(_none(throughput.THIN)) == [
         "  3 pieces left",
         "",
-        "  Fewer than 4 weeks of finished stories, so there is no date range yet.",
+        "  Fewer than 4 weeks of this feature's own finished work, so there is no date range yet.",
     ]
+
+
+def test_the_rows_say_so_when_too_few_stories_finished():
+    assert throughput.rows(_none(throughput.FEW))[-1] == (
+        "  Fewer than 5 of this feature's stories have finished in the weeks measured, so there is no date range yet."
+    )
 
 
 def test_the_rows_say_so_when_nothing_finished_in_the_weeks_measured():
     assert throughput.rows(_none(throughput.IDLE))[-1] == (
-        "  No story finished in the last 12 weeks, so there is no date range."
+        "  No story of this feature finished in the weeks measured, so there is no date range."
     )
 
 

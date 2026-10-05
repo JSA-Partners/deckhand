@@ -135,7 +135,7 @@ def test_list_reads_as_a_line_per_epic(board_env, capsys):
 # forecast
 
 
-def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, capsys):
+def test_forecast_gives_no_dates_before_five_of_the_epic_s_stories_finish(board_env, capsys):
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
 
     assert json.loads(capsys.readouterr().out) == {
@@ -146,12 +146,46 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, capsys)
         "pieces": 2,
         "done": 1,
         "drafts": 0,
-        "floor": "2026-10-30",
-        "commitment": "2026-12-04",
-        "worst": "2027-01-08",
-        "pace": "project",
+        "floor": None,
+        "commitment": None,
+        "worst": None,
+        "pace": None,
         "weeks": 5,
         "per_week": 0.2,
+        "unsplit": 0,
+        "split_size": 1.0,
+        "split_basis": None,
+        "reason": "too few finished",
+    }
+
+    assert cli.main(["epic", "forecast", "300"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "## Forecast: Permission rework",
+        "  1 piece left",
+        "",
+        "  Fewer than 5 of this feature's stories have finished in the weeks measured, so there is no date range yet.",
+    ]
+
+
+def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, *PACED)
+
+    assert cli.main(["epic", "forecast", "300", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {
+        "epic": "acme/widgets#300",
+        "title": "Permission rework",
+        "about": "Guests and registry ownership.",
+        "closed": False,
+        "pieces": 6,
+        "done": 5,
+        "drafts": 0,
+        "floor": "2026-10-09",
+        "commitment": "2026-10-16",
+        "worst": "2026-10-23",
+        "pace": "epic",
+        "weeks": 5,
+        "per_week": 1.0,
         "unsplit": 0,
         "split_size": 1.0,
         "split_basis": None,
@@ -159,7 +193,9 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, capsys)
     }
 
 
-def test_forecast_prints_the_block_for_one_epic(board_env, capsys):
+def test_forecast_prints_the_block_for_one_epic(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, *PACED)
+
     assert cli.main(["epic", "forecast", "300"]) == 0
 
     out = capsys.readouterr().out
@@ -167,12 +203,11 @@ def test_forecast_prints_the_block_for_one_epic(board_env, capsys):
         "## Forecast: Permission rework",
         "  1 piece left",
         "",
-        "  Floor         4 weeks   50th percentile",
-        "  Commitment    9 weeks   85th percentile",
-        "  Worst seen   14 weeks   95th percentile",
+        "  Floor         1 week    50th percentile",
+        "  Commitment    2 weeks   95th percentile",
+        "  Worst seen    3 weeks   99th percentile",
         "",
-        "  Paced by the whole project's last 5 weeks, an average of 0.2 stories a week.",
-        "  That includes work outside this epic, so it leans early.",
+        "  Paced by this feature's own 5 weeks, an average of 1.0 stories a week.",
     ]
 
 
@@ -190,7 +225,7 @@ def test_a_dropped_story_is_neither_a_piece_nor_left_to_forecast(board_env, caps
     assert "  1 piece left" in capsys.readouterr().out.splitlines()
 
 
-def _member(number: int, repo: str = REPO) -> dict:
+def _member(number: int, repo: str = REPO, closed_at: str | None = None) -> dict:
     return {
         "id": f"I_{number}",
         "isArchived": False,
@@ -198,16 +233,23 @@ def _member(number: int, repo: str = REPO) -> dict:
             "number": number,
             "title": "More",
             "url": f"https://github.com/{repo}/issues/{number}",
-            "state": "OPEN",
-            "closedAt": None,
+            "state": "CLOSED" if closed_at else "OPEN",
+            "closedAt": closed_at,
             "body": "",
             "repository": {"nameWithOwner": repo},
             "labels": {"nodes": [{"name": "deckhand"}]},
             "parent": {"number": 300, "repository": {"nameWithOwner": REPO}},
             "comments": {"nodes": []},
         },
-        "fieldValues": {"nodes": [{"name": "Backlog", "field": {"name": "Status"}}]},
+        "fieldValues": {"nodes": [{"name": "Done" if closed_at else "Backlog", "field": {"name": "Status"}}]},
     }
+
+
+# With #301 finished on 2026-09-02, five finishes over the five weeks to 2026-10-02: 1, 2, 0, 1 and 1.
+PACED = [
+    _member(310 + index, closed_at=f"{day}T12:00:00Z")
+    for index, day in enumerate(["2026-09-10", "2026-09-10", "2026-09-24", "2026-10-01"])
+]
 
 
 def _with_members(tmp_path, monkeypatch, *nodes: dict) -> None:
@@ -219,29 +261,29 @@ def _with_members(tmp_path, monkeypatch, *nodes: dict) -> None:
 
 
 def test_forecast_counts_a_member_in_another_repository(board_env, monkeypatch, capsys):
-    _with_members(board_env, monkeypatch, _member(7, repo="acme/gadgets"))
+    _with_members(board_env, monkeypatch, *PACED, _member(7, repo="acme/gadgets"))
 
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
-    assert (found["pieces"], found["done"], found["pace"]) == (3, 1, "project")
-    assert found["commitment"] > "2026-12-04"
+    assert (found["pieces"], found["done"], found["pace"]) == (7, 5, "epic")
+    assert found["commitment"] > "2026-10-16"
 
     assert cli.main(["epic", "forecast", "300"]) == 0
     assert "  2 pieces left" in capsys.readouterr().out.splitlines()
 
 
 def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_env, monkeypatch, capsys):
-    _with_members(board_env, monkeypatch, *[_member(400 + index) for index in range(30)])
+    _with_members(board_env, monkeypatch, *PACED, *[_member(400 + index) for index in range(120)])
 
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
     assert (found["floor"], found["commitment"], found["worst"], found["pace"]) == (None, None, None, None)
-    assert (found["pieces"], found["per_week"], found["reason"]) == (32, 0.2, "over two years")
+    assert (found["pieces"], found["per_week"], found["reason"]) == (126, 1.0, "over two years")
 
     assert cli.main(["epic", "forecast", "300"]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "## Forecast: Permission rework",
-        "  31 pieces left",
+        "  121 pieces left",
         "",
         "  The measured pace would take over two years, so there is no date range.",
     ]

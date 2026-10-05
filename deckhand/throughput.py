@@ -16,14 +16,16 @@ from datetime import date, datetime
 
 from deckhand import draft, fleet, log
 
-PERCENTILES = (50, 85, 95)
+# Floor, commitment, worst: independent weekly draws run narrow when the pace shifts, so the commitment is the 95th.
+PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 95, 99)
 ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
 PACED = 5  # an epic's finishes in its last LOOKBACK weeks below which its own weeks are noise
-SETTLED = 4  # weeks since the first finish counted below which a pace has not settled
+SETTLED = 4  # weeks since an epic's work began below which its pace has not settled
 LOOKBACK = 12  # weeks of history drawn from, so a pace from long ago does not outvote this quarter's
 HORIZON = 104  # weeks, two years, at which a commitment says nothing a stakeholder can plan on
 
 THIN = "too little history"
+FEW = "too few finished"
 IDLE = "nothing finished in the weeks measured"
 FAR = "over two years"
 
@@ -65,42 +67,54 @@ def _sizes(measured: list[int]) -> tuple[str, list[int]]:
     return "assumed", [1]
 
 
-def _finished_on(stories: list[fleet.Story]) -> list[date]:
-    return [
-        datetime.fromisoformat(story.closed_at).date()
-        for story in stories
-        if story.closed and story.closed_at and fleet.touched(story) and not story.dropped
-    ]
+def _day(stamp: str) -> date:
+    """The local calendar day of a GitHub timestamp, the calendar `date.today()` reads."""
+    return datetime.fromisoformat(stamp).astimezone().date()
 
 
-def weekly(stories: list[fleet.Story], today: date) -> list[int]:
-    """Finished stories per seven days, oldest first, from the week of the earliest finish to the week ending today."""
-    back = [max(0, (today - day).days // 7) for day in _finished_on(stories)]
-    if not back:
+def _held(stories: list[fleet.Story]) -> list[fleet.Story]:
+    return [story for story in stories if fleet.touched(story) and not story.dropped]
+
+
+def _finished_on(stories: list[fleet.Story], today: date) -> list[date]:
+    found = (_day(story.closed_at) for story in _held(stories) if story.closed and story.closed_at)
+    return [day for day in found if day <= today]
+
+
+def weekly(stories: list[fleet.Story], today: date, start: date | None = None) -> list[int]:
+    """Finished stories per seven days, oldest first, from the week of `start` or the earliest finish to today's."""
+    done = _finished_on(stories, today)
+    first = min(done, default=None) if start is None else start
+    if first is None or first > today:
         return []
-    counts = [0] * (max(back) + 1)
-    for weeks in back:
-        counts[weeks] += 1
+    counts = [0] * ((today - first).days // 7 + 1)
+    for day in done:
+        if day >= first:
+            counts[(today - day).days // 7] += 1
     return counts[::-1]
 
 
-def _settled(stories: list[fleet.Story], today: date) -> bool:
-    done = _finished_on(stories)
-    return bool(done) and (today - min(done)).days >= 7 * SETTLED
+def began(stories: list[fleet.Story], today: date) -> date | None:
+    """The day work on `stories` began: the earliest `Started:` entry or finish among them, whichever came first."""
+    started = [
+        _day(entry.created_at)
+        for story in _held(stories)
+        for entry in log.entries(story.issue)
+        if entry.prefix == "Started:" and entry.created_at
+    ]
+    return min([*started, *_finished_on(stories, today)], default=None)
 
 
-def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[str, list[int], bool]:
-    """Which history paces the epic, "epic" or "project", its last `LOOKBACK` weekly counts, and whether it settled.
+def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[list[int], bool]:
+    """The epic's own last `LOOKBACK` weekly counts since its work began, and whether `SETTLED` weeks have passed.
 
-    The epic's own once it has `PACED` finished stories in those weeks and `SETTLED` weeks since its
-    first, because the project's count holds work outside the epic and would forecast it early; the
-    project's before that. Either pace is settled only `SETTLED` weeks after the first finish it counts.
+    Only the epic's stories count: the project's weeks hold work outside the epic and forecast it early.
     """
     mine = fleet.members(every, epic)
-    own = weekly(mine, today)[-LOOKBACK:]
-    if sum(own) >= PACED and _settled(mine, today):
-        return "epic", own, True
-    return "project", weekly(every, today)[-LOOKBACK:], _settled(every, today)
+    start = began(mine, today)
+    if start is None:
+        return [], False
+    return weekly(mine, today, start)[-LOOKBACK:], (today - start).days >= 7 * SETTLED
 
 
 def remaining(read: fleet.Fleet, epic: fleet.Key) -> tuple[int, int]:
@@ -139,7 +153,7 @@ def simulate(
         taken.append(weeks)
     taken.sort()
     found = {p: _percentile(taken, p) for p in PERCENTILES}
-    return None if found[85] >= HORIZON else found
+    return None if found[COMMITMENT] >= HORIZON else found
 
 
 @dataclass(frozen=True)
@@ -160,23 +174,31 @@ class Outlook:
     reason: str | None
 
 
+def _short(samples: list[int], settled: bool) -> str | None:
+    """Why the epic's own weeks cannot pace a forecast yet, or None when they can."""
+    if not settled:
+        return THIN
+    if not any(samples):
+        return IDLE
+    return FEW if sum(samples) < PACED else None
+
+
 def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> Outlook:
-    """The forecast over what is left of `epic`, drawn from every finished story, archived ones too."""
+    """The forecast over what is left of `epic`, drawn from its own stories, archived ones too."""
     every = [*read.stories, *read.archived]
     items, unsplit = remaining(read, epic)
-    paced, samples, settled = pace(every, epic, today)
+    samples, settled = pace(every, epic, today)
     measured = splits(every)
     basis, sizes = _sizes(measured)
-    found = simulate(items, unsplit, samples, sizes, seed=seed) if settled else None
-    reason = None
-    if found is None and items + unsplit:
-        reason = THIN if not settled else IDLE if not any(samples) else FAR
+    short = _short(samples, settled)
+    found = None if short else simulate(items, unsplit, samples, sizes, seed=seed)
+    reason = None if found is not None or not items + unsplit else short or FAR
     return Outlook(
         left=items + unsplit,
-        floor_weeks=None if found is None else found[50],
-        commitment_weeks=None if found is None else found[85],
-        worst_weeks=None if found is None else found[95],
-        pace=None if found is None else paced,
+        floor_weeks=None if found is None else found[FLOOR],
+        commitment_weeks=None if found is None else found[COMMITMENT],
+        worst_weeks=None if found is None else found[WORST],
+        pace=None if found is None else "epic",
         weeks=len(samples),
         per_week=round(statistics.fmean(samples), 2) if samples else 0.0,
         unsplit=unsplit,
@@ -188,8 +210,10 @@ def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> O
 
 
 _WHY = {
-    THIN: f"Fewer than {SETTLED} weeks of finished stories, so there is no date range yet.",
-    IDLE: f"No story finished in the last {LOOKBACK} weeks, so there is no date range.",
+    THIN: f"Fewer than {SETTLED} weeks of this feature's own finished work, so there is no date range yet.",
+    FEW: f"Fewer than {PACED} of this feature's stories have finished in the weeks measured, "
+    "so there is no date range yet.",
+    IDLE: "No story of this feature finished in the weeks measured, so there is no date range.",
     FAR: "The measured pace would take over two years, so there is no date range.",
 }
 
@@ -213,17 +237,13 @@ def rows(found: Outlook) -> list[str]:
     lines = [
         header,
         "",
-        _row("Floor", found.floor_weeks, "50th percentile"),
-        _row("Commitment", found.commitment_weeks, "85th percentile"),
-        _row("Worst seen", found.worst_weeks, "95th percentile"),
+        _row("Floor", found.floor_weeks, f"{FLOOR}th percentile"),
+        _row("Commitment", found.commitment_weeks, f"{COMMITMENT}th percentile"),
+        _row("Worst seen", found.worst_weeks, f"{WORST}th percentile"),
         "",
+        f"  Paced by this feature's own {_plural(found.weeks, 'week')}, "
+        f"an average of {found.per_week:.1f} stories a week.",
     ]
-    rate = f"an average of {found.per_week:.1f} stories a week."
-    if found.pace == "epic":
-        lines.append(f"  Paced by this epic's own {_plural(found.weeks, 'week')}, {rate}")
-    else:
-        lines.append(f"  Paced by the whole project's last {_plural(found.weeks, 'week')}, {rate}")
-        lines.append("  That includes work outside this epic, so it leans early.")
     if found.unsplit:
         lines.append(_drafts(found))
     return lines
