@@ -217,7 +217,7 @@ def test_an_epic_is_paced_by_its_own_finishes_alone():
     members = _members(5, 28)
     others = [_finished(100 + day, day) for day in range(28)]
 
-    assert throughput.pace([*members, *others], EPIC, TODAY) == ([1, 1, 1, 1, 1], True)
+    assert throughput.pace([*members, *others], EPIC, TODAY) == ([1, 1, 1, 1], True)
 
 
 def test_an_epic_settles_on_the_twenty_eighth_day_after_its_first_finish():
@@ -231,23 +231,35 @@ def test_an_epic_settles_on_the_twenty_eighth_day_after_its_first_finish():
 def test_the_history_starts_when_the_first_member_started():
     members = [_started(20, 35, 14), _finished(21, 14, parent=EPIC), *_members(2, 7)]
 
-    assert throughput.pace(members, EPIC, TODAY) == ([0, 0, 0, 2, 1, 1], True)
+    assert throughput.pace(members, EPIC, TODAY) == ([0, 0, 2, 1, 1], True)
 
 
 def test_without_a_start_the_history_starts_at_the_first_finish():
     members = [_finished(20, 14, parent=EPIC), _finished(21, 14, parent=EPIC), *_members(2, 7)]
 
-    assert throughput.pace(members, EPIC, TODAY) == ([2, 1, 1], False)
+    assert throughput.pace(members, EPIC, TODAY) == ([1, 1], False)
 
 
 def test_an_open_member_started_long_ago_starts_the_history():
-    assert throughput.pace([_started(10, 35)], EPIC, TODAY) == ([0] * 6, True)
+    assert throughput.pace([_started(10, 35)], EPIC, TODAY) == ([0] * 5, True)
 
 
 def test_the_epic_pace_is_its_last_twelve_weeks():
     members = [_finished(10 + week, 7 * week, parent=EPIC) for week in range(20)]
 
     assert throughput.pace(members, EPIC, TODAY) == ([1] * 12, True)
+
+
+def test_the_oldest_week_is_left_out_when_work_began_partway_through_it():
+    members = [_started(20, 30, 29), *_members(4, 21)]
+
+    assert throughput.pace(members, EPIC, TODAY)[0] == [1, 1, 1, 1]
+
+
+def test_the_oldest_week_counts_when_work_began_on_its_first_day():
+    members = [_started(20, 34, 29), *_members(4, 21)]
+
+    assert throughput.pace(members, EPIC, TODAY)[0] == [1, 1, 1, 1, 1]
 
 
 def test_an_epic_with_no_member_worked_on_has_no_history():
@@ -284,25 +296,42 @@ def test_no_measured_pace_is_no_forecast():
 
 
 def test_one_steady_week_makes_every_run_identical():
-    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 95: 2, 99: 2}
-    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 95: 3, 99: 3}
+    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 85: 2, 99: 2}
+    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 85: 3, 99: 3}
 
 
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():
-    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 95: 4, 99: 4}
+    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 85: 4, 99: 4}
 
 
 def test_empty_weeks_reach_the_pessimistic_percentiles():
-    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 95: 3, 99: 5}
+    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 85: 3, 99: None}
 
 
-def test_the_floor_commitment_and_worst_are_the_50th_95th_and_99th():
-    assert throughput.PERCENTILES == (50, 95, 99)
+def test_each_run_resamples_the_weeks_so_a_short_history_runs_wide():
+    # A quarter of the runs resample [1, 3] as two slow weeks and take all six.
+    assert throughput.simulate(6, 0, [1, 3], [1], runs=2000)[throughput.COMMITMENT] == 6
+
+
+def test_the_floor_commitment_and_worst_are_the_50th_85th_and_99th():
+    assert throughput.PERCENTILES == (50, 85, 99)
+
+
+def test_an_epic_settles_four_weeks_after_its_work_began():
+    assert throughput.SETTLED == 4
 
 
 def test_a_commitment_two_years_out_is_no_forecast():
-    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 95: 103, 99: 103}
+    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 85: 103, 99: 103}
     assert throughput.simulate(104, 0, [1], [1], runs=5) is None
+
+
+def test_a_worst_case_at_two_years_is_not_measured():
+    found = throughput.simulate(1, 0, [0, 1, 1], [1])
+
+    assert found is not None
+    assert found[throughput.COMMITMENT] is not None
+    assert found[throughput.WORST] is None
 
 
 def test_a_seed_makes_two_runs_identical():
@@ -318,9 +347,13 @@ def _weekly_members(weeks: int) -> list[fleet.Story]:
     return [_finished(100 + week, 7 * week, parent=EPIC) for week in range(weeks)]
 
 
+def _varied_members() -> list[fleet.Story]:
+    return [*_weekly_members(13), _finished(99, 3, parent=EPIC)]
+
+
 def test_an_outlook_is_paced_by_the_epic_alone():
     others = [_finished(500 + day, day) for day in range(84)]
-    read = _fleet(_open(1, parent=EPIC), _open(2, parent=EPIC), *others, archived=tuple(_weekly_members(12)))
+    read = _fleet(_open(1, parent=EPIC), _open(2, parent=EPIC), *others, archived=tuple(_varied_members()))
 
     assert throughput.outlook(read, EPIC, TODAY) == throughput.Outlook(
         left=2,
@@ -329,12 +362,26 @@ def test_an_outlook_is_paced_by_the_epic_alone():
         worst_weeks=2,
         pace="epic",
         weeks=12,
-        per_week=1.0,
+        per_week=1.08,
         unsplit=0,
         split_size=1.0,
         split_basis=None,
         measured=0,
         reason=None,
+    )
+
+
+def test_an_outlook_of_weeks_that_never_varied_is_no_forecast():
+    read = _fleet(*_members(9, 56), _started(30, 62), _open(1, parent=EPIC))
+
+    found = throughput.outlook(read, EPIC, TODAY)
+
+    assert (found.commitment_weeks, found.pace, found.weeks, found.per_week, found.reason) == (
+        None,
+        None,
+        9,
+        1.0,
+        throughput.FLAT,
     )
 
 
@@ -357,12 +404,13 @@ def test_an_outlook_with_four_finished_members_is_no_forecast():
 
 
 def test_an_outlook_is_settled_four_weeks_after_a_member_started():
-    members = [_started(20, 28, 0), *[_finished(21 + index, 0, parent=EPIC) for index in range(4)]]
+    finishes = [_finished(21 + index, day, parent=EPIC) for index, day in enumerate([0, 7, 14, 21])]
+    members = [_started(20, 28, 0), *finishes]
     read = _fleet(*members, _open(1, parent=EPIC))
 
     found = throughput.outlook(read, EPIC, TODAY)
 
-    assert (found.pace, found.weeks, found.per_week, found.reason) == ("epic", 5, 1.0, None)
+    assert (found.pace, found.weeks, found.per_week, found.reason) == ("epic", 4, 1.25, None)
 
 
 def test_an_outlook_of_an_epic_finished_long_ago_is_no_forecast():
@@ -376,7 +424,7 @@ def test_an_outlook_of_an_epic_finished_long_ago_is_no_forecast():
 
 
 def test_the_pace_is_the_average_week():
-    read = _fleet(_finished(1, 30, parent=EPIC), _open(2, parent=EPIC))
+    read = _fleet(_finished(1, 34, parent=EPIC), _open(2, parent=EPIC))
 
     found = throughput.outlook(read, EPIC, TODAY)
 
@@ -395,11 +443,11 @@ def test_one_story_finished_today_is_no_forecast():
         None,
         None,
     )
-    assert (found.weeks, found.reason) == (1, throughput.THIN)
+    assert (found.weeks, found.reason) == (0, throughput.THIN)
 
 
 def test_an_outlook_two_years_out_is_no_forecast():
-    read = _fleet(*[_open(index, parent=EPIC) for index in range(1, 201)], *_weekly_members(12))
+    read = _fleet(*[_open(index, parent=EPIC) for index in range(1, 201)], *_varied_members())
 
     found = throughput.outlook(read, EPIC, TODAY)
 
@@ -410,7 +458,7 @@ def test_an_outlook_two_years_out_is_no_forecast():
         None,
         None,
     )
-    assert (found.weeks, found.per_week, found.reason) == (12, 1.0, throughput.FAR)
+    assert (found.weeks, found.per_week, found.reason) == (12, 1.08, throughput.FAR)
 
 
 def test_an_outlook_with_no_finish_in_twelve_weeks_is_no_forecast():
@@ -522,8 +570,8 @@ def test_the_rows_give_each_line_in_weeks():
         "  3 pieces left",
         "",
         "  Floor         2 weeks   50th percentile",
-        "  Commitment    4 weeks   95th percentile",
-        "  Worst seen    6 weeks   99th percentile",
+        "  Commitment    4 weeks   85th percentile",
+        "  Worst case    6 weeks   99th percentile",
         "",
         "  Paced by this feature's own 12 weeks, an average of 1.5 stories a week.",
     ]
@@ -567,7 +615,7 @@ def test_the_rows_say_so_when_the_history_is_too_short():
     assert throughput.rows(_none(throughput.THIN)) == [
         "  3 pieces left",
         "",
-        "  Fewer than 4 weeks of this feature's own finished work, so there is no date range yet.",
+        "  Work on this feature began fewer than 4 weeks ago, so there is no date range yet.",
     ]
 
 
@@ -581,6 +629,16 @@ def test_the_rows_say_so_when_nothing_finished_in_the_weeks_measured():
     assert throughput.rows(_none(throughput.IDLE))[-1] == (
         "  No story of this feature finished in the weeks measured, so there is no date range."
     )
+
+
+def test_the_rows_say_so_when_the_weekly_pace_has_not_varied():
+    assert throughput.rows(_none(throughput.FLAT))[-1] == (
+        "  This feature's weekly pace has not varied yet, so a date range would be falsely precise."
+    )
+
+
+def test_the_rows_say_a_worst_case_past_two_years_is_beyond_them():
+    assert "  Worst case  beyond two years" in throughput.rows(_outlook(worst_weeks=None))
 
 
 def test_the_rows_say_so_when_the_pace_would_take_over_two_years():

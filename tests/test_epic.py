@@ -135,7 +135,9 @@ def test_list_reads_as_a_line_per_epic(board_env, capsys):
 # forecast
 
 
-def test_forecast_gives_no_dates_before_five_of_the_epic_s_stories_finish(board_env, capsys):
+def test_forecast_gives_no_dates_before_five_of_the_epic_s_stories_finish(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, _member(310, closed_at="2026-09-24T12:00:00Z"))
+
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
 
     assert json.loads(capsys.readouterr().out) == {
@@ -143,15 +145,15 @@ def test_forecast_gives_no_dates_before_five_of_the_epic_s_stories_finish(board_
         "title": "Permission rework",
         "about": "Guests and registry ownership.",
         "closed": False,
-        "pieces": 2,
-        "done": 1,
+        "pieces": 3,
+        "done": 2,
         "drafts": 0,
         "floor": None,
         "commitment": None,
         "worst": None,
         "pace": None,
-        "weeks": 5,
-        "per_week": 0.2,
+        "weeks": 4,
+        "per_week": 0.25,
         "unsplit": 0,
         "split_size": 1.0,
         "split_basis": None,
@@ -177,15 +179,15 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeyp
         "title": "Permission rework",
         "about": "Guests and registry ownership.",
         "closed": False,
-        "pieces": 6,
-        "done": 5,
+        "pieces": 7,
+        "done": 6,
         "drafts": 0,
         "floor": "2026-10-09",
         "commitment": "2026-10-16",
-        "worst": "2026-10-23",
+        "worst": "2026-11-27",
         "pace": "epic",
-        "weeks": 5,
-        "per_week": 1.0,
+        "weeks": 4,
+        "per_week": 1.25,
         "unsplit": 0,
         "split_size": 1.0,
         "split_basis": None,
@@ -204,10 +206,10 @@ def test_forecast_prints_the_block_for_one_epic(board_env, monkeypatch, capsys):
         "  1 piece left",
         "",
         "  Floor         1 week    50th percentile",
-        "  Commitment    2 weeks   95th percentile",
-        "  Worst seen    3 weeks   99th percentile",
+        "  Commitment    2 weeks   85th percentile",
+        "  Worst case    8 weeks   99th percentile",
         "",
-        "  Paced by this feature's own 5 weeks, an average of 1.0 stories a week.",
+        "  Paced by this feature's own 4 weeks, an average of 1.2 stories a week.",
     ]
 
 
@@ -245,10 +247,10 @@ def _member(number: int, repo: str = REPO, closed_at: str | None = None) -> dict
     }
 
 
-# With #301 finished on 2026-09-02, five finishes over the five weeks to 2026-10-02: 1, 2, 0, 1 and 1.
+# #301 finished in the partial week work began in, so five finishes over the four full weeks to 2026-10-02: 2, 0, 2, 1.
 PACED = [
     _member(310 + index, closed_at=f"{day}T12:00:00Z")
-    for index, day in enumerate(["2026-09-10", "2026-09-10", "2026-09-24", "2026-10-01"])
+    for index, day in enumerate(["2026-09-10", "2026-09-10", "2026-09-24", "2026-09-24", "2026-10-01"])
 ]
 
 
@@ -265,7 +267,7 @@ def test_forecast_counts_a_member_in_another_repository(board_env, monkeypatch, 
 
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
-    assert (found["pieces"], found["done"], found["pace"]) == (7, 5, "epic")
+    assert (found["pieces"], found["done"], found["pace"]) == (8, 6, "epic")
     assert found["commitment"] > "2026-10-16"
 
     assert cli.main(["epic", "forecast", "300"]) == 0
@@ -278,7 +280,7 @@ def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_e
     assert cli.main(["epic", "forecast", "300", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
     assert (found["floor"], found["commitment"], found["worst"], found["pace"]) == (None, None, None, None)
-    assert (found["pieces"], found["per_week"], found["reason"]) == (126, 1.0, "over two years")
+    assert (found["pieces"], found["per_week"], found["reason"]) == (127, 1.25, "over two years")
 
     assert cli.main(["epic", "forecast", "300"]) == 0
     assert capsys.readouterr().out.splitlines() == [

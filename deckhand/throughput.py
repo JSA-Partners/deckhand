@@ -16,8 +16,8 @@ from datetime import date, datetime
 
 from deckhand import draft, fleet, log
 
-# Floor, commitment, worst: independent weekly draws run narrow when the pace shifts, so the commitment is the 95th.
-PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 95, 99)
+# Floor, commitment, worst: with each run resampling its weeks, the 85th was met 82 to 86 percent of the time.
+PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 85, 99)
 ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
 PACED = 5  # an epic's finishes in its last LOOKBACK weeks below which its own weeks are noise
 SETTLED = 4  # weeks since an epic's work began below which its pace has not settled
@@ -28,6 +28,7 @@ THIN = "too little history"
 FEW = "too few finished"
 IDLE = "nothing finished in the weeks measured"
 FAR = "over two years"
+FLAT = "too little variation"
 
 
 def _was_parked(story: fleet.Story) -> bool:
@@ -106,15 +107,19 @@ def began(stories: list[fleet.Story], today: date) -> date | None:
 
 
 def pace(every: list[fleet.Story], epic: fleet.Key, today: date) -> tuple[list[int], bool]:
-    """The epic's own last `LOOKBACK` weekly counts since its work began, and whether `SETTLED` weeks have passed.
+    """The epic's own last `LOOKBACK` full weekly counts since its work began, and whether `SETTLED` weeks have passed.
 
     Only the epic's stories count: the project's weeks hold work outside the epic and forecast it early.
+    The oldest week is left out when work began partway through it, since it would count a few days as seven.
     """
     mine = fleet.members(every, epic)
     start = began(mine, today)
     if start is None:
         return [], False
-    return weekly(mine, today, start)[-LOOKBACK:], (today - start).days >= 7 * SETTLED
+    days = (today - start).days
+    counts = weekly(mine, today, start)
+    full = counts if days % 7 == 6 else counts[1:]
+    return full[-LOOKBACK:], days >= 7 * SETTLED
 
 
 def remaining(read: fleet.Fleet, epic: fleet.Key) -> tuple[int, int]:
@@ -135,10 +140,12 @@ def _percentile(sorted_values: list[int], p: int) -> int:
 
 def simulate(
     items: int, unsplit: int, samples: list[int], sizes: list[int], runs: int = 10_000, seed: int = 0
-) -> dict[int, int] | None:
-    """The weeks to finish at `PERCENTILES`, each run drawing a week's count from `samples` until nothing is left.
+) -> dict[int, int | None] | None:
+    """The weeks to finish at `PERCENTILES`, each run resampling `samples` and drawing weeks from that until done.
 
-    None when nothing is left, no week in `samples` finished anything, or the commitment reaches `HORIZON`.
+    Resampling per run carries the doubt about the pace itself, so a short history gives a wide range.
+    A percentile that reaches `HORIZON` is None, since no run measured it; the whole forecast is None
+    when nothing is left, no week in `samples` finished anything, or the commitment reaches `HORIZON`.
     """
     if items + unsplit == 0 or not any(samples):
         return None
@@ -146,14 +153,17 @@ def simulate(
     taken = []
     for _ in range(runs):
         left = items + sum(rng.choice(sizes) for _ in range(unsplit))
+        run_samples = [rng.choice(samples) for _ in samples]
         weeks = 0
         while left > 0 and weeks < HORIZON:
-            left -= rng.choice(samples)
+            left -= rng.choice(run_samples)
             weeks += 1
         taken.append(weeks)
     taken.sort()
     found = {p: _percentile(taken, p) for p in PERCENTILES}
-    return None if found[COMMITMENT] >= HORIZON else found
+    if found[COMMITMENT] >= HORIZON:
+        return None
+    return {p: None if weeks >= HORIZON else weeks for p, weeks in found.items()}
 
 
 @dataclass(frozen=True)
@@ -180,7 +190,9 @@ def _short(samples: list[int], settled: bool) -> str | None:
         return THIN
     if not any(samples):
         return IDLE
-    return FEW if sum(samples) < PACED else None
+    if sum(samples) < PACED:
+        return FEW
+    return FLAT if len(set(samples)) == 1 else None
 
 
 def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> Outlook:
@@ -210,11 +222,12 @@ def outlook(read: fleet.Fleet, epic: fleet.Key, today: date, seed: int = 0) -> O
 
 
 _WHY = {
-    THIN: f"Fewer than {SETTLED} weeks of this feature's own finished work, so there is no date range yet.",
+    THIN: f"Work on this feature began fewer than {SETTLED} weeks ago, so there is no date range yet.",
     FEW: f"Fewer than {PACED} of this feature's stories have finished in the weeks measured, "
     "so there is no date range yet.",
     IDLE: "No story of this feature finished in the weeks measured, so there is no date range.",
     FAR: "The measured pace would take over two years, so there is no date range.",
+    FLAT: "This feature's weekly pace has not varied yet, so a date range would be falsely precise.",
 }
 
 
@@ -228,18 +241,23 @@ def _row(label: str, weeks: int, note: str) -> str:
 
 
 def rows(found: Outlook) -> list[str]:
-    """The floor, the commitment and the worst seen in weeks, and what the pace was measured from."""
+    """The floor, the commitment and the worst case in weeks, and what the pace was measured from."""
     if found.left == 0:
         return ["  nothing left to forecast"]
     header = f"  {_plural(found.left, 'piece')} left"
-    if found.floor_weeks is None or found.commitment_weeks is None or found.worst_weeks is None:
+    if found.floor_weeks is None or found.commitment_weeks is None:
         return [header, "", f"  {_WHY[found.reason or IDLE]}"]
+    worst = (
+        f"  {'Worst case':<12}beyond two years"
+        if found.worst_weeks is None
+        else _row("Worst case", found.worst_weeks, f"{WORST}th percentile")
+    )
     lines = [
         header,
         "",
         _row("Floor", found.floor_weeks, f"{FLOOR}th percentile"),
         _row("Commitment", found.commitment_weeks, f"{COMMITMENT}th percentile"),
-        _row("Worst seen", found.worst_weeks, f"{WORST}th percentile"),
+        worst,
         "",
         f"  Paced by this feature's own {_plural(found.weeks, 'week')}, "
         f"an average of {found.per_week:.1f} stories a week.",
