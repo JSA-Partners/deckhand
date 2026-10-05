@@ -76,13 +76,16 @@ def clean_tree() -> None:
         raise Refusal("\n".join(["the working tree is not clean", *indented(status.splitlines()[:DIRTY])]))
 
 
-def contains_main() -> None:
-    """Fetch the trunk, then refuse a branch that does not contain it; every later range needs it."""
+def contains_main(number: int) -> None:
+    """Fetch the trunk, then refuse a branch that does not contain it; every later range needs it.
+
+    The remedy is the update step: a rebase moves HEAD off the commit the review ref names.
+    """
     refuse_git("fetch", "origin", MAIN)
     try:
         git.run("merge-base", "--is-ancestor", ORIGIN_MAIN, "HEAD")
     except git.GitError as error:
-        raise Refusal("branch does not contain main; rebase first") from error
+        raise Refusal(f"branch does not contain main; run update apply {number}") from error
 
 
 def _fault(subject: str) -> str | None:

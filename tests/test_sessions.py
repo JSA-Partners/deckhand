@@ -280,6 +280,26 @@ def test_waiting_comes_from_the_status_claude_code_records(tmp_path, monkeypatch
     assert sessions.discover(REPOS, since=999, exclude="")[0].waiting is True
 
 
+def test_an_idle_session_whose_last_word_was_its_own_is_waiting(tmp_path, monkeypatch):
+    """Claude Code says idle, not waiting, when the question was asked in prose."""
+    _transcript(tmp_path)
+    _live(tmp_path / "live", os.getpid(), "abcd1234", status="idle")
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))
+    monkeypatch.setenv("DECKHAND_LIVE", str(tmp_path / "live"))
+
+    assert sessions.discover(REPOS, since=999, exclude="")[0].waiting is True
+
+
+def test_an_idle_session_whose_last_word_was_a_tool_result_is_not_waiting(tmp_path, monkeypatch):
+    extra = [{"type": "user", "message": {"content": [{"type": "tool_result", "text": "ok"}]}}]
+    _transcript(tmp_path, extra=extra)
+    _live(tmp_path / "live", os.getpid(), "abcd1234", status="idle")
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))
+    monkeypatch.setenv("DECKHAND_LIVE", str(tmp_path / "live"))
+
+    assert sessions.discover(REPOS, since=999, exclude="")[0].waiting is False
+
+
 def test_without_the_running_list_recent_transcripts_are_listed_and_marked(tmp_path, monkeypatch):
     _two_transcripts(tmp_path / "projects")
     monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "projects"))

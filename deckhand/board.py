@@ -52,6 +52,11 @@ def add(settings: Settings, url: str) -> None:
     gh.run("project", "item-add", str(settings.project), "--owner", settings.owner, "--url", url, "--format", "json")
 
 
+def remove(settings: Settings, item: str) -> None:
+    """Take `item` off the project; the issue itself stays as it is."""
+    gh.run("project", "item-delete", str(settings.project), "--owner", settings.owner, "--id", item)
+
+
 def items(settings: Settings) -> list[dict[str, Any]]:
     """Every item node on the project, across every page."""
     query = gh.owner_query(ITEMS_QUERY, settings.owner_type)

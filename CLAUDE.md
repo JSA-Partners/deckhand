@@ -12,7 +12,8 @@
   verifies; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
   `issue.py` every issue read and write; `draft.py` an issue whose body is requirements, open until
   its Stories list names what to write; `edges.py` every blocker edge between two stories, added or
-  dropped; `order.py` the build order the blocker graph implies; `git.py` every git call;
+  dropped; `withdraw.py` a story closed as not planned and taken off the board; `order.py` the
+  build order the blocker graph implies; `git.py` every git call;
   `park.py` a parked feature in any repository, boarded and logged;
   `update.py` GitHub brings a pull request behind main up to date; `worktree.py` every story's
   worktree, where its branch is checked out, and the sweep of merged ones; `drift.py` the plan references

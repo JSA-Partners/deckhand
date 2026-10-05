@@ -25,6 +25,7 @@ PREFIXES = (
     "Noted:",  # a fact a later reader needs and no step acts on
     "Split:",
     "Parked:",  # a feature parked elsewhere for this story
+    "Withdrawn:",  # closed as not planned and taken off the board, with why
     "Reviewed:",  # the commit sha first, then a line on the pass
     "Pull request:",
     "After the merge:",

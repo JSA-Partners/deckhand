@@ -281,7 +281,10 @@ def _open(live: dict[str, dict], repos: dict[str, str], exclude: str) -> list[Pu
         beat = pulse(path, repos) if path is not None and session != exclude else None
         if beat is not None:
             started = float(entry.get("startedAt") or 0) / 1000 or beat.started
-            found.append(replace(beat, live=True, waiting=entry.get("status") == "waiting", started=started))
+            status = entry.get("status")
+            # Claude Code records waiting only for a prompt; a question asked in prose leaves the session idle.
+            waiting = status == "waiting" or (status == "idle" and beat.waiting)
+            found.append(replace(beat, live=True, waiting=waiting, started=started))
     return found
 
 

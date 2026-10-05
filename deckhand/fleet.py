@@ -120,7 +120,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                 archived=bool(node.get("isArchived")),
                 feature=board.field_value(node, board.FEATURE, "optionId"),
                 feature_name=board.field_value(node, board.FEATURE, "name") or "",
-                dropped=content.get("stateReason") in ("NOT_PLANNED", "DUPLICATE"),
+                dropped=content.get("stateReason") in issue.DROPPED,
                 closed_at=content.get("closedAt") or "",
             )
         )
@@ -277,7 +277,12 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, "Done, but the issue is open", "close it or move it back"))
         if story.closed and story.status and story.status not in (columns.DONE, columns.VERIFICATION):
             what = f"closed, but {story.status}"
-            out.append(Anomaly(story.number, story.repo, what, f"run next {story.number}"))
+            # Dropped work has no step to run; finished work closed by hand still has after to reach Done.
+            if story.dropped:
+                fix = f'captain apply --withdraw {story.repo}#{story.number} --note "<why>"'
+            else:
+                fix = f"run next {story.number}"
+            out.append(Anomaly(story.number, story.repo, what, fix))
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
         if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):
