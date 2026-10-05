@@ -356,7 +356,6 @@ def test_an_outlook_is_paced_by_the_feature_alone():
         floor_weeks=2,
         commitment_weeks=2,
         worst_weeks=2,
-        pace="epic",
         weeks=12,
         per_week=1.08,
         unsplit=0,
@@ -372,8 +371,7 @@ def test_an_outlook_of_weeks_that_never_varied_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.pace, found.weeks, found.per_week, found.reason) == (
-        None,
+    assert (found.commitment_weeks, found.weeks, found.per_week, found.reason) == (
         None,
         9,
         1.0,
@@ -387,7 +385,7 @@ def test_an_outlook_never_falls_back_to_the_project():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.pace, found.weeks, found.reason) == (None, None, 0, throughput.THIN)
+    assert (found.commitment_weeks, found.weeks, found.reason) == (None, 0, throughput.THIN)
 
 
 def test_an_outlook_with_four_finished_members_is_no_forecast():
@@ -396,7 +394,7 @@ def test_an_outlook_with_four_finished_members_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.pace, found.reason) == (None, None, throughput.FEW)
+    assert (found.commitment_weeks, found.reason) == (None, throughput.FEW)
 
 
 def test_an_outlook_is_settled_four_weeks_after_a_member_started():
@@ -406,7 +404,8 @@ def test_an_outlook_is_settled_four_weeks_after_a_member_started():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.pace, found.weeks, found.per_week, found.reason) == ("epic", 4, 1.25, None)
+    assert (found.weeks, found.per_week, found.reason) == (4, 1.25, None)
+    assert found.commitment_weeks is not None
 
 
 def test_an_outlook_of_a_feature_finished_long_ago_is_no_forecast():
@@ -416,7 +415,7 @@ def test_an_outlook_of_a_feature_finished_long_ago_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.pace, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
+    assert (found.commitment_weeks, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
 
 
 def test_the_pace_is_the_average_week():
@@ -432,13 +431,7 @@ def test_one_story_finished_today_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks, found.pace) == (
-        10,
-        None,
-        None,
-        None,
-        None,
-    )
+    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks) == (10, None, None, None)
     assert (found.weeks, found.reason) == (0, throughput.THIN)
 
 
@@ -447,13 +440,7 @@ def test_an_outlook_two_years_out_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks, found.pace) == (
-        200,
-        None,
-        None,
-        None,
-        None,
-    )
+    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks) == (200, None, None, None)
     assert (found.weeks, found.per_week, found.reason) == (12, 1.08, throughput.FAR)
 
 
@@ -514,21 +501,14 @@ def test_an_outlook_with_no_unsplit_draft_has_no_split_basis():
 def test_a_feature_with_nothing_left_has_no_forecast():
     found = throughput.outlook(_fleet(_finished(1, 0, feature=FEATURE)), FEATURE, TODAY)
 
-    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks, found.pace) == (
-        0,
-        None,
-        None,
-        None,
-        None,
-    )
+    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks) == (0, None, None, None)
 
 
 def test_an_outlook_with_no_finished_story_has_no_forecast():
     found = throughput.outlook(_fleet(_open(1, feature=FEATURE)), FEATURE, TODAY)
 
-    assert (found.left, found.commitment_weeks, found.pace, found.weeks, found.per_week, found.reason) == (
+    assert (found.left, found.commitment_weeks, found.weeks, found.per_week, found.reason) == (
         1,
-        None,
         None,
         0,
         0.0,
@@ -545,7 +525,6 @@ def _outlook(**changes) -> throughput.Outlook:
         floor_weeks=2,
         commitment_weeks=4,
         worst_weeks=6,
-        pace="epic",
         weeks=12,
         per_week=1.5,
         unsplit=0,
@@ -558,7 +537,7 @@ def _outlook(**changes) -> throughput.Outlook:
 
 
 def _none(reason: str) -> throughput.Outlook:
-    return _outlook(floor_weeks=None, commitment_weeks=None, worst_weeks=None, pace=None, reason=reason)
+    return _outlook(floor_weeks=None, commitment_weeks=None, worst_weeks=None, reason=reason)
 
 
 def test_the_rows_give_each_line_in_weeks():
@@ -604,7 +583,7 @@ def test_the_rows_say_an_unsplit_draft_was_counted_as_one_story_by_assumption():
 
 
 def test_the_rows_say_so_when_nothing_is_left():
-    assert throughput.rows(_outlook(left=0, floor_weeks=None, pace=None)) == ["  nothing left to forecast"]
+    assert throughput.rows(_outlook(left=0, floor_weeks=None)) == ["  nothing left to forecast"]
 
 
 def test_the_rows_say_so_when_the_history_is_too_short():

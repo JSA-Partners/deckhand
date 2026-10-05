@@ -178,7 +178,6 @@ class Outlook:
     floor_weeks: int | None
     commitment_weeks: int | None
     worst_weeks: int | None
-    pace: str | None
     weeks: int
     per_week: float
     unsplit: int
@@ -214,7 +213,6 @@ def outlook(read: fleet.Fleet, feature: str, today: date, seed: int = 0) -> Outl
         floor_weeks=None if found is None else found[FLOOR],
         commitment_weeks=None if found is None else found[COMMITMENT],
         worst_weeks=None if found is None else found[WORST],
-        pace=None if found is None else "epic",
         weeks=len(samples),
         per_week=round(statistics.fmean(samples), 2) if samples else 0.0,
         unsplit=unsplit,

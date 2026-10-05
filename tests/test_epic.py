@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -22,6 +22,8 @@ EXISTING = [
     },
     {"id": "OPT_AUDIT", "name": "Permission audit", "color": "PURPLE", "description": "Who saw what, logged."},
 ]
+# The local calendar day of #301's Started: entry, the first work on Permission rework.
+STARTED = datetime.fromisoformat("2026-09-01T00:00:00Z").astimezone().date().isoformat()
 
 
 @pytest.fixture
@@ -310,27 +312,30 @@ def test_list_counts_the_pieces_of_every_feature_in_field_order(board_env, capsy
 
     assert json.loads(capsys.readouterr().out) == [
         {
-            "epic": "OPT_BILLING",
-            "title": "Billing",
+            "feature": "OPT_BILLING",
+            "name": "Billing",
             "about": "Charge for seats.",
+            "began": None,
             "closed": False,
             "pieces": 1,
             "done": 0,
             "drafts": 0,
         },
         {
-            "epic": "OPT_PERMISSION",
-            "title": "Permission rework",
+            "feature": "OPT_PERMISSION",
+            "name": "Permission rework",
             "about": "Guests and registry ownership.",
+            "began": STARTED,
             "closed": False,
             "pieces": 2,
             "done": 1,
             "drafts": 0,
         },
         {
-            "epic": "OPT_AUDIT",
-            "title": "Permission audit",
+            "feature": "OPT_AUDIT",
+            "name": "Permission audit",
             "about": "Who saw what, logged.",
+            "began": None,
             "closed": False,
             "pieces": 0,
             "done": 0,
@@ -359,7 +364,7 @@ def test_list_follows_the_option_order_not_the_board_order(board_env, tmp_path, 
 
     assert cli.main(["epic", "list", "--json"]) == 0
 
-    assert [row["title"] for row in json.loads(capsys.readouterr().out)] == [
+    assert [row["name"] for row in json.loads(capsys.readouterr().out)] == [
         "Permission audit",
         "Permission rework",
         "Billing",
@@ -376,12 +381,24 @@ def test_list_says_when_no_feature_was_ever_opened(board_env, monkeypatch, capsy
     assert json.loads(capsys.readouterr().out) == []
 
 
+def test_list_dates_a_feature_s_work_from_its_first_finish_when_nothing_logged_a_start(board_env, monkeypatch, capsys):
+    stamps = ["2026-09-20T12:00:00Z", "2026-09-27T12:00:00Z"]
+    _with_members(
+        board_env, monkeypatch, *[_member(320 + n, closed_at=at, feature="OPT_AUDIT") for n, at in enumerate(stamps)]
+    )
+
+    assert cli.main(["epic", "list", "--json"]) == 0
+
+    rows = {row["name"]: row for row in json.loads(capsys.readouterr().out)}
+    assert rows["Permission audit"]["began"] == datetime.fromisoformat(stamps[0]).astimezone().date().isoformat()
+
+
 def test_list_reads_a_feature_whose_every_piece_is_done_as_closed(board_env, monkeypatch, capsys):
     _archived_and_closed(board_env, monkeypatch)
 
     assert cli.main(["epic", "list", "--json"]) == 0
 
-    rows = {row["title"]: row for row in json.loads(capsys.readouterr().out)}
+    rows = {row["name"]: row for row in json.loads(capsys.readouterr().out)}
     assert (rows["Permission rework"]["closed"], rows["Permission rework"]["done"]) == (True, 2)
     assert rows["Permission audit"]["closed"] is False
 
@@ -395,9 +412,10 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
     assert json.loads(capsys.readouterr().out) == {
-        "epic": "OPT_PERMISSION",
-        "title": "Permission rework",
+        "feature": "OPT_PERMISSION",
+        "name": "Permission rework",
         "about": "Guests and registry ownership.",
+        "began": STARTED,
         "closed": False,
         "pieces": 3,
         "done": 2,
@@ -405,7 +423,6 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
         "floor": None,
         "commitment": None,
         "worst": None,
-        "pace": None,
         "weeks": 4,
         "per_week": 0.25,
         "unsplit": 0,
@@ -429,9 +446,10 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeyp
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
     assert json.loads(capsys.readouterr().out) == {
-        "epic": "OPT_PERMISSION",
-        "title": "Permission rework",
+        "feature": "OPT_PERMISSION",
+        "name": "Permission rework",
         "about": "Guests and registry ownership.",
+        "began": STARTED,
         "closed": False,
         "pieces": 7,
         "done": 6,
@@ -439,7 +457,6 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeyp
         "floor": "2026-10-09",
         "commitment": "2026-10-23",
         "worst": "2026-11-20",
-        "pace": "epic",
         "weeks": 4,
         "per_week": 1.25,
         "unsplit": 0,
@@ -471,7 +488,7 @@ def test_forecast_prints_the_block_for_one_feature(board_env, monkeypatch, capsy
 def test_forecast_finds_a_feature_by_name_prefix_or_id(board_env, capsys, named):
     assert cli.main(["epic", "forecast", named, "--json"]) == 0
 
-    assert json.loads(capsys.readouterr().out)["epic"] == "OPT_PERMISSION"
+    assert json.loads(capsys.readouterr().out)["feature"] == "OPT_PERMISSION"
 
 
 @pytest.mark.parametrize(
@@ -545,7 +562,8 @@ def test_forecast_counts_a_member_in_another_repository(board_env, monkeypatch, 
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
-    assert (found["pieces"], found["done"], found["pace"]) == (8, 6, "epic")
+    assert (found["pieces"], found["done"]) == (8, 6)
+    assert found["floor"] is not None
     assert found["commitment"] > "2026-10-16"
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
@@ -557,7 +575,7 @@ def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_e
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
-    assert (found["floor"], found["commitment"], found["worst"], found["pace"]) == (None, None, None, None)
+    assert (found["floor"], found["commitment"], found["worst"]) == (None, None, None)
     assert (found["pieces"], found["per_week"], found["reason"]) == (127, 1.25, "over two years")
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
@@ -608,4 +626,4 @@ def test_forecast_reads_a_finished_feature_the_board_archived(board_env, monkeyp
 
     found = json.loads(capsys.readouterr().out)
     assert (found["closed"], found["pieces"], found["done"]) == (True, 2, 2)
-    assert (found["floor"], found["commitment"], found["worst"], found["pace"]) == (None, None, None, None)
+    assert (found["floor"], found["commitment"], found["worst"]) == (None, None, None)

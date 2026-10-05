@@ -162,10 +162,12 @@ def _row(read: fleet.Fleet, option: dict) -> dict:
     """One feature and its pieces; archived stories count, because the board archives finished work."""
     mine = fleet.members([*read.stories, *read.archived], option["id"])
     done = sum(1 for story in mine if story.closed)
+    began = throughput.began(mine, _today())
     return {
-        "epic": option["id"],
-        "title": option["name"],
+        "feature": option["id"],
+        "name": option["name"],
         "about": option["description"],
+        "began": None if began is None else began.isoformat(),
         "closed": bool(mine) and done == len(mine),
         "pieces": len(mine),
         "done": done,
@@ -184,7 +186,7 @@ def _list(args: argparse.Namespace) -> int:
         return 0
     for row in rows:
         about = f" {row['about']}" if row["about"] else ""
-        print(f"{row['title']}: {row['done']} of {row['pieces']} pieces done, {row['drafts']} drafts.{about}")
+        print(f"{row['name']}: {row['done']} of {row['pieces']} pieces done, {row['drafts']} drafts.{about}")
     if not rows:
         print("no features yet; open one with epic open")
     return 0
@@ -199,7 +201,6 @@ def _dated(found: throughput.Outlook) -> dict:
         "floor": _on(found.floor_weeks),
         "commitment": _on(found.commitment_weeks),
         "worst": _on(found.worst_weeks),
-        "pace": found.pace,
         "weeks": found.weeks,
         "per_week": found.per_week,
         "unsplit": found.unsplit,
