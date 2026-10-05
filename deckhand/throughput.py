@@ -16,8 +16,8 @@ from datetime import date, datetime
 
 from deckhand import draft, fleet, log
 
-# Floor, commitment, worst: with each run resampling its weeks, the 85th was met 82 to 86 percent of the time.
-PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 85, 99)
+# Synthetic first forecasts flatter the method, so the commitment is the 90th, which real history met 86 percent.
+PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 90, 99)
 ROOTS = 5  # measured split trees below which a draw is noise, so the worst seen is used
 PACED = 5  # an epic's finishes in its last LOOKBACK weeks below which its own weeks are noise
 SETTLED = 4  # weeks since an epic's work began below which its pace has not settled
@@ -144,6 +144,7 @@ def simulate(
     """The weeks to finish at `PERCENTILES`, each run resampling `samples` and drawing weeks from that until done.
 
     Resampling per run carries the doubt about the pace itself, so a short history gives a wide range.
+    A resample with no finished week is drawn again, since it would stall and never finish.
     A percentile that reaches `HORIZON` is None, since no run measured it; the whole forecast is None
     when nothing is left, no week in `samples` finished anything, or the commitment reaches `HORIZON`.
     """
@@ -154,6 +155,8 @@ def simulate(
     for _ in range(runs):
         left = items + sum(rng.choice(sizes) for _ in range(unsplit))
         run_samples = [rng.choice(samples) for _ in samples]
+        while not any(run_samples):
+            run_samples = [rng.choice(samples) for _ in samples]
         weeks = 0
         while left > 0 and weeks < HORIZON:
             left -= rng.choice(run_samples)

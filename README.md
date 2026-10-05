@@ -167,14 +167,14 @@ the epic by itself, so the captain lists it under Anomalies with the command tha
 It counts how many of the epic's own stories finished each week and draws whole weeks from those
 counts, the method of Daniel Vacanti's "When Will It Be Done?". A week with nothing finished counts
 as zero, so client work, weekends and stalls are already in the numbers. Each simulated run first
-resamples the measured weeks, so a short history gives a wider range. The weeks start when the first
-of the epic's stories started, a first week that began partway through is left out, and the
-forecast draws from the last twelve full weeks. A draft with no stories listed yet counts as the
+resamples the measured weeks, so a short history gives a wider range, and a resample with no
+finished week is drawn again. The weeks start when the first of the epic's stories started, a first week that began
+partway through is left out, and the forecast draws from the last twelve full weeks. A draft with no stories listed yet counts as the
 average a finished parked feature became once five have finished, as the largest seen before that,
-and as one story before any has. The floor is the 50th percentile, the commitment the 85th and the
-worst case the 99th. On this project's history the commitment was met 82 percent of the time. In
-simulated steady work, the first forecast an epic gets met its commitment 82 to 92 percent of the
-time.
+and as one story before any has. The floor is the 50th percentile, the commitment the 90th and the
+worst case the 99th. On this project's history the commitment was met 86 percent of the time. In
+simulated steady work, the first forecast an epic gets met its commitment 89 percent of the time,
+and 87 percent in the worst case.
 
 There is no date range until four weeks have passed since the epic's work began and five of its
 stories have finished in the weeks measured, nor when every week measured finished the same number,

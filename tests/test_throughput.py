@@ -296,16 +296,16 @@ def test_no_measured_pace_is_no_forecast():
 
 
 def test_one_steady_week_makes_every_run_identical():
-    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 85: 2, 99: 2}
-    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 85: 3, 99: 3}
+    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 90: 2, 99: 2}
+    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 90: 3, 99: 3}
 
 
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():
-    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 85: 4, 99: 4}
+    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 90: 4, 99: 4}
 
 
 def test_empty_weeks_reach_the_pessimistic_percentiles():
-    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 85: 3, 99: None}
+    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 90: 3, 99: 8}
 
 
 def test_each_run_resamples_the_weeks_so_a_short_history_runs_wide():
@@ -313,8 +313,12 @@ def test_each_run_resamples_the_weeks_so_a_short_history_runs_wide():
     assert throughput.simulate(6, 0, [1, 3], [1], runs=2000)[throughput.COMMITMENT] == 6
 
 
-def test_the_floor_commitment_and_worst_are_the_50th_85th_and_99th():
-    assert throughput.PERCENTILES == (50, 85, 99)
+def test_a_resample_of_only_empty_weeks_is_drawn_again():
+    assert throughput.simulate(3, 0, [0, 0, 0, 3], [1], runs=2000) is not None
+
+
+def test_the_floor_commitment_and_worst_are_the_50th_90th_and_99th():
+    assert throughput.PERCENTILES == (50, 90, 99)
 
 
 def test_an_epic_settles_four_weeks_after_its_work_began():
@@ -322,12 +326,12 @@ def test_an_epic_settles_four_weeks_after_its_work_began():
 
 
 def test_a_commitment_two_years_out_is_no_forecast():
-    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 85: 103, 99: 103}
+    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 90: 103, 99: 103}
     assert throughput.simulate(104, 0, [1], [1], runs=5) is None
 
 
 def test_a_worst_case_at_two_years_is_not_measured():
-    found = throughput.simulate(1, 0, [0, 1, 1], [1])
+    found = throughput.simulate(5, 0, [0] * 11 + [1], [1])
 
     assert found is not None
     assert found[throughput.COMMITMENT] is not None
@@ -570,7 +574,7 @@ def test_the_rows_give_each_line_in_weeks():
         "  3 pieces left",
         "",
         "  Floor         2 weeks   50th percentile",
-        "  Commitment    4 weeks   85th percentile",
+        "  Commitment    4 weeks   90th percentile",
         "  Worst case    6 weeks   99th percentile",
         "",
         "  Paced by this feature's own 12 weeks, an average of 1.5 stories a week.",
