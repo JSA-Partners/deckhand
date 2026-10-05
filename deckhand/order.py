@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from deckhand import columns, sessions
-from deckhand.fleet import Blockers, Fleet, Key, Story
+from deckhand.fleet import Blockers, Fleet, Key, Story, touched
 from deckhand.step import ref_label
 
 
@@ -99,8 +99,9 @@ def _name(repo: str) -> str:
 
 
 def backlog(read: Fleet) -> list[Ranked]:
-    """The Backlog of this reading, ranked."""
-    return ranked([story for story in read.stories if story.status == columns.BACKLOG], read.blockers)
+    """The Backlog stories deckhand owns in this reading, ranked; an issue opened by hand is not one."""
+    held = [story for story in read.stories if story.status == columns.BACKLOG and touched(story)]
+    return ranked(held, read.blockers)
 
 
 def rows(read: Fleet) -> list[str]:
@@ -121,7 +122,7 @@ def _head(read: Fleet, repo: str) -> str | None:
     A blocker that is not in Backlog is nowhere in the order table, so a repository whose whole
     Backlog waits has nothing to show without it.
     """
-    queued = {story.key for story in read.stories if story.status == columns.BACKLOG}
+    queued = {story.key for story in read.stories if story.status == columns.BACKLOG and touched(story)}
     seen: set[Key] = set()
     roots: set[Key] = set()
     stack = [(w, n) for key, holds in read.blockers.items() if key[0] == repo and key in queued for w, n, _ in holds]

@@ -36,6 +36,13 @@
                       }
                     }
                   ]
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
                 }
               },
               "fieldValues": {
@@ -88,6 +95,13 @@
                       "author": {
                         "login": "mjm"
                       }
+                    }
+                  ]
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
                     }
                   ]
                 }
@@ -144,6 +158,13 @@
                       }
                     }
                   ]
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
                 }
               },
               "fieldValues": {
@@ -196,6 +217,13 @@
                       "author": {
                         "login": "mjm"
                       }
+                    }
+                  ]
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
                     }
                   ]
                 }

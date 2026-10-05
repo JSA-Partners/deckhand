@@ -139,11 +139,69 @@ apart. It writes
 to the board only, to put the backlog in build order, add a blocker a story gained late, or board a
 story it owns that never reached the board.
 
-Ask it for a forecast and it gives a stakeholder two numbers for everything left on the board: a
-floor, from the critical path through the blockers and how many stories run at once, and a
-commitment that is deliberately pessimistic. Both are measured rather than estimated, from how long
-finished stories actually took, so the numbers get better as the board fills and the forecast says
-how thin its history still is.
+Ask it for a forecast and it says in weeks when everything left on the board is likely done, drawn
+from how many stories the board finished each week, the way a feature is forecast below. The method
+was chosen on a short history, so it is worth checking again as the history grows.
+
+### Features
+
+A feature is an option of the project's single-select Feature field, never an issue, so the board
+holds only units of work and a feature spans every repository of the project. The option's name is
+the feature's name, its description says what it delivers, and the order of the options is the
+order the features are built in. A story belongs to a feature by its Feature value.
+
+```text
+deckhand epic open "Let guests into a collection" --about "A client sees their own collection and nothing else."
+deckhand epic add "Let guests" 261 259 owner/front-end#133
+deckhand epic list
+deckhand epic forecast "Let guests into a collection"
+deckhand epic close "Let guests into a collection"
+```
+
+`epic open` creates the Feature field the first time and adds each later feature at the end. A
+feature is named by its option id, by its name in any case and spacing, or by the start of one name
+alone. A name that matches two features refuses and lists each with its option id.
+
+To reorder the features, drag the options in the project's settings for the Feature field. Deleting
+an option clears that feature from every story that held it.
+
+`new` offers the features when it boards a story. A story split from a feature's story does not join
+the feature by itself, so the captain lists it under Anomalies with the command that adds it.
+
+`epic add` refuses a story that is off the board, not a deckhand story, or closed as not planned or
+as a duplicate, and writes nothing until every one passes. A story already in another feature moves.
+
+`epic forecast` says how many weeks the feature's open stories will take, and with `--json` gives
+dates and the day the feature's work began. It counts how many of the feature's own stories finished
+each week and draws whole weeks from those counts, the method of Daniel Vacanti's "When Will It Be
+Done?". A week with nothing finished counts as zero, so client work, weekends and stalls are
+already in the numbers.
+
+Each simulated run first resamples the measured weeks, so a short history gives a wider range, and
+a resample with no finished week is drawn again. The weeks start when the first of the feature's
+stories started, a first week that began partway through is left out, and the forecast draws from
+the last twelve full weeks.
+
+A draft with no stories listed yet counts as the average a finished parked feature became once five
+have finished, as the largest seen before that, and as one story before any has. A piece is one
+issue, so a draft not yet split is one piece even though the forecast counts it as several. A story
+closed as not planned or as a duplicate is not a piece.
+
+The floor is the 50th percentile, the commitment the 90th and the worst case the 99th. On a real
+board's history the commitment was met 86 percent of the time. In simulated steady work, the first
+forecast a feature gets met its commitment 89 percent of the time, and 87 percent in the worst case.
+
+There is no date range until four weeks have passed since the feature's work began and five of its
+stories have finished in the weeks measured, nor when every week measured finished the same number,
+nor when the commitment would be over two years out, and the forecast says which. A worst case
+past two years reads as beyond two years. Until then the forecast gives an early estimate drawn the
+same way from the weekly finishes of every story in any feature, once two weeks of that work have
+passed and five stories have finished, divided by how many features finished anything in those
+weeks, so a feature run beside another is estimated at its share. It is not a commitment.
+
+`epic close` removes a feature once everything in it is done, or when nothing in it will be started,
+and refuses while any of its stories is open. Its finished stories drop the label, which nothing
+reads, so the option list holds only live features.
 
 | Command | What it does |
 | --- | --- |

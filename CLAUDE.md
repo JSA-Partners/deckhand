@@ -21,9 +21,12 @@
   `refs/deckhand/reviewed/<n>`; `finish.py` opens the pull request only from the commit that ref
   names; `gates.py` what must be true before a branch becomes a pull request, run only from
   `finish.apply`; `findings.py` reads the findings, verdicts or decisions document into data, for
-  `review.py` to join; `forecast.py` measures what a finished story took and how many run at once,
-  and simulates what a batch of open ones will; `related.py` the issues a story names, with their
-  column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
+  `review.py` to join; `forecast.py` measures what a finished story took and prints the captain's
+  forecast of the board, its weeks from `throughput.py` and its critical path through the blockers;
+  `epic.py` the features, the options of the project's Feature field, opened, filled, listed and
+  forecast in dates; `throughput.py` how many stories finish a week, and the weeks a feature's open
+  ones or the board's will take; `related.py` the issues a story
+  names, with their column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
   which Claude Code sessions are open and on what, `transcript.py` what one of them says;
   `since.py` the snapshot a full captain read leaves, and what changed against the last;
   `candidates.py` what to open next and which plans touch the same files; `merges.py` which pull
@@ -92,14 +95,21 @@ install reaches them when the next fix or feature does.
 - A status is set only by a step's `apply`, never by prose
 - A step is reached through `next` and nowhere else; nothing a person reads names a step command
 - Nothing a person writes on GitHub is read; every decision comes from the session
+- The Feature field's options, their descriptions and their order are the one thing a person sets
+  on GitHub that deckhand reads
 - The log is written and never decided from: the column says where a story is, the `deckhand` label
   says whose it is, and a git ref says which commit the review passed. Reading prose to print prose
   stays fine
+- The timestamps of log entries may be measured for a forecast, which prints and decides nothing
 - Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
 - Do not hardcode organization, project, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
 - A blocker is `owner/name#M`; a bare number is this repository
 - A parked feature is written in place and becomes the story; only finished work closes an issue
+- A feature is an option of the project's Feature field, never an issue: the board holds only
+  units of work, and a story of any repository joins one by its Feature value. The option order is
+  the pipeline order, and `updateProjectV2Field` keeps an item's value only for an option resent with
+  its id
 - The build happens in the story's worktree, which `start` makes and `next` names; a branch is
   never checked out by hand, and the clone stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec

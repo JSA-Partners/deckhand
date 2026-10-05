@@ -14,6 +14,8 @@ from deckhand.config import Settings
 from deckhand.step import reason
 
 BOARD_FIELDS = ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"]
+# A field the Board view may show or hide without anything left to do.
+OPTIONAL_BOARD_FIELDS = frozenset({board.FEATURE})
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"
 
@@ -60,22 +62,28 @@ def kind_options(kinds: list[str]) -> list[dict[str, str]]:
 def kind_update(kind: dict[str, Any], kinds: list[str]) -> list[dict[str, str]] | None:
     """The options to write so Kind carries every configured kind in its color, or None when it does.
 
-    The update replaces the whole option list, so every option goes in: the configured kinds in
-    their order, each by its existing id so no story loses its value, then whatever a person added,
-    kept as it is.
+    The update replaces the whole option list, so every option goes in with its existing id and
+    description, and no story loses its value: the configured kinds in their order, then whatever a
+    person added, in the order it already has.
     """
-    existing = {o["name"]: o for o in kind.get("options") or []}
+    found = kind.get("options") or []
+    existing = {o["name"]: o for o in found}
     wanted = kind_options(kinds)
     if all(o["name"] in existing and existing[o["name"]].get("color") == o["color"] for o in wanted):
         return None
     options: list[dict[str, str]] = []
     for option in wanted:
-        found = existing.get(option["name"])
-        options.append({"id": found["id"], **option} if found else option)
-    for name, found in existing.items():
-        if name not in kinds:
+        held = existing.get(option["name"])
+        options.append({"id": held["id"], **option, "description": held.get("description") or ""} if held else option)
+    for held in found:
+        if held["name"] not in kinds:
             options.append(
-                {"id": found["id"], "name": name, "color": found.get("color") or OTHER_COLOR, "description": ""}
+                {
+                    "id": held["id"],
+                    "name": held["name"],
+                    "color": held.get("color") or OTHER_COLOR,
+                    "description": held.get("description") or "",
+                }
             )
     return options
 
@@ -102,10 +110,10 @@ def _board_item(settings: Settings) -> Item:
     if shown is None:
         return Item("Board view fields", click, "no view named Board")
     # The view menu only toggles a field on or off, so the order it reports is GitHub's, never a person's.
-    if set(shown) == set(BOARD_FIELDS):
-        return Item("Board view fields", click, None)
     missing = [name for name in BOARD_FIELDS if name not in shown]
-    extra = [name for name in shown if name not in BOARD_FIELDS]
+    extra = [name for name in shown if name not in BOARD_FIELDS and name not in OPTIONAL_BOARD_FIELDS]
+    if not missing and not extra:
+        return Item("Board view fields", click, None)
     parts = [f"turn on {', '.join(missing)}"] if missing else []
     parts += [f"turn off {', '.join(extra)}"] if extra else []
     return Item("Board view fields", click, f"on the Board view {' and '.join(parts)}")

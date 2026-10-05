@@ -1,0 +1,640 @@
+{
+  "data": {
+    "organization": {
+      "projectV2": {
+        "items": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          },
+          "nodes": [
+            {
+              "id": "I_301",
+              "isArchived": false,
+              "content": {
+                "number": 301,
+                "title": "Grant guests access",
+                "url": "https://github.com/acme/widgets/issues/301",
+                "state": "CLOSED",
+                "closedAt": "2026-09-02T00:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": [
+                    {
+                      "body": "Started: on the branch",
+                      "createdAt": "2026-09-01T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    },
+                    {
+                      "body": "Pull request: opened",
+                      "createdAt": "2026-09-02T00:00:00Z",
+                      "author": {
+                        "login": "mjm"
+                      }
+                    }
+                  ]
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_302",
+              "isArchived": false,
+              "content": {
+                "number": 302,
+                "title": "Scope guests to granted collections",
+                "url": "https://github.com/acme/widgets/issues/302",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_303",
+              "isArchived": false,
+              "content": {
+                "number": 303,
+                "title": "Opened by hand",
+                "url": "https://github.com/acme/widgets/issues/303",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": []
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_304",
+              "isArchived": false,
+              "content": {
+                "number": 304,
+                "title": "Bring the toolchain current",
+                "url": "https://github.com/acme/widgets/issues/304",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_305",
+              "isArchived": false,
+              "content": {
+                "number": 305,
+                "title": "Dropped before it began",
+                "url": "https://github.com/acme/widgets/issues/305",
+                "state": "CLOSED",
+                "closedAt": "2026-09-03T00:00:00Z",
+                "stateReason": "NOT_PLANNED",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_306",
+              "isArchived": false,
+              "content": {
+                "number": 306,
+                "title": "Already asked for in 302",
+                "url": "https://github.com/acme/widgets/issues/306",
+                "state": "CLOSED",
+                "closedAt": "2026-09-04T00:00:00Z",
+                "stateReason": "DUPLICATE",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Permission rework",
+                    "optionId": "OPT_PERMISSION",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_307",
+              "isArchived": false,
+              "content": {
+                "number": 307,
+                "title": "Charge per seat",
+                "url": "https://github.com/acme/widgets/issues/307",
+                "state": "OPEN",
+                "closedAt": null,
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Backlog",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_311",
+              "isArchived": true,
+              "content": {
+                "number": 311,
+                "title": "Billing piece 1",
+                "url": "https://github.com/acme/widgets/issues/311",
+                "state": "CLOSED",
+                "closedAt": "2026-09-10T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_312",
+              "isArchived": true,
+              "content": {
+                "number": 312,
+                "title": "Billing piece 2",
+                "url": "https://github.com/acme/widgets/issues/312",
+                "state": "CLOSED",
+                "closedAt": "2026-09-10T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_313",
+              "isArchived": true,
+              "content": {
+                "number": 313,
+                "title": "Billing piece 3",
+                "url": "https://github.com/acme/widgets/issues/313",
+                "state": "CLOSED",
+                "closedAt": "2026-09-17T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_314",
+              "isArchived": true,
+              "content": {
+                "number": 314,
+                "title": "Billing piece 4",
+                "url": "https://github.com/acme/widgets/issues/314",
+                "state": "CLOSED",
+                "closedAt": "2026-09-24T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_315",
+              "isArchived": true,
+              "content": {
+                "number": 315,
+                "title": "Billing piece 5",
+                "url": "https://github.com/acme/widgets/issues/315",
+                "state": "CLOSED",
+                "closedAt": "2026-09-24T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "I_316",
+              "isArchived": true,
+              "content": {
+                "number": 316,
+                "title": "Billing piece 6",
+                "url": "https://github.com/acme/widgets/issues/316",
+                "state": "CLOSED",
+                "closedAt": "2026-10-01T12:00:00Z",
+                "body": "",
+                "repository": {
+                  "nameWithOwner": "acme/widgets"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "deckhand"
+                    }
+                  ]
+                },
+                "comments": {
+                  "nodes": []
+                }
+              },
+              "fieldValues": {
+                "nodes": [
+                  {
+                    "name": "Done",
+                    "field": {
+                      "name": "Status"
+                    }
+                  },
+                  {
+                    "number": 1,
+                    "field": {
+                      "name": "Story Points"
+                    }
+                  },
+                  {
+                    "name": "Billing",
+                    "optionId": "OPT_BILLING",
+                    "field": {
+                      "name": "Feature"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

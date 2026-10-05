@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 
-from deckhand import fleet, issue, sessions
+from deckhand import board, fleet, issue, sessions
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -490,3 +491,226 @@ def test_an_archived_issue_the_process_never_wrote_to_is_not_an_anomaly():
     """A board carries issues that are not deckhand's, and archiving one of those is nobody's business."""
     archived = [dataclasses.replace(fleet.stories(_foreign("Backlog"))[0], archived=True)]
     assert fleet.anomalies([], {}, set(), [], archived=archived) == []
+
+
+# features
+
+
+def _item(number: int, labels: tuple[str, ...], feature: str | None = None, repo: str = REPO) -> dict:
+    content = {
+        "number": number,
+        "title": f"T{number}",
+        "state": "OPEN",
+        "closedAt": None,
+        "repository": {"nameWithOwner": repo},
+        "labels": {"nodes": [{"name": name} for name in labels]},
+    }
+    values = [] if feature is None else [{"name": f"Name {feature}", "optionId": feature, "field": {"name": "Feature"}}]
+    return {"id": f"I_{number}", "content": content, "fieldValues": {"nodes": values}}
+
+
+def test_the_items_query_asks_for_the_option_id_of_a_single_select():
+    assert "ProjectV2ItemFieldSingleSelectValue{ name optionId " in fleet.ITEMS_QUERY
+    assert "parent{" not in fleet.ITEMS_QUERY
+
+
+def test_the_items_query_reads_as_many_field_values_as_the_board_read():
+    def _first(query: str) -> str:
+        return query.split("fieldValues(first:", 1)[1].split(")", 1)[0]
+
+    assert _first(fleet.ITEMS_QUERY) == _first(board.ITEMS_QUERY)
+
+
+def _nodes_asked(query: str) -> int:
+    """GitHub's node count for a query: each connection's first or last times every connection around it."""
+    total, around, depth, opened = 0, [1], 0, []
+    for match in re.finditer(r"(?:first|last):(\d+)|[{}]", query):
+        if match.group(1):
+            total += around[-1] * int(match.group(1))
+            opened.append((depth + 1, around[-1] * int(match.group(1))))
+        elif match.group() == "{":
+            depth += 1
+            if opened and opened[-1][0] == depth:
+                around.append(opened.pop()[1])
+            else:
+                around.append(around[-1])
+        else:
+            depth -= 1
+            around.pop()
+    return total
+
+
+def test_the_items_query_reads_a_long_log_within_the_node_limit():
+    assert "comments(last:100)" in fleet.ITEMS_QUERY
+    assert _nodes_asked(fleet.ITEMS_QUERY) == 18_100
+    assert _nodes_asked(fleet.ITEMS_QUERY) < 500_000
+
+
+def test_a_row_carries_the_feature_option_its_item_holds():
+    found = fleet.stories([_item(1, ("deckhand",), feature="OPT_A"), _item(2, ("deckhand",))])
+
+    assert (found[0].feature, found[0].feature_name) == ("OPT_A", "Name OPT_A")
+    assert (found[1].feature, found[1].feature_name) == (None, "")
+
+
+def test_a_story_closed_as_not_planned_reads_as_dropped():
+    dropped = _item(1, ("deckhand",))
+    dropped["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z", "stateReason": "NOT_PLANNED"})
+    finished = _item(2, ("deckhand",))
+    finished["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z"})
+
+    found = fleet.stories([dropped, finished])
+
+    assert [story.dropped for story in found] == [True, False]
+
+
+def test_a_story_closed_as_a_duplicate_reads_as_dropped():
+    duplicate = _item(1, ("deckhand",))
+    duplicate["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z", "stateReason": "DUPLICATE"})
+
+    assert fleet.stories([duplicate])[0].dropped is True
+
+
+def test_a_row_carries_when_the_issue_closed():
+    finished = _item(1, ("deckhand",))
+    finished["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z"})
+
+    found = fleet.stories([finished, _item(2, ("deckhand",))])
+
+    assert [story.closed_at for story in found] == ["2026-09-02T00:00:00Z", ""]
+
+
+def test_members_are_the_owned_stories_of_one_feature_and_nothing_dropped():
+    dropped = _item(5, ("deckhand",), feature="OPT_A")
+    dropped["content"].update({"state": "CLOSED", "closedAt": "2026-09-02T00:00:00Z", "stateReason": "NOT_PLANNED"})
+    found = fleet.stories(
+        [
+            _item(1, ("deckhand",), feature="OPT_A"),
+            _item(2, (), feature="OPT_A"),
+            _item(3, ("deckhand",), feature="OPT_B"),
+            _item(4, ("deckhand",), feature="OPT_A", repo="acme/gadgets"),
+            dropped,
+        ]
+    )
+
+    assert [story.number for story in fleet.members(found, "OPT_A")] == [1, 4]
+
+
+def _logged(
+    number: int,
+    *entries: str,
+    feature: str | None = None,
+    closed: bool = False,
+    labels: tuple[str, ...] = ("deckhand",),
+    repo: str = REPO,
+) -> fleet.Story:
+    comments = [issue.Comment(author="claude", body=body, created_at="2026-09-01T00:00:00Z") for body in entries]
+    held = issue.Issue(
+        number=number,
+        title=f"T{number}",
+        body="",
+        url="",
+        state="CLOSED" if closed else "OPEN",
+        comments=comments,
+        labels=labels,
+    )
+    return fleet.Story(
+        number=number,
+        repo=repo,
+        title=f"T{number}",
+        status="Done" if closed else "Backlog",
+        points=1,
+        closed=closed,
+        item=f"I_{number}",
+        issue=held,
+        feature=feature,
+        feature_name={"OPT_A": "Alpha", "OPT_B": "Beta"}.get(feature or "", ""),
+    )
+
+
+def test_shed_names_every_story_a_split_entry_names():
+    story = _logged(1, "Split: into #2, acme/gadgets#3", "Split: #4 Follow on, blocked by this story.")
+
+    assert fleet.shed(story) == [(REPO, 2), ("acme/gadgets", 3), (REPO, 4)]
+
+
+def test_shed_ignores_an_issue_a_split_title_mentions():
+    story = _logged(1, "Split: #45 Fix the crash from #12, blocked by this story.")
+
+    assert fleet.shed(story) == [(REPO, 45)]
+
+
+def test_a_story_that_never_split_shed_nothing():
+    assert fleet.shed(_logged(1, "Started: on the branch")) == []
+
+
+SPLIT = "Split: #2 Follow on, blocked by this story."
+
+
+def test_a_story_shed_by_a_feature_s_story_and_left_out_is_a_stray():
+    shedder, kid = _logged(1, SPLIT, feature="OPT_A"), _logged(2)
+
+    assert fleet.strays([shedder, kid]) == [(kid, shedder)]
+
+
+def test_a_story_shed_by_a_story_in_no_feature_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT), _logged(2)]) == []
+
+
+def test_a_shed_story_already_in_a_feature_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, feature="OPT_B")]) == []
+
+
+def test_a_finished_shed_story_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, closed=True)]) == []
+
+
+def test_a_shed_issue_deckhand_does_not_own_is_not_a_stray():
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, labels=())]) == []
+
+
+def test_a_stray_is_an_anomaly_that_names_its_fix():
+    found = fleet.anomalies([_logged(1, SPLIT, feature="OPT_A"), _logged(2)], {}, set(), [])
+
+    assert [(item.number, item.what, item.fix) for item in found] == [
+        (2, "split from a story of Alpha, but in no feature", "epic add OPT_A acme/widgets#2")
+    ]
+
+
+def test_a_stray_fix_names_the_option_id_whatever_the_feature_is_called():
+    shedder = dataclasses.replace(_logged(1, SPLIT, feature="OPT_A"), feature_name='Say "hi" | $HOME `id`')
+
+    (found,) = fleet.anomalies([shedder, _logged(2)], {}, set(), [])
+
+    assert found.what == 'split from a story of Say "hi" \\| $HOME `id`, but in no feature'
+    assert found.fix == "epic add OPT_A acme/widgets#2"
+
+
+def test_a_stray_in_another_repository_names_its_ref_in_full():
+    gadgets = _logged(4, "Split: #5 Follow on.", feature="OPT_A", repo="acme/gadgets")
+
+    found = fleet.anomalies([gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
+
+    assert [item.fix for item in found] == ["epic add OPT_A acme/gadgets#5"]
+
+
+def test_an_archived_story_that_shed_still_reports_its_open_kid():
+    shedder = dataclasses.replace(_logged(1, SPLIT, feature="OPT_A", closed=True), archived=True)
+    kid = _logged(2)
+
+    assert fleet.strays([kid], [shedder]) == [(kid, shedder)]
+    assert [item.number for item in fleet.anomalies([kid], {}, set(), [], archived=[shedder])] == [2]
+
+
+def test_an_archived_kid_is_not_a_stray():
+    kid = dataclasses.replace(_logged(2), archived=True)
+
+    assert fleet.strays([_logged(1, SPLIT, feature="OPT_A")], [kid]) == []
+
+
+def test_a_kid_shed_by_two_stories_of_a_feature_is_one_stray():
+    first = _logged(1, "Split: #3 Follow on, blocked by this story.", feature="OPT_A")
+    second = _logged(2, "Split: #3 Follow on, blocked by this story.", feature="OPT_A")
+    kid = _logged(3)
+
+    assert fleet.strays([first, second, kid]) == [(kid, first)]

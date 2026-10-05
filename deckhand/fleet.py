@@ -7,9 +7,10 @@ the board in a single paginated read instead of one read per story.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
-from deckhand import board, columns, draft, gh, issue, sections, sessions, step
+from deckhand import board, columns, draft, gh, issue, log, sections, sessions, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -17,14 +18,14 @@ ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
     "projectV2(number:$number){ items(first:100, after:$endCursor, archivedStates:[ARCHIVED,NOT_ARCHIVED]){ "
     "pageInfo{ hasNextPage endCursor } nodes{ id isArchived "
-    "content{ ... on Issue{ number title url state closedAt body repository{ nameWithOwner } "
+    "content{ ... on Issue{ number title url state stateReason closedAt body repository{ nameWithOwner } "
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
-    "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
-    "fieldValues(first:20){ nodes{ "
+    "comments(last:100){ nodes{ body createdAt author{ login } } } } } "
+    "fieldValues(first:30){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
-    "... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } } "
+    "... on ProjectV2ItemFieldSingleSelectValue{ name optionId field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
 )
 
@@ -47,6 +48,10 @@ class Story:
     assignees: tuple[str, ...] = ()
     blocked_by: tuple[tuple[str, int, str], ...] = ()
     archived: bool = False
+    feature: str | None = None
+    feature_name: str = ""
+    dropped: bool = False
+    closed_at: str = ""
 
     @property
     def key(self) -> tuple[str, int]:
@@ -113,6 +118,10 @@ def stories(nodes: list[dict]) -> list[Story]:
                 ),
                 blocked_by=_open_blockers(content),
                 archived=bool(node.get("isArchived")),
+                feature=board.field_value(node, board.FEATURE, "optionId"),
+                feature_name=board.field_value(node, board.FEATURE, "name") or "",
+                dropped=content.get("stateReason") in ("NOT_PLANNED", "DUPLICATE"),
+                closed_at=content.get("closedAt") or "",
             )
         )
     return found
@@ -129,13 +138,13 @@ def _nodes(settings: Settings) -> list[dict]:
     return found
 
 
-def load(settings: Settings) -> list[Story]:
-    """Every story on the project with its log, and nothing else read; an archived one is not a story here.
+def load(settings: Settings, archived: bool = False) -> list[Story]:
+    """Every story on the project with its log, and nothing else read; an archived one only when asked for.
 
     The query asks for archived items because `read` reports the archived story the process still owns.
-    Nothing else wants them, so this drops them and every caller sees the board as a person does.
+    Most callers want the board as a person sees it, so archived items are dropped unless asked for.
     """
-    return [story for story in stories(_nodes(settings)) if not story.archived]
+    return [story for story in stories(_nodes(settings)) if archived or not story.archived]
 
 
 def touched(story: Story) -> bool:
@@ -146,6 +155,46 @@ def touched(story: Story) -> bool:
     every one of them broken.
     """
     return issue.LABEL[0] in story.issue.labels
+
+
+def members(found: list[Story], feature: str) -> list[Story]:
+    """The stories the process owns whose Feature is the option `feature`, in any repository, none dropped."""
+    return [story for story in found if story.feature == feature and touched(story) and not story.dropped]
+
+
+_SHED = re.compile(r"(?:([^\s/#,]+/[^\s/#,]+))?#([0-9]+)")
+
+
+def shed(story: Story) -> list[tuple[str, int]]:
+    """`(repository, number)` of every story this one was split into, as its `Split:` entries name them."""
+    found = []
+    for entry in log.entries(story.issue):
+        if entry.prefix != "Split:":
+            continue
+        # A split's title is free text and may name an issue, so only the references the process wrote are read.
+        if entry.text.startswith("into "):
+            named = entry.text.removeprefix("into ").split(", ")
+        else:
+            named = entry.text.split()[:1]
+        for token in named:
+            match = _SHED.fullmatch(token)
+            if match is not None:
+                found.append((match.group(1) or story.repo, int(match.group(2))))
+    return found
+
+
+def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, Story]]:
+    """Every open story on the board in no feature that a story of a feature shed, with the story that shed it."""
+    held = {story.key: story for story in found}
+    out: dict[tuple[str, int], tuple[Story, Story]] = {}
+    for story in [*found, *(archived or [])]:
+        if story.feature is None:
+            continue
+        for key in shed(story):
+            kid = held.get(key)
+            if kid is not None and kid.feature is None and not kid.closed and touched(kid):
+                out.setdefault(key, (kid, story))
+    return list(out.values())
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
@@ -243,6 +292,12 @@ def anomalies(
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
             fix = "captain apply --unblock on one edge"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
+    for story, shedder in strays(found, archived):
+        name = shedder.feature_name.replace("|", "\\|")
+        what = f"split from a story of {name}, but in no feature"
+        # A name may hold quotes or shell characters, and a bare number is the repository epic add runs in.
+        fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
+        out.append(Anomaly(story.number, story.repo, what, fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
     for story in archived or []:

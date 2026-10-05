@@ -4,9 +4,10 @@ Nothing here writes into a repository's files. The project comes from the GitHub
 merge settings come from `gh repo edit`, the board's three fields come from the API, and everything
 the API cannot do is read back through `checklist` and printed for a person to finish by hand.
 
-A project keeps exactly the three fields this module creates and GitHub's own Status. Whatever else
-a person or a template added is deleted, because a field the process does not set is a column nobody
-fills in; GitHub's own built-in fields cannot be deleted and are never touched.
+A project keeps the fields this module creates, the Feature field `epic open` creates, and GitHub's
+own Status. Whatever else a person or a template added is deleted, because a field the process does
+not set is a column nobody fills in; GitHub's own built-in fields cannot be deleted and are never
+touched.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from deckhand import checklist, config, gh, issue
+from deckhand import board, checklist, config, gh, issue
 from deckhand.checklist import Item
 from deckhand.config import SETTINGS_FILE, Settings
 from deckhand.step import Refusal, reason, step
@@ -37,8 +38,8 @@ SUPERPOWERS = "superpowers@"
 NO_PLUGIN_LIST = "superpowers: unknown (no plugin list in the file)"
 
 # The fields the process reads; every other field a person could have made is deleted. Status is
-# GitHub's own, and a single select like any other, so it is kept by name.
-KEPT_FIELDS = frozenset({"Status", *(name for name, _ in PROJECT_FIELDS)})
+# GitHub's own, and a single select like any other, so it is kept by name; `epic open` makes Feature.
+KEPT_FIELDS = frozenset({"Status", board.FEATURE, *(name for name, _ in PROJECT_FIELDS)})
 # The GraphQL data types `gh project field-create` can make, which are the ones it can delete.
 DELETABLE_TYPES = frozenset({"TEXT", "NUMBER", "DATE", "SINGLE_SELECT", "ITERATION"})
 

@@ -78,3 +78,25 @@ def test_the_next_line_names_the_draft_a_blocked_repository_waits_on():
     )
 
     assert order.next_line(read, []) == "Next per repository: widgets: #268 is Draft, unblocking 1 story"
+
+
+def test_the_backlog_leaves_out_an_issue_deckhand_does_not_own():
+    found = list(fleet.stories(_nodes()))
+    bug = replace(found[0], issue=replace(found[0].issue, labels=("bug",)))
+    foreign = replace(found[3], issue=replace(found[3].issue, labels=()))
+    read = fleet.Fleet(stories=[bug, found[1], found[2], foreign], blockers={}, missing=[])
+
+    assert sorted(row.story.number for row in order.backlog(read)) == [257, 258]
+
+
+def test_the_next_line_names_a_blocker_deckhand_does_not_own_in_backlog():
+    """A foreign Backlog issue is not in the order table, so the Next line is the only place it shows."""
+    found = {story.number: story for story in fleet.stories(_nodes())}
+    foreign = replace(found[268], status="Backlog", issue=replace(found[268].issue, labels=()))
+    read = fleet.Fleet(
+        stories=[found[257], foreign],
+        blockers={found[257].key: [("acme/widgets", 268, "Domains")], foreign.key: []},
+        missing=[],
+    )
+
+    assert order.next_line(read, []) == "Next per repository: widgets: #268 is Backlog, unblocking 1 story"

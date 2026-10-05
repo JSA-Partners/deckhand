@@ -12,6 +12,8 @@ from typing import Any
 from deckhand import columns, gh
 from deckhand.config import Settings
 
+FEATURE = "Feature"
+
 # gh --paginate advances the cursor only when the variable is named endCursor.
 ITEMS_QUERY = (
     "query($owner:String!,$number:Int!,$endCursor:String){ OWNER_ROOT(login:$owner){ "
