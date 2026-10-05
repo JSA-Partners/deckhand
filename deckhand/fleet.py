@@ -22,7 +22,7 @@ ITEMS_QUERY = (
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
     "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
-    "comments(last:40){ nodes{ body createdAt author{ login } } } } } "
+    "comments(last:100){ nodes{ body createdAt author{ login } } } } } "
     "fieldValues(first:30){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
     "... on ProjectV2ItemFieldSingleSelectValue{ name optionId field{ ... on ProjectV2FieldCommon{ name } } } "

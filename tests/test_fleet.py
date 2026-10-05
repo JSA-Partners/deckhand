@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 
 from deckhand import board, fleet, issue, sessions
@@ -518,6 +519,31 @@ def test_the_items_query_reads_as_many_field_values_as_the_board_read():
         return query.split("fieldValues(first:", 1)[1].split(")", 1)[0]
 
     assert _first(fleet.ITEMS_QUERY) == _first(board.ITEMS_QUERY)
+
+
+def _nodes_asked(query: str) -> int:
+    """GitHub's node count for a query: each connection's first or last times every connection around it."""
+    total, around, depth, opened = 0, [1], 0, []
+    for match in re.finditer(r"(?:first|last):(\d+)|[{}]", query):
+        if match.group(1):
+            total += around[-1] * int(match.group(1))
+            opened.append((depth + 1, around[-1] * int(match.group(1))))
+        elif match.group() == "{":
+            depth += 1
+            if opened and opened[-1][0] == depth:
+                around.append(opened.pop()[1])
+            else:
+                around.append(around[-1])
+        else:
+            depth -= 1
+            around.pop()
+    return total
+
+
+def test_the_items_query_reads_a_long_log_within_the_node_limit():
+    assert "comments(last:100)" in fleet.ITEMS_QUERY
+    assert _nodes_asked(fleet.ITEMS_QUERY) == 18_100
+    assert _nodes_asked(fleet.ITEMS_QUERY) < 500_000
 
 
 def test_a_row_carries_the_feature_option_its_item_holds():
