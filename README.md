@@ -139,11 +139,9 @@ apart. It writes
 to the board only, to put the backlog in build order, add a blocker a story gained late, or board a
 story it owns that never reached the board.
 
-Ask it for a forecast and it gives a stakeholder two numbers for everything left on the board: a
-floor, from the critical path through the blockers and how many stories run at once, and a
-commitment that is deliberately pessimistic. Both are measured rather than estimated, from how long
-finished stories actually took, so the numbers get better as the board fills and the forecast says
-how thin its history still is.
+Ask it for a forecast and it says in weeks when everything left on the board is likely done, drawn
+from how many stories the board finished each week, the way a feature is forecast below. The method
+was chosen on a short history, so it is worth checking again as the history grows.
 
 ### Epics
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from datetime import date
 
 from deckhand import (
     board,
@@ -48,6 +49,10 @@ from deckhand.step import (
 WINDOW = 24.0
 # `new` takes a whole idea as its argument, and the table is read across, not down.
 COMMAND = 28
+
+
+def _today() -> date:
+    return date.today()
 
 
 def _name(repo: str) -> str:
@@ -174,7 +179,6 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", metavar="ID", help="read one session properly, by the id in the table")
     parser.add_argument("--since", type=float, default=WINDOW, help="how many hours back to look for sessions")
     parser.add_argument("--only", choices=(*BLOCKS, *ON_REQUEST), help="print one block instead of the full read")
-    parser.add_argument("--sessions", type=int, help="stories to forecast at once; defaults to what history shows")
 
 
 def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
@@ -259,9 +263,7 @@ def context(args: argparse.Namespace) -> int:
             )
             print()
         if "forecast" in wanted:
-            live = len([beat for beat in pulses if beat.live])
-            at_once, source = forecast.parallel(args.sessions, read, live=live)
-            block("## Forecast", lambda: forecast.rows(read, at_once, source))
+            block("## Forecast", lambda: forecast.rows(read, _today()))
         if "candidates" in wanted:
             block("## Candidates", lambda: candidates.rows(read, gh.repo_slug()))
         if after:

@@ -21,10 +21,11 @@
   `refs/deckhand/reviewed/<n>`; `finish.py` opens the pull request only from the commit that ref
   names; `gates.py` what must be true before a branch becomes a pull request, run only from
   `finish.apply`; `findings.py` reads the findings, verdicts or decisions document into data, for
-  `review.py` to join; `forecast.py` measures what a finished story took and how many run at once,
-  and simulates what a batch of open ones will; `epic.py` the features, the options of the project's
-  Feature field, opened, filled, listed and forecast in dates; `throughput.py` how many stories
-  finish a week, and the weeks a feature's open ones will take; `related.py` the issues a story
+  `review.py` to join; `forecast.py` measures what a finished story took and prints the captain's
+  forecast of the board, its weeks from `throughput.py` and its critical path through the blockers;
+  `epic.py` the features, the options of the project's Feature field, opened, filled, listed and
+  forecast in dates; `throughput.py` how many stories finish a week, and the weeks a feature's open
+  ones or the board's will take; `related.py` the issues a story
   names, with their column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
   which Claude Code sessions are open and on what, `transcript.py` what one of them says;
   `since.py` the snapshot a full captain read leaves, and what changed against the last;

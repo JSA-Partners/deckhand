@@ -1,26 +1,22 @@
-"""How long finished stories took, and how long a batch of them will take.
+"""How long finished stories took, and when everything left on the board will be done.
 
-Nothing here reads GitHub or prints: it takes stories, their blockers and a session count, and
-returns numbers and the lines of the captain's Forecast block. The durations are measured rather
-than estimated, from the timestamps the log has always carried, so a point value selects which
-history is relevant instead of predicting a time.
-
-A stall is never trimmed. The longest story in a band is in that band at the rate stalls actually
-happen, and discarding it would produce exactly the optimistic estimate this exists to avoid.
+Nothing here reads GitHub or prints: it takes the fleet and today's date and returns the lines of the
+captain's Forecast block. The weeks come from `throughput`, the board's weekly finishes drawn the way
+a feature's are, because a week's count already holds new work, new blockers and waiting. The
+durations, measured from the log, give only the critical path through the blockers, a bound no
+schedule can beat.
 """
 
 from __future__ import annotations
 
 import math
-import random
 import statistics
-from datetime import datetime
+from datetime import date, datetime
 
-from deckhand import fleet, log, order
+from deckhand import fleet, log, order, throughput
 
-PERCENTILES = (50, 85, 95, 100)
-THIN = 10  # samples in a band below which a percentile is a fit to noise, so the worst run is used
-HOURS_A_DAY = 24.0  # the durations are elapsed wall clock, including the hours a story waited
+# The durations are elapsed wall clock, including the hours a story waited.
+HOURS_A_DAY = 24.0
 POINT = "A point groups stories that take about as long as each other. It is not hours."
 
 
@@ -35,33 +31,6 @@ def hours(story: fleet.Story) -> float | None:
     if started is None or opened is None:
         return None
     return (_stamp(opened.created_at) - _stamp(started.created_at)).total_seconds() / 3600
-
-
-OVERLAPPING = 5  # finished stories that ran beside another, below which a median is noise
-
-
-def _span(story: fleet.Story) -> tuple[datetime, datetime] | None:
-    started = log.last(story.issue, "Started:")
-    opened = log.last(story.issue, "Pull request:")
-    if not story.closed or started is None or opened is None:
-        return None
-    return _stamp(started.created_at), _stamp(opened.created_at)
-
-
-def concurrency(stories: list[fleet.Story]) -> int | None:
-    """How many stories were in progress at once: the median count at every finished story's start.
-
-    Measured from the log rather than from the sessions a machine can see, so a teammate's work
-    counts; too few overlapping stories says nothing, and the caller falls back.
-    """
-    spans = [span for span in (_span(story) for story in stories) if span is not None]
-    overlapped = sum(
-        1 for i, (a, b) in enumerate(spans) if any(j != i and c < b and a < d for j, (c, d) in enumerate(spans))
-    )
-    if overlapped < OVERLAPPING:
-        return None
-    counts = [sum(1 for start, end in spans if start <= at < end) for at, _ in spans]
-    return max(1, round(statistics.median(counts)))
 
 
 def durations(stories: list[fleet.Story]) -> dict[int | None, list[float]]:
@@ -83,115 +52,58 @@ def _waits(story: fleet.Story, blockers: fleet.Blockers, finish: dict[fleet.Key,
     return max((finish.get((where, number), 0.0) for where, number, _ in holds), default=0.0)
 
 
-def floor(stories: list[fleet.Story], blockers: fleet.Blockers, sessions: int, hours: dict[int | None, float]) -> float:
-    """`max(critical path, total work / sessions)`, both proven lower bounds on the makespan."""
-    fallback = statistics.median(hours.values())
-    duration = {story.key: hours.get(story.points, fallback) for story in stories}
+def critical_path(
+    stories: list[fleet.Story], blockers: fleet.Blockers, history: dict[int | None, list[float]]
+) -> float | None:
+    """Hours along the longest chain of blockers, each story its band's median; None with no history."""
+    if not history:
+        return None
+    medians = {band: statistics.median(took) for band, took in history.items()}
+    fallback = statistics.median(medians.values())
     finish: dict[fleet.Key, float] = {}
-    path = 0.0
     for story in _placed(stories, blockers):
-        end = _waits(story, blockers, finish) + duration[story.key]
-        finish[story.key] = end
-        path = max(path, end)
-    return max(path, sum(duration.values()) / max(sessions, 1))
-
-
-def _schedule(
-    placed: list[fleet.Story], blockers: fleet.Blockers, sessions: int, duration: dict[fleet.Key, float]
-) -> float:
-    """List scheduling: each story to whichever session frees up first, no earlier than its blockers finish."""
-    free = [0.0] * max(sessions, 1)
-    finish: dict[fleet.Key, float] = {}
-    for story in placed:
-        session = min(range(sessions), key=lambda i: free[i])
-        start = max(free[session], _waits(story, blockers, finish))
-        finish[story.key] = free[session] = start + duration[story.key]
+        finish[story.key] = _waits(story, blockers, finish) + medians.get(story.points, fallback)
     return max(finish.values(), default=0.0)
 
 
-def _percentile(sorted_values: list[float], p: int) -> float:
-    index = math.ceil(p / 100 * len(sorted_values)) - 1
-    return sorted_values[min(len(sorted_values) - 1, max(0, index))]
+_WHY = {
+    throughput.THIN: f"Work on the board began fewer than {throughput.SETTLED} weeks ago, "
+    "so there is no date range yet.",
+    throughput.FEW: f"Fewer than {throughput.PACED} stories finished on the board in the weeks measured, "
+    "so there is no date range yet.",
+    throughput.IDLE: "No story finished on the board in the weeks measured, so there is no date range.",
+    throughput.FAR: "The measured pace would take over two years, so there is no date range.",
+    throughput.FLAT: "The board's weekly pace has not varied yet, so a date range would be falsely precise.",
+}
 
 
-def simulate(
-    stories: list[fleet.Story],
-    blockers: fleet.Blockers,
-    sessions: int,
-    samples: dict[int | None, list[float]],
-    runs: int = 10_000,
-    seed: int | None = None,
-) -> dict[int, float]:
-    """The makespan at `PERCENTILES`, from `runs` schedules drawn from `samples`."""
-    rng = random.Random(seed)
-    pool = [value for band in samples.values() for value in band]
-    placed = _placed(stories, blockers)
-
-    def _draw() -> dict[fleet.Key, float]:
-        return {story.key: rng.choice(samples.get(story.points) or pool) for story in stories}
-
-    makespans = sorted(_schedule(placed, blockers, sessions, _draw()) for _ in range(runs))
-    return {p: _percentile(makespans, p) for p in PERCENTILES}
+def _row(label: str, weeks: int, note: str) -> str:
+    unit = "week" if weeks == 1 else "weeks"
+    return f"  {label:<22}{weeks:>3} {unit:<5}   {note}"
 
 
-def _days(hours: float) -> int:
-    return math.ceil(hours / HOURS_A_DAY)
-
-
-def _row(label: str, hours: float, note: str) -> str:
-    return f"  {label:<12}{_days(hours):>3} days   {note}"
-
-
-def parallel(given: int | None, read: fleet.Fleet, live: int) -> tuple[int, str]:
-    """How many stories the forecast runs at once, and where that number came from."""
-    if given is not None:
-        return given, "given"
-    measured = concurrency([*read.stories, *read.archived])
-    if measured is not None:
-        return measured, "measured"
-    return max(live, 1), "open sessions"
-
-
-def rows(read: fleet.Fleet, at_once: int, source: str) -> list[str]:
-    """The floor, the commitment, and the control that pools points away, over what the process owns and is not Done.
-
-    The history is every finished story, archived ones too, because the board archives finished work.
-    """
-    left = [story for story in read.stories if not story.closed and fleet.touched(story)]
-    if not left:
+def rows(read: fleet.Fleet, today: date) -> list[str]:
+    """When the open stories the process owns are likely done, in weeks, and the bound the blockers set."""
+    every = [*read.stories, *read.archived]
+    found = throughput.board(read, today)
+    if found.left == 0:
         return ["  nothing left to forecast"]
-
-    points = sum(story.points or 0 for story in left)
-    story_word = "story" if len(left) == 1 else "stories"
-    header = f"  {len(left)} {story_word}, {points} points, {at_once} at once, {source}"
-
-    history = durations([*read.stories, *read.archived])
-    if not history:
-        return [f"{header}: no finished stories, so no Floor and no Commitment."]
-
-    pooled = sorted(hours for band in history.values() for hours in band)
-    thin = any(len(band) < THIN for band in history.values())
-    commitment_p = 100 if thin else 85
-    worst_p = max(commitment_p, 95)  # never below the commitment, so a thin history cannot invert the two
-    medians = {band: statistics.median(hours) for band, hours in history.items()}
-
-    floor_hours = floor(left, read.blockers, at_once, medians)
-    banded = simulate(left, read.blockers, at_once, history)
-    unbanded = simulate(left, read.blockers, at_once, {None: pooled})
-    commitment_note = ("worst run" if thin else "85th percentile") + ", banded by points"
-
-    lines = [
-        header,
-        "",
-        _row("Floor", floor_hours, "critical path, nothing stalls"),
-        _row("Commitment", banded[commitment_p], commitment_note),
-        _row("Worst seen", banded[worst_p], f"{worst_p}th percentile"),
-        "",
-        _row("Unbanded", unbanded[commitment_p], "the same, points ignored"),
-        "",
-        f"  From {len(pooled)} finished stories, the longest {pooled[-1]:.1f} hours against a median "
-        f"of {statistics.median(pooled):.1f}.",
-    ]
-    if thin:
-        lines.append(f"  Thin history: under {THIN} in a band, so the commitment is the worst run, not a fit.")
-    return [*lines, "", f"  {POINT}"]
+    lines = [f"  {found.left} {'story' if found.left == 1 else 'stories'} left", ""]
+    if found.floor_weeks is None or found.commitment_weeks is None:
+        lines.append(f"  {_WHY[found.reason or throughput.IDLE]}")
+    else:
+        lines += [
+            _row("Likely done by", found.commitment_weeks, f"{throughput.COMMITMENT}th percentile"),
+            _row("Possibly as early as", found.floor_weeks, f"{throughput.FLOOR}th percentile"),
+            "",
+            f"  Paced by the board's last {throughput.plural(found.weeks, 'week')}, "
+            f"an average of {found.per_week:.1f} stories a week.",
+        ]
+    if found.unsplit:
+        lines.append(throughput.drafts(found))
+    left = [story for story in every if not story.closed and fleet.touched(story) and not story.dropped]
+    path = critical_path(left, read.blockers, durations(every))
+    if path is not None:
+        days = math.ceil(path / HOURS_A_DAY)
+        lines += ["", f"  Cannot finish before: {throughput.plural(days, 'day')} (critical path through the blockers)"]
+    return lines

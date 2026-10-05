@@ -1,4 +1,4 @@
-"""How many stories finish a week, and how many weeks what is left of a feature will take.
+"""How many stories finish a week, and how many weeks what is left of a feature or the board will take.
 
 Nothing here reads GitHub or prints: it takes the fleet and today's date and returns numbers and the
 lines of `epic forecast`. It is Monte Carlo simulation on measured weekly throughput, the method of
@@ -111,27 +111,34 @@ def began(stories: list[fleet.Story], today: date) -> date | None:
     return min([*started, *_finished_on(stories, today)], default=None)
 
 
-def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int], bool]:
-    """The feature's own last `LOOKBACK` full weekly counts since its work began, and whether `SETTLED` weeks passed.
+def _paced(stories: list[fleet.Story], today: date) -> tuple[list[int], bool]:
+    """The last `LOOKBACK` full weekly counts since work on `stories` began, and whether `SETTLED` weeks passed.
 
-    Only the feature's stories count: the project's weeks hold work outside it and forecast it early.
     The oldest week is left out when work began partway through it, since it would count a few days as seven.
     """
-    mine = fleet.members(every, feature)
-    start = began(mine, today)
+    start = began(stories, today)
     if start is None:
         return [], False
     days = (today - start).days
-    counts = weekly(mine, today, start)
+    counts = weekly(stories, today, start)
     full = counts if days % 7 == 6 else counts[1:]
     return full[-LOOKBACK:], days >= 7 * SETTLED
 
 
-def remaining(read: fleet.Fleet, feature: str) -> tuple[int, int]:
-    """The feature's open stories counted as one each, and apart from them its drafts with no stories listed yet."""
-    left = [story for story in fleet.members([*read.stories, *read.archived], feature) if not story.closed]
+def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int], bool]:
+    """The feature's own weekly counts: the project's weeks hold work outside it and would forecast it early."""
+    return _paced(fleet.members(every, feature), today)
+
+
+def _left(stories: list[fleet.Story]) -> tuple[int, int]:
+    left = [story for story in stories if not story.closed]
     unsplit = sum(1 for story in left if draft.is_draft(story.issue.body) and not draft.read(story.issue.body)[1])
     return len(left) - unsplit, unsplit
+
+
+def remaining(read: fleet.Fleet, feature: str) -> tuple[int, int]:
+    """The feature's open stories counted as one each, and apart from them its drafts with no stories listed yet."""
+    return _left(fleet.members([*read.stories, *read.archived], feature))
 
 
 def _percentile(sorted_values: list[int], p: int) -> int:
@@ -201,8 +208,18 @@ def _short(samples: list[int], settled: bool) -> str | None:
 def outlook(read: fleet.Fleet, feature: str, today: date, seed: int = 0) -> Outlook:
     """The forecast over what is left of `feature`, drawn from its own stories, archived ones too."""
     every = [*read.stories, *read.archived]
-    items, unsplit = remaining(read, feature)
-    samples, settled = pace(every, feature, today)
+    return _outlook(every, fleet.members(every, feature), today, seed)
+
+
+def board(read: fleet.Fleet, today: date, seed: int = 0) -> Outlook:
+    """The forecast over every open story the process owns, drawn from every one it finished, archived ones too."""
+    every = [*read.stories, *read.archived]
+    return _outlook(every, _held(every), today, seed)
+
+
+def _outlook(every: list[fleet.Story], stories: list[fleet.Story], today: date, seed: int) -> Outlook:
+    items, unsplit = _left(stories)
+    samples, settled = _paced(stories, today)
     measured = splits(every)
     basis, sizes = _sizes(measured)
     short = _short(samples, settled)
@@ -233,7 +250,7 @@ _WHY = {
 }
 
 
-def _plural(count: int, word: str) -> str:
+def plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
@@ -246,7 +263,7 @@ def rows(found: Outlook) -> list[str]:
     """The floor, the commitment and the worst case in weeks, and what the pace was measured from."""
     if found.left == 0:
         return ["  nothing left to forecast"]
-    header = f"  {_plural(found.left, 'piece')} left"
+    header = f"  {plural(found.left, 'piece')} left"
     if found.floor_weeks is None or found.commitment_weeks is None:
         return [header, "", f"  {_WHY[found.reason or IDLE]}"]
     worst = (
@@ -261,17 +278,18 @@ def rows(found: Outlook) -> list[str]:
         _row("Commitment", found.commitment_weeks, f"{COMMITMENT}th percentile"),
         worst,
         "",
-        f"  Paced by this feature's own {_plural(found.weeks, 'week')}, "
+        f"  Paced by this feature's own {plural(found.weeks, 'week')}, "
         f"an average of {found.per_week:.1f} stories a week.",
     ]
     if found.unsplit:
-        lines.append(_drafts(found))
+        lines.append(drafts(found))
     return lines
 
 
-def _drafts(found: Outlook) -> str:
-    drafts = f"  {_plural(found.unsplit, 'draft')} not yet split, {'each ' if found.unsplit > 1 else ''}counted as"
-    parked = _plural(found.measured, "finished parked feature")
+def drafts(found: Outlook) -> str:
+    """How the drafts not yet split were counted, as one line."""
+    drafts = f"  {plural(found.unsplit, 'draft')} not yet split, {'each ' if found.unsplit > 1 else ''}counted as"
+    parked = plural(found.measured, "finished parked feature")
     if found.split_basis == "measured":
         return f"{drafts} {found.split_size:.1f} stories, the average of {parked}."
     if found.split_basis == "largest":

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from deckhand import captain, cli, fleet, forecast, issue
+from deckhand import captain, cli, fleet, issue
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -307,43 +308,90 @@ def test_the_forecast_is_not_one_of_the_default_blocks(fleet_env, capsys):
     assert "## Forecast" not in capsys.readouterr().out
 
 
-def test_the_forecast_prints_a_floor_and_a_commitment(fleet_env, monkeypatch, capsys):
-    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+def _finished_node(number: int, closed: str) -> dict:
+    started = (datetime.fromisoformat(closed) - timedelta(hours=24)).isoformat()
+    return {
+        "id": f"I_{number}",
+        "isArchived": True,
+        "content": {
+            "number": number,
+            "title": "Done",
+            "url": f"https://github.com/{REPO}/issues/{number}",
+            "state": "CLOSED",
+            "closedAt": closed,
+            "body": "",
+            "repository": {"nameWithOwner": REPO},
+            "labels": {"nodes": [{"name": "deckhand"}]},
+            "comments": {
+                "nodes": [
+                    {"body": "Started: on the branch", "createdAt": started, "author": {"login": "claude"}},
+                    {"body": "Pull request: opened", "createdAt": closed, "author": {"login": "claude"}},
+                ]
+            },
+        },
+        "fieldValues": {"nodes": [{"name": "Done", "field": {"name": "Status"}}]},
+    }
+
+
+def _paced_board(tmp_path, monkeypatch) -> None:
+    """The forecast fixture's open story beside nine weeks of finishes, two in odd weeks and one in even."""
+    monkeypatch.setattr(captain, "_today", lambda: date(2026, 10, 2))
+    data = json.loads((FIXTURES / "captain-forecast.json").read_text(encoding="utf-8"))
+    nodes = [
+        node for node in data["data"]["organization"]["projectV2"]["items"]["nodes"] if node["content"]["number"] == 253
+    ]
+    for index, days in enumerate([0, 7, 8, 14, 21, 22, 28, 35, 36, 42, 49, 50, 56]):
+        noon = datetime.combine(date(2026, 10, 2) - timedelta(days=days), datetime.min.time()) + timedelta(hours=12)
+        nodes.append(_finished_node(600 + index, noon.astimezone().isoformat()))
+    for name, value in _items(tmp_path, "paced.json", nodes).items():
+        monkeypatch.setenv(name, value)
+
+
+def test_the_forecast_says_when_the_board_is_likely_done_in_weeks(fleet_env, monkeypatch, capsys):
+    _paced_board(fleet_env, monkeypatch)
+
     assert cli.main(["captain", "context", "--only", "forecast"]) == 0
+
     out = capsys.readouterr().out
-    assert "## Forecast" in out
-    assert "Floor" in out
-    assert "Commitment" in out
+    assert out.split("## Forecast\n", 1)[1].splitlines() == [
+        "  1 story left",
+        "",
+        "  Likely done by          1 week    90th percentile",
+        "  Possibly as early as    1 week    50th percentile",
+        "",
+        "  Paced by the board's last 8 weeks, an average of 1.5 stories a week.",
+        "",
+        "  Cannot finish before: 1 day (critical path through the blockers)",
+    ]
 
 
-def test_a_thin_band_reports_the_worst_run_and_says_so(fleet_env, monkeypatch, capsys):
-    """Under ten samples a percentile is a fit to noise, so the commitment is the worst thing seen."""
-    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
+def test_the_forecast_prints_no_worst_case_and_no_parallelism(fleet_env, monkeypatch, capsys):
+    _paced_board(fleet_env, monkeypatch)
 
     assert cli.main(["captain", "context", "--only", "forecast"]) == 0
 
     out = capsys.readouterr().out
-    assert "worst run, banded by points" in out
-    assert "Thin history" in out
+    assert "Worst" not in out and "at once" not in out and "Commitment" not in out
 
 
-def test_a_full_band_reports_a_percentile_and_drops_the_warning(fleet_env, monkeypatch, capsys):
-    """The label must track the number it describes: an 85th percentile is not the observed maximum."""
+def test_a_short_history_says_why_there_is_no_range(fleet_env, monkeypatch, capsys):
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
-    monkeypatch.setattr(forecast, "THIN", 1)  # the fixture's bands are enough once the bar is this low
+    monkeypatch.setattr(captain, "_today", lambda: date(2026, 10, 2))
 
     assert cli.main(["captain", "context", "--only", "forecast"]) == 0
 
-    out = capsys.readouterr().out
-    assert "85th percentile, banded by points" in out
-    assert "observed maximum" not in out
-    assert "Thin history" not in out
+    assert capsys.readouterr().out.split("## Forecast\n", 1)[1].splitlines() == [
+        "  1 story left",
+        "",
+        "  No story finished on the board in the weeks measured, so there is no date range.",
+        "",
+        "  Cannot finish before: 1 day (critical path through the blockers)",
+    ]
 
 
-def test_the_forecast_never_prints_a_median(fleet_env, capsys):
-    """A number on the page gets quoted, and the median forecast is the one that must not be."""
-    cli.main(["captain", "context", "--only", "forecast"])
-    assert "50th" not in capsys.readouterr().out
+def test_the_forecast_takes_no_session_count(fleet_env, capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["captain", "context", "--only", "forecast", "--sessions", "3"])
 
 
 def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
@@ -431,20 +479,6 @@ def test_a_field_that_could_not_be_read_is_not_reported_as_owed(fleet_env, monke
     assert cli.main(["captain", "context", "--only", "anomalies"]) == 0
 
     assert "/deckhand:setup" not in capsys.readouterr().out
-
-
-def test_the_forecast_says_where_its_parallelism_came_from(fleet_env, monkeypatch, capsys):
-    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
-    cli.main(["captain", "context", "--only", "forecast", "--sessions", "3"])
-    out = capsys.readouterr().out
-    assert "3 at once, given" in out
-    assert "A point groups stories that take about as long as each other. It is not hours." in out
-
-
-def test_thin_history_forecasts_across_the_open_sessions(fleet_env, monkeypatch, capsys):
-    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-forecast.json"))
-    cli.main(["captain", "context", "--only", "forecast"])
-    assert "1 at once, open sessions" in capsys.readouterr().out
 
 
 def _waiting(fleet_env, monkeypatch, records) -> None:
