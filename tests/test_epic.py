@@ -726,6 +726,19 @@ def test_close_removes_a_feature_nothing_ever_joined(board_env, gh_calls, capsys
     ]
 
 
+def test_close_refuses_the_last_feature_and_writes_nothing(board_env, gh_calls, monkeypatch, capsys):
+    """GitHub rejects a single select with no options, so the write would fail with a raw error."""
+    _options_file(board_env, monkeypatch, [EXISTING[2]])
+
+    assert cli.main(["epic", "close", "Permission audit"]) == 1
+
+    assert (
+        "Permission audit is the last feature, and the Feature field cannot be left with no option;"
+        " delete the field in the project settings instead"
+    ) in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
 def test_close_says_one_finished_story_carried_it(board_env, gh_calls, monkeypatch, capsys):
     _with_members(board_env, monkeypatch, _member(320, closed_at="2026-09-20T12:00:00Z", feature="OPT_AUDIT"))
 

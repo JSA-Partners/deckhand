@@ -128,6 +128,13 @@ def test_splits_count_a_tree_two_levels_deep():
     assert throughput.splits([_parked(1, 2), shed, _done(3)]) == [3]
 
 
+def test_splits_count_a_kid_named_in_another_case():
+    parked = ("Drafted:", _at(0), f"parked from {REPO}#900")
+    root = _story(1, True, parked, ("Split:", _at(0), "into Acme/Widgets#2"))
+
+    assert throughput.splits([root, _done(2)]) == [2]
+
+
 def test_splits_ignore_a_parked_feature_that_has_not_finished():
     assert throughput.splits([_parked(1, 2, closed=False), _done(2)]) == []
 
@@ -298,6 +305,11 @@ def test_no_measured_pace_is_no_forecast():
 def test_one_steady_week_makes_every_run_identical():
     assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 90: 2, 99: 2}
     assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 90: 3, 99: 3}
+
+
+def test_simulate_treats_a_run_that_lands_on_zero_as_finished():
+    """Early samples are shares such as thirds, whose floating sum leaves a residue above zero."""
+    assert throughput.simulate(1, 0, [1 / 3, 1 / 3, 1 / 3], [1], runs=50) == {50: 3, 90: 3, 99: 3}
 
 
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():

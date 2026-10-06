@@ -361,7 +361,7 @@ def test_the_forecast_says_when_the_board_is_likely_done_in_weeks(fleet_env, mon
         "",
         "  Paced by the board's last 8 weeks, an average of 1.5 stories a week.",
         "",
-        "  Cannot finish before: 1 day (critical path through the blockers)",
+        "  Critical path through the blockers: 1 day at the median pace",
     ]
 
 
@@ -385,7 +385,7 @@ def test_a_short_history_says_why_there_is_no_range(fleet_env, monkeypatch, caps
         "",
         "  No story finished on the board in the weeks measured, so there is no date range.",
         "",
-        "  Cannot finish before: 1 day (critical path through the blockers)",
+        "  Critical path through the blockers: 1 day at the median pace",
     ]
 
 

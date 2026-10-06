@@ -705,6 +705,14 @@ def test_a_stray_in_another_repository_names_its_ref_in_full():
     assert [item.fix for item in found] == ["epic add OPT_A acme/gadgets#5"]
 
 
+def test_a_stray_named_in_another_case_is_still_found():
+    gadgets = _logged(4, "Split: into Acme/Gadgets#5", feature="OPT_A", repo="acme/gadgets")
+
+    found = fleet.anomalies([gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
+
+    assert [item.fix for item in found] == ["epic add OPT_A acme/gadgets#5"]
+
+
 def test_an_archived_story_that_shed_still_reports_its_open_kid():
     shedder = dataclasses.replace(_logged(1, SPLIT, feature="OPT_A", closed=True), archived=True)
     kid = _logged(2)
