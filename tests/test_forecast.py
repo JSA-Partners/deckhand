@@ -157,7 +157,7 @@ def test_the_board_is_forecast_from_its_weekly_finishes():
         "",
         "  Paced by the board's last 8 weeks, an average of 1.5 stories a week.",
         "",
-        "  Cannot finish before: 1 day (critical path through the blockers)",
+        "  Critical path through the blockers: 1 day at the median pace",
     ]
 
 
@@ -169,7 +169,7 @@ def test_the_critical_path_follows_the_blockers():
         archived=list(PACED),
     )
 
-    assert forecast.rows(read, TODAY)[-1] == "  Cannot finish before: 3 days (critical path through the blockers)"
+    assert forecast.rows(read, TODAY)[-1] == "  Critical path through the blockers: 3 days at the median pace"
 
 
 def test_an_unsplit_draft_counts_as_a_split_and_says_so():
@@ -188,7 +188,7 @@ def test_too_few_finishes_give_the_reason_and_no_range():
         "",
         "  Fewer than 5 stories finished on the board in the weeks measured, so there is no date range yet.",
         "",
-        "  Cannot finish before: 1 day (critical path through the blockers)",
+        "  Critical path through the blockers: 1 day at the median pace",
     ]
 
 

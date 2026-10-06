@@ -3,8 +3,8 @@
 Nothing here reads GitHub or prints: it takes the fleet and today's date and returns the lines of the
 captain's Forecast block. The weeks come from `throughput`, the board's weekly finishes drawn the way
 a feature's are, because a week's count already holds new work, new blockers and waiting. The
-durations, measured from the log, give only the critical path through the blockers, a bound no
-schedule can beat.
+durations, measured from the log, give only the critical path through the blockers at each band's
+median, which a chain beats about half the time.
 """
 
 from __future__ import annotations
@@ -105,5 +105,5 @@ def rows(read: fleet.Fleet, today: date) -> list[str]:
     path = critical_path(left, read.blockers, durations(every))
     if path is not None:
         days = math.ceil(path / HOURS_A_DAY)
-        lines += ["", f"  Cannot finish before: {throughput.plural(days, 'day')} (critical path through the blockers)"]
+        lines += ["", f"  Critical path through the blockers: {throughput.plural(days, 'day')} at the median pace"]
     return lines
