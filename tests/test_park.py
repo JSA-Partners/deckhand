@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from deckhand import park
 from tests.conftest import run_deckhand
 
 FEATURE = "## Requirements\n\nGuests should be able to share a collection with a guest.\n"
@@ -16,6 +18,35 @@ def _park(repo: Path, tmp_path: Path, *flags: str, copy: Path | None = None):
     source.write_text(FEATURE, encoding="utf-8")
     env = {"GH_BODY_FILE_COPY": str(copy)} if copy is not None else {}
     return run_deckhand("new", "apply", "--park", *flags, str(source), cwd=repo, env=env)
+
+
+def test_similar_shares_two_significant_words():
+    others = [(321, "Compare times as times in the publications list test"), (12, "Share a collection")]
+
+    assert park.similar("Compare times, not strings, in list sort tests", others) == [others[0]]
+
+
+def test_similar_ignores_short_and_common_words():
+    assert park.similar("Share this with them", [(1, "Share that with those")]) == []
+
+
+def test_a_park_names_the_open_drafts_that_look_like_it(fake_gh, repo, tmp_path, monkeypatch):
+    listing = tmp_path / "titles.json"
+    listing.write_text(
+        json.dumps(
+            [
+                {"number": 321, "title": "Compare times as times in the publications list test"},
+                {"number": 12, "title": "Share a collection"},
+            ]
+        )
+    )
+    monkeypatch.setenv("GH_ISSUE_LIST_FILE", str(listing))
+
+    result = _park(repo, tmp_path, "--title", "Compare times, not strings, in list sort tests")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Similar: #321 Compare times as times in the publications list test"
+    assert "#12" not in result.stdout
 
 
 def test_a_parked_feature_is_boarded_as_draft(fake_gh, gh_calls, repo, tmp_path):
