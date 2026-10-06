@@ -81,8 +81,8 @@ entry. Merging it creates the tag and the GitHub Release. The number is computed
 conventional types that landed: `fix` a patch, `feat` a minor, `!` or `BREAKING CHANGE` a major.
 
 `uv.lock` records the project's own version too, and release-please does not bump it, so the release
-workflow relocks the open release branch on every push to `main`. CI installs with `uv sync --frozen`,
-and a lock behind the version fails `tests/test_cli.py`.
+workflow relocks the open release branch on every push to `main`. CI installs with
+`uv sync --frozen`, and a lock behind the version fails `tests/test_cli.py`.
 
 The changelog hides `refactor`, `chore`, `test`, `build`, `style` and `ci`, so a change of one of
 those types opens no release on its own and ships with the next one. A refactor of what users
