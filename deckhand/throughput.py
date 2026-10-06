@@ -30,6 +30,7 @@ EARLY_SETTLED = 2
 LOOKBACK = 12
 # Two years in weeks, past which a commitment says nothing a stakeholder can plan on.
 HORIZON = 104
+RESIDUE = 1e-9
 
 THIN = "too little history"
 FEW = "too few finished"
@@ -173,7 +174,8 @@ def simulate(
         while not any(run_samples):
             run_samples = [rng.choice(samples) for _ in samples]
         weeks = 0
-        while left > 0 and weeks < HORIZON:
+        # Shares such as thirds leave a floating residue above zero, so done is within a billionth.
+        while left > RESIDUE and weeks < HORIZON:
             left -= rng.choice(run_samples)
             weeks += 1
         taken.append(weeks)

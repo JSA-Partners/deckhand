@@ -300,6 +300,11 @@ def test_one_steady_week_makes_every_run_identical():
     assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 90: 3, 99: 3}
 
 
+def test_simulate_treats_a_run_that_lands_on_zero_as_finished():
+    """Early samples are shares such as thirds, whose floating sum leaves a residue above zero."""
+    assert throughput.simulate(1, 0, [1 / 3, 1 / 3, 1 / 3], [1], runs=50) == {50: 3, 90: 3, 99: 3}
+
+
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():
     assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 90: 4, 99: 4}
 
