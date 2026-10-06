@@ -39,7 +39,9 @@ def test_view_parses_comments(fake_gh, gh_calls):
         ("arjan", "2026-09-01T12:00:00Z"),
     ]
     assert result.comments[1].body == "Approved."
-    assert gh_calls() == ["issue view 248 --repo acme/widgets --json number,title,body,url,state,comments,labels"]
+    assert gh_calls() == [
+        "issue view 248 --repo acme/widgets --json number,title,body,url,state,stateReason,comments,labels"
+    ]
 
 
 def test_view_carries_the_labels(fake_gh):
@@ -59,6 +61,18 @@ def test_open_titles_lists_the_open_stories_of_the_repository(fake_gh, gh_calls,
     assert gh_calls() == [
         "issue list --repo acme/widgets --state open --label deckhand --limit 200 --json number,title"
     ]
+
+
+def test_view_carries_why_the_issue_closed(fake_gh, tmp_path, monkeypatch):
+    dropped = tmp_path / "dropped.json"
+    dropped.write_text(json.dumps({"number": 320, "state": "CLOSED", "stateReason": "NOT_PLANNED"}), encoding="utf-8")
+    monkeypatch.setenv("GH_ISSUE_FILE", str(dropped))
+
+    assert issue.view(REPO, 320).state_reason == "NOT_PLANNED"
+
+
+def test_view_reads_an_empty_reason_for_an_open_issue(fake_gh):
+    assert issue.view(REPO, 248).state_reason == ""
 
 
 def test_sibling_asks_for_the_state_and_the_body(fake_gh, gh_calls):
@@ -182,9 +196,9 @@ def test_assign_rejects_a_malformed_repo(fake_gh, gh_calls):
 # --- close ------------------------------------------------------------------
 
 
-def test_close_closes_the_issue(fake_gh, gh_calls):
-    issue.close(REPO, 248)
-    assert gh_calls() == ["issue close 248 --repo acme/widgets"]
+def test_close_closes_the_issue_with_a_reason(fake_gh, gh_calls):
+    issue.close(REPO, 248, "not planned")
+    assert gh_calls() == ["issue close 248 --repo acme/widgets --reason not planned"]
 
 
 # --- comment ----------------------------------------------------------------

@@ -12,7 +12,8 @@
   verifies; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
   `issue.py` every issue read and write; `draft.py` an issue whose body is requirements, open until
   its Stories list names what to write; `edges.py` every blocker edge between two stories, added or
-  dropped; `order.py` the build order the blocker graph implies; `git.py` every git call;
+  dropped; `withdraw.py` a story closed as not planned and taken off the board; `order.py` the
+  build order the blocker graph implies; `git.py` every git call;
   `park.py` a parked feature in any repository, boarded and logged;
   `update.py` GitHub brings a pull request behind main up to date; `worktree.py` every story's
   worktree, where its branch is checked out, and the sweep of merged ones; `drift.py` the plan references
@@ -79,9 +80,8 @@ date as work merges. It bumps the version in `pyproject.toml`, `deckhand/__init_
 entry. Merging it creates the tag and the GitHub Release. The number is computed from the
 conventional types that landed: `fix` a patch, `feat` a minor, `!` or `BREAKING CHANGE` a major.
 
-`uv.lock` also records the project's own version, and no release bumps it, so CI installs with
-`uv sync --frozen`: the pinned dependency versions without asserting the lock matches the project
-version it does not track.
+`uv.lock` records the project's own version too, and the release bumps it with the rest, so CI
+installs with `uv sync --frozen` and a lock behind the version fails `tests/test_cli.py`.
 
 The changelog hides `refactor`, `chore`, `test`, `build`, `style` and `ci`, so a change of one of
 those types opens no release on its own and ships with the next one. A refactor of what users

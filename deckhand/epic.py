@@ -41,7 +41,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 def _key(found: tuple[str, int]) -> tuple[str, int]:
     """A reference as GitHub matches one, whose repository part ignores case."""
-    return found[0].lower(), found[1]
+    return fleet.folded(found)
 
 
 def _ref(value: str, repo: str) -> tuple[str, int]:
@@ -146,6 +146,11 @@ def _close(args: argparse.Namespace, repo: str) -> int:
     if still_open:
         raise Refusal(f"{option['name']} still has open pieces: {', '.join(still_open)}; close it once they are done")
     kept = _kept([other for other in options if other["id"] != option["id"]])
+    if not kept:
+        raise Refusal(
+            f"{option['name']} is the last feature, and the {board.FEATURE} field cannot be left with no option;"
+            " delete the field in the project settings instead"
+        )
     _write_options(settings, field, kept, kept)
     print(f"Closed {option['name']}: removed from the {board.FEATURE} field. {_carried(len(mine))}")
     return 0

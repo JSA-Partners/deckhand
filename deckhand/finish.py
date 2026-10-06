@@ -257,7 +257,7 @@ def apply(args: argparse.Namespace) -> int:
     branch = _branch()
     gates.reviewed_head(args.issue)
     gates.clean_tree()
-    gates.contains_main()
+    gates.contains_main(args.issue)
     gates.conventional_commits()
     gates.docs_audit()
     for command in args.check:

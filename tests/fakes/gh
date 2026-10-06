@@ -132,7 +132,13 @@ elif head == "project link":
     respond("{}")
 elif head == "project list":
     respond(fixture("GH_PROJECT_LIST_FILE", "project-list.json"))
-elif head in ("project field-create", "project field-delete", "project item-edit", "project item-add"):
+elif head in (
+    "project field-create",
+    "project field-delete",
+    "project item-edit",
+    "project item-add",
+    "project item-delete",
+):
     respond("{}")
 elif head == "issue view":
     number = argv[2] if len(argv) > 2 else ""

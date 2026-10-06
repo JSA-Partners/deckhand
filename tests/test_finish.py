@@ -424,7 +424,7 @@ def test_apply_refuses_a_branch_behind_main(fake_gh, gh_calls, repo, origin, bra
     result = _apply(repo)
 
     assert result.returncode == 1
-    assert result.stderr == "deckhand finish apply: branch does not contain main; rebase first\n"
+    assert result.stderr == "deckhand finish apply: branch does not contain main; run update apply 248\n"
     assert _writes(gh_calls) == []
     assert BRANCH not in _branches(origin)
 

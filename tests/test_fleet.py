@@ -319,6 +319,17 @@ def test_a_closed_story_left_in_an_earlier_column_is_an_anomaly():
     assert [(a.number, a.what, a.fix) for a in found] == [(301, "closed, but In Review", "run next 301")]
 
 
+def test_a_story_closed_as_not_planned_is_sent_to_withdraw():
+    nodes = _closed("Draft")
+    nodes[0]["content"]["stateReason"] = "NOT_PLANNED"
+
+    found = fleet.anomalies(fleet.stories(nodes), {}, set(), [])
+
+    assert [(a.what, a.fix) for a in found] == [
+        ("closed, but Draft", 'captain apply --withdraw acme/widgets#301 --note "<why>"')
+    ]
+
+
 def test_a_closed_story_in_verification_is_not_an_anomaly():
     assert fleet.anomalies(fleet.stories(_closed("Verification")), {}, set(), []) == []
 
@@ -688,6 +699,14 @@ def test_a_stray_fix_names_the_option_id_whatever_the_feature_is_called():
 
 def test_a_stray_in_another_repository_names_its_ref_in_full():
     gadgets = _logged(4, "Split: #5 Follow on.", feature="OPT_A", repo="acme/gadgets")
+
+    found = fleet.anomalies([gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
+
+    assert [item.fix for item in found] == ["epic add OPT_A acme/gadgets#5"]
+
+
+def test_a_stray_named_in_another_case_is_still_found():
+    gadgets = _logged(4, "Split: into Acme/Gadgets#5", feature="OPT_A", repo="acme/gadgets")
 
     found = fleet.anomalies([gadgets, _logged(5, repo="acme/gadgets")], {}, set(), [])
 

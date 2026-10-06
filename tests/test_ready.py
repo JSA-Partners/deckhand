@@ -457,7 +457,7 @@ def test_apply_records_dependencies_checks_the_board_and_sets_the_fields(fake_gh
     assert result.returncode == 0, result.stderr
     assert _calls(gh_calls) == [
         "repo view --json nameWithOwner",
-        "issue view 248 --repo acme/widgets --json number,title,body,url,state,comments,labels",
+        "issue view 248 --repo acme/widgets --json number,title,body,url,state,stateReason,comments,labels",
         # the gate reads the column before anything is written, so a refusal costs no writes
         "api graphql linked-projects",
         "api graphql item-id",

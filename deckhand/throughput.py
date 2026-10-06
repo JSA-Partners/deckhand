@@ -30,6 +30,7 @@ EARLY_SETTLED = 2
 LOOKBACK = 12
 # Two years in weeks, past which a commitment says nothing a stakeholder can plan on.
 HORIZON = 104
+RESIDUE = 1e-9
 
 THIN = "too little history"
 FEW = "too few finished"
@@ -49,7 +50,7 @@ def splits(stories: list[fleet.Story]) -> list[int]:
     is itself and everything its `Split:` entries name, however deep, counted among the stories given.
     A story closed as not planned is no piece of what a feature became, so it is neither.
     """
-    held = {story.key: story for story in stories if not story.dropped}
+    held = {fleet.folded(story.key): story for story in stories if not story.dropped}
     kids = {key: [kid for kid in fleet.shed(story) if kid in held] for key, story in held.items()}
     was_shed = {key for found in kids.values() for key in found}
 
@@ -60,9 +61,9 @@ def splits(stories: list[fleet.Story]) -> list[int]:
         return 1 + sum(_size(kid, seen) for kid in kids[key])
 
     return sorted(
-        _size(story.key, set())
+        _size(fleet.folded(story.key), set())
         for story in held.values()
-        if story.closed and fleet.touched(story) and story.key not in was_shed and _was_parked(story)
+        if story.closed and fleet.touched(story) and fleet.folded(story.key) not in was_shed and _was_parked(story)
     )
 
 
@@ -173,7 +174,8 @@ def simulate(
         while not any(run_samples):
             run_samples = [rng.choice(samples) for _ in samples]
         weeks = 0
-        while left > 0 and weeks < HORIZON:
+        # Shares such as thirds leave a floating residue above zero, so done is within a billionth.
+        while left > RESIDUE and weeks < HORIZON:
             left -= rng.choice(run_samples)
             weeks += 1
         taken.append(weeks)
