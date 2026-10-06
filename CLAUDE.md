@@ -79,9 +79,8 @@ date as work merges. It bumps the version in `pyproject.toml`, `deckhand/__init_
 entry. Merging it creates the tag and the GitHub Release. The number is computed from the
 conventional types that landed: `fix` a patch, `feat` a minor, `!` or `BREAKING CHANGE` a major.
 
-`uv.lock` also records the project's own version, and no release bumps it, so CI installs with
-`uv sync --frozen`: the pinned dependency versions without asserting the lock matches the project
-version it does not track.
+`uv.lock` records the project's own version too, and the release bumps it with the rest, so CI
+installs with `uv sync --frozen` and a lock behind the version fails `tests/test_cli.py`.
 
 The changelog hides `refactor`, `chore`, `test`, `build`, `style` and `ci`, so a change of one of
 those types opens no release on its own and ships with the next one. A refactor of what users

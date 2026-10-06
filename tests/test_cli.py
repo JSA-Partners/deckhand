@@ -30,6 +30,11 @@ def test_every_version_source_agrees():
         "pyproject.toml": tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"],
         "plugin.json": json.loads((manifests / "plugin.json").read_text(encoding="utf-8"))["version"],
         "release-please manifest": manifest["."],
+        "uv.lock": next(
+            package["version"]
+            for package in tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))["package"]
+            if package["name"] == "deckhand"
+        ),
     }
     assert all(found == __version__ for found in versions.values()), f"__version__ is {__version__}; {versions}"
 
