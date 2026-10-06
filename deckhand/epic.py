@@ -41,7 +41,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 def _key(found: tuple[str, int]) -> tuple[str, int]:
     """A reference as GitHub matches one, whose repository part ignores case."""
-    return found[0].lower(), found[1]
+    return fleet.folded(found)
 
 
 def _ref(value: str, repo: str) -> tuple[str, int]:

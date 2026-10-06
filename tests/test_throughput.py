@@ -128,6 +128,13 @@ def test_splits_count_a_tree_two_levels_deep():
     assert throughput.splits([_parked(1, 2), shed, _done(3)]) == [3]
 
 
+def test_splits_count_a_kid_named_in_another_case():
+    parked = ("Drafted:", _at(0), f"parked from {REPO}#900")
+    root = _story(1, True, parked, ("Split:", _at(0), "into Acme/Widgets#2"))
+
+    assert throughput.splits([root, _done(2)]) == [2]
+
+
 def test_splits_ignore_a_parked_feature_that_has_not_finished():
     assert throughput.splits([_parked(1, 2, closed=False), _done(2)]) == []
 
