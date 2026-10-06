@@ -50,6 +50,17 @@ def test_view_carries_the_labels(fake_gh):
 # --- sibling ----------------------------------------------------------------
 
 
+def test_open_titles_lists_the_open_stories_of_the_repository(fake_gh, gh_calls, tmp_path, monkeypatch):
+    listing = tmp_path / "titles.json"
+    listing.write_text(json.dumps([{"number": 321, "title": "Compare  times"}, {"number": 12, "title": "Share"}]))
+    monkeypatch.setenv("GH_ISSUE_LIST_FILE", str(listing))
+
+    assert issue.open_titles(REPO) == [(321, "Compare times"), (12, "Share")]
+    assert gh_calls() == [
+        "issue list --repo acme/widgets --state open --label deckhand --limit 200 --json number,title"
+    ]
+
+
 def test_sibling_asks_for_the_state_and_the_body(fake_gh, gh_calls):
     state, body = issue.sibling(REPO, 57)
 

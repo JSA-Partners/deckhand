@@ -101,6 +101,14 @@ def list_open(repo: str) -> list[int]:
     return [item["number"] for item in data or [] if isinstance(item, dict) and "number" in item]
 
 
+def open_titles(repo: str) -> list[tuple[int, str]]:
+    """`(number, title)` of every open story of `repo`, which is what a new one is checked against."""
+    gh.split_repo(repo)
+    ours = ("issue", "list", "--repo", repo, "--state", "open", "--label", LABEL[0], "--limit", "200")
+    data = gh.json_out(*ours, "--json", "number,title")
+    return [(int(item["number"]), " ".join((item.get("title") or "").split())) for item in data]
+
+
 def create(repo: str, title: str, body: str) -> tuple[int, str]:
     """Create an issue carrying the marker label; returns its `(number, url)`."""
     gh.split_repo(repo)
