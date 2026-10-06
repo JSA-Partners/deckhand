@@ -25,18 +25,27 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       # release-please bumps pyproject.toml but not the lock, which records the project's own version.
+      # Its pr output is set only when it changed the pull request, so the open one is looked up by label.
+      - name: Find the release pull request
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label 'autorelease: pending' \
+            --json headRefName --jq '.[0].headRefName // empty')
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
       - name: Check out the release pull request
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.find.outputs.branch }}
         uses: actions/checkout@v6
         with:
-          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          ref: ${{ steps.find.outputs.branch }}
       - name: Install uv and Python
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.find.outputs.branch }}
         uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: '3.12'
       - name: Record the release version in uv.lock
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.find.outputs.branch }}
         run: |
           uv lock
           if ! git diff --quiet -- uv.lock; then
