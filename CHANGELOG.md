@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.2.0](https://github.com/JSA-Partners/deckhand/compare/v4.1.2...v4.2.0) (2026-10-06)
+
+
+### Features
+
+* group stories into features and forecast each in dates ([#33](https://github.com/JSA-Partners/deckhand/issues/33)) ([ac14693](https://github.com/JSA-Partners/deckhand/commit/ac14693841142b64dc482fe92afc35720dbcd6ec))
+* name the open drafts a parked feature resembles ([#37](https://github.com/JSA-Partners/deckhand/issues/37)) ([299a5b4](https://github.com/JSA-Partners/deckhand/commit/299a5b4baed325d58fee30af6886b6577a4e1987))
+* withdraw a story, see prose questions, name update apply ([#35](https://github.com/JSA-Partners/deckhand/issues/35)) ([4f7a27a](https://github.com/JSA-Partners/deckhand/commit/4f7a27aff7e8953cf17cd985663d6c594c2b7e14))
+
+
+### Bug Fixes
+
+* forecast residue, last feature close, split keys, uv.lock bumps ([#36](https://github.com/JSA-Partners/deckhand/issues/36)) ([e903b5b](https://github.com/JSA-Partners/deckhand/commit/e903b5bdadbfb8a93ba9e2f5e5330b2fc393148c))
+
 ## [4.1.2](https://github.com/JSA-Partners/deckhand/compare/v4.1.1...v4.1.2) (2026-10-01)
 
 
