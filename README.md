@@ -169,8 +169,9 @@ an option clears that feature from every story that held it.
 `new` offers the features when it boards a story. A story split from a feature's story does not join
 the feature by itself, so the captain lists it under Anomalies with the command that adds it.
 
-`epic add` refuses a story that is off the board, not a deckhand story, or closed as not planned or
-as a duplicate, and writes nothing until every one passes. A story already in another feature moves.
+`epic add` refuses a story that is not a deckhand story or is closed as not planned or as a
+duplicate, and writes nothing until every one passes. A story the board has not caught up with yet
+is read as an issue and boarded on the way. A story already in another feature moves.
 
 `epic forecast` says how many weeks the feature's open stories will take, and with `--json` gives
 dates and the day the feature's work began. It counts how many of the feature's own stories finished

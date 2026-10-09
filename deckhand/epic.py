@@ -11,7 +11,7 @@ import argparse
 import json
 from datetime import date, timedelta
 
-from deckhand import board, draft, fleet, gh, throughput
+from deckhand import board, draft, fleet, gh, issue, throughput
 from deckhand.cli import command
 from deckhand.config import Settings
 from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
@@ -164,11 +164,29 @@ def _carried(count: int) -> str:
     return f"{count} finished stories no longer carry it."
 
 
+def _read(ref: tuple[str, int]) -> fleet.Story:
+    """A story the board read has not caught up with, as its issue tells it; its item is not known yet.
+
+    The project items query lags `item-add` by seconds, and a story boarded a moment ago is the one
+    most often joined, so the issue itself answers the two rules and the join boards it on the way.
+    """
+    found = issue.view(ref[0], ref[1])
+    return fleet.Story(
+        number=ref[1],
+        repo=ref[0],
+        title=found.title,
+        status="",
+        points=None,
+        closed=found.state.upper() == "CLOSED",
+        item="",
+        issue=found,
+        dropped=found.state_reason in issue.DROPPED,
+    )
+
+
 def _story(held: dict[tuple[str, int], fleet.Story], ref: tuple[str, int], repo: str) -> fleet.Story:
     named = ref_label(*ref, repo)
-    story = held.get(ref)
-    if story is None:
-        raise Refusal(f"{named} is not on the board; a story joins a feature from the board")
+    story = held.get(ref) or _read(ref)
     if not fleet.touched(story):
         raise Refusal(f"{named} is not a deckhand story; write one with new")
     if story.dropped:
@@ -192,7 +210,8 @@ def _add(args: argparse.Namespace, repo: str) -> int:
             print(f"{named} already in {name}", flush=True)
             continue
         flags = ("--project-id", project, "--field-id", field, "--single-select-option-id", option["id"])
-        gh.run("project", "item-edit", "--id", story.item, *flags)
+        item = story.item or board.add(settings, story.issue.url)
+        gh.run("project", "item-edit", "--id", item, *flags)
         moved = f"moved from {story.feature_name} to" if story.feature else "joined"
         print(f"{named} {moved} {name}", flush=True)
     return 0

@@ -276,7 +276,6 @@ def test_add_reaches_a_story_in_another_repository(board_env, gh_calls, monkeypa
             ["perm", "304"],
             "perm matches Permission rework (OPT_PERMISSION) and Permission audit (OPT_AUDIT); name one by its id",
         ),
-        (["Billing", "304", "999"], "#999 is not on the board"),
         (["Billing", "304", "303"], "#303 is not a deckhand story"),
         (["Billing", "304", "305"], "#305 was closed as not planned or a duplicate"),
         (["Billing", "304", "not-a-ref"], "not-a-ref"),
@@ -305,6 +304,48 @@ def test_add_reaches_an_archived_story(board_env, gh_calls, monkeypatch):
     assert cli.main(["epic", "add", "Billing", "301"]) == 0
 
     assert _writes(gh_calls()) == [_edit("I_301", "OPT_BILLING")]
+
+
+def _issue_999(tmp_path, monkeypatch, labels=({"name": "deckhand"},), state_reason: str | None = None) -> None:
+    """#999, an issue the board read does not hold, as gh issue view answers for it."""
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data.update(number=999, url="https://github.com/acme/widgets/issues/999", labels=list(labels))
+    if state_reason:
+        data.update(state="CLOSED", stateReason=state_reason)
+    path = tmp_path / "issue-999.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("GH_ISSUE_FILE_999", str(path))
+
+
+def test_add_boards_and_joins_a_story_the_board_read_has_not_caught_up_with(board_env, gh_calls, monkeypatch, capsys):
+    """The items query lags item-add by seconds, and a story boarded a moment ago is the one most often joined."""
+    _issue_999(board_env, monkeypatch)
+
+    assert cli.main(["epic", "add", "Billing", "999"]) == 0
+
+    assert _writes(gh_calls()) == [
+        "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/999 --format json",
+        _edit("PVTI_ADDED", "OPT_BILLING"),
+    ]
+    assert capsys.readouterr().out.splitlines() == ["#999 joined Billing"]
+
+
+def test_add_refuses_an_unlabeled_issue_off_the_board_read(board_env, gh_calls, monkeypatch, capsys):
+    _issue_999(board_env, monkeypatch, labels=())
+
+    assert cli.main(["epic", "add", "Billing", "999"]) == 1
+
+    assert "#999 is not a deckhand story" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_add_refuses_a_dropped_issue_off_the_board_read(board_env, gh_calls, monkeypatch, capsys):
+    _issue_999(board_env, monkeypatch, state_reason="NOT_PLANNED")
+
+    assert cli.main(["epic", "add", "Billing", "999"]) == 1
+
+    assert "#999 was closed as not planned or a duplicate" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
 
 
 # list
