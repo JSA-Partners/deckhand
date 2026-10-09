@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from deckhand import transcript
@@ -70,13 +71,13 @@ def test_asking_names_the_last_question_with_its_options(tmp_path):
     }
     path = _write(tmp_path / "s.jsonl", [_last_words("Earlier words."), asked])
 
-    assert transcript.asking(path) == "Board it? [Board it, Not yet]"
+    assert transcript.asking(path) == "asked: Board it? [Board it, Not yet]"
 
 
 def test_asking_falls_back_to_the_last_sentence(tmp_path):
     path = _write(tmp_path / "s.jsonl", [_last_words("Merged.\nShould I start #261 next?")])
 
-    assert transcript.asking(path) == "Should I start #261 next?"
+    assert transcript.asking(path) == "said: Should I start #261 next?"
 
 
 def test_asking_is_cut_at_the_limit(tmp_path):
@@ -111,7 +112,7 @@ def test_asking_reads_past_a_message_no_person_typed(tmp_path):
     handback = {"type": "user", "isMeta": True, "origin": {"kind": "peer"}, "message": {"content": "report"}}
     for injected in (handback, {**handback, "isMeta": False}, {**handback, "origin": {"kind": "human"}}):
         path = _write(tmp_path / "s.jsonl", [_asked("q7"), {"type": "system"}, injected])
-        assert transcript.asking(path) == "Board it? [Yes, Not yet]", injected
+        assert transcript.asking(path) == "asked: Board it? [Yes, Not yet]", injected
 
 
 def test_asking_reads_past_the_last_prompt_record(tmp_path):
@@ -119,13 +120,13 @@ def test_asking_reads_past_the_last_prompt_record(tmp_path):
         tmp_path / "s.jsonl", [_last_words("Merged. Start #261?"), {"type": "last-prompt", "lastPrompt": "go"}]
     )
 
-    assert transcript.asking(path) == "Start #261?"
+    assert transcript.asking(path) == "said: Start #261?"
 
 
 def test_asking_skips_a_question_already_answered(tmp_path):
     path = _write(tmp_path / "s.jsonl", [_last_words("Merged. Pick the next one?"), _asked("q5"), _result("q5")])
 
-    assert transcript.asking(path) == "Pick the next one?"
+    assert transcript.asking(path) == "said: Pick the next one?"
 
 
 def test_asking_names_a_command_waiting_for_permission(tmp_path):
@@ -144,3 +145,29 @@ def test_asking_reads_no_further_than_its_bound(tmp_path):
 
 def test_asking_a_vanished_transcript_is_blank(tmp_path):
     assert transcript.asking(tmp_path / "gone.jsonl") == ""
+
+
+def test_asking_dates_the_last_words_from_the_record(tmp_path):
+    """The transcript lags a pending question, so last words carry their age rather than posing as current."""
+    said = {**_last_words("Checking three things."), "timestamp": "2026-10-06T17:21:00Z"}
+    path = _write(tmp_path / "s.jsonl", [said])
+    now = datetime.fromisoformat("2026-10-06T17:33:00Z").timestamp()
+
+    assert transcript.asking(path, now=now) == "said 12m ago: Checking three things."
+
+
+def test_asking_never_quotes_a_table_row_a_heading_or_a_list_item(tmp_path):
+    words = (
+        "Here is the dispatch.\n\n## Lanes\n\n| Session | Command |\n| --- | --- |\n| a | next 1 |\n"
+        "- a lane\n* another\n1. a step"
+    )
+    path = _write(tmp_path / "s.jsonl", [_last_words(words)])
+
+    assert transcript.asking(path) == "said: Here is the dispatch."
+
+
+def test_asking_keeps_a_sentence_that_opens_with_an_issue_number(tmp_path):
+    """A heading is a hash and a space; `#331` is a reference, not a heading."""
+    path = _write(tmp_path / "s.jsonl", [_last_words("#331 is boarded.\nShip it?")])
+
+    assert transcript.asking(path) == "said: Ship it?"
