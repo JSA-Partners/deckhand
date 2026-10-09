@@ -185,3 +185,30 @@ def advance_origin(origin: Path, tmp_path: Path, count: int = 1, name: str = "la
         run_git(other, "add", f"{name}{index}")
         run_git(other, "commit", "-qm", f"feat: {name} {index}")
     run_git(other, "push", "-q", "origin", "main")
+
+
+def labeled_board(tmp_path: Path, *stories: tuple[str, int, str], status: str = "Draft") -> dict[str, str]:
+    """A one-page board of open deckhand stories, `(repository, number, title)` each, in `status`."""
+    nodes = [
+        {
+            "id": f"I_{number}",
+            "isArchived": False,
+            "content": {
+                "number": number,
+                "title": title,
+                "url": f"https://github.com/{repo}/issues/{number}",
+                "state": "OPEN",
+                "closedAt": None,
+                "body": "",
+                "repository": {"nameWithOwner": repo},
+                "labels": {"nodes": [{"name": "deckhand"}]},
+                "comments": {"nodes": []},
+            },
+            "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
+        }
+        for repo, number, title in stories
+    ]
+    data = {"data": {"organization": {"projectV2": {"items": {"pageInfo": {"hasNextPage": False}, "nodes": nodes}}}}}
+    path = tmp_path / "labeled-board.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return {"GH_PROJECT_ITEMS_FILE": str(path)}

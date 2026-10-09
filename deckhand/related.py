@@ -12,10 +12,13 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from deckhand import gh, issue
+from deckhand import config, fleet, gh, issue
 from deckhand.config import Settings
+from deckhand.step import reason, ref_label
 
 LIMIT = 25
+STOP = frozenset("with from that this when into only their them then than what have each more over about".split())
+SHARED = 2
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _CODE_SPAN = re.compile(r"`[^`]*`")
 _REFERENCE = re.compile(r"(?<![\w/#.&-])([\w.-]+/[\w.-]+)?#([1-9][0-9]{0,8})\b")
@@ -128,3 +131,60 @@ def lines(found: list[Related], repo: str) -> list[str]:
     if len(ordered) > LIMIT:
         shown.append(f"and {len(ordered) - LIMIT} more")
     return shown
+
+
+def _words(title: str) -> set[str]:
+    return {word for word in re.findall(r"[a-z0-9]+", title.lower()) if len(word) >= 4 and word not in STOP}
+
+
+def similar(stories: list[fleet.Story], title: str, skip: tuple[str, int] | None = None) -> list[fleet.Story]:
+    """The open stories the process owns whose titles share `SHARED` significant words with `title`.
+
+    A duplicate looks like this, and the board holds every repository, so a story parked elsewhere
+    is seen before anything is written.
+    """
+    mine = _words(title)
+    own = fleet.folded(skip) if skip else None
+    return [
+        story
+        for story in stories
+        if not story.closed
+        and fleet.touched(story)
+        and fleet.folded(story.key) != own
+        and len(mine & _words(story.title)) >= SHARED
+    ]
+
+
+def similar_lines(stories: list[fleet.Story], title: str, repo: str, skip: tuple[str, int] | None = None) -> list[str]:
+    """`Similar: <reference> <column> <title>` per match, the reference as a session in `repo` reads it."""
+    return [
+        f"Similar: {ref_label(story.repo, story.number, repo)} {story.status or 'off the board'} {story.title}"
+        for story in similar(stories, title, skip)
+    ]
+
+
+def resembling(title: str, repo: str | None = None, skip: tuple[str, int] | None = None) -> list[str]:
+    """The Similar lines for `title` from the whole board, `Similar: none`, or why they could not be read."""
+    try:
+        here = repo or gh.repo_slug()
+        return similar_lines(fleet.load(config.load()), title, here, skip) or ["Similar: none"]
+    except Exception as error:
+        return [f"Similar: unavailable ({reason(error)})"]
+
+
+def block(repo: str, number: int, story: issue.Issue, skip: frozenset[tuple[str, int]], resemble: bool) -> None:
+    """Print what the story names and is linked to, and with `resemble` the open stories its title looks like.
+
+    Each read sits inside its own try, so a settings or board failure costs one line, never the briefing.
+    """
+    try:
+        found = read(config.load(), repo, number, story.body, skip)
+    except Exception as error:
+        print(f"Related: unavailable ({reason(error)})")
+    else:
+        print("Related:" if found else "Related: none")
+        for line in lines(found, repo):
+            print(f"  {line}")
+    if resemble:
+        for line in resembling(story.title, repo, (repo, number)):
+            print(line)

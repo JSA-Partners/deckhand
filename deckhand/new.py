@@ -22,7 +22,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import columns, draft, gh, invoke, issue, lint, log, naming, park, sections, worktree
+from deckhand import columns, draft, fleet, gh, invoke, issue, lint, log, naming, park, related, sections, worktree
 from deckhand.lint import RULES
 from deckhand.step import (
     Refusal,
@@ -150,6 +150,9 @@ def _request_context(source: str) -> int:
             print(draft.REQUIREMENTS_HEADING)
             print()
         print(text)
+        first = next((line for line in text.splitlines() if line.strip() and not line.startswith("#")), "")
+        for line in related.resembling(first):
+            print(line)
     print()
     return _tail(DRAFT, SPLIT, park=True)
 
@@ -282,6 +285,7 @@ def _split(repo: str, text: str, parked: int | None) -> int:
     if parked is not None and entries[0].repo:
         raise Refusal(f"the first story of #{parked} is written into it, so it stays in this repository")
     settings = resolved_settings()
+    stories = fleet.load(settings)
     # Every draft carries the whole feature, so the first pass writes it unnumbered: no story can
     # name its siblings' numbers until every issue exists.
     provisional = draft.render(requirements, entries)
@@ -292,7 +296,7 @@ def _split(repo: str, text: str, parked: int | None) -> int:
     for position, entry in enumerate(entries):
         if entry.repo:
             body = draft.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
-            number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin)
+            number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin, stories)
         elif position == 0 and parked is not None:
             number, url = parked, parked_url or ""
             issue.set_title(repo, number, entry.title)

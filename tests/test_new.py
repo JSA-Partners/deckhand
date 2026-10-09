@@ -12,7 +12,7 @@ import pytest
 from deckhand import draft, lint, log, naming, new, sections, step
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
-from tests.conftest import FIXTURES, ROOT, advance_origin, run_deckhand, run_git
+from tests.conftest import FIXTURES, ROOT, advance_origin, labeled_board, run_deckhand, run_git
 
 VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
@@ -401,6 +401,34 @@ def test_context_prints_a_prose_argument_as_the_requirements(fake_gh):
     assert "unavailable" not in result.stdout
     assert "### Story" in lines
     assert "Rules:" in lines
+
+
+def test_context_names_the_open_stories_the_request_resembles(fake_gh, tmp_path, monkeypatch):
+    for name, value in labeled_board(tmp_path, ("acme/gadgets", 316, "Name collections on a guest invitation")).items():
+        monkeypatch.setenv(name, value)
+
+    result = run_deckhand("new", "context", "--idea", "Name collections when inviting a guest")
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    similar = "Similar: acme/gadgets#316 Draft Name collections on a guest invitation"
+    assert lines[:3] == ["## Requirements", "", "Name collections when inviting a guest"]
+    assert lines.index(similar) < lines.index("Rules:")
+
+
+def test_context_says_when_nothing_on_the_board_resembles_the_request(fake_gh):
+    result = run_deckhand("new", "context", "--idea", "A release command that opens the pull request")
+
+    assert "Similar: none" in result.stdout.splitlines()
+
+
+def test_context_says_when_the_board_could_not_be_read_for_similar_stories(no_real_gh, tmp_path):
+    env = {"DECKHAND_CACHE": str(tmp_path / "cache")}
+
+    result = run_deckhand("new", "context", "--idea", "Export the data", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert any(line.startswith("Similar: unavailable (") for line in result.stdout.splitlines())
 
 
 def test_context_does_not_repeat_a_heading_the_prose_already_has(fake_gh):

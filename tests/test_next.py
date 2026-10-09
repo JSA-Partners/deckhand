@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from deckhand.next import Facts, decide
-from tests.conftest import FIXTURES, advance_origin, fieldvalues, run_deckhand, run_git
+from tests.conftest import FIXTURES, advance_origin, fieldvalues, labeled_board, run_deckhand, run_git
 
 BRANCH = "feat/248-x"
 PR_URL = "https://github.com/acme/widgets/pull/1000"
@@ -325,6 +325,26 @@ def test_only_settle_prints_the_notes(fake_gh, repo, tmp_path):
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Backlog")})
 
     assert "Notes:" not in result.stdout.splitlines()
+
+
+def test_settle_names_the_open_stories_the_feature_resembles(fake_gh, repo, tmp_path):
+    board = labeled_board(
+        tmp_path, ("acme/gadgets", 133, "Guest sharing of a collection"), ("acme/widgets", 7, "Billing per seat")
+    )
+
+    result = _next(repo, "60", env={**PARKED, **board, **fieldvalues(tmp_path, "Draft")})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    similar = "Similar: acme/gadgets#133 Draft Guest sharing of a collection"
+    assert lines.index("Related: none") < lines.index(similar) < lines.index("## Context")
+    assert "#7" not in result.stdout
+
+
+def test_only_settle_names_resembling_stories(fake_gh, repo, tmp_path):
+    result = _next(repo, env=fieldvalues(tmp_path, "Backlog"))
+
+    assert not any(line.startswith("Similar:") for line in result.stdout.splitlines())
 
 
 def test_a_drafted_entry_on_a_stub_body_is_still_a_stub(fake_gh, repo, tmp_path):
