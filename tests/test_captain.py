@@ -394,7 +394,7 @@ def test_the_forecast_takes_no_session_count(fleet_env, capsys):
         cli.main(["captain", "context", "--only", "forecast", "--sessions", "3"])
 
 
-def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
+def test_a_command_typed_with_prose_shows_the_verb_alone(fleet_env, capsys):
     _session(
         fleet_env / "sessions",
         "wordy",
@@ -411,8 +411,7 @@ def test_a_long_command_does_not_blow_out_the_session_table(fleet_env, capsys):
     )
     cli.main(["captain", "context"])
     row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("| word |"))
-    assert "new the test refactor" in row
-    assert len(row) < 110
+    assert row.startswith("| word | widgets | free | new |")
 
 
 def test_the_anomalies_say_when_setup_is_owed(fleet_env, monkeypatch, capsys, tmp_path):

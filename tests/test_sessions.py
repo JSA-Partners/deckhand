@@ -129,6 +129,40 @@ def test_a_session_that_never_called_deckhand_reports_no_version(tmp_path):
     assert pulse.version == ""
 
 
+def test_a_version_is_read_from_the_briefing_before_any_command(tmp_path):
+    """The skill injection carries the installed path, so a session has a version from its first record."""
+    extra = [
+        {
+            "type": "user",
+            "message": {
+                "content": "Base directory for this skill: "
+                "/home/me/.claude/plugins/cache/acme/deckhand/4.2.0/skills/next"
+            },
+        }
+    ]
+    assert sessions.pulse(_transcript(tmp_path, extra=extra), REPOS, now=0.0).version == "4.2.0"
+
+
+def test_the_command_keeps_the_verb_and_the_number_and_drops_the_prose(tmp_path):
+    records = [
+        {"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}},
+        {
+            "type": "user",
+            "message": {
+                "content": "<command-name>/deckhand:captain</command-name>\n"
+                "<command-args>a few sessions are wrapping up. Give me a new table.</command-args>"
+            },
+        },
+    ]
+    path = _write(tmp_path / "projects" / "acme" / "prose.jsonl", records)
+    pulse = sessions.pulse(path, REPOS, now=0.0)
+    assert (pulse.command, pulse.story) == ("captain", sessions.FREE)
+
+
+def test_since_prints_minutes_then_hours_then_days():
+    assert [sessions.since(seconds) for seconds in (59, 3600 * 5, 86400 * 2 + 1)] == ["0m", "5h", "2d"]
+
+
 def test_sessions_come_back_oldest_start_first(tmp_path, monkeypatch):
     root = tmp_path / "projects"
     for name, start in (("old.jsonl", 1_000_000), ("new.jsonl", 2_000_000)):
@@ -243,7 +277,8 @@ def test_a_word_before_the_number_does_not_hide_the_story(tmp_path):
         },
     ]
     path = _write(tmp_path / "projects" / "acme" / "resume.jsonl", records)
-    assert sessions.pulse(path, REPOS, now=0.0).story == "248"
+    pulse = sessions.pulse(path, REPOS, now=0.0)
+    assert (pulse.story, pulse.command) == ("248", "new 248")
 
 
 def _live(root: Path, pid: int, session: str, status: str = "idle", started: int = 1_000_000_000) -> None:

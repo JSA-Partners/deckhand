@@ -49,8 +49,6 @@ from deckhand.step import (
 )
 
 WINDOW = 24.0
-# `new` takes a whole idea as its argument, and the table is read across, not down.
-COMMAND = 28
 
 
 def _today() -> date:
@@ -64,14 +62,6 @@ def _name(repo: str) -> str:
 def _repos(found: list[fleet.Story]) -> dict[str, str]:
     """The bare name of every repository the board holds, mapped to its slug, for matching a session."""
     return {_name(slug): slug for slug in {story.repo for story in found if story.repo}}
-
-
-def _since(seconds: float) -> str:
-    if seconds < 3600:
-        return f"{int(seconds // 60)}m"
-    if seconds < 86400:
-        return f"{int(seconds // 3600)}h"
-    return f"{int(seconds // 86400)}d"
 
 
 def _fleet_rows(read: fleet.Fleet) -> list[str]:
@@ -102,18 +92,15 @@ def _story(story: str) -> str:
 
 def _waiting_rows(pulses: list[sessions.Pulse]) -> list[str]:
     held = sorted((beat for beat in pulses if beat.waiting), key=lambda beat: -beat.idle)
-    return [
-        f"  {beat.label} {_story(beat.story)}, {_since(beat.idle)}: {transcript.asking(beat.path) or 'no words yet'}"
-        for beat in held
-    ] or ["  nobody"]
+    rows = []
+    for beat in held:
+        asks = transcript.asking(beat.path) or "no words yet"
+        rows.append(f"  {beat.label} {_story(beat.story)}, {sessions.since(beat.idle)}: {asks}")
+    return rows or ["  nobody"]
 
 
 def _thousands(count: int) -> str:
     return f"{count / 1000:.0f}k" if count >= 1000 else str(count)
-
-
-def _short(command: str) -> str:
-    return command if len(command) <= COMMAND else command[: COMMAND - 3].rstrip() + "..."
 
 
 UNKNOWN_LIVE = "  Running sessions could not be read; these are transcripts from the last {hours:g} hours."
@@ -130,8 +117,8 @@ def _session_rows(pulses: list[sessions.Pulse], since: float) -> list[str]:
     ]
     for beat in pulses:
         rows.append(
-            f"| {beat.label} | {_name(beat.repo)} | {beat.story} | {_short(beat.command)} | "
-            f"{_since(beat.idle)} | {_thousands(beat.tokens)} | {'yes' if beat.waiting else 'no'} | "
+            f"| {beat.label} | {_name(beat.repo)} | {beat.story} | {beat.command} | "
+            f"{sessions.since(beat.idle)} | {_thousands(beat.tokens)} | {'yes' if beat.waiting else 'no'} | "
             f"{beat.version or '-'} |"
         )
     return rows
@@ -211,7 +198,7 @@ def _one_session(pulses: list[sessions.Pulse], label: str) -> int:
         return 0
     read = transcript.deep(beat.path)
     spent = _thousands(beat.tokens)
-    print(f"Session {beat.label}: {beat.repo} story {beat.story}, idle {_since(beat.idle)}, {spent} tokens")
+    print(f"Session {beat.label}: {beat.repo} story {beat.story}, idle {sessions.since(beat.idle)}, {spent} tokens")
     print(f"Last prompt: {read.prompt or 'none'}")
     print()
     print("Since then:")
