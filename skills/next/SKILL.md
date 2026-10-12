@@ -14,10 +14,10 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh 
 
 If no number was given, ask which story. Say where the story is in two sentences from the briefing
 above, then run the step it names and carry on to the next step in the same conversation until a
-decision is the person's, or until you are unsure what they want, and ask. Every command below
+decision is the person's, or until you are unsure, and ask. Every command below
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
 did not print, run `<step> context $issue`. A `Plan:` or `Body:` line names a file holding that
-text: read the file rather than run the context again. When a command refuses, fix the rule it names
+text: read the file, not the context again. When a command refuses, fix the rule it names
 and run it again; when you cannot, say so in one sentence. When the briefing or a command prints a
 `Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
 else; in a worktree entered for the first time, run the repository's setup commands from its
@@ -33,7 +33,7 @@ Talk to the person as to a colleague from another project, in plain words, an an
 they ask. Say one line when something will take
 more than a moment. Recommend every time you ask.
 When the run ends because the story waits on something outside this session, say where it is,
-the one link worth opening, and what happens next, in two or three sentences. Never show what a
+the one link worth opening, and what happens next. Never show what a
 command printed; read it and say what matters. A failure is one sentence on what could not be done.
 
 When they approve something, tell the story plainly first: what a user gets when it is done, how we
@@ -46,8 +46,8 @@ waits on this one, and name the number it prints.
 
 ## Write
 
-A draft: dispatch the deckhand:author agent with the number and the path to deckhand, say in a
-sentence what it wrote, and carry on to the review.
+A draft: dispatch the deckhand:author agent with the number and the path to deckhand, say what it
+wrote, and carry on to the review.
 
 ## Settle
 
@@ -56,7 +56,10 @@ until the requirements say what a user gets, what is in and out, and how we will
 One outcome: dispatch deckhand:author as for a draft. Several: propose the split as one story per line
 in dependency order, each opening with `owner/name:` when it belongs elsewhere, confirm it in one
 question, write the split file, run `new apply --split <file> --from $issue`, and dispatch one
-author per draft it prints, all at once, then carry on to each one's review.
+author per draft it prints, all at once, then carry on to each one's review. Park each feature
+the brainstorm turns up as in Speaking, with `--repo owner/name` for another repository, `--after
+REF` for any story it waits on, and `--blocks $issue` in place of `--from` when this story waits
+on it.
 
 ## Review
 
@@ -73,7 +76,9 @@ with the skeptic: accept a confirmed finding that improves the story, decline wh
 each in a sentence, and ask only where one changes what the story delivers. Write them to the
 decisions file and run
 `review apply $issue <findings> <verdicts> <decisions> --verdict "<sentence>"`; on a clean pass,
-the findings file alone with `--verdict`. Then amend from the accepted findings.
+the findings file alone with `--verdict`. Then amend from the accepted findings; when every
+confirmed finding is P3 the story is sound, so amend with `--minor`, which keeps it in Ready, and
+carry on to Board.
 
 ## Amend
 
@@ -81,19 +86,18 @@ From the amend context (above, or run it), copy the body file it names to the dr
 edit that, keeping every heading, with superpowers:writing-plans for a plan rewrite, and run
 `amend apply $issue <file> --note "<what changed and why>"`, never where it came from, with
 `--title "<new title>"` when the Story no longer matches
-it. An amend writes Refinement, so the next briefing asks for the review again; say what changed and
-carry on. Work that belongs in its own story: overwrite the draft with its whole body
+it. An amend writes Refinement, so the next briefing asks for the review again, unless `--minor`
+says the review found P3s only; say what changed and carry on. Work that belongs in its own story: overwrite the draft with its whole body
 and run `amend apply $issue <file> --new-issue "<title>"`; work that must land first takes `--before`.
 
 ## Board
 
 From the ready context (above, or run it), brief the story in three sentences: what it changes, as
 behavior rather than files; what it leaves alone, from Scope Out; and the one judgment call the
-plan makes, an approach over another, a trade-off, or an accepted review finding, with the
-alternative named. When there is none, the third sentence says so. Propose kind, and points by
+plan makes, with the alternative named. When there is none, the third sentence says so. Propose kind, and points by
 naming the reference story it is most like and why, and ask one question about that call: "The
 plan does X rather than Y; board it that way, review it again, or not yet?" A story whose plan waits on other stories
-boards with them as blockers rather than waiting unboarded.
+boards with them as blockers.
 Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
@@ -116,7 +120,7 @@ alters what the story delivers: say so in one sentence with the diff's size and 
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
 amend step. A decision that changes an issue in another repository before it starts: run
 `amend context N --repo owner/name`, edit its draft, run
-`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. On build, the check is done: run the plan. When it says resume, say which tasks the commits cover and recommend carrying on,
+`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. When it says resume, say which tasks the commits cover and recommend carrying on,
 which skips them, while tasks are left, or reviewing what is there. When the briefing lists `Blocked by:`, say what it waits on, build what does not
 depend on it, then stop. A story that must not start or merge before another: run
 `captain apply --block $issue --by M`, run `log $issue "Noted: <why>"`, and stop.
@@ -128,18 +132,16 @@ story, plan, and Deviations from `finish context` as its brief, reporting P1 to 
 line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
 idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
 and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk the
-change one group of files at a time, in reading order: in plain terms what it does and why, a short
+change one group of files at a time, in reading order: what it does and why, a short
 snippet, the criterion it serves, and any Deviation it carries; wait for them before the next.
 After the last, give them
-`cd "<the worktree>" && tuicr -r origin/main..HEAD` as a plain message for a terminal of their own;
+`cd "<the worktree>" && tuicr -r origin/main..HEAD` as a plain message;
 they paste the export or say there are no comments. On comments: fix every
 one, commit with deckhand:commit, run the same review over
-`<the previous pass's last commit>..HEAD` only, fix its P1 and P2, and hand off the same way with
-that range. The review never runs on its own fixes and never after a clean pass; only their
-comments start a round. Record the clean pass with `reviewed apply $issue "<one line>"`, which reads
-the commit itself; the pull request opens only from that commit. Then run the
+`<the previous pass's last commit>..HEAD` only, fix its P1 and P2, and hand off the same way. The review never runs on its own fixes and never after a clean pass. Record the clean pass with `reviewed apply $issue "<one line>"`; the pull
+request opens only from that commit. Then run the
 deckhand:document skill, fixing what its audit lists first; its commits land past the reviewed one
-and need no pass, because docs/claude is Claude's alone.
+and need no pass.
 
 ## Pull request
 
@@ -168,5 +170,5 @@ Verification while any is left, Done when none is. Then walk the items one at a 
 can be done here and asking for what is theirs; park one that is a change of its own as above,
 adding `--repo owner/name`. Run `after apply $issue --item <n>` as each is done, ticking its box.
 When nothing is left, say the story is finished and name the next story the briefing gave.
-Read the briefing's `Clear:` line out either way, so they hear what is owed without asking.
+Read the briefing's `Clear:` line out either way.
 With no story in hand, `/deckhand:captain` says what to pick up next across every repository.

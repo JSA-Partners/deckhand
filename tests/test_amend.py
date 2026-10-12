@@ -568,6 +568,26 @@ def test_apply_moves_a_boarded_story_back_to_refinement(fake_gh, gh_calls, tmp_p
     assert "Status=Refinement" in result.stdout.splitlines()
 
 
+def test_minor_keeps_the_column_after_a_review_that_found_p3s_only(fake_gh, gh_calls, tmp_path):
+    """A pass whose confirmed findings are all P3 is clean, so the amend that takes them is not reviewed again."""
+    result = run_deckhand(
+        "amend", "apply", "248", _draft(tmp_path, BODY), "--note", NOTE, "--minor", env=_status_reads(tmp_path, "Ready")
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Status kept" in result.stdout.splitlines()
+    assert "PVTSSF_STATUS" not in "\n".join(gh_calls())
+    assert any(call.startswith("issue comment") for call in gh_calls())
+
+
+def test_minor_goes_with_a_note(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path, BODY), "--new-issue", TITLE, "--minor")
+
+    assert result.returncode == 2
+    assert "--minor goes with --note" in result.stderr
+    assert _writes(gh_calls) == []
+
+
 # --- apply, a story of its own ------------------------------------------------
 
 

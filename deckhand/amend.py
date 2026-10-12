@@ -236,13 +236,17 @@ def _refine(repo: str, number: int, status: str | None) -> None:
     print(fields.set_field(resolved_settings(), repo, number, "Status", columns.REFINEMENT))
 
 
-def _amend(repo: str, number: int, edited: str, note: str, title_flag: str | None, story: issue.Issue) -> int:
+def _amend(
+    repo: str, number: int, edited: str, note: str, title_flag: str | None, story: issue.Issue, minor: bool = False
+) -> int:
     """Put the drafted body and title on the issue and log the amend, unless the story is frozen.
 
     The body is the draft as it was written: what changed and why goes on the issue's own log, where
     a later step reads it, and never into the story the draft is a rewrite of. The title is checked
     here against the subject the pull request will carry, because a title is written far more often
-    than a pull request is opened and the refusal belongs at the write.
+    than a pull request is opened and the refusal belongs at the write. `minor` says the review this
+    amend answers found P3s only, which is a clean pass, so the column stands and nothing asks for
+    the review again.
     """
     note = _note(note)
     title = _title(title_flag, story)
@@ -252,7 +256,10 @@ def _amend(repo: str, number: int, edited: str, note: str, title_flag: str | Non
     if status in STARTED:
         raise Refusal(FROZEN)
     _write(repo, number, body, title, note, story)
-    _refine(repo, number, status)
+    if minor:
+        print("Status kept")
+    else:
+        _refine(repo, number, status)
     if (room := lint.headroom(body, given=edited)) is not None:
         print(room)
     return 0
@@ -314,6 +321,11 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="with --new-issue: the new story lands first, so this story waits on it",
     )
+    parser.add_argument(
+        "--minor",
+        action="store_true",
+        help="with --note: the review found P3s only, so the story keeps its column and is not reviewed again",
+    )
     # Only the parser that read these arguments knows the usage line to print a usage error with.
     parser.set_defaults(usage=parser)
 
@@ -331,6 +343,8 @@ def apply(args: argparse.Namespace) -> int:
         raise Refusal(NO_MODE)
     if args.before and args.new_issue is None:
         args.usage.error("--before is only for --new-issue")
+    if args.minor and args.note is None:
+        args.usage.error("--minor goes with --note")
     if args.repo is not None and args.new_issue is not None:
         raise Refusal(ELSEWHERE)
     repo = _repo(args.repo)
@@ -350,4 +364,4 @@ def apply(args: argparse.Namespace) -> int:
         if args.title is not None:
             raise Refusal("--title goes with --note; --new-issue carries its title as its argument")
         return _new_issue(repo, args.issue, edited, args.new_issue, args.before)
-    return _amend(repo, args.issue, edited, args.note, args.title, story)
+    return _amend(repo, args.issue, edited, args.note, args.title, story, args.minor)
