@@ -13,6 +13,7 @@ import re
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 CHUNK = 262_144
@@ -153,6 +154,14 @@ def tokens(path: Path) -> int:
     return total
 
 
+def _stamp(record: dict) -> float:
+    """When the harness wrote this record, from its own timestamp, or 0.0 when it carries none."""
+    try:
+        return datetime.fromisoformat(str(record.get("timestamp"))).timestamp()
+    except ValueError:
+        return 0.0
+
+
 def _repo_of(cwd: str, repos: dict[str, str]) -> str | None:
     """The repository whose name is a component of `cwd`; a worktree lives under its own clone."""
     parts = Path(cwd).parts
@@ -173,9 +182,11 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
     cwd = branch = ""
     verb = args = ""
     version = ""
-    started = 0.0
+    started = newest = 0.0
     waiting: bool | None = None
     for record in records_back(path):
+        if not newest:
+            newest = _stamp(record)
         if not cwd and record.get("cwd"):
             cwd = str(record["cwd"])
             branch = str(record.get("gitBranch") or "")
@@ -196,7 +207,7 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
                 waiting = True
             elif _answered(record):
                 waiting = False
-        if cwd and started and verb and waiting is not None:
+        if cwd and started and verb and waiting is not None and newest:
             break
     repo = _repo_of(cwd, repos) if cwd else None
     if repo is None:
@@ -213,7 +224,8 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
         repo=repo,
         story=story,
         command=" ".join(word for word in (verb, number) if word) if verb else "-",
-        idle=max(clock - path.stat().st_mtime, 0.0),
+        # The file time runs ahead of the words: the harness touches a transcript without writing to it.
+        idle=max(clock - (newest or path.stat().st_mtime), 0.0),
         tokens=tokens(path),
         waiting=bool(waiting),
         started=started,
