@@ -174,7 +174,8 @@ duplicate, and writes nothing until every one passes. A story the board has not 
 is read as an issue and boarded on the way. A story already in another feature moves.
 
 `epic forecast` says how many weeks the feature's open stories will take, and with `--json` gives
-dates and the day the feature's work began. It counts how many of the feature's own stories finished
+dates and the day the feature's work began. Either way it names each of the feature's stories with
+its column, open ones first, so one command says what is in a feature and where it stands. It counts how many of the feature's own stories finished
 each week and draws whole weeks from those counts, the method of Daniel Vacanti's "When Will It Be
 Done?". A week with nothing finished counts as zero, so client work, weekends and stalls are
 already in the numbers.

@@ -11,7 +11,7 @@ import argparse
 import json
 from datetime import date, timedelta
 
-from deckhand import board, draft, fleet, gh, issue, throughput
+from deckhand import board, columns, draft, fleet, gh, issue, throughput
 from deckhand.cli import command
 from deckhand.config import Settings
 from deckhand.step import Refusal, issue_ref, ref_label, resolved_settings
@@ -273,6 +273,27 @@ def _dated(found: throughput.Outlook) -> dict:
     }
 
 
+def _pieces(read: fleet.Fleet, option: dict) -> list[dict]:
+    """Every member story as the report reads it: open ones first in column order, then finished ones."""
+    rank = {name: index for index, name in enumerate(columns.ORDER)}
+    mine = sorted(
+        fleet.members([*read.stories, *read.archived], option["id"]),
+        key=lambda story: (story.closed, rank.get(story.status, len(rank)), story.repo, story.number),
+    )
+    return [
+        {"repo": s.repo, "number": s.number, "status": s.status, "closed": s.closed, "title": s.title} for s in mine
+    ]
+
+
+def _piece_lines(pieces: list[dict], repo: str) -> list[str]:
+    """One line per piece, a finished one as `done`, the reference as a session in `repo` reads it."""
+    return [
+        f"  {ref_label(piece['repo'], piece['number'], repo)} "
+        f"{'done' if piece['closed'] else piece['status'] or 'off the board'} {piece['title']}"
+        for piece in pieces
+    ] or ["  none"]
+
+
 def _forecast(args: argparse.Namespace) -> int:
     if len(args.refs) != 1:
         raise Refusal("epic forecast takes one feature: epic forecast <feature>")
@@ -280,11 +301,16 @@ def _forecast(args: argparse.Namespace) -> int:
     option = _find(_options(settings)[1], args.refs[0])
     read = fleet.read(settings)
     found = throughput.outlook(read, option["id"], _today(), seed=SEED)
+    pieces = _pieces(read, option)
     if args.json:
-        print(json.dumps({**_row(read, option), **_dated(found)}))
+        print(json.dumps({**_row(read, option), **_dated(found), "stories": pieces}))
         return 0
     print(f"## Forecast: {option['name']}")
     for line in throughput.rows(found):
+        print(line)
+    print()
+    print("Pieces:")
+    for line in _piece_lines(pieces, gh.repo_slug()):
         print(line)
     return 0
 
