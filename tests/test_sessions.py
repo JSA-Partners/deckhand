@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from deckhand import sessions
@@ -367,3 +368,20 @@ def test_tokens_include_the_sessions_subagents(tmp_path):
     _write(tmp_path / "s" / "subagents" / "agent-a.jsonl", [_said("a1", output_tokens=7)])
 
     assert sessions.tokens(path) == 12
+
+
+def test_idle_is_measured_from_the_newest_record_not_the_file(tmp_path):
+    """Something touches a transcript without writing a record, so the file time runs ahead of the words."""
+    path = _transcript(tmp_path)
+    now = datetime.fromisoformat("2026-09-18T10:05:00Z").timestamp()
+    os.utime(path, (now, now))
+
+    assert sessions.pulse(path, REPOS, now=now).idle == 2 * 86400
+
+
+def test_idle_falls_back_to_the_file_time_when_no_record_is_timestamped(tmp_path):
+    records = [{"type": "user", "cwd": "/Users/x/acme/widgets", "message": {"content": "hi"}}]
+    path = _write(tmp_path / "projects" / "acme" / "plain.jsonl", records)
+    os.utime(path, (1000.0, 1000.0))
+
+    assert sessions.pulse(path, REPOS, now=1600.0).idle == 600.0
