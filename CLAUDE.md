@@ -27,7 +27,8 @@
   `epic.py` the features, the options of the project's Feature field, opened, filled, listed and
   forecast in dates; `throughput.py` how many stories finish a week, and the weeks a feature's open
   ones or the board's will take; `related.py` the issues a story
-  names, with their column, for the briefing; `fleet.py` the one board read the captain works from; `sessions.py`
+  names, with their column, and the open stories whose titles resemble one, for the briefing;
+  `fleet.py` the one board read the captain works from; `sessions.py`
   which Claude Code sessions are open and on what, `transcript.py` what one of them says;
   `since.py` the snapshot a full captain read leaves, and what changed against the last;
   `candidates.py` what to open next and which plans touch the same files; `merges.py` which pull

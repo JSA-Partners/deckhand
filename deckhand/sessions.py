@@ -30,8 +30,8 @@ _BRANCH_NUMBER = re.compile(r"^[^/]+/([0-9]+)-")  # <kind>/<number>-<slug>, the 
 # A whole word, because `new` takes a path as readily as a number and `.../04-registry-split.md`
 # holds digits that are not a story.
 _NUMBER = re.compile(r"^[0-9]+$")
-# The path a session resolves once and then holds in a shell variable, so the version is read from
-# anywhere in a command rather than from the call itself.
+# The path a session resolves once and then holds in a shell variable, and the path the skill
+# injection names before any command runs, so the version is read from any record's text.
 _VERSION = re.compile(r"/deckhand/(\d+\.\d+\.\d+)\b")
 
 
@@ -159,6 +159,15 @@ def _repo_of(cwd: str, repos: dict[str, str]) -> str | None:
     return next((slug for name, slug in repos.items() if name in parts), None)
 
 
+def since(seconds: float) -> str:
+    """`12m`, `3h` or `2d`: an age as every table and quote prints one."""
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
 def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse | None:
     """The one line this session is worth, or None when it is not working in a board repository."""
     cwd = branch = ""
@@ -180,7 +189,7 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
                 said = _ARGS.search(words)
                 args = said.group(1).strip() if said is not None else ""
         if not version:
-            seen = _VERSION.search(ran(record))
+            seen = _VERSION.search(ran(record)) or _VERSION.search(text(record))
             version = seen.group(1) if seen is not None else ""
         if waiting is None:
             if spoke(record):
@@ -203,7 +212,7 @@ def pulse(path: Path, repos: dict[str, str], now: float | None = None) -> Pulse 
         session=path.stem,
         repo=repo,
         story=story,
-        command=f"{verb} {args}".strip() if verb else "-",
+        command=" ".join(word for word in (verb, number) if word) if verb else "-",
         idle=max(clock - path.stat().st_mtime, 0.0),
         tokens=tokens(path),
         waiting=bool(waiting),

@@ -25,9 +25,10 @@ def _board(tmp_path: Path, monkeypatch, nodes: list[dict]) -> None:
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(path))
 
 
-def test_add_puts_the_issue_on_the_project(fake_gh, gh_calls, settings):
-    board.add(settings, "https://github.com/acme/widgets/issues/248")
+def test_add_puts_the_issue_on_the_project_and_returns_its_item(fake_gh, gh_calls, settings):
+    item = board.add(settings, "https://github.com/acme/widgets/issues/248")
 
+    assert item == "PVTI_ADDED"
     assert gh_calls() == [
         "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/248 --format json"
     ]

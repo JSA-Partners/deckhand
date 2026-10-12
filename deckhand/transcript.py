@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-from deckhand.sessions import ran, records_back, spoke, text
+from deckhand.sessions import ran, records_back, since, spoke, text
 
 DEEP_LINES = 12
 _SAID = 400
 ASKING = 200
 _SENTENCE = re.compile(r"(?<=[.?!])\s+")
+# A table row, a heading or a list item is not a sentence anybody asked.
+_NOT_PROSE = re.compile(r"^\s*(\||#+\s|[-*]\s|\d+\.\s)")
 
 
 @dataclass(frozen=True)
@@ -65,24 +69,40 @@ def _results(record: dict) -> set[str]:
 
 
 def _permission(record: dict, done: set[str]) -> str:
-    """`permission: <tool>` for a call still waiting on the person, other than a question."""
+    """`Bash <command>` or the tool's name, for a call still waiting on the person, other than a question."""
     for part in _parts(record):
         if not isinstance(part, dict) or part.get("type") != "tool_use" or str(part.get("id")) in done:
             continue
         name = str(part.get("name") or "")
         if name == "Bash":
-            return f"permission: Bash {' '.join(ran(record).split())}"
+            return f"Bash {' '.join(ran(record).split())}"
         if name != "AskUserQuestion":
-            return f"permission: {name}"
+            return name
     return ""
 
 
 def _last_sentence(said: str) -> str:
-    return next((line for line in reversed(_SENTENCE.split(" ".join(said.split()))) if line), "")
+    prose = " ".join(line for line in said.splitlines() if not _NOT_PROSE.match(line))
+    return next((line for line in reversed(_SENTENCE.split(" ".join(prose.split()))) if line), "")
 
 
-def asking(path: Path) -> str:
-    """What a waiting session is asking: an open question, a call it wants allowed, or its last sentence."""
+def _ago(record: dict, now: float) -> str:
+    """` 12m ago` from the record's own timestamp, or nothing when it carries none."""
+    try:
+        at = datetime.fromisoformat(str(record.get("timestamp"))).timestamp()
+    except ValueError:
+        return ""
+    return f" {since(max(now - at, 0.0))} ago"
+
+
+def asking(path: Path, now: float | None = None) -> str:
+    """What a waiting session is asking, said as which it is.
+
+    `asked:` an open question, `permission:` a call it wants allowed, and otherwise `said <age> ago:`
+    its last sentence, dated from the record: the transcript holds a question back until it is
+    answered, so the last words on disk may be older than a question nobody can see yet.
+    """
+    clock = time.time() if now is None else now
     done: set[str] = set()
     newest = True
     try:
@@ -96,12 +116,12 @@ def asking(path: Path) -> str:
                 newest = False
                 allow = _permission(record, done)
                 if allow:
-                    return allow[:ASKING]
+                    return f"permission: {allow}"[:ASKING]
             question, ids = _questions(record)
             if question and not ids & done:
-                return question[:ASKING]
+                return f"asked: {question}"[:ASKING]
             if spoke(record):
-                return _last_sentence(text(record))[:ASKING]
+                return f"said{_ago(record, clock)}: {_last_sentence(text(record))}"[:ASKING]
     except OSError:
         return ""
     return ""

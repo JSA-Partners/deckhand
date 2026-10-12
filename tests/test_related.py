@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from deckhand import gh, related
+from deckhand import fleet, gh, issue, related
 from deckhand.config import Settings
 
 REPO = "acme/widgets"
@@ -113,3 +113,39 @@ def test_lines_are_capped():
     shown = related.lines(many, REPO)
     assert len(shown) == related.LIMIT + 1
     assert shown[-1] == "and 5 more"
+
+
+def _story(number: int, title: str, repo: str = REPO, labels=("deckhand",), closed: bool = False) -> fleet.Story:
+    held = issue.Issue(number=number, title=title, body="", url="", state="OPEN", comments=[], labels=labels)
+    return fleet.Story(
+        number=number, repo=repo, title=title, status="Draft", points=None, closed=closed, item="", issue=held
+    )
+
+
+def test_similar_shares_two_significant_words_in_any_repository():
+    stories = [
+        _story(321, "Compare times as times in the publications list test", repo="acme/gadgets"),
+        _story(12, "Share a collection"),
+    ]
+
+    assert related.similar_lines(stories, "Compare times, not strings, in list sort tests", REPO) == [
+        "Similar: acme/gadgets#321 Draft Compare times as times in the publications list test"
+    ]
+
+
+def test_similar_ignores_short_and_common_words():
+    assert related.similar([_story(1, "Share that with those")], "Share this with them") == []
+
+
+def test_similar_leaves_out_the_closed_the_unlabeled_and_the_story_itself():
+    title = "Compare times in the list test"
+    stories = [_story(1, title, closed=True), _story(2, title, labels=()), _story(3, title)]
+
+    assert [story.number for story in related.similar(stories, title)] == [3]
+    assert related.similar(stories, title, skip=("ACME/Widgets", 3)) == []
+
+
+def test_resembling_says_why_the_board_could_not_be_read(no_real_gh):
+    (line,) = related.resembling("Compare times in the list test")
+
+    assert line.startswith("Similar: unavailable (")

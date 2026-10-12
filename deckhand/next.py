@@ -332,18 +332,6 @@ def _worktree(name: str, branch: str | None) -> tuple[str | None, str | None]:
         return f"Worktree: unavailable ({reason(error)})", None
 
 
-def _related_block(repo: str, number: int, story: issue.Issue, skip: frozenset[tuple[str, int]]) -> None:
-    """The issues the story names or is linked to, with their state and column, or why they are not."""
-    try:
-        found = related.read(config.load(), repo, number, story.body, skip)
-    except Exception as error:
-        print(f"Related: unavailable ({reason(error)})")
-        return
-    print("Related:" if found else "Related: none")
-    for line in related.lines(found, repo):
-        print(f"  {line}")
-
-
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("issue", type=issue_number, nargs="?", default=None, help="the issue number")
 
@@ -384,7 +372,7 @@ def context(args: argparse.Namespace) -> int:
     if name == "settle" and story:
         _notes_block(story)
     if repo and story and not facts.closed:
-        _related_block(repo, number, story, printed)
+        related.block(repo, number, story, printed, resemble=name == "settle")
     if name in CONTEXT_OF:
         _context(name, number)
         # The after context lists the items and names the tick, so only what the session still owes

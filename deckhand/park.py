@@ -9,25 +9,11 @@ lives here because every draft and story boards the same way, from new, amend, a
 
 from __future__ import annotations
 
-import re
-
-from deckhand import board, columns, draft, fields, gh, issue, log
+from deckhand import board, columns, draft, fields, fleet, gh, issue, log, related
 from deckhand.config import Settings
 from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 
 PARKED_HEADING = "## Parked feature"
-STOP = frozenset("with from that this when into only their them then than what have each more over about".split())
-SHARED = 2
-
-
-def _words(title: str) -> set[str]:
-    return {word for word in re.findall(r"[a-z0-9]+", title.lower()) if len(word) >= 4 and word not in STOP}
-
-
-def similar(title: str, others: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """The open stories whose titles share `SHARED` significant words with `title`; a duplicate looks like this."""
-    mine = _words(title)
-    return [(number, other) for number, other in others if len(mine & _words(other)) >= SHARED]
 
 
 def board_draft(
@@ -45,12 +31,23 @@ def board_draft(
         print(f"Logged {note.split(':', 1)[0]}", flush=True)
 
 
-def open_parked(settings: Settings, here: str, target: str, title: str, body: str, origin: str) -> tuple[int, str]:
-    """Open `body` as a draft titled `title` in `target`, board it as Draft, and log where it came from."""
+def open_parked(
+    settings: Settings,
+    here: str,
+    target: str,
+    title: str,
+    body: str,
+    origin: str,
+    stories: list[fleet.Story],
+) -> tuple[int, str]:
+    """Open `body` as a draft titled `title` in `target`, board it as Draft, and log where it came from.
+
+    `stories` is the board as read before the first write, so the stories this one resembles are
+    named ahead of it in any repository.
+    """
     gh.split_repo(target)
-    # Read before the first write, so a listing that fails refuses the park rather than leaving it half done.
-    for found, other in similar(title, issue.open_titles(target)):
-        print(f"Similar: {ref_label(target, found, here)} {other}", flush=True)
+    for line in related.similar_lines(stories, title, here):
+        print(line, flush=True)
     number, url = issue.create(target, title, body)
     print(f"Parked {ref_label(target, number, here)} {url}", flush=True)
     board_draft(settings, target, number, url, f"Drafted: parked from {origin}")
@@ -132,7 +129,9 @@ def feature(
     title = fits_title((flag or "").strip() or first.strip())
     came = story[1] if story is not None else came_from
     origin = ref_label(repo, came, target) if came is not None else repo
-    number, _ = open_parked(settings, repo, target, title, draft.render(requirements, []), origin)
+    # Read before the first write, so a board that fails refuses the park rather than leaving it half done.
+    stories = fleet.load(settings)
+    number, _ = open_parked(settings, repo, target, title, draft.render(requirements, []), origin, stories)
     if story is not None:
         block(repo, story[1], target, number, title)
     if waits_on is not None:

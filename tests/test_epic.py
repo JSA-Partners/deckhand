@@ -276,7 +276,6 @@ def test_add_reaches_a_story_in_another_repository(board_env, gh_calls, monkeypa
             ["perm", "304"],
             "perm matches Permission rework (OPT_PERMISSION) and Permission audit (OPT_AUDIT); name one by its id",
         ),
-        (["Billing", "304", "999"], "#999 is not on the board"),
         (["Billing", "304", "303"], "#303 is not a deckhand story"),
         (["Billing", "304", "305"], "#305 was closed as not planned or a duplicate"),
         (["Billing", "304", "not-a-ref"], "not-a-ref"),
@@ -305,6 +304,48 @@ def test_add_reaches_an_archived_story(board_env, gh_calls, monkeypatch):
     assert cli.main(["epic", "add", "Billing", "301"]) == 0
 
     assert _writes(gh_calls()) == [_edit("I_301", "OPT_BILLING")]
+
+
+def _issue_999(tmp_path, monkeypatch, labels=({"name": "deckhand"},), state_reason: str | None = None) -> None:
+    """#999, an issue the board read does not hold, as gh issue view answers for it."""
+    data = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))
+    data.update(number=999, url="https://github.com/acme/widgets/issues/999", labels=list(labels))
+    if state_reason:
+        data.update(state="CLOSED", stateReason=state_reason)
+    path = tmp_path / "issue-999.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("GH_ISSUE_FILE_999", str(path))
+
+
+def test_add_boards_and_joins_a_story_the_board_read_has_not_caught_up_with(board_env, gh_calls, monkeypatch, capsys):
+    """The items query lags item-add by seconds, and a story boarded a moment ago is the one most often joined."""
+    _issue_999(board_env, monkeypatch)
+
+    assert cli.main(["epic", "add", "Billing", "999"]) == 0
+
+    assert _writes(gh_calls()) == [
+        "project item-add 2 --owner acme --url https://github.com/acme/widgets/issues/999 --format json",
+        _edit("PVTI_ADDED", "OPT_BILLING"),
+    ]
+    assert capsys.readouterr().out.splitlines() == ["#999 joined Billing"]
+
+
+def test_add_refuses_an_unlabeled_issue_off_the_board_read(board_env, gh_calls, monkeypatch, capsys):
+    _issue_999(board_env, monkeypatch, labels=())
+
+    assert cli.main(["epic", "add", "Billing", "999"]) == 1
+
+    assert "#999 is not a deckhand story" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
+
+
+def test_add_refuses_a_dropped_issue_off_the_board_read(board_env, gh_calls, monkeypatch, capsys):
+    _issue_999(board_env, monkeypatch, state_reason="NOT_PLANNED")
+
+    assert cli.main(["epic", "add", "Billing", "999"]) == 1
+
+    assert "#999 was closed as not planned or a duplicate" in capsys.readouterr().err
+    assert _writes(gh_calls()) == []
 
 
 # list
@@ -414,7 +455,9 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
-    assert json.loads(capsys.readouterr().out) == {
+    found = json.loads(capsys.readouterr().out)
+    found.pop("stories")
+    assert found == {
         "feature": "OPT_PERMISSION",
         "name": "Permission rework",
         "about": "Guests and registry ownership.",
@@ -439,7 +482,8 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
     }
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
-    assert capsys.readouterr().out.splitlines() == [
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[: lines.index("Pieces:") - 1] == [
         "## Forecast: Permission rework",
         "  1 piece left",
         "",
@@ -455,7 +499,9 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeyp
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
-    assert json.loads(capsys.readouterr().out) == {
+    found = json.loads(capsys.readouterr().out)
+    found.pop("stories")
+    assert found == {
         "feature": "OPT_PERMISSION",
         "name": "Permission rework",
         "about": "Guests and registry ownership.",
@@ -480,7 +526,9 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeyp
 def test_forecast_gives_an_early_estimate_before_the_feature_s_own_pace_settles(board_env, capsys):
     assert cli.main(["epic", "forecast", "Billing", "--json"]) == 0
 
-    assert json.loads(capsys.readouterr().out) == {
+    found = json.loads(capsys.readouterr().out)
+    found.pop("stories")
+    assert found == {
         "feature": "OPT_BILLING",
         "name": "Billing",
         "about": "Charge for seats.",
@@ -505,7 +553,8 @@ def test_forecast_gives_an_early_estimate_before_the_feature_s_own_pace_settles(
     }
 
     assert cli.main(["epic", "forecast", "Billing"]) == 0
-    assert capsys.readouterr().out.splitlines() == [
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[: lines.index("Pieces:") - 1] == [
         "## Forecast: Billing",
         "  1 piece left",
         "",
@@ -541,6 +590,15 @@ def test_forecast_prints_the_block_for_one_feature(board_env, monkeypatch, capsy
         "  Worst case    7 weeks   99th percentile",
         "",
         "  Paced by this feature's own 4 weeks, an average of 1.2 stories a week.",
+        "",
+        "Pieces:",
+        "  #302 Backlog Scope guests to granted collections",
+        "  #301 done Grant guests access",
+        "  #310 done More",
+        "  #311 done More",
+        "  #312 done More",
+        "  #313 done More",
+        "  #314 done More",
     ]
 
 
@@ -640,6 +698,32 @@ def test_forecast_counts_a_member_in_another_repository(board_env, monkeypatch, 
     assert "  2 pieces left" in capsys.readouterr().out.splitlines()
 
 
+def test_forecast_names_each_piece_open_first_in_column_order(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, _member(7, repo="acme/gadgets"))
+
+    assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["stories"] == [
+        {"repo": "acme/gadgets", "number": 7, "status": "Backlog", "closed": False, "title": "More"},
+        {
+            "repo": "acme/widgets",
+            "number": 302,
+            "status": "Backlog",
+            "closed": False,
+            "title": "Scope guests to granted collections",
+        },
+        {"repo": "acme/widgets", "number": 301, "status": "Done", "closed": True, "title": "Grant guests access"},
+    ]
+
+    assert cli.main(["epic", "forecast", "Permission rework"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    start = lines.index("Pieces:")
+    assert lines[start + 1 :] == [
+        "  acme/gadgets#7 Backlog More",
+        "  #302 Backlog Scope guests to granted collections",
+        "  #301 done Grant guests access",
+    ]
+
+
 def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_env, monkeypatch, capsys):
     _with_members(board_env, monkeypatch, *PACED, *[_member(400 + index) for index in range(120)])
 
@@ -649,7 +733,8 @@ def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_e
     assert (found["pieces"], found["per_week"], found["reason"]) == (127, 1.25, "over two years")
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
-    assert capsys.readouterr().out.splitlines() == [
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[: lines.index("Pieces:") - 1] == [
         "## Forecast: Permission rework",
         "  121 pieces left",
         "",

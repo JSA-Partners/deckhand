@@ -47,9 +47,12 @@ def move(project: str, item: str, after: str | None) -> None:
     gh.graphql_json(POSITION_MUTATION, {"project": project, "item": item, "after": after})
 
 
-def add(settings: Settings, url: str) -> None:
-    """Put the issue at `url` on the project; GitHub takes an issue already there as a no-op."""
-    gh.run("project", "item-add", str(settings.project), "--owner", settings.owner, "--url", url, "--format", "json")
+def add(settings: Settings, url: str) -> str:
+    """Put the issue at `url` on the project and return its item id; an issue already there answers the same."""
+    found = gh.json_out(
+        "project", "item-add", str(settings.project), "--owner", settings.owner, "--url", url, "--format", "json"
+    )
+    return str(found.get("id") or "") if isinstance(found, dict) else ""
 
 
 def remove(settings: Settings, item: str) -> None:
