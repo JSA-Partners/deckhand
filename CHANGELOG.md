@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.3.0](https://github.com/JSA-Partners/deckhand/compare/v4.2.0...v4.3.0) (2026-10-12)
+
+
+### Features
+
+* similar stories, feature pieces, dated waiting rows, minor amends ([#40](https://github.com/JSA-Partners/deckhand/issues/40)) ([de1403f](https://github.com/JSA-Partners/deckhand/commit/de1403ffff2b449c1eaae9a9d699a62cda24df43))
+
+
+### Bug Fixes
+
+* measure a session's idle time from its newest record ([#42](https://github.com/JSA-Partners/deckhand/issues/42)) ([a20dfca](https://github.com/JSA-Partners/deckhand/commit/a20dfcabf32c795adc5345fd09fa44fda97f7ddf))
+
 ## [4.2.0](https://github.com/JSA-Partners/deckhand/compare/v4.1.2...v4.2.0) (2026-10-06)
 
 
