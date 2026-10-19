@@ -2,8 +2,8 @@
 
 Nothing here reads GitHub or prints: it takes the fleet and today's date and returns numbers and the
 lines of `epic forecast`. It is Monte Carlo simulation on measured weekly throughput, the method of
-Daniel Vacanti's "When Will It Be Done?". A week's finished count already holds the client work, the
-overhead stories, the weekends, the stalls and the sessions run side by side, so none is modeled.
+Daniel Vacanti's "When Will It Be Done?". A week the whole board stalled is drawn at the board's own
+rate of stalls, so a client week or a planning week in a short history does not pull every week down.
 """
 
 from __future__ import annotations
@@ -11,26 +11,26 @@ from __future__ import annotations
 import math
 import random
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from deckhand import draft, fleet, log
 
-# The commitment is the 90th percentile, which a real board's history met 86 percent of the time.
-PERCENTILES = FLOOR, COMMITMENT, WORST = (50, 90, 99)
+# Likely is the 85th percentile, the line ActionableAgile draws; early is the median.
+PERCENTILES = EARLY, LIKELY, WORST = (50, 85, 99)
 # Below this many finished split trees a draw is noise, so the largest is used.
 ROOTS = 5
 # Below this many finishes in the weeks measured, a feature's own weeks are noise.
 PACED = 5
 # Below this many weeks since a feature's work began, its pace has not settled.
 SETTLED = 4
-# An early estimate is no commitment, so two weeks of feature work are enough to draw it from.
-EARLY_SETTLED = 2
+# A board week under this share of its median week is a stall: client work or planning, not a slow week.
+STALL = 0.5
 # Weeks of history drawn from, so a pace from long ago does not outvote this quarter's.
 LOOKBACK = 12
-# Two years in weeks, past which a commitment says nothing a stakeholder can plan on.
+# Two years in weeks, past which a likely date says nothing a stakeholder can plan on.
 HORIZON = 104
-RESIDUE = 1e-9
 
 THIN = "too little history"
 FEW = "too few finished"
@@ -114,8 +114,8 @@ def began(stories: list[fleet.Story], today: date) -> date | None:
     return min([*started, *_finished_on(stories, today)], default=None)
 
 
-def _paced(stories: list[fleet.Story], today: date, settled: int = SETTLED) -> tuple[list[int], bool]:
-    """The last `LOOKBACK` full weekly counts since work on `stories` began, and whether `settled` weeks passed.
+def _paced(stories: list[fleet.Story], today: date) -> tuple[list[int], bool]:
+    """The last `LOOKBACK` full weekly counts since work on `stories` began, and whether `SETTLED` weeks passed.
 
     The oldest week is left out when work began partway through it, since it would count a few days as seven.
     """
@@ -125,7 +125,7 @@ def _paced(stories: list[fleet.Story], today: date, settled: int = SETTLED) -> t
     days = (today - start).days
     counts = weekly(stories, today, start)
     full = counts if days % 7 == 6 else counts[1:]
-    return full[-LOOKBACK:], days >= 7 * settled
+    return full[-LOOKBACK:], days >= 7 * SETTLED
 
 
 def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int], bool]:
@@ -133,9 +133,28 @@ def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int]
     return _paced(fleet.members(every, feature), today)
 
 
-def featured(every: list[fleet.Story]) -> list[fleet.Story]:
-    """Every story in any feature: one in flight alone gets all of that pace, so two side by side lean early."""
-    return [story for story in every if story.feature is not None]
+def stalls(counts: list[int]) -> list[bool]:
+    """Which of the board's weekly counts are stalls: under `STALL` of its median week."""
+    if not counts:
+        return []
+    line = statistics.median(counts) * STALL
+    return [count < line for count in counts]
+
+
+def _split(samples: list[int], flags: list[bool]) -> tuple[list[int], list[int]]:
+    """The weeks of `samples` the board worked and the weeks it stalled; both end on today's week."""
+    verdicts = flags[-len(samples) :] if samples else []
+    working = [count for count, stalled in zip(samples, verdicts, strict=True) if not stalled]
+    stalled = [count for count, stalled in zip(samples, verdicts, strict=True) if stalled]
+    return working, stalled
+
+
+def _share(samples: list[int], flags: list[bool], board: list[int]) -> float | None:
+    """The feature's finishes over the board's in the weeks the board worked, or None with no such week."""
+    verdicts = flags[-len(samples) :] if samples else []
+    weeks = [index for index, stalled in enumerate(verdicts) if not stalled]
+    whole = sum(board[-len(samples) :][index] for index in weeks)
+    return sum(samples[index] for index in weeks) / whole if whole else None
 
 
 def _left(stories: list[fleet.Story]) -> tuple[int, int]:
@@ -154,138 +173,129 @@ def _percentile(sorted_values: list[int], p: int) -> int:
     return sorted_values[min(len(sorted_values) - 1, max(0, index))]
 
 
+def _resample(rng: random.Random, values: list, kept: Callable[[list], bool]) -> list:
+    """`values` drawn again to their own length until `kept` accepts the draw."""
+    drawn = [rng.choice(values) for _ in values]
+    while not kept(drawn):
+        drawn = [rng.choice(values) for _ in values]
+    return drawn
+
+
 def simulate(
-    items: int, unsplit: int, samples: list[int], sizes: list[int], runs: int = 10_000, seed: int = 0
+    items: int,
+    unsplit: int,
+    samples: list[int],
+    sizes: list[int],
+    flags: list[bool] | None = None,
+    stalled: list[int] | None = None,
+    runs: int = 10_000,
+    seed: int = 0,
 ) -> dict[int, int | None] | None:
     """The weeks to finish at `PERCENTILES`, each run resampling `samples` and drawing weeks from that until done.
 
+    `samples` are the weeks the board worked. With `flags`, each run also resamples the board's stall
+    flags, and a week drawn as a stall finishes one of `stalled`, or nothing when there is none.
     Resampling per run carries the doubt about the pace itself, so a short history gives a wide range.
-    A resample with no finished week is drawn again, since it would stall and never finish.
-    A percentile that reaches `HORIZON` is None, since no run measured it; the whole forecast is None
-    when nothing is left, no week in `samples` finished anything, or the commitment reaches `HORIZON`.
+    A resample with no finished week, or with no week the board worked, is drawn again, since it would
+    never finish. A percentile that reaches `HORIZON` is None, since no run measured it; the whole
+    forecast is None when nothing is left, no week in `samples` finished anything, or `LIKELY`
+    reaches `HORIZON`.
     """
     if items + unsplit == 0 or not any(samples):
         return None
     rng = random.Random(seed)
+    stalling = bool(flags) and any(flags)
     taken = []
     for _ in range(runs):
         left = items + sum(rng.choice(sizes) for _ in range(unsplit))
-        run_samples = [rng.choice(samples) for _ in samples]
-        while not any(run_samples):
-            run_samples = [rng.choice(samples) for _ in samples]
+        run_samples = _resample(rng, samples, any)
+        run_flags = _resample(rng, flags or [], lambda drawn: not all(drawn)) if stalling else []
         weeks = 0
-        # Shares such as thirds leave a floating residue above zero, so done is within a billionth.
-        while left > RESIDUE and weeks < HORIZON:
-            left -= rng.choice(run_samples)
+        while left > 0 and weeks < HORIZON:
+            if stalling and rng.choice(run_flags):
+                left -= rng.choice(stalled) if stalled else 0
+            else:
+                left -= rng.choice(run_samples)
             weeks += 1
         taken.append(weeks)
     taken.sort()
     found = {p: _percentile(taken, p) for p in PERCENTILES}
-    if found[COMMITMENT] >= HORIZON:
+    if found[LIKELY] >= HORIZON:
         return None
     return {p: None if weeks >= HORIZON else weeks for p, weeks in found.items()}
 
 
 @dataclass(frozen=True)
 class Outlook:
-    """One feature's forecast in weeks and the history it was drawn from; without one, None weeks and a `reason`."""
+    """One forecast in weeks and the history it was drawn from; without one, None weeks and a `reason`."""
 
     left: int
-    floor_weeks: int | None
-    commitment_weeks: int | None
+    early_weeks: int | None
+    likely_weeks: int | None
     worst_weeks: int | None
     weeks: int
     per_week: float
+    stalls: int
+    board_weeks: int
+    share: float | None
     unsplit: int
     split_size: float
     split_basis: str | None
     measured: int
     reason: str | None
-    early_floor_weeks: int | None = None
-    early_commitment_weeks: int | None = None
-    early_weeks: int = 0
-    early_per_week: float = 0.0
 
 
-def _short(samples: list[int], settled: bool) -> str | None:
-    """Why the feature's own weeks cannot pace a forecast yet, or None when they can."""
+def _short(samples: list[int], working: list[int], settled: bool) -> str | None:
+    """Why the weeks cannot pace a forecast yet, or None when they can."""
     if not settled:
         return THIN
     if not any(samples):
         return IDLE
     if sum(samples) < PACED:
         return FEW
-    return FLAT if len(set(samples)) == 1 else None
+    if not any(working):
+        return IDLE
+    return FLAT if len(set(working)) == 1 else None
 
 
 def outlook(read: fleet.Fleet, feature: str, today: date, seed: int = 0) -> Outlook:
-    """The forecast over what is left of `feature`, drawn from its own stories, archived ones too.
-
-    Before its own stories can pace it, one feature's share of the feature work gives an early estimate instead.
-    """
+    """The forecast over what is left of `feature`, drawn from its own stories, archived ones too."""
     every = [*read.stories, *read.archived]
-    return _outlook(every, fleet.members(every, feature), today, seed, prior=featured(every))
+    return _outlook(every, fleet.members(every, feature), today, seed, shared=True)
 
 
 def board(read: fleet.Fleet, today: date, seed: int = 0) -> Outlook:
     """The forecast over every open story the process owns, drawn from every one it finished, archived ones too."""
     every = [*read.stories, *read.archived]
-    return _outlook(every, _held(every), today, seed)
+    return _outlook(every, _held(every), today, seed, shared=False)
 
 
-def _early(
-    items: int, unsplit: int, sizes: list[int], prior: list[fleet.Story], today: date, seed: int
-) -> tuple[dict[int, int | None] | None, list[int]]:
-    """The weeks drawn from `prior` instead, and the weekly counts drawn from, when `prior` can pace a forecast."""
-    counts, settled = _paced(prior, today, EARLY_SETTLED)
-    if _short(counts, settled):
-        return None, []
-    # Pooled weeks hold every feature run side by side, and one feature gets only its share of them.
-    samples = [count / _active(prior, today, len(counts)) for count in counts]
-    found = simulate(items, unsplit, samples, sizes, seed=seed)
-    return found, samples if found else []
-
-
-def _active(prior: list[fleet.Story], today: date, weeks: int) -> int:
-    """How many features finished anything in the last `weeks` weeks, one at least."""
-    since = today - timedelta(days=7 * weeks)
-    finished = {
-        story.feature
-        for story in _held(prior)
-        if story.closed and story.closed_at and since < _day(story.closed_at) <= today
-    }
-    return max(1, len(finished))
-
-
-def _outlook(
-    every: list[fleet.Story], stories: list[fleet.Story], today: date, seed: int, prior: list[fleet.Story] | None = None
-) -> Outlook:
+def _outlook(every: list[fleet.Story], stories: list[fleet.Story], today: date, seed: int, shared: bool) -> Outlook:
     items, unsplit = _left(stories)
     samples, settled = _paced(stories, today)
+    board_counts = _paced(_held(every), today)[0]
+    flags = stalls(board_counts)
+    working, stalled = _split(samples, flags)
     measured = splits(every)
     basis, sizes = _sizes(measured)
-    short = _short(samples, settled)
-    found = None if short else simulate(items, unsplit, samples, sizes, seed=seed)
+    short = _short(samples, working, settled)
+    found = None if short else simulate(items, unsplit, working, sizes, flags, stalled, seed=seed)
     reason = None if found is not None or not items + unsplit else short or FAR
-    early, early_samples = None, []
-    if reason in (THIN, FEW, FLAT):
-        early, early_samples = _early(items, unsplit, sizes, prior or [], today, seed)
     return Outlook(
         left=items + unsplit,
-        floor_weeks=None if found is None else found[FLOOR],
-        commitment_weeks=None if found is None else found[COMMITMENT],
+        early_weeks=None if found is None else found[EARLY],
+        likely_weeks=None if found is None else found[LIKELY],
         worst_weeks=None if found is None else found[WORST],
-        weeks=len(samples),
-        per_week=round(statistics.fmean(samples), 2) if samples else 0.0,
+        weeks=len(working),
+        per_week=round(statistics.fmean(working), 2) if working else 0.0,
+        stalls=sum(flags),
+        board_weeks=len(flags),
+        share=_share(samples, flags, board_counts) if shared else None,
         unsplit=unsplit,
         split_size=statistics.fmean(sizes) if unsplit else 1.0,
         split_basis=basis if unsplit else None,
         measured=len(measured),
         reason=reason,
-        early_floor_weeks=None if early is None else early[FLOOR],
-        early_commitment_weeks=None if early is None else early[COMMITMENT],
-        early_weeks=len(early_samples),
-        early_per_week=round(statistics.fmean(early_samples), 2) if early_samples else 0.0,
     )
 
 
@@ -303,50 +313,50 @@ def plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
-def _row(label: str, weeks: int, note: str) -> str:
+def row(label: str, weeks: int, note: str) -> str:
     unit = "week" if weeks == 1 else "weeks"
-    return f"  {label:<12}{weeks:>3} {unit:<5}   {note}"
+    return f"  {label:<22}{weeks:>3} {unit:<5}   {note}"
+
+
+def range_rows(likely: int, early: int) -> list[str]:
+    """The likely and the early weeks, as the feature and the board forecast both print them."""
+    return [
+        row("Likely done by", likely, f"{LIKELY} in 100 runs"),
+        row("Possibly as early as", early, "half the runs"),
+    ]
+
+
+def stall_line(found: Outlook) -> list[str]:
+    """The line that says how often the board stalled, or none when it never did."""
+    if not found.stalls:
+        return []
+    verb = "was a stall" if found.stalls == 1 else "were stalls"
+    weeks = plural(found.board_weeks, "week")
+    return [f"  {found.stalls} of the board's last {weeks} {verb}, under half its usual finishes."]
 
 
 def rows(found: Outlook) -> list[str]:
-    """The floor, the commitment and the worst case in weeks, and what the pace was measured from."""
+    """The likely and the early weeks, and what the pace was measured from."""
     if found.left == 0:
         return ["  nothing left to forecast"]
     header = f"  {plural(found.left, 'piece')} left"
-    if found.floor_weeks is None or found.commitment_weeks is None:
-        return [header, "", f"  {_WHY[found.reason or IDLE]}", *early(found)]
-    worst = (
-        f"  {'Worst case':<12}beyond two years"
-        if found.worst_weeks is None
-        else _row("Worst case", found.worst_weeks, f"{WORST}th percentile")
-    )
+    if found.early_weeks is None or found.likely_weeks is None:
+        return [header, "", f"  {_WHY[found.reason or IDLE]}"]
     lines = [
         header,
         "",
-        _row("Floor", found.floor_weeks, f"{FLOOR}th percentile"),
-        _row("Commitment", found.commitment_weeks, f"{COMMITMENT}th percentile"),
-        worst,
+        *range_rows(found.likely_weeks, found.early_weeks),
         "",
-        f"  Paced by this feature's own {plural(found.weeks, 'week')}, "
+        f"  Paced by this feature's {plural(found.weeks, 'working week')}, "
         f"an average of {found.per_week:.1f} stories a week.",
+        *stall_line(found),
     ]
+    if found.share is not None:
+        percent = round(found.share * 100)
+        lines.append(f"  This feature took {percent} percent of the board's finishes in its working weeks.")
     if found.unsplit:
         lines.append(drafts(found))
     return lines
-
-
-def early(found: Outlook) -> list[str]:
-    """The early estimate as two lines, or none when the feature has no estimate from the feature work."""
-    if found.early_floor_weeks is None or found.early_commitment_weeks is None:
-        return []
-    likely = plural(found.early_commitment_weeks, "week")
-    possibly = plural(found.early_floor_weeks, "week")
-    paced = f"{plural(found.early_weeks, 'week')}, {found.early_per_week:.1f} stories a week"
-    return [
-        f"  Early estimate   likely by {likely}, possibly {possibly}, from one feature's share of the feature work "
-        f"({paced}).",
-        "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
-    ]
 
 
 def drafts(found: Outlook) -> str:

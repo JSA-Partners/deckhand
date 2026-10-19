@@ -356,10 +356,10 @@ def test_the_forecast_says_when_the_board_is_likely_done_in_weeks(fleet_env, mon
     assert out.split("## Forecast\n", 1)[1].splitlines() == [
         "  1 story left",
         "",
-        "  Likely done by          1 week    90th percentile",
-        "  Possibly as early as    1 week    50th percentile",
+        "  Likely done by          1 week    85 in 100 runs",
+        "  Possibly as early as    1 week    half the runs",
         "",
-        "  Paced by the board's last 8 weeks, an average of 1.5 stories a week.",
+        "  Paced by the board's last 8 working weeks, an average of 1.5 stories a week.",
         "",
         "  Critical path through the blockers: 1 day at the median pace",
     ]
@@ -371,7 +371,7 @@ def test_the_forecast_prints_no_worst_case_and_no_parallelism(fleet_env, monkeyp
     assert cli.main(["captain", "context", "--only", "forecast"]) == 0
 
     out = capsys.readouterr().out
-    assert "Worst" not in out and "at once" not in out and "Commitment" not in out
+    assert "Worst" not in out and "at once" not in out
 
 
 def test_a_short_history_says_why_there_is_no_range(fleet_env, monkeypatch, capsys):

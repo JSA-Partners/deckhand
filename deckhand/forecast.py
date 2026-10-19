@@ -77,11 +77,6 @@ _WHY = {
 }
 
 
-def _row(label: str, weeks: int, note: str) -> str:
-    unit = "week" if weeks == 1 else "weeks"
-    return f"  {label:<22}{weeks:>3} {unit:<5}   {note}"
-
-
 def rows(read: fleet.Fleet, today: date) -> list[str]:
     """When the open stories the process owns are likely done, in weeks, and the bound the blockers set."""
     every = [*read.stories, *read.archived]
@@ -89,15 +84,15 @@ def rows(read: fleet.Fleet, today: date) -> list[str]:
     if found.left == 0:
         return ["  nothing left to forecast"]
     lines = [f"  {found.left} {'story' if found.left == 1 else 'stories'} left", ""]
-    if found.floor_weeks is None or found.commitment_weeks is None:
+    if found.early_weeks is None or found.likely_weeks is None:
         lines.append(f"  {_WHY[found.reason or throughput.IDLE]}")
     else:
         lines += [
-            _row("Likely done by", found.commitment_weeks, f"{throughput.COMMITMENT}th percentile"),
-            _row("Possibly as early as", found.floor_weeks, f"{throughput.FLOOR}th percentile"),
+            *throughput.range_rows(found.likely_weeks, found.early_weeks),
             "",
-            f"  Paced by the board's last {throughput.plural(found.weeks, 'week')}, "
+            f"  Paced by the board's last {throughput.plural(found.weeks, 'working week')}, "
             f"an average of {found.per_week:.1f} stories a week.",
+            *throughput.stall_line(found),
         ]
     if found.unsplit:
         lines.append(throughput.drafts(found))

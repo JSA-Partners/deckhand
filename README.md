@@ -177,30 +177,37 @@ is read as an issue and boarded on the way. A story already in another feature m
 dates and the day the feature's work began. Either way it names each of the feature's stories with
 its column, open ones first, so one command says what is in a feature and where it stands. It counts how many of the feature's own stories finished
 each week and draws whole weeks from those counts, the method of Daniel Vacanti's "When Will It Be
-Done?". A week with nothing finished counts as zero, so client work, weekends and stalls are
-already in the numbers.
+Done?".
 
-Each simulated run first resamples the measured weeks, so a short history gives a wider range, and
-a resample with no finished week is drawn again. The weeks start when the first of the feature's
-stories started, a first week that began partway through is left out, and the forecast draws from
-the last twelve full weeks.
+A week the whole board finished under half its median week is a stall: client work, planning, or
+time away, not a slow week for the feature. The board decides it, because the board sees every
+story. The feature's pace is drawn from the weeks the board worked, and a stall is drawn as often as
+the board stalled over its last twelve full weeks, finishing what the feature finished in its own
+stalls. A short history with two stalls in four weeks then counts them at the board's longer rate,
+and history from conditions unlike the work ahead is kept from setting the pace, the advice of
+[ActionableAgile](https://55degrees.atlassian.net/wiki/spaces/ActionableAgile/pages/2408972289/Monte+Carlo+When).
+
+Each simulated run first resamples the measured weeks and the board's stalls, so a short history
+gives a wider range, and a resample with no finished week or no working week is drawn again. The
+weeks start when the first of the feature's stories started, a first week that began partway
+through is left out, and the forecast draws from the last twelve full weeks. The forecast also says
+what share of the board's finishes the feature took in its working weeks, which other features and
+loose stories run beside it already shape.
 
 A draft with no stories listed yet counts as the average a finished parked feature became once five
 have finished, as the largest seen before that, and as one story before any has. A piece is one
 issue, so a draft not yet split is one piece even though the forecast counts it as several. A story
 closed as not planned or as a duplicate is not a piece.
 
-The floor is the 50th percentile, the commitment the 90th and the worst case the 99th. On a real
-board's history the commitment was met 86 percent of the time. In simulated steady work, the first
-forecast a feature gets met its commitment 89 percent of the time, and 87 percent in the worst case.
+The forecast reads likely done by the 85th percentile and possibly as early as the 50th, and the
+JSON adds the 99th as `worst`. Every date is the Friday on or after the day the weeks end. In
+simulated histories whose board stalled one week in five or one in three, the likely date was met
+84 to 90 percent of the time.
 
 There is no date range until four weeks have passed since the feature's work began and five of its
-stories have finished in the weeks measured, nor when every week measured finished the same number,
-nor when the commitment would be over two years out, and the forecast says which. A worst case
-past two years reads as beyond two years. Until then the forecast gives an early estimate drawn the
-same way from the weekly finishes of every story in any feature, once two weeks of that work have
-passed and five stories have finished, divided by how many features finished anything in those
-weeks, so a feature run beside another is estimated at its share. It is not a commitment.
+stories have finished in the weeks measured, nor when every working week finished the same number,
+nor when the likely date would be over two years out, and the forecast says which. A worst case
+past two years is null.
 
 `epic close` removes a feature once everything in it is done, or when nothing in it will be started,
 and refuses while any of its stories is open. Its finished stories drop the label, which nothing

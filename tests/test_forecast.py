@@ -152,10 +152,10 @@ def test_the_board_is_forecast_from_its_weekly_finishes():
     assert forecast.rows(read, TODAY) == [
         "  6 stories left",
         "",
-        "  Likely done by          5 weeks   90th percentile",
-        "  Possibly as early as    4 weeks   50th percentile",
+        "  Likely done by          5 weeks   85 in 100 runs",
+        "  Possibly as early as    4 weeks   half the runs",
         "",
-        "  Paced by the board's last 8 weeks, an average of 1.5 stories a week.",
+        "  Paced by the board's last 8 working weeks, an average of 1.5 stories a week.",
         "",
         "  Critical path through the blockers: 1 day at the median pace",
     ]
@@ -200,10 +200,17 @@ def test_a_board_whose_work_began_lately_has_no_range():
     )
 
 
+def test_the_block_says_how_often_the_board_stalled():
+    stalled = [story for story in PACED if story.number not in (102, 103)]
+    read = _fleet(_plain(1, 1), archived=tuple(stalled))
+
+    assert "  1 of the board's last 8 weeks was a stall, under half its usual finishes." in forecast.rows(read, TODAY)
+
+
 def test_the_block_never_prints_a_worst_case():
     lines = forecast.rows(_fleet(_plain(1, 1), archived=tuple(PACED)), TODAY)
 
-    assert not any("Worst" in line or "99th" in line for line in lines)
+    assert not any("Worst" in line or "99" in line for line in lines)
 
 
 def test_no_finished_story_is_no_range_and_no_critical_path():

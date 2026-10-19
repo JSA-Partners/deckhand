@@ -26,7 +26,6 @@ EXISTING = [
 STARTED = datetime.fromisoformat("2026-09-01T00:00:00Z").astimezone().date().isoformat()
 # The local calendar day of #311's finish, the first work on Billing.
 BILLED = datetime.fromisoformat("2026-09-10T12:00:00Z").astimezone().date().isoformat()
-NO_EARLY = {"early_floor": None, "early_commitment": None, "early_weeks": 0, "early_per_week": 0.0}
 
 
 @pytest.fixture
@@ -466,19 +465,18 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
         "pieces": 3,
         "done": 2,
         "drafts": 0,
-        "floor": None,
-        "commitment": None,
+        "early": None,
+        "likely": None,
         "worst": None,
         "weeks": 4,
         "per_week": 0.25,
+        "stalls": 0,
+        "board_weeks": 4,
+        "share": 0.14,
         "unsplit": 0,
         "split_size": 1.0,
         "split_basis": None,
         "reason": "too few finished",
-        "early_floor": "2026-10-16",
-        "early_commitment": "2026-10-16",
-        "early_weeks": 4,
-        "early_per_week": 0.88,
     }
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
@@ -488,13 +486,10 @@ def test_forecast_gives_no_dates_before_five_of_the_feature_s_stories_finish(boa
         "  1 piece left",
         "",
         "  Fewer than 5 of this feature's stories have finished in the weeks measured, so there is no date range yet.",
-        "  Early estimate   likely by 2 weeks, possibly 2 weeks, from one feature's share of the feature work "
-        "(4 weeks, 0.9 stories a week).",
-        "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
     ]
 
 
-def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeypatch, capsys):
+def test_forecast_gives_the_early_and_the_likely_dates(board_env, monkeypatch, capsys):
     _with_members(board_env, monkeypatch, *PACED)
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
@@ -510,47 +505,26 @@ def test_forecast_gives_the_floor_and_the_commitment_as_dates(board_env, monkeyp
         "pieces": 7,
         "done": 6,
         "drafts": 0,
-        "floor": "2026-10-09",
-        "commitment": "2026-10-23",
+        "early": "2026-10-09",
+        "likely": "2026-10-16",
         "worst": "2026-11-20",
-        "weeks": 4,
-        "per_week": 1.25,
+        "weeks": 3,
+        "per_week": 1.67,
+        "stalls": 1,
+        "board_weeks": 4,
+        "share": 0.5,
         "unsplit": 0,
         "split_size": 1.0,
         "split_basis": None,
         "reason": None,
-        **NO_EARLY,
     }
 
 
-def test_forecast_gives_an_early_estimate_before_the_feature_s_own_pace_settles(board_env, capsys):
+def test_forecast_gives_no_dates_before_four_weeks_of_the_feature_s_work(board_env, capsys):
     assert cli.main(["epic", "forecast", "Billing", "--json"]) == 0
 
     found = json.loads(capsys.readouterr().out)
-    found.pop("stories")
-    assert found == {
-        "feature": "OPT_BILLING",
-        "name": "Billing",
-        "about": "Charge for seats.",
-        "began": BILLED,
-        "closed": False,
-        "pieces": 7,
-        "done": 6,
-        "drafts": 0,
-        "floor": None,
-        "commitment": None,
-        "worst": None,
-        "weeks": 3,
-        "per_week": 1.33,
-        "unsplit": 0,
-        "split_size": 1.0,
-        "split_basis": None,
-        "reason": "too little history",
-        "early_floor": "2026-10-09",
-        "early_commitment": "2026-10-09",
-        "early_weeks": 4,
-        "early_per_week": 1.5,
-    }
+    assert (found["early"], found["likely"], found["reason"]) == (None, None, "too little history")
 
     assert cli.main(["epic", "forecast", "Billing"]) == 0
     lines = capsys.readouterr().out.splitlines()
@@ -559,20 +533,17 @@ def test_forecast_gives_an_early_estimate_before_the_feature_s_own_pace_settles(
         "  1 piece left",
         "",
         "  Work on this feature began fewer than 4 weeks ago, so there is no date range yet.",
-        "  Early estimate   likely by 1 week, possibly 1 week, from one feature's share of the feature work "
-        "(4 weeks, 1.5 stories a week).",
-        "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
     ]
 
 
-def test_forecast_gives_no_early_estimate_without_any_feature_work(board_env, monkeypatch, capsys):
-    _without_feature_work(board_env, monkeypatch)
+def test_forecast_rounds_each_date_up_to_a_friday(board_env, monkeypatch, capsys):
+    _with_members(board_env, monkeypatch, *PACED)
+    monkeypatch.setattr(epic, "_today", lambda: date(2026, 10, 3))
 
-    assert cli.main(["epic", "forecast", "Billing", "--json"]) == 0
+    assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
     found = json.loads(capsys.readouterr().out)
-    assert found["reason"] == "too little history"
-    assert {key: found[key] for key in NO_EARLY} == NO_EARLY
+    assert (found["early"], found["likely"], found["worst"]) == ("2026-10-16", "2026-10-23", "2026-11-27")
 
 
 def test_forecast_prints_the_block_for_one_feature(board_env, monkeypatch, capsys):
@@ -585,11 +556,12 @@ def test_forecast_prints_the_block_for_one_feature(board_env, monkeypatch, capsy
         "## Forecast: Permission rework",
         "  1 piece left",
         "",
-        "  Floor         1 week    50th percentile",
-        "  Commitment    3 weeks   90th percentile",
-        "  Worst case    7 weeks   99th percentile",
+        "  Likely done by          2 weeks   85 in 100 runs",
+        "  Possibly as early as    1 week    half the runs",
         "",
-        "  Paced by this feature's own 4 weeks, an average of 1.2 stories a week.",
+        "  Paced by this feature's 3 working weeks, an average of 1.7 stories a week.",
+        "  1 of the board's last 4 weeks was a stall, under half its usual finishes.",
+        "  This feature took 50 percent of the board's finishes in its working weeks.",
         "",
         "Pieces:",
         "  #302 Backlog Scope guests to granted collections",
@@ -661,6 +633,7 @@ def _member(
 
 
 # #301 finished in the partial week work began in, so five finishes over the four full weeks to 2026-10-02: 2, 0, 2, 1.
+# The board finished nothing else in the second week, so it is a stall and the working weeks are 2, 2, 1.
 PACED = [
     _member(310 + index, closed_at=f"{day}T12:00:00Z")
     for index, day in enumerate(["2026-09-10", "2026-09-10", "2026-09-24", "2026-09-24", "2026-10-01"])
@@ -675,24 +648,14 @@ def _with_members(tmp_path, monkeypatch, *nodes: dict) -> None:
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(path))
 
 
-def _without_feature_work(tmp_path, monkeypatch) -> None:
-    """The fixture without the six finished Billing stories, so no feature's pace has settled."""
-    items = json.loads((FIXTURES / "epic-items.json").read_text(encoding="utf-8"))
-    project = items["data"]["organization"]["projectV2"]["items"]
-    project["nodes"] = [node for node in project["nodes"] if node["content"]["number"] < 311]
-    path = tmp_path / "fewer-items.json"
-    path.write_text(json.dumps(items), encoding="utf-8")
-    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(path))
-
-
 def test_forecast_counts_a_member_in_another_repository(board_env, monkeypatch, capsys):
     _with_members(board_env, monkeypatch, *PACED, _member(7, repo="acme/gadgets"))
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
     assert (found["pieces"], found["done"]) == (8, 6)
-    assert found["floor"] is not None
-    assert found["commitment"] > "2026-10-16"
+    assert found["early"] is not None
+    assert found["likely"] > "2026-10-16"
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
     assert "  2 pieces left" in capsys.readouterr().out.splitlines()
@@ -729,8 +692,8 @@ def test_forecast_gives_no_dates_when_the_pace_would_take_over_two_years(board_e
 
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
     found = json.loads(capsys.readouterr().out)
-    assert (found["floor"], found["commitment"], found["worst"]) == (None, None, None)
-    assert (found["pieces"], found["per_week"], found["reason"]) == (127, 1.25, "over two years")
+    assert (found["early"], found["likely"], found["worst"]) == (None, None, None)
+    assert (found["pieces"], found["per_week"], found["reason"]) == (127, 1.67, "over two years")
 
     assert cli.main(["epic", "forecast", "Permission rework"]) == 0
     lines = capsys.readouterr().out.splitlines()
@@ -757,7 +720,7 @@ def test_two_forecasts_of_an_unchanged_board_give_the_same_dates(board_env, caps
     first = json.loads(capsys.readouterr().out)
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
-    assert first["floor"] is not None and first["commitment"] is not None
+    assert first["early"] is not None and first["likely"] is not None
     assert json.loads(capsys.readouterr().out) == first
     assert seeds == [epic.SEED, epic.SEED]
 
@@ -781,7 +744,7 @@ def test_forecast_reads_a_finished_feature_the_board_archived(board_env, monkeyp
 
     found = json.loads(capsys.readouterr().out)
     assert (found["closed"], found["pieces"], found["done"]) == (True, 2, 2)
-    assert (found["floor"], found["commitment"], found["worst"]) == (None, None, None)
+    assert (found["early"], found["likely"], found["worst"]) == (None, None, None)
 
 
 # close

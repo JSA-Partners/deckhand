@@ -303,34 +303,29 @@ def test_no_measured_pace_is_no_forecast():
 
 
 def test_one_steady_week_makes_every_run_identical():
-    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 90: 2, 99: 2}
-    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 90: 3, 99: 3}
-
-
-def test_simulate_treats_a_run_that_lands_on_zero_as_finished():
-    """Early samples are shares such as thirds, whose floating sum leaves a residue above zero."""
-    assert throughput.simulate(1, 0, [1 / 3, 1 / 3, 1 / 3], [1], runs=50) == {50: 3, 90: 3, 99: 3}
+    assert throughput.simulate(4, 0, [2], [1], runs=50) == {50: 2, 85: 2, 99: 2}
+    assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 85: 3, 99: 3}
 
 
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():
-    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 90: 4, 99: 4}
+    assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 85: 4, 99: 4}
 
 
 def test_empty_weeks_reach_the_pessimistic_percentiles():
-    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 90: 3, 99: 8}
+    assert throughput.simulate(1, 0, [0, 1, 1], [1]) == {50: 1, 85: 3, 99: 8}
 
 
 def test_each_run_resamples_the_weeks_so_a_short_history_runs_wide():
     # A quarter of the runs resample [1, 3] as two slow weeks and take all six.
-    assert throughput.simulate(6, 0, [1, 3], [1], runs=2000)[throughput.COMMITMENT] == 6
+    assert throughput.simulate(6, 0, [1, 3], [1], runs=2000)[throughput.LIKELY] == 6
 
 
 def test_a_resample_of_only_empty_weeks_is_drawn_again():
     assert throughput.simulate(3, 0, [0, 0, 0, 3], [1], runs=2000) is not None
 
 
-def test_a_commitment_two_years_out_is_no_forecast():
-    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 90: 103, 99: 103}
+def test_a_likely_date_two_years_out_is_no_forecast():
+    assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 85: 103, 99: 103}
     assert throughput.simulate(104, 0, [1], [1], runs=5) is None
 
 
@@ -338,7 +333,7 @@ def test_a_worst_case_at_two_years_is_not_measured():
     found = throughput.simulate(5, 0, [0] * 11 + [1], [1])
 
     assert found is not None
-    assert found[throughput.COMMITMENT] is not None
+    assert found[throughput.LIKELY] is not None
     assert found[throughput.WORST] is None
 
 
@@ -346,6 +341,83 @@ def test_a_seed_makes_two_runs_identical():
     first = throughput.simulate(9, 2, [0, 1, 3], [1, 2, 4], runs=200, seed=7)
 
     assert first == throughput.simulate(9, 2, [0, 1, 3], [1, 2, 4], runs=200, seed=7)
+
+
+# stalls
+
+
+def test_a_week_under_half_the_median_is_a_stall():
+    assert throughput.stalls([12, 16, 17, 0, 0]) == [False, False, False, True, True]
+    assert throughput.stalls([12, 16, 17, 5, 6]) == [False, False, False, True, False]
+
+
+def test_no_history_has_no_stalls():
+    assert throughput.stalls([]) == []
+    assert throughput.stalls([0, 0, 0]) == [False, False, False]
+
+
+def test_a_stall_week_draws_from_the_stall_counts():
+    flags = [False, True]
+
+    assert throughput.simulate(6, 0, [3], [1], flags, [0], runs=2000)[throughput.LIKELY] > 2
+    assert set(throughput.simulate(6, 0, [3], [1], flags, [3], runs=50).values()) == {2}
+
+
+def test_a_resample_of_only_stalls_is_drawn_again():
+    found = throughput.simulate(6, 0, [3], [1], [True, True, True, False], [0], runs=2000)
+
+    assert found is not None
+    assert found[throughput.WORST] is not None
+
+
+def _stalled_board(each: int = 3) -> list[fleet.Story]:
+    """Outside the feature, the board's four full weeks to TODAY finish 2 * `each`, 2 * `each`, 0 and 2 * `each`."""
+    days = [day for day in (27, 26, 20, 19, 5, 4) for _ in range(each)]
+    return [_finished(600 + index, day) for index, day in enumerate(days)]
+
+
+def _member_weeks() -> list[fleet.Story]:
+    """The feature's four full weeks to TODAY finish 2, 3, 0, 2, inside the board's weeks."""
+    days = [27, 26, 20, 20, 19, 5, 4]
+    return [_finished(700 + index, day, feature=FEATURE) for index, day in enumerate(days)]
+
+
+def test_an_outlook_leaves_the_board_s_stall_weeks_out_of_the_pace():
+    read = _fleet(_started(1, 28), _open(2, feature=FEATURE), *_member_weeks(), *_stalled_board())
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert (found.weeks, found.per_week, found.stalls, found.board_weeks) == (3, 2.33, 1, 4)
+    assert found.share == 7 / 25
+    assert found.likely_weeks is not None
+
+
+def test_a_feature_that_finished_only_in_the_board_s_stalls_is_idle():
+    days = [13, 12, 11, 10, 9]
+    quiet = [_finished(800 + index, day, feature=FEATURE) for index, day in enumerate(days)]
+    read = _fleet(_started(1, 28), _open(2, feature=FEATURE), *quiet, *_stalled_board(each=6))
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert (found.likely_weeks, found.reason) == (None, throughput.IDLE)
+
+
+def test_an_outlook_whose_working_weeks_never_varied_is_flat_whatever_its_stalls():
+    days = [27, 26, 20, 19, 5, 4]
+    even = [_finished(900 + index, day, feature=FEATURE) for index, day in enumerate(days)]
+    read = _fleet(_started(1, 28), _open(2, feature=FEATURE), *even, *_stalled_board())
+
+    found = throughput.outlook(read, FEATURE, TODAY)
+
+    assert (found.weeks, found.per_week, found.reason) == (3, 2.0, throughput.FLAT)
+
+
+def test_the_board_outlook_has_no_share():
+    read = _fleet(_open(2), *_stalled_board())
+
+    found = throughput.board(read, TODAY)
+
+    assert (found.stalls, found.board_weeks, found.share) == (1, 4, None)
 
 
 # outlook
@@ -365,11 +437,14 @@ def test_an_outlook_is_paced_by_the_feature_alone():
 
     assert throughput.outlook(read, FEATURE, TODAY) == throughput.Outlook(
         left=2,
-        floor_weeks=2,
-        commitment_weeks=2,
+        early_weeks=2,
+        likely_weeks=2,
         worst_weeks=2,
         weeks=12,
         per_week=1.08,
+        stalls=0,
+        board_weeks=12,
+        share=13 / 97,
         unsplit=0,
         split_size=1.0,
         split_basis=None,
@@ -383,7 +458,7 @@ def test_an_outlook_of_weeks_that_never_varied_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.weeks, found.per_week, found.reason) == (
+    assert (found.likely_weeks, found.weeks, found.per_week, found.reason) == (
         None,
         9,
         1.0,
@@ -397,7 +472,7 @@ def test_an_outlook_never_falls_back_to_the_project():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.weeks, found.reason) == (None, 0, throughput.THIN)
+    assert (found.likely_weeks, found.weeks, found.reason) == (None, 0, throughput.THIN)
 
 
 def test_an_outlook_with_four_finished_members_is_no_forecast():
@@ -406,7 +481,7 @@ def test_an_outlook_with_four_finished_members_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.reason) == (None, throughput.FEW)
+    assert (found.likely_weeks, found.reason) == (None, throughput.FEW)
 
 
 def test_an_outlook_is_settled_four_weeks_after_a_member_started():
@@ -417,7 +492,7 @@ def test_an_outlook_is_settled_four_weeks_after_a_member_started():
     found = throughput.outlook(read, FEATURE, TODAY)
 
     assert (found.weeks, found.per_week, found.reason) == (4, 1.25, None)
-    assert found.commitment_weeks is not None
+    assert found.likely_weeks is not None
 
 
 def test_an_outlook_of_a_feature_finished_long_ago_is_no_forecast():
@@ -427,7 +502,7 @@ def test_an_outlook_of_a_feature_finished_long_ago_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
+    assert (found.likely_weeks, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
 
 
 def test_the_pace_is_the_average_week():
@@ -443,7 +518,7 @@ def test_one_story_finished_today_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks) == (10, None, None, None)
+    assert (found.left, found.early_weeks, found.likely_weeks, found.worst_weeks) == (10, None, None, None)
     assert (found.weeks, found.reason) == (0, throughput.THIN)
 
 
@@ -452,7 +527,7 @@ def test_an_outlook_two_years_out_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks) == (200, None, None, None)
+    assert (found.left, found.early_weeks, found.likely_weeks, found.worst_weeks) == (200, None, None, None)
     assert (found.weeks, found.per_week, found.reason) == (12, 1.08, throughput.FAR)
 
 
@@ -461,7 +536,7 @@ def test_an_outlook_with_no_finish_in_twelve_weeks_is_no_forecast():
 
     found = throughput.outlook(read, FEATURE, TODAY)
 
-    assert (found.commitment_weeks, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
+    assert (found.likely_weeks, found.weeks, found.per_week, found.reason) == (None, 12, 0.0, throughput.IDLE)
 
 
 def _trees(count: int, size: int = 2, start: int = 100) -> list[fleet.Story]:
@@ -513,13 +588,13 @@ def test_an_outlook_with_no_unsplit_draft_has_no_split_basis():
 def test_a_feature_with_nothing_left_has_no_forecast():
     found = throughput.outlook(_fleet(_finished(1, 0, feature=FEATURE)), FEATURE, TODAY)
 
-    assert (found.left, found.floor_weeks, found.commitment_weeks, found.worst_weeks) == (0, None, None, None)
+    assert (found.left, found.early_weeks, found.likely_weeks, found.worst_weeks) == (0, None, None, None)
 
 
 def test_an_outlook_with_no_finished_story_has_no_forecast():
     found = throughput.outlook(_fleet(_open(1, feature=FEATURE)), FEATURE, TODAY)
 
-    assert (found.left, found.commitment_weeks, found.weeks, found.per_week, found.reason) == (
+    assert (found.left, found.likely_weeks, found.weeks, found.per_week, found.reason) == (
         1,
         None,
         0,
@@ -528,127 +603,20 @@ def test_an_outlook_with_no_finished_story_has_no_forecast():
     )
 
 
-# early estimate
-
-OTHER = "OPT_OTHER"
-
-
-def _feature_work() -> list[fleet.Story]:
-    """Another feature's finishes: one 28 days ago starts the weeks, and the four full ones since count 1, 1, 1, 2."""
-    return [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([28, 21, 14, 7, 0, 0])]
-
-
-def _early(found: throughput.Outlook) -> tuple:
-    return found.early_floor_weeks, found.early_commitment_weeks, found.early_weeks, found.early_per_week
-
-
-def test_a_feature_a_week_old_gets_an_early_estimate_from_the_pace_of_all_feature_work():
-    read = _fleet(_started(1, 7), _open(2, feature=FEATURE), *_feature_work())
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert (found.reason, found.floor_weeks, found.commitment_weeks) == (throughput.THIN, None, None)
-    assert _early(found) == (2, 2, 4, 1.25)
-
-
-def test_a_feature_with_too_few_finishes_gets_an_early_estimate():
-    read = _fleet(*_members(2, 28), _open(2, feature=FEATURE), *_feature_work())
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert found.reason == throughput.FEW
-    assert _early(found) == (2, 2, 4, 0.75)
-
-
-def test_the_early_estimate_is_one_feature_s_share_of_the_feature_work():
-    beside = [_finished(300 + index, day, feature="OPT_BESIDE") for index, day in enumerate([28, 21, 14, 7, 0, 0])]
-    read = _fleet(_started(1, 7), _open(2, feature=FEATURE), *_feature_work(), *beside)
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert found.early_per_week == 1.25
-    assert _early(found) == (2, 2, 4, 1.25)
-
-
-def test_a_feature_with_its_own_range_gets_no_early_estimate():
-    read = _fleet(_open(1, feature=FEATURE), *_varied_members(), *_feature_work())
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert found.commitment_weeks is not None
-    assert _early(found) == (None, None, 0, 0.0)
-
-
-def test_no_feature_work_at_all_gives_no_early_estimate():
-    others = [_finished(500 + day, day) for day in range(60)]
-    read = _fleet(_started(1, 7), *others)
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert found.reason == throughput.THIN
-    assert _early(found) == (None, None, 0, 0.0)
-
-
-def test_two_weeks_of_feature_work_are_enough_for_an_early_estimate():
-    recent = [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([20, 13, 6, 6, 0, 0])]
-    read = _fleet(_started(1, 7), *recent)
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert found.early_commitment_weeks is not None
-    assert found.early_weeks >= 2
-
-
-def test_feature_work_under_two_weeks_old_gives_no_early_estimate():
-    recent = [_finished(200 + index, day, feature=OTHER) for index, day in enumerate([13, 6, 6, 0, 0])]
-    read = _fleet(_started(1, 7), *recent)
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert _early(found) == (None, None, 0, 0.0)
-
-
-def test_the_early_estimate_is_paced_by_feature_work_alone():
-    others = [_finished(500 + day, day) for day in range(60)]
-    read = _fleet(_started(1, 7), _open(2, feature=FEATURE), *_feature_work(), *others)
-
-    found = throughput.outlook(read, FEATURE, TODAY)
-
-    assert _early(found) == (2, 2, 4, 1.25)
-
-
-def test_the_early_estimate_counts_an_unsplit_draft_by_the_splits_parked_features_had():
-    settled = throughput.outlook(_fleet(*_trees(5), _open(20, feature=FEATURE), *_feature_work()), FEATURE, TODAY)
-    unsplit = throughput.outlook(
-        _fleet(*_trees(5), _open(20, feature=FEATURE, body=DRAFT), *_feature_work()), FEATURE, TODAY
-    )
-
-    assert (settled.unsplit, unsplit.unsplit, unsplit.split_size) == (0, 1, 2.0)
-    assert (settled.early_floor_weeks, settled.early_commitment_weeks) == (1, 1)
-    assert (unsplit.early_floor_weeks, unsplit.early_commitment_weeks) == (2, 2)
-
-
-def test_the_board_outlook_has_no_early_estimate():
-    steadying = [_finished(300 + index, day) for index, day in enumerate([21, 14, 7])]
-    read = _fleet(_open(1, feature=FEATURE), *_feature_work(), *steadying)
-
-    found = throughput.board(read, TODAY)
-
-    assert found.reason == throughput.FLAT
-    assert _early(found) == (None, None, 0, 0.0)
-
-
 # rows
 
 
 def _outlook(**changes) -> throughput.Outlook:
     base = throughput.Outlook(
         left=3,
-        floor_weeks=2,
-        commitment_weeks=4,
+        early_weeks=2,
+        likely_weeks=4,
         worst_weeks=6,
-        weeks=12,
+        weeks=10,
         per_week=1.5,
+        stalls=0,
+        board_weeks=12,
+        share=None,
         unsplit=0,
         split_size=1.0,
         split_basis=None,
@@ -659,27 +627,39 @@ def _outlook(**changes) -> throughput.Outlook:
 
 
 def _none(reason: str) -> throughput.Outlook:
-    return _outlook(floor_weeks=None, commitment_weeks=None, worst_weeks=None, reason=reason)
+    return _outlook(early_weeks=None, likely_weeks=None, worst_weeks=None, reason=reason)
 
 
-def test_the_rows_give_each_line_in_weeks():
-    assert throughput.rows(_outlook()) == [
+def test_the_rows_give_the_likely_and_the_early_weeks():
+    assert throughput.rows(_outlook(stalls=2, share=0.33)) == [
         "  3 pieces left",
         "",
-        "  Floor         2 weeks   50th percentile",
-        "  Commitment    4 weeks   90th percentile",
-        "  Worst case    6 weeks   99th percentile",
+        "  Likely done by          4 weeks   85 in 100 runs",
+        "  Possibly as early as    2 weeks   half the runs",
         "",
-        "  Paced by this feature's own 12 weeks, an average of 1.5 stories a week.",
+        "  Paced by this feature's 10 working weeks, an average of 1.5 stories a week.",
+        "  2 of the board's last 12 weeks were stalls, under half its usual finishes.",
+        "  This feature took 33 percent of the board's finishes in its working weeks.",
     ]
 
 
 def test_the_rows_say_one_week_and_one_piece():
-    lines = throughput.rows(_outlook(weeks=5, left=1, floor_weeks=1))
+    lines = throughput.rows(_outlook(weeks=1, left=1, early_weeks=1, stalls=1))
 
-    assert "  Paced by this feature's own 5 weeks, an average of 1.5 stories a week." in lines
+    assert "  Paced by this feature's 1 working week, an average of 1.5 stories a week." in lines
     assert "  1 piece left" in lines
-    assert "  Floor         1 week    50th percentile" in lines
+    assert "  Possibly as early as    1 week    half the runs" in lines
+    assert "  1 of the board's last 12 weeks was a stall, under half its usual finishes." in lines
+
+
+def test_the_rows_name_no_stall_and_no_share_when_there_is_none():
+    lines = throughput.rows(_outlook())
+
+    assert not any("stall" in line or "percent" in line for line in lines)
+
+
+def test_the_rows_never_print_a_worst_case():
+    assert not any("Worst" in line or "99" in line for line in throughput.rows(_outlook()))
 
 
 def test_the_rows_say_an_unsplit_draft_was_counted_as_the_measured_average():
@@ -705,7 +685,7 @@ def test_the_rows_say_an_unsplit_draft_was_counted_as_one_story_by_assumption():
 
 
 def test_the_rows_say_so_when_nothing_is_left():
-    assert throughput.rows(_outlook(left=0, floor_weeks=None)) == ["  nothing left to forecast"]
+    assert throughput.rows(_outlook(left=0, early_weeks=None)) == ["  nothing left to forecast"]
 
 
 def test_the_rows_say_so_when_the_history_is_too_short():
@@ -732,32 +712,6 @@ def test_the_rows_say_so_when_the_weekly_pace_has_not_varied():
     assert throughput.rows(_none(throughput.FLAT))[-1] == (
         "  This feature's weekly pace has not varied yet, so a date range would be falsely precise."
     )
-
-
-def test_the_rows_give_the_early_estimate_after_the_reason():
-    found = _none(throughput.THIN)
-    found = dataclasses.replace(
-        found, early_floor_weeks=1, early_commitment_weeks=3, early_weeks=8, early_per_week=1.25
-    )
-
-    assert throughput.rows(found) == [
-        "  3 pieces left",
-        "",
-        "  Work on this feature began fewer than 4 weeks ago, so there is no date range yet.",
-        "  Early estimate   likely by 3 weeks, possibly 1 week, from one feature's share of the feature work "
-        "(8 weeks, 1.2 stories a week).",
-        "  The estimate is not a commitment; the feature's own pace replaces it once that pace has settled.",
-    ]
-
-
-def test_the_rows_give_no_early_estimate_beside_a_range():
-    found = _outlook(early_floor_weeks=1, early_commitment_weeks=3, early_weeks=8, early_per_week=1.25)
-
-    assert not any("Early estimate" in line for line in throughput.rows(found))
-
-
-def test_the_rows_say_a_worst_case_past_two_years_is_beyond_them():
-    assert "  Worst case  beyond two years" in throughput.rows(_outlook(worst_weeks=None))
 
 
 def test_the_rows_say_so_when_the_pace_would_take_over_two_years():
