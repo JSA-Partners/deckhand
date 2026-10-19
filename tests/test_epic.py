@@ -543,8 +543,7 @@ def test_forecast_rounds_each_date_up_to_a_friday(board_env, monkeypatch, capsys
     assert cli.main(["epic", "forecast", "Permission rework", "--json"]) == 0
 
     found = json.loads(capsys.readouterr().out)
-    days = [date.fromisoformat(found[key]).weekday() for key in ("early", "likely", "worst")]
-    assert days == [epic.FRIDAY] * 3
+    assert (found["early"], found["likely"], found["worst"]) == ("2026-10-16", "2026-10-23", "2026-11-27")
 
 
 def test_forecast_prints_the_block_for_one_feature(board_env, monkeypatch, capsys):

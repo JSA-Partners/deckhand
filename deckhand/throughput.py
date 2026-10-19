@@ -31,7 +31,6 @@ STALL = 0.5
 LOOKBACK = 12
 # Two years in weeks, past which a likely date says nothing a stakeholder can plan on.
 HORIZON = 104
-RESIDUE = 1e-9
 
 THIN = "too little history"
 FEW = "too few finished"
@@ -206,15 +205,13 @@ def simulate(
         return None
     rng = random.Random(seed)
     stalling = bool(flags) and any(flags)
-    all_stalls = stalling and all(flags)
     taken = []
     for _ in range(runs):
         left = items + sum(rng.choice(sizes) for _ in range(unsplit))
         run_samples = _resample(rng, samples, any)
-        run_flags = _resample(rng, flags or [], lambda drawn: all_stalls or not all(drawn)) if stalling else []
+        run_flags = _resample(rng, flags or [], lambda drawn: not all(drawn)) if stalling else []
         weeks = 0
-        # Shares such as thirds leave a floating residue above zero, so done is within a billionth.
-        while left > RESIDUE and weeks < HORIZON:
+        while left > 0 and weeks < HORIZON:
             if stalling and rng.choice(run_flags):
                 left -= rng.choice(stalled) if stalled else 0
             else:

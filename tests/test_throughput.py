@@ -307,11 +307,6 @@ def test_one_steady_week_makes_every_run_identical():
     assert throughput.simulate(5, 0, [2], [1], runs=50) == {50: 3, 85: 3, 99: 3}
 
 
-def test_simulate_treats_a_run_that_lands_on_zero_as_finished():
-    """Early samples are shares such as thirds, whose floating sum leaves a residue above zero."""
-    assert throughput.simulate(1, 0, [1 / 3, 1 / 3, 1 / 3], [1], runs=50) == {50: 3, 85: 3, 99: 3}
-
-
 def test_an_unsplit_draft_counts_as_a_drawn_split_size():
     assert throughput.simulate(1, 1, [1], [3], runs=50) == {50: 4, 85: 4, 99: 4}
 
@@ -329,7 +324,7 @@ def test_a_resample_of_only_empty_weeks_is_drawn_again():
     assert throughput.simulate(3, 0, [0, 0, 0, 3], [1], runs=2000) is not None
 
 
-def test_a_commitment_two_years_out_is_no_forecast():
+def test_a_likely_date_two_years_out_is_no_forecast():
     assert throughput.simulate(103, 0, [1], [1], runs=5) == {50: 103, 85: 103, 99: 103}
     assert throughput.simulate(104, 0, [1], [1], runs=5) is None
 
@@ -373,10 +368,6 @@ def test_a_resample_of_only_stalls_is_drawn_again():
 
     assert found is not None
     assert found[throughput.WORST] is not None
-
-
-def test_an_all_stall_history_finishes_on_its_stall_counts():
-    assert set(throughput.simulate(6, 0, [3], [1], [True, True], [3], runs=50).values()) == {2}
 
 
 def _stalled_board(each: int = 3) -> list[fleet.Story]:

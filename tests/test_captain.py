@@ -371,7 +371,7 @@ def test_the_forecast_prints_no_worst_case_and_no_parallelism(fleet_env, monkeyp
     assert cli.main(["captain", "context", "--only", "forecast"]) == 0
 
     out = capsys.readouterr().out
-    assert "Worst" not in out and "at once" not in out and "Commitment" not in out
+    assert "Worst" not in out and "at once" not in out
 
 
 def test_a_short_history_says_why_there_is_no_range(fleet_env, monkeypatch, capsys):

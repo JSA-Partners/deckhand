@@ -210,7 +210,7 @@ def test_the_block_says_how_often_the_board_stalled():
 def test_the_block_never_prints_a_worst_case():
     lines = forecast.rows(_fleet(_plain(1, 1), archived=tuple(PACED)), TODAY)
 
-    assert not any("Worst" in line or "99th" in line for line in lines)
+    assert not any("Worst" in line or "99" in line for line in lines)
 
 
 def test_no_finished_story_is_no_range_and_no_critical_path():
