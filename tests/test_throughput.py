@@ -348,6 +348,37 @@ def test_a_seed_makes_two_runs_identical():
     assert first == throughput.simulate(9, 2, [0, 1, 3], [1, 2, 4], runs=200, seed=7)
 
 
+# stalls
+
+
+def test_a_week_under_half_the_median_is_a_stall():
+    assert throughput.stalls([12, 16, 17, 0, 0]) == [False, False, False, True, True]
+    assert throughput.stalls([12, 16, 17, 5, 6]) == [False, False, False, True, False]
+
+
+def test_no_history_has_no_stalls():
+    assert throughput.stalls([]) == []
+    assert throughput.stalls([0, 0, 0]) == [False, False, False]
+
+
+def test_a_stall_week_draws_from_the_stall_counts():
+    flags = [False, True]
+
+    assert throughput.simulate(6, 0, [3], [1], flags, [0], runs=2000)[throughput.WORST] > 2
+    assert set(throughput.simulate(6, 0, [3], [1], flags, [3], runs=50).values()) == {2}
+
+
+def test_a_resample_of_only_stalls_is_drawn_again():
+    found = throughput.simulate(6, 0, [3], [1], [True, True, True, False], [0], runs=2000)
+
+    assert found is not None
+    assert found[throughput.WORST] is not None
+
+
+def test_an_all_stall_history_finishes_on_its_stall_counts():
+    assert set(throughput.simulate(6, 0, [3], [1], [True, True], [3], runs=50).values()) == {2}
+
+
 # outlook
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import random
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -24,8 +25,8 @@ ROOTS = 5
 PACED = 5
 # Below this many weeks since a feature's work began, its pace has not settled.
 SETTLED = 4
-# An early estimate is no commitment, so two weeks of feature work are enough to draw it from.
-EARLY_SETTLED = 2
+# A board week under this share of its median week is a stall: client work or planning, not a slow week.
+STALL = 0.5
 # Weeks of history drawn from, so a pace from long ago does not outvote this quarter's.
 LOOKBACK = 12
 # Two years in weeks, past which a commitment says nothing a stakeholder can plan on.
@@ -133,6 +134,14 @@ def pace(every: list[fleet.Story], feature: str, today: date) -> tuple[list[int]
     return _paced(fleet.members(every, feature), today)
 
 
+def stalls(counts: list[int]) -> list[bool]:
+    """Which of the board's weekly counts are stalls: under `STALL` of its median week."""
+    if not counts:
+        return []
+    line = statistics.median(counts) * STALL
+    return [count < line for count in counts]
+
+
 def featured(every: list[fleet.Story]) -> list[fleet.Story]:
     """Every story in any feature: one in flight alone gets all of that pace, so two side by side lean early."""
     return [story for story in every if story.feature is not None]
@@ -154,29 +163,51 @@ def _percentile(sorted_values: list[int], p: int) -> int:
     return sorted_values[min(len(sorted_values) - 1, max(0, index))]
 
 
+def _resample(rng: random.Random, values: list, kept: Callable[[list], bool]) -> list:
+    """`values` drawn again to their own length until `kept` accepts the draw."""
+    drawn = [rng.choice(values) for _ in values]
+    while not kept(drawn):
+        drawn = [rng.choice(values) for _ in values]
+    return drawn
+
+
 def simulate(
-    items: int, unsplit: int, samples: list[int], sizes: list[int], runs: int = 10_000, seed: int = 0
+    items: int,
+    unsplit: int,
+    samples: list[int],
+    sizes: list[int],
+    flags: list[bool] | None = None,
+    stalled: list[int] | None = None,
+    runs: int = 10_000,
+    seed: int = 0,
 ) -> dict[int, int | None] | None:
     """The weeks to finish at `PERCENTILES`, each run resampling `samples` and drawing weeks from that until done.
 
+    `samples` are the weeks the board worked. With `flags`, each run also resamples the board's stall
+    flags, and a week drawn as a stall finishes one of `stalled`, or nothing when there is none.
     Resampling per run carries the doubt about the pace itself, so a short history gives a wide range.
-    A resample with no finished week is drawn again, since it would stall and never finish.
-    A percentile that reaches `HORIZON` is None, since no run measured it; the whole forecast is None
-    when nothing is left, no week in `samples` finished anything, or the commitment reaches `HORIZON`.
+    A resample with no finished week, or with no week the board worked, is drawn again, since it would
+    never finish. A percentile that reaches `HORIZON` is None, since no run measured it; the whole
+    forecast is None when nothing is left, no week in `samples` finished anything, or the commitment
+    reaches `HORIZON`.
     """
     if items + unsplit == 0 or not any(samples):
         return None
     rng = random.Random(seed)
+    stalling = bool(flags) and any(flags)
+    all_stalls = stalling and all(flags)
     taken = []
     for _ in range(runs):
         left = items + sum(rng.choice(sizes) for _ in range(unsplit))
-        run_samples = [rng.choice(samples) for _ in samples]
-        while not any(run_samples):
-            run_samples = [rng.choice(samples) for _ in samples]
+        run_samples = _resample(rng, samples, any)
+        run_flags = _resample(rng, flags or [], lambda drawn: all_stalls or not all(drawn)) if stalling else []
         weeks = 0
         # Shares such as thirds leave a floating residue above zero, so done is within a billionth.
         while left > RESIDUE and weeks < HORIZON:
-            left -= rng.choice(run_samples)
+            if stalling and rng.choice(run_flags):
+                left -= rng.choice(stalled) if stalled else 0
+            else:
+                left -= rng.choice(run_samples)
             weeks += 1
         taken.append(weeks)
     taken.sort()
@@ -237,7 +268,7 @@ def _early(
     items: int, unsplit: int, sizes: list[int], prior: list[fleet.Story], today: date, seed: int
 ) -> tuple[dict[int, int | None] | None, list[int]]:
     """The weeks drawn from `prior` instead, and the weekly counts drawn from, when `prior` can pace a forecast."""
-    counts, settled = _paced(prior, today, EARLY_SETTLED)
+    counts, settled = _paced(prior, today, 2)
     if _short(counts, settled):
         return None, []
     # Pooled weeks hold every feature run side by side, and one feature gets only its share of them.
