@@ -1,5 +1,16 @@
 # Changelog
 
+## [5.0.0](https://github.com/JSA-Partners/deckhand/compare/v4.3.0...v5.0.0) (2026-10-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* forecast likely and early dates, stalls left out of the pace ([#43](https://github.com/JSA-Partners/deckhand/issues/43))
+
+### Features
+
+* forecast likely and early dates, stalls left out of the pace ([#43](https://github.com/JSA-Partners/deckhand/issues/43)) ([75e8cfe](https://github.com/JSA-Partners/deckhand/commit/75e8cfeede20c712697a0ad6b3bdc3a18598402b))
+
 ## [4.3.0](https://github.com/JSA-Partners/deckhand/compare/v4.2.0...v4.3.0) (2026-10-12)
 
 
