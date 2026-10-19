@@ -175,9 +175,9 @@ is read as an issue and boarded on the way. A story already in another feature m
 
 `epic forecast` says how many weeks the feature's open stories will take, and with `--json` gives
 dates and the day the feature's work began. Either way it names each of the feature's stories with
-its column, open ones first, so one command says what is in a feature and where it stands. It counts how many of the feature's own stories finished
-each week and draws whole weeks from those counts, the method of Daniel Vacanti's "When Will It Be
-Done?".
+its column, open ones first, so one command says what is in a feature and where it stands. It counts
+how many of the feature's own stories finished each week and draws whole weeks from those counts,
+the method of Daniel Vacanti's "When Will It Be Done?".
 
 A week the whole board finished under half its median week is a stall: client work, planning, or
 time away, not a slow week for the feature. The board decides it, because the board sees every
@@ -191,8 +191,9 @@ Each simulated run first resamples the measured weeks and the board's stalls, so
 gives a wider range, and a resample with no finished week or no working week is drawn again. The
 weeks start when the first of the feature's stories started, a first week that began partway
 through is left out, and the forecast draws from the last twelve full weeks. The forecast also says
-what share of the board's finishes the feature took in its working weeks, which other features and
-loose stories run beside it already shape.
+what share of the board's finishes the feature took in its working weeks. The share is reported, not
+modeled, because the feature's own pace already reflects the other features and loose stories
+beside it.
 
 A draft with no stories listed yet counts as the average a finished parked feature became once five
 have finished, as the largest seen before that, and as one story before any has. A piece is one
