@@ -141,9 +141,14 @@ def stalls(counts: list[int]) -> list[bool]:
     return [count < line for count in counts]
 
 
+def _verdicts(samples: list[int], flags: list[bool]) -> list[bool]:
+    """The board's stall flag for each week of `samples`; both end on today's week."""
+    return flags[-len(samples) :] if samples else []
+
+
 def _split(samples: list[int], flags: list[bool]) -> tuple[list[int], list[int]]:
-    """The weeks of `samples` the board worked and the weeks it stalled; both end on today's week."""
-    verdicts = flags[-len(samples) :] if samples else []
+    """The weeks of `samples` the board worked and the weeks it stalled."""
+    verdicts = _verdicts(samples, flags)
     working = [count for count, stalled in zip(samples, verdicts, strict=True) if not stalled]
     stalled = [count for count, stalled in zip(samples, verdicts, strict=True) if stalled]
     return working, stalled
@@ -151,8 +156,7 @@ def _split(samples: list[int], flags: list[bool]) -> tuple[list[int], list[int]]
 
 def _share(samples: list[int], flags: list[bool], board: list[int]) -> float | None:
     """The feature's finishes over the board's in the weeks the board worked, or None with no such week."""
-    verdicts = flags[-len(samples) :] if samples else []
-    weeks = [index for index, stalled in enumerate(verdicts) if not stalled]
+    weeks = [index for index, stalled in enumerate(_verdicts(samples, flags)) if not stalled]
     whole = sum(board[-len(samples) :][index] for index in weeks)
     return sum(samples[index] for index in weeks) / whole if whole else None
 
@@ -173,7 +177,7 @@ def _percentile(sorted_values: list[int], p: int) -> int:
     return sorted_values[min(len(sorted_values) - 1, max(0, index))]
 
 
-def _resample(rng: random.Random, values: list, kept: Callable[[list], bool]) -> list:
+def _resample[T](rng: random.Random, values: list[T], kept: Callable[[list[T]], bool]) -> list[T]:
     """`values` drawn again to their own length until `kept` accepts the draw."""
     drawn = [rng.choice(values) for _ in values]
     while not kept(drawn):
