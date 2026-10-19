@@ -22,6 +22,7 @@ COLOR = "GRAY"
 MOST_OPTIONS = 50
 # A fixed draw, so two forecasts of an unchanged board give a report the same dates.
 SEED = 0
+FRIDAY = 4
 
 
 def _today() -> date:
@@ -252,24 +253,27 @@ def _list(args: argparse.Namespace) -> int:
 
 
 def _on(weeks: int | None) -> str | None:
-    return None if weeks is None else (_today() + timedelta(days=7 * weeks)).isoformat()
+    """The Friday on or after the day `weeks` weeks from today, so a date reads as the end of a week."""
+    if weeks is None:
+        return None
+    day = _today() + timedelta(days=7 * weeks)
+    return (day + timedelta(days=(FRIDAY - day.weekday()) % 7)).isoformat()
 
 
 def _dated(found: throughput.Outlook) -> dict:
     return {
-        "floor": _on(found.floor_weeks),
-        "commitment": _on(found.commitment_weeks),
+        "early": _on(found.early_weeks),
+        "likely": _on(found.likely_weeks),
         "worst": _on(found.worst_weeks),
         "weeks": found.weeks,
         "per_week": found.per_week,
+        "stalls": found.stalls,
+        "board_weeks": found.board_weeks,
+        "share": None if found.share is None else round(found.share, 2),
         "unsplit": found.unsplit,
         "split_size": round(found.split_size, 2),
         "split_basis": found.split_basis,
         "reason": found.reason,
-        "early_floor": _on(found.early_floor_weeks),
-        "early_commitment": _on(found.early_commitment_weeks),
-        "early_weeks": found.early_weeks,
-        "early_per_week": found.early_per_week,
     }
 
 
