@@ -45,13 +45,16 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def isolated_git(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Hide the ambient git repository and the user's git config from every test.
 
     git exports GIT_DIR, GIT_INDEX_FILE, GIT_PREFIX, and friends to its hooks, so a hook-invoked
     pytest must never see the ambient repository: a test that inits a scratch repo would otherwise
     re-init the real one and write its config, index, and objects there. Only GIT_EXEC_PATH survives.
+    A test also starts outside any repository, since a command run from the checkout would fetch
+    and fast-forward its main.
     """
+    monkeypatch.chdir(tmp_path)
     for name in list(os.environ):
         if name.startswith("GIT_") and name != "GIT_EXEC_PATH":
             monkeypatch.delenv(name, raising=False)
