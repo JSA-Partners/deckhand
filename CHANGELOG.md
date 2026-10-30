@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.1](https://github.com/JSA-Partners/deckhand/compare/v5.0.0...v5.0.1) (2026-10-30)
+
+
+### Documentation
+
+* cut the README down to what a reader needs ([#49](https://github.com/JSA-Partners/deckhand/issues/49)) ([ad12238](https://github.com/JSA-Partners/deckhand/commit/ad122382da7c30f0ffd725c9d82a6afea6be8091))
+
 ## [5.0.0](https://github.com/JSA-Partners/deckhand/compare/v4.3.0...v5.0.0) (2026-10-19)
 
 
