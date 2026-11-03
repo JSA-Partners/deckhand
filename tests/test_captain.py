@@ -33,7 +33,7 @@ def _settled(tmp_path, monkeypatch) -> None:
     """
     data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
     for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
-        node["enabled"] = node["name"] == "Auto-archive items"
+        node["enabled"] = False
     path = tmp_path / "workflows-off.json"
     path.write_text(json.dumps(data))
     monkeypatch.setenv("GH_WORKFLOWS_FILE", str(path))
@@ -205,10 +205,49 @@ def test_the_order_is_written_to_the_board(fleet_env, gh_calls, capsys):
     assert "Ordered 4 stories" in capsys.readouterr().out
 
 
-def test_a_repair_with_nothing_to_repair_refuses(fleet_env, monkeypatch, capsys):
+def test_a_repair_with_nothing_to_repair_refuses(fleet_env, gh_calls, monkeypatch, capsys):
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-clean.json"))
     assert cli.main(["captain", "apply", "--repair"]) == 1
     assert "nothing to repair" in capsys.readouterr().err
+    assert not [call for call in gh_calls() if "item-archive" in call]
+
+
+def _archived(node: dict, item: str, number: int, repo: str, status: str) -> dict:
+    """`node` as a closed story of `repo` that the project archived while it stood in `status`."""
+    content = {
+        **node["content"],
+        "number": number,
+        "url": f"https://github.com/{repo}/issues/{number}",
+        "state": "CLOSED",
+        "closedAt": "2026-10-20T00:00:00Z",
+        "repository": {"nameWithOwner": repo},
+    }
+    values = [{"name": status, "field": {"name": "Status"}}]
+    return {**node, "id": item, "isArchived": True, "content": content, "fieldValues": {"nodes": values}}
+
+
+def test_a_repair_unarchives_a_story_archived_before_done(fleet_env, gh_calls, monkeypatch, tmp_path, capsys):
+    """Auto-archive takes a merged story off the board while it still owes after-the-merge items."""
+    seed = _clean_nodes()[0]
+    nodes = [
+        *_clean_nodes(),
+        _archived(seed, "I_259", 259, REPO, "Verification"),
+        _archived(seed, "I_21", 21, "acme/gadgets", "Verification"),
+        _archived(seed, "I_200", 200, REPO, "Done"),
+    ]
+    for name, value in _items(tmp_path, "archived.json", nodes).items():
+        monkeypatch.setenv(name, value)
+
+    assert cli.main(["captain", "apply", "--repair"]) == 0
+
+    assert [call for call in gh_calls() if call.startswith("project item-archive")] == [
+        "project item-archive 2 --owner acme --id I_259 --undo",
+        "project item-archive 2 --owner acme --id I_21 --undo",
+    ]
+    out = capsys.readouterr().out
+    assert "Unarchived acme/widgets#259" in out
+    assert "Unarchived acme/gadgets#21" in out
+    assert not [call for call in gh_calls() if "item-edit" in call]
 
 
 def _foreign(status: str) -> dict:

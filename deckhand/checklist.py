@@ -19,9 +19,9 @@ OPTIONAL_BOARD_FIELDS = frozenset({board.FEATURE})
 KIND_COLORS = {"feat": "GREEN", "fix": "RED", "chore": "GRAY", "refactor": "BLUE", "docs": "PURPLE", "perf": "ORANGE"}
 OTHER_COLOR = "YELLOW"
 
-# Built-in project workflows that write what deckhand owns. Auto-archive items is deliberately not
-# here: it is the only built-in that never touches Status.
-WORKFLOWS_OFF = ("Item added to project", "Item closed", "Auto-close issue")
+# Built-in project workflows that write what deckhand owns. Auto-archive items never touches Status,
+# but its default filter takes a closed story off the board while it still owes after-the-merge items.
+WORKFLOWS_OFF = ("Item added to project", "Item closed", "Auto-close issue", "Auto-archive items")
 
 # The repository settings `setup apply` writes, as the REST repository object reports them.
 MERGE_SETTINGS: dict[str, Any] = {

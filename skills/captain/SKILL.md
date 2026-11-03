@@ -19,9 +19,8 @@ before; mention it only when asked.
 Every later question in this session reruns `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
 because sessions move. Asking about one session is `captain context --session <id>`.
 
-When the anomalies block has a row whose fix is a Status or adding an item, offer
-`captain apply --repair` and run it if the person agrees. When they ask for the backlog to be put in
-order, offer `captain apply --order`. Both write the board and nothing else: never a story step, a
+When an anomaly's fix is `captain apply --repair`, offer it and run it if the person agrees.
+When they ask for the backlog to be put in order, offer `captain apply --order`. Both write the board and nothing else: never a story step, a
 branch, or a commit. An edge the board is missing is written with
 `captain apply --block N --by M`, and taken away with `--unblock N --by M`; both refuse a blocker
 that is closed. A duplicate or an abandoned story is withdrawn with

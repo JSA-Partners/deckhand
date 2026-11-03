@@ -488,7 +488,7 @@ def test_an_archived_story_the_process_owns_is_an_anomaly():
     archived = [dataclasses.replace(_story(120), archived=True)]
     found = fleet.anomalies([], {}, set(), [], archived=archived)
     assert [(a.number, a.what, a.fix) for a in found] == [
-        (120, "archived, and still In Progress", "unarchive it on the board")
+        (120, "archived, and still In Progress", "captain apply --repair")
     ]
 
 

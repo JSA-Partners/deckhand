@@ -60,6 +60,11 @@ def remove(settings: Settings, item: str) -> None:
     gh.run("project", "item-delete", str(settings.project), "--owner", settings.owner, "--id", item)
 
 
+def unarchive(settings: Settings, item: str) -> None:
+    """Put the archived `item` back on the project's board."""
+    gh.run("project", "item-archive", str(settings.project), "--owner", settings.owner, "--id", item, "--undo")
+
+
 def items(settings: Settings) -> list[dict[str, Any]]:
     """Every item node on the project, across every page."""
     query = gh.owner_query(ITEMS_QUERY, settings.owner_type)

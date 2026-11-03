@@ -130,7 +130,7 @@ def _settled(tmp_path) -> dict[str, str]:
     """
     data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
     for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
-        node["enabled"] = node["name"] == "Auto-archive items"
+        node["enabled"] = False
     path = tmp_path / "workflows-off.json"
     path.write_text(json.dumps(data))
     return {"GH_WORKFLOWS_FILE": str(path), "GH_LABELS": json.dumps([{"name": "deckhand"}])}
@@ -310,7 +310,7 @@ def test_context_reports_each_checklist_item(repo, fake_gh, tmp_path):
         "(currently: Backlog, Blocked, In Progress, Pending Review, Done)",
         "  Board view fields: done",
         "  Kind colors: done",
-        "  Workflows: turn off Item added to project, Item closed",
+        "  Workflows: turn off Item added to project, Item closed, Auto-archive items",
         "  Label: create deckhand; apply creates it",
         "  Merge settings: done",
     ]

@@ -266,7 +266,7 @@ def context(args: argparse.Namespace) -> int:
 
 def _configure_apply(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--order", action="store_true", help="write the build order onto the board")
-    parser.add_argument("--repair", action="store_true", help="put right every Status, label, and item owed")
+    parser.add_argument("--repair", action="store_true", help="put every story the process owns back on the board")
     parser.add_argument("--block", type=issue_number, metavar="N", help="the boarded story that gains a blocker")
     parser.add_argument("--unblock", type=issue_number, metavar="N", help="the boarded story that loses one")
     parser.add_argument("--by", metavar="REF", help="the blocker, owner/name#M or M for this repository")
@@ -289,18 +289,25 @@ def _order_writes(settings: Settings, read: fleet.Fleet) -> int:
 
 
 def _repair_writes(settings: Settings, read: fleet.Fleet) -> int:
-    """Put every story the process owns that never reached the board on it.
+    """Put every story the process owns on the board: the ones never added, and the ones archived before Done.
 
     Nothing else is left to repair. The column is written by a step's apply and read back by the
     same, so there is no second source for it to disagree with, and the label is what makes a story
     the process's business rather than something a repair could work out.
     """
-    if not read.missing:
-        raise Refusal(f"nothing to repair: every story the process owns is on the board, all {len(read.stories)}")
+    early = [story for story in read.archived if fleet.touched(story) and story.status != columns.DONE]
+    if not read.missing and not early:
+        raise Refusal(
+            f"nothing to repair: every story the process owns is on the board, all {len(read.stories)}, "
+            "and none is archived before Done"
+        )
     for repo, number, url in read.missing:
         board.add(settings, url)
         print(f"Added {repo}#{number} to the board")
-    return len(read.missing)
+    for story in early:
+        board.unarchive(settings, story.item)
+        print(f"Unarchived {story.repo}#{story.number}")
+    return len(read.missing) + len(early)
 
 
 @step("captain", _configure_apply, issue_bound=False, configure_context=_configure_context)

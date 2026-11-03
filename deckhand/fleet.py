@@ -313,11 +313,11 @@ def anomalies(
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
     for story in archived or []:
-        # Archiving is how finished work leaves the board, so only a story still in play is wrong.
+        # An archived story is off every board read, and only one still in play is missed there.
         if not touched(story) or story.status == columns.DONE:
             continue
         what = f"archived, and still {story.status or 'without a column'}"
-        out.append(Anomaly(story.number, story.repo, what, "unarchive it on the board"))
+        out.append(Anomaly(story.number, story.repo, what, "captain apply --repair"))
     return out
 
 
