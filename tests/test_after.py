@@ -25,6 +25,17 @@ def _story(tmp_path: Path, plan: str, state: str = "CLOSED") -> dict[str, str]:
     return {"GH_ISSUE_FILE": str(path)}
 
 
+def _status_reads(tmp_path: Path, status: str) -> dict[str, str]:
+    """An env where the board's field-values read answers `status` for Status."""
+    data = json.loads((FIXTURES / "graphql-fieldvalues.json").read_text(encoding="utf-8"))
+    for node in data["data"]["node"]["fieldValues"]["nodes"]:
+        if (node.get("field") or {}).get("name") == "Status":
+            node["name"] = status
+    path = tmp_path / f"fieldvalues-{status.lower().replace(' ', '-')}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return {"GH_FIELDVALUES_FILE": str(path)}
+
+
 def test_apply_ticks_the_item_and_writes_verification(fake_gh, gh_calls, tmp_path):
     result = run_deckhand("after", "apply", "248", "--item", "1", env=_story(tmp_path, TWO))
 
@@ -80,7 +91,37 @@ def test_apply_refuses_an_item_already_ticked(fake_gh, gh_calls, tmp_path):
 
 
 def test_context_opens_with_the_apply(fake_gh, tmp_path):
-    result = run_deckhand("after", "context", "248", env=_story(tmp_path, ONE_DONE))
+    env = {**_story(tmp_path, ONE_DONE), **_status_reads(tmp_path, "Verification")}
+    result = run_deckhand("after", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Apply: deckhand after apply 248 --item 2"
+    assert "Then:" not in result.stdout
+
+
+def test_context_opens_with_the_bare_apply_while_the_story_is_in_review(fake_gh, tmp_path):
+    """Only an apply moves the column, and a session that only lists the items runs none."""
+    env = {**_story(tmp_path, ONE_DONE), **_status_reads(tmp_path, "In Review")}
+    result = run_deckhand("after", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == [
+        "Apply: deckhand after apply 248",
+        "Then: deckhand after apply 248 --item 2",
+    ]
+
+
+def test_context_opens_with_the_bare_apply_alone_when_nothing_is_owed(fake_gh, tmp_path):
+    env = {**_story(tmp_path, NONE), **_status_reads(tmp_path, "In Review")}
+    result = run_deckhand("after", "context", "248", env=env)
+
+    assert result.stdout.splitlines()[0] == "Apply: deckhand after apply 248"
+    assert "Then:" not in result.stdout
+
+
+def test_context_without_the_column_opens_with_the_item(fake_gh, tmp_path):
+    env = {**_story(tmp_path, ONE_DONE), "GH_FIELDVALUES_FILE": str(tmp_path / "gone.json")}
+    result = run_deckhand("after", "context", "248", env=env)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[0] == "Apply: deckhand after apply 248 --item 2"
