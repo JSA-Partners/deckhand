@@ -223,6 +223,25 @@ def test_context_still_prints_when_the_issue_cannot_be_read(fake_gh, tmp_path):
     assert lines[-1] == review.DECISION_FORMAT
 
 
+def test_context_says_the_body_is_near_its_limit(fake_gh, tmp_path):
+    """The findings land in the same story, so the review has to know the room before it decides them."""
+    big = sections.replace(ISSUE["body"], "Notes", "x" * 60000)
+
+    result = run_deckhand("review", "context", "248", env=_issue_file(tmp_path, big))
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    body = next(i for i, line in enumerate(lines) if line.startswith("Body: "))
+    assert lines[body + 1].startswith("Budget: the body is ")
+
+
+def test_context_says_nothing_of_the_budget_with_room(fake_gh, tmp_path):
+    result = run_deckhand("review", "context", "248", env=_issue_file(tmp_path, ISSUE["body"]))
+
+    assert result.returncode == 0, result.stderr
+    assert "Budget:" not in result.stdout
+
+
 def test_context_prints_the_plan_out_of_its_fold(fake_gh, tmp_path):
     """The reviewer reads the plan, and on GitHub the plan sits inside a collapsed block."""
     preamble, parsed = sections.parse(ISSUE["body"])

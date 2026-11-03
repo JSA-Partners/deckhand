@@ -64,16 +64,16 @@ on it.
 ## Review
 
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
-agent with the body and brief file paths and write its lines as they are to the findings file.
-If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
-write its lines to the verdicts file. Then speak: a verdict on the story as a whole, sound, needs
+agent with the body and brief file paths and write its lines to the findings file.
+If it found something, run the deckhand:skeptic agent with those lines and the body file and
+write its lines to the verdicts file. Then speak: a verdict on the whole story, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
 story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, with
 `--after` or `--blocks` as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
-ones, each as a sentence on the problem and one on what accepting it would do. Decide the clear ones
-with the skeptic: accept a confirmed finding that improves the story, decline what it rejected, say
-each in a sentence, and ask only where one changes what the story delivers. Write them to the
+ones, each as a sentence on the problem and one on accepting it. Decide the clear ones with the
+skeptic, and under a Budget line say what the plan drops or splits out: accept a confirmed finding
+that improves the story, decline what it rejected, say each in a sentence, and ask only where one changes what the story delivers. Write them to the
 decisions file and run
 `review apply $issue <findings> <verdicts> <decisions> --verdict "<sentence>"`; on a clean pass,
 the findings file alone with `--verdict`. Then amend from the accepted findings; when every

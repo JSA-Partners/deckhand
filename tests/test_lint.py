@@ -291,3 +291,14 @@ def test_within_scope_drops_the_out_subsection():
 
 def test_within_scope_without_an_out_is_the_whole_scope():
     assert lint.within_scope("#### In\n- Sessions.") == "#### In\n- Sessions."
+
+
+def test_review_budget_is_silent_with_room():
+    assert lint.review_budget("x" * 1000) is None
+
+
+def test_review_budget_names_the_size_near_the_limit():
+    note = lint.review_budget("x" * 60000)
+
+    assert note.startswith(f"Budget: the body is 60000 of {BODY_LIMIT} characters; ")
+    assert "--new-issue" not in note

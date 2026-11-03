@@ -20,7 +20,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from deckhand import columns, fields, gh, invoke, issue, sections
+from deckhand import columns, fields, gh, invoke, issue, lint, sections
 from deckhand import findings as findings_file
 from deckhand.step import (
     PLUGIN_ROOT,
@@ -171,6 +171,9 @@ def context(args: argparse.Namespace) -> int:
         story = error
     text = "" if isinstance(story, Exception) else story.body
     print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body)))
+    budget = None if isinstance(story, Exception) else lint.review_budget(sections.render(*sections.parse(text)))
+    if budget:
+        print(budget)
     lenses = _lens_files()
     selected = _selected(lenses, text, named_lenses(text))
     print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected)))
