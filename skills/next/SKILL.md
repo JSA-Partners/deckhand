@@ -94,11 +94,11 @@ and run `amend apply $issue <file> --new-issue "<title>"`; work that must land f
 
 From the ready context (above, or run it), brief the story in three sentences: what it changes, as
 behavior rather than files; what it leaves alone, from Scope Out; and the one judgment call the
-plan makes, with the alternative named. When there is none, the third sentence says so. Propose kind, and points by
+plan makes, with the alternative named. With none, the third sentence says so. Propose kind, and points by
 naming the reference story it is most like and why, and ask one question about that call: "The
 plan does X rather than Y; board it that way, review it again, or not yet?" A story whose plan waits on other stories
 boards with them as blockers.
-Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
+Say the kind and points before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by REF` per open blocker, as its list names it,
 then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Wait
