@@ -271,9 +271,15 @@ def anomalies(
 ) -> list[Anomaly]:
     """Every disagreement worth a line: a wrong Status, a story off the board or archived, a stall, a cycle."""
     on: dict[str, list[str]] = {}
+    # A running session holds its story however long the person has been away.
+    held: set[str] = set()
     for beat in pulses:
-        if beat.story != sessions.FREE and beat.idle < ACTIVE:
+        if beat.story == sessions.FREE:
+            continue
+        if beat.idle < ACTIVE:
             on.setdefault(beat.story, []).append(beat.label)
+        if beat.live or beat.idle < ACTIVE:
+            held.add(beat.story)
     out: list[Anomaly] = []
     for story in found:
         if not touched(story):
@@ -292,7 +298,8 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, what, fix))
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
-        if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):
+        alone = str(story.number) not in held
+        if story.status == columns.IN_PROGRESS and alone and mine and not blockers.get(story.key):
             out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
         if len(labels) > 1:
             named = " and ".join(labels)

@@ -122,7 +122,7 @@ BLOCKERS = {
 }
 
 
-def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float = 0.0):
+def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float = 0.0, live: bool = False):
     return sessions.Pulse(
         label=label,
         session=label,
@@ -134,6 +134,7 @@ def _pulse(story: str, label: str = "a", repo: str = "acme/widgets", idle: float
         waiting=False,
         started=1.0,
         path=Path("x.jsonl"),
+        live=live,
     )
 
 
@@ -149,6 +150,26 @@ def test_a_story_held_by_a_blocker_is_not_reported_as_abandoned():
     blockers = {**BLOCKERS, ("acme/widgets", 120): [("acme/widgets", 253, "Seed the role matrix")]}
     found = fleet.anomalies(fleet.stories(_nodes()), blockers, behind=set(), pulses=[])
     assert [item for item in found if item.number == 120 and "no session open" in item.what] == []
+
+
+def test_a_running_session_idle_overnight_still_holds_its_story():
+    """The person is away, not gone; the Sessions table already says for how long."""
+    pulses = [_pulse("120", "a", idle=17 * 3600.0, live=True)]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    assert [item for item in found if item.number == 120 and "no session open" in item.what] == []
+
+
+def test_a_stale_transcript_does_not_hide_an_abandoned_story():
+    """Without the running list, an old transcript is no evidence that anyone is there."""
+    pulses = [_pulse("120", "a", idle=3 * 3600.0)]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    assert [item for item in found if item.number == 120 and item.what == "In Progress, no session open"]
+
+
+def test_two_running_sessions_idle_for_hours_are_not_a_duplicate():
+    pulses = [_pulse("117", "a", idle=5 * 3600.0, live=True), _pulse("117", "b", idle=6 * 3600.0, live=True)]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    assert not [item for item in found if item.number == 117 and "both on it" in item.what]
 
 
 def test_a_story_two_sessions_share_is_reported():
