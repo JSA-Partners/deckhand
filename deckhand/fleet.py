@@ -271,9 +271,15 @@ def anomalies(
 ) -> list[Anomaly]:
     """Every disagreement worth a line: a wrong Status, a story off the board or archived, a stall, a cycle."""
     on: dict[str, list[str]] = {}
+    # A running session holds its story however long the person has been away.
+    held: set[str] = set()
     for beat in pulses:
-        if beat.story != sessions.FREE and beat.idle < ACTIVE:
+        if beat.story == sessions.FREE:
+            continue
+        if beat.idle < ACTIVE:
             on.setdefault(beat.story, []).append(beat.label)
+        if beat.live or beat.idle < ACTIVE:
+            held.add(beat.story)
     out: list[Anomaly] = []
     for story in found:
         if not touched(story):
@@ -292,7 +298,8 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, what, fix))
         labels = on.get(str(story.number)) or []
         mine = not me or not story.assignees or me in story.assignees
-        if story.status == columns.IN_PROGRESS and not labels and mine and not blockers.get(story.key):
+        alone = str(story.number) not in held
+        if story.status == columns.IN_PROGRESS and alone and mine and not blockers.get(story.key):
             out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
         if len(labels) > 1:
             named = " and ".join(labels)
@@ -311,13 +318,13 @@ def anomalies(
         fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
         out.append(Anomaly(story.number, story.repo, what, fix))
     for repo, number, _ in missing or []:
-        out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
+        out.append(Anomaly(number, repo, "drafted, but not on the board", "captain apply --repair"))
     for story in archived or []:
-        # Archiving is how finished work leaves the board, so only a story still in play is wrong.
+        # An archived story is off every board read, and only one still in play is missed there.
         if not touched(story) or story.status == columns.DONE:
             continue
         what = f"archived, and still {story.status or 'without a column'}"
-        out.append(Anomaly(story.number, story.repo, what, "unarchive it on the board"))
+        out.append(Anomaly(story.number, story.repo, what, "captain apply --repair"))
     return out
 
 

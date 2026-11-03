@@ -265,6 +265,64 @@ def test_context_lists_the_stories_a_blocker_could_be(fake_gh):
     assert "#248" not in listed
 
 
+def _move(number: int, repo: str | None):
+    """An edit that puts board item `number` in `repo`, or leaves it with no repository at all."""
+
+    def edit(nodes):
+        for node in nodes:
+            content = node.get("content") or {}
+            if content.get("number") == number:
+                if repo is None:
+                    content.pop("repository", None)
+                else:
+                    content["repository"] = {"nameWithOwner": repo}
+
+    return edit
+
+
+def test_context_names_the_repository_of_a_story_elsewhere(fake_gh, tmp_path):
+    """`--blocked-by 300` means this repository's #300, so a story elsewhere is listed the way the flag takes it."""
+    env = {**REVIEWED, **_items_file(tmp_path, "elsewhere.json", _move(300, "acme/gadgets"))}
+
+    result = run_deckhand("ready", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    listed = result.stdout.split("Could block this story:")[1]
+    assert "acme/gadgets#300 " in listed
+
+
+def test_context_names_a_story_of_this_repository_by_number(fake_gh):
+    result = run_deckhand("ready", "context", "248", env=REVIEWED)
+
+    listed = result.stdout.split("Could block this story:")[1]
+    assert "  #300 " in listed
+    assert "acme/widgets#" not in listed
+
+
+def test_context_lists_an_item_without_a_repository_by_number(fake_gh, tmp_path):
+    env = {**REVIEWED, **_items_file(tmp_path, "no-repo.json", _move(300, None))}
+
+    result = run_deckhand("ready", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "  #300 " in result.stdout.split("Could block this story:")[1]
+
+
+def test_context_lists_a_story_elsewhere_with_this_one_s_number(fake_gh, tmp_path):
+    """Two repositories number their issues on their own, so only this repository's #248 is the story itself."""
+
+    def _twin(nodes):
+        twin = json.loads(json.dumps(next(n for n in nodes if (n.get("content") or {}).get("number") == 300)))
+        twin["content"].update(number=248, repository={"nameWithOwner": "acme/gadgets"})
+        nodes.append(twin)
+
+    env = {**REVIEWED, **_items_file(tmp_path, "twin.json", _twin)}
+
+    result = run_deckhand("ready", "context", "248", env=env)
+
+    assert "acme/gadgets#248 " in result.stdout.split("Could block this story:")[1]
+
+
 def test_a_closed_issue_is_not_offered_as_a_blocker(fake_gh, tmp_path):
     """The list says open stories, and with archived items in the read the closed ones would flood it."""
 

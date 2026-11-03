@@ -29,7 +29,7 @@ import json
 import re
 from pathlib import Path
 
-from deckhand import columns, config, fields, gates, gh, git, invoke, issue, log, naming
+from deckhand import columns, config, fields, gates, gh, git, invoke, issue, log, naming, sections
 from deckhand.config import Settings
 from deckhand.step import (
     MAIN,
@@ -41,8 +41,10 @@ from deckhand.step import (
     read_file,
     ref_label,
     refuse_git,
+    spill,
     step,
     trunk,
+    usable,
 )
 
 MAKE_TEST = re.compile(r"^test[ \t]*:", re.MULTILINE)
@@ -121,8 +123,12 @@ def _body(number: int, story: issue.Issue, breaking: str | None, summary: str) -
     if closing is not None:
         offending = closing.group(0).strip()
         raise Refusal(f"the summary already ends with {offending!r}; finish appends its own Closes #{number} footer")
-    deviations = [entry.body.partition("Deviation:")[2] for entry in log.entries(story) if entry.prefix == "Deviation:"]
-    return naming.pr_body(number, text, breaking=breaking, deviations=deviations)
+    return naming.pr_body(number, text, breaking=breaking, deviations=_deviations(story))
+
+
+def _deviations(story: issue.Issue) -> list[str]:
+    """What the branch did that the story did not say, one text per `Deviation:` entry in its log."""
+    return [entry.body.partition("Deviation:")[2] for entry in log.entries(story) if entry.prefix == "Deviation:"]
 
 
 def _push(branch: str) -> None:
@@ -190,17 +196,24 @@ def _recent_block() -> list[str]:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the apply and the summary path, then the commits, diff stat, message, and checks.
+    """Print the apply, the summary path and the review's brief, then the commits, diff stat, message, and checks.
 
-    The branch review is this step's first act and runs before any of this is acted on: what is
-    printed here is read against a branch a person has already been through comment by comment.
+    The branch review is this step's first act and runs before any of this is acted on, briefed with
+    the story, its plan out of the fold, and the deviations the build logged.
     """
     base = trunk()
     detected = checks(Path.cwd())
     flags = [f'--check "{command}"' for command in detected] or ['--check "<cmd>"']
     print(invoke.apply_line("finish", str(args.issue), "<summary>", *flags))
     print(file_line("Summary", f"{args.issue}-summary.md"))
+    story: issue.Issue | Exception
+    try:
+        story = issue.view(gh.repo_slug(), args.issue)
+    except Exception as error:  # the commits and the checks are still worth printing without the story
+        story = error
+    print(spill("Body", f"{args.issue}-issue.md", lambda: sections.bare(usable(story).body)))
     print()
+    block("## Deviations", lambda: indented(" ".join(text.split()) for text in _deviations(usable(story))))
     block("## Commits", lambda: _commits_block(base))
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))

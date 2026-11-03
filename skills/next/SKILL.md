@@ -30,8 +30,7 @@ nothing is amended past the last reviewed commit or pushed by hand.
 ## Speaking
 
 Talk to the person as to a colleague from another project, in plain words, an analogy only when
-they ask. Say one line when something will take
-more than a moment. Recommend every time you ask.
+they ask. Say one line before anything slow. Recommend every time you ask.
 When the run ends because the story waits on something outside this session, say where it is,
 the one link worth opening, and what happens next. Never show what a
 command printed; read it and say what matters. A failure is one sentence on what could not be done.
@@ -66,14 +65,15 @@ on it.
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
 agent with the body and brief file paths and write its lines as they are to the findings file.
 If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
-write its lines to the verdicts file. Then speak: a verdict on the story as a whole, sound, needs
+write its lines to the verdicts file. Then speak: a verdict on the whole story, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
 story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, with
 `--after` or `--blocks` as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
-ones, each as a sentence on the problem and one on what accepting it would do. Decide the clear ones
-with the skeptic: accept a confirmed finding that improves the story, decline what it rejected, say
-each in a sentence, and ask only where one changes what the story delivers. Write them to the
+ones, each as a sentence on the problem and one on accepting it. Decide the clear ones with the
+skeptic: accept a confirmed finding that improves the story, decline what it rejected, say each
+in a sentence, and ask only where one changes what the story delivers. When the context prints a
+Budget line, the decisions say what the plan drops or splits out. Write them to the
 decisions file and run
 `review apply $issue <findings> <verdicts> <decisions> --verdict "<sentence>"`; on a clean pass,
 the findings file alone with `--verdict`. Then amend from the accepted findings; when every
@@ -94,12 +94,13 @@ and run `amend apply $issue <file> --new-issue "<title>"`; work that must land f
 
 From the ready context (above, or run it), brief the story in three sentences: what it changes, as
 behavior rather than files; what it leaves alone, from Scope Out; and the one judgment call the
-plan makes, with the alternative named. When there is none, the third sentence says so. Propose kind, and points by
+plan makes, with the alternative named. With none, the third sentence says so. Propose kind, and points by
 naming the reference story it is most like and why, and ask one question about that call: "The
-plan does X rather than Y; board it that way, review it again, or not yet?" A story whose plan waits on other stories
+plan does X rather than Y; board it that way, review it again, or not yet?" A plan that waits on other stories
 boards with them as blockers.
-Say the kind and the points in the sentence before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker,
-then carry on to the check. Review it again: the Review section. Not yet: stop.
+Say the kind and points before boarding, even when the answer came early. Board it:
+`ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker, `owner/name#M` for
+one elsewhere, then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Wait
 
@@ -128,7 +129,7 @@ depend on it, then stop. A story that must not start or merge before another: ru
 ## Branch review
 
 When the plan is done, run one superpowers code-review subagent over `origin/main..HEAD` with the
-story, plan, and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
+Body file and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
 line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
 idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
 and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk the

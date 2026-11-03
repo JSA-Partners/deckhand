@@ -139,6 +139,7 @@ elif head in (
     "project field-delete",
     "project item-edit",
     "project item-delete",
+    "project item-archive",
 ):
     respond("{}")
 elif head == "issue view":

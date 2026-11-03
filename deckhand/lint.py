@@ -208,12 +208,16 @@ def _criteria(body: str) -> list[str]:
 HEADROOM = 0.9  # of the limit: a body this full is one or two amends from refusing, and usually two stories
 
 
+def _size(text: str) -> int:
+    return len(text.replace("\r\n", "\n"))
+
+
 def headroom(text: str, given: str | None = None) -> str | None:
     """A note when the body is within `HEADROOM` of the limit, or None; the size is the one lint measures.
 
     With `given`, the file as written, the note gives the file's size against its budget.
     """
-    size = len(text.replace("\r\n", "\n"))
+    size = _size(text)
     if size < BODY_LIMIT * HEADROOM:
         return None
     raw = None if given is None else len(given.replace("\r\n", "\n"))
@@ -225,4 +229,19 @@ def headroom(text: str, given: str | None = None) -> str | None:
     return (
         f"{figures}; a story this size is usually more than one, "
         "and the next amend may not fit: move what belongs in its own story out with --new-issue"
+    )
+
+
+def review_budget(text: str) -> str | None:
+    """A note for the review when the rendered body is within `HEADROOM` of the limit, or None.
+
+    A review's accepted findings land in the same story, so the amend after it must fit; splitting
+    is one answer among several, and the decisions are where it is chosen.
+    """
+    size = _size(text)
+    if size < BODY_LIMIT * HEADROOM:
+        return None
+    return (
+        f"Budget: the body is {size} of {BODY_LIMIT} characters; the amend after this review must fit, "
+        "so the decisions trim the plan or split a part out"
     )

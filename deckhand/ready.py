@@ -97,14 +97,17 @@ def _table_block(settings: Settings | Exception) -> list[str]:
 
 
 def _could_block(settings: Settings | Exception, number: int) -> list[str]:
-    """Every other open story on the board, so a blocker is chosen here and not on the board by hand."""
+    """Every other open story on the board, named the way `--blocked-by` takes it, so a blocker is chosen here."""
+    here = gh.repo_slug()
     rows = []
     for node in board.items(usable(settings)):
         content = node.get("content") or {}
         status = board.field_value(node, "Status", "name") or "-"
-        if content.get("number") == number or content.get("closedAt") or status == columns.DONE:
+        where = (content.get("repository") or {}).get("nameWithOwner") or here
+        if (where, content.get("number")) == (here, number) or content.get("closedAt") or status == columns.DONE:
             continue
-        rows.append(f"#{content.get('number')} {status} {content.get('title') or ''}".rstrip())
+        name = ref_label(where, content.get("number"), here)
+        rows.append(f"{name} {status} {content.get('title') or ''}".rstrip())
     return indented(rows, "none")
 
 

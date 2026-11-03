@@ -44,7 +44,7 @@ def _settled(tmp_path, monkeypatch) -> None:
     """
     data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
     for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
-        node["enabled"] = node["name"] == "Auto-archive items"
+        node["enabled"] = False
     path = tmp_path / "workflows-off.json"
     path.write_text(json.dumps(data))
     monkeypatch.setenv("GH_WORKFLOWS_FILE", str(path))
@@ -249,7 +249,7 @@ def test_kind_colors_left_says_a_kind_of_the_wrong_type(fake_gh, settings):
 def test_the_workflows_item_names_the_ones_still_on(fake_gh, settings):
     item = _item(checklist.checklist(settings, REPO, []), "Workflows")
 
-    assert item.left == "turn off Item added to project, Item closed"
+    assert item.left == "turn off Item added to project, Item closed, Auto-archive items"
 
 
 def test_the_workflows_item_cannot_answer_for_a_workflow_the_project_omits(fake_gh, settings, monkeypatch, tmp_path):
@@ -265,10 +265,18 @@ def test_the_workflows_item_cannot_answer_for_a_workflow_the_project_omits(fake_
     assert "does not report" in item.left
 
 
-def test_the_workflows_item_ignores_auto_archive(fake_gh, settings):
+def test_the_workflows_item_names_auto_archive_alone(fake_gh, settings, monkeypatch, tmp_path):
+    """Its default filter archives a closed story still in Verification, which takes it off the board."""
+    data = json.loads((FIXTURES / "graphql-workflows.json").read_text(encoding="utf-8"))
+    for node in data["data"]["organization"]["projectV2"]["workflows"]["nodes"]:
+        node["enabled"] = node["name"] == "Auto-archive items"
+    path = tmp_path / "archive-on.json"
+    path.write_text(json.dumps(data))
+    monkeypatch.setenv("GH_WORKFLOWS_FILE", str(path))
+
     item = _item(checklist.checklist(settings, REPO, []), "Workflows")
 
-    assert "Auto-archive" not in (item.left or "")
+    assert item.left == "turn off Auto-archive items"
 
 
 def test_the_workflows_item_is_unknown_when_they_cannot_be_read(fake_gh, settings, tmp_path, monkeypatch):

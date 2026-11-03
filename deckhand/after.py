@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import re
 
-from deckhand import columns, fields, gh, invoke, issue, log, sections
+from deckhand import columns, config, fields, gh, invoke, issue, log, sections
 from deckhand.step import Refusal, block, indented, resolved_settings, step
 
 OWED = "After the merge:"
@@ -30,13 +30,32 @@ def _next_unticked(items: list[tuple[str, bool]]) -> int | None:
     return next((number for number, (_, ticked) in enumerate(items, 1) if not ticked), None)
 
 
+def _column(repo: str, number: int) -> str | None:
+    """The story's column, or None when the board cannot say."""
+    try:
+        return fields.get_field(config.load(), repo, number, "Status")
+    except Exception:
+        return None
+
+
 def context(args: argparse.Namespace) -> int:
-    """Print the item the next apply ticks, then the story and what it still owes after the merge."""
-    story = issue.view(gh.repo_slug(), args.issue)
+    """Print the apply to run next, then the story and what it still owes after the merge.
+
+    A merged story still in an earlier column leads with the bare apply, because that is what moves
+    it, and a session that only reads the items here would otherwise leave it where it was.
+    """
+    repo = gh.repo_slug()
+    story = issue.view(repo, args.issue)
     items = sections.after_merge_items(story.body)
     position = _next_unticked(items)
-    parts = ("--item", str(position)) if position is not None else ()
-    print(invoke.apply_line("after", str(args.issue), *parts))
+    tick = ("--item", str(position)) if position is not None else ()
+    column = _column(repo, args.issue) if story.state.upper() == "CLOSED" else None
+    if column is not None and column not in (columns.VERIFICATION, columns.DONE):
+        print(invoke.apply_line("after", str(args.issue)))
+        if tick:
+            print(" ".join(["Then: deckhand after apply", str(args.issue), *tick]))
+    else:
+        print(invoke.apply_line("after", str(args.issue), *tick))
     print()
     print(f"Title: {story.title}")
     print(f"Issue: {story.url}")

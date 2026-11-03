@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import naming, reviewed
-from tests.conftest import FIXTURES, run_deckhand
+from tests.conftest import FIXTURES, run_deckhand, spilled
 
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
 # GitHub links a pull request to the issue its footer closes, so every apply finds the link unless told otherwise.
@@ -174,6 +174,46 @@ def test_context_prints_the_commits_before_the_stat_and_the_checks(fake_gh, repo
     assert lines[1].startswith("Summary: ")
 
 
+def test_context_spills_the_story_and_plan_for_the_branch_review(fake_gh, repo, branch):
+    """The branch review is briefed with the story and its plan, so the context hands over both."""
+    result = _finish("context", repo)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[2].startswith("Body: ")
+    body = spilled(result.stdout, "Body")
+    assert "### Story" in body
+    assert "### Plan" in body
+    assert "<details>" not in body
+
+
+def test_context_lists_the_logged_deviations(fake_gh, repo, branch, tmp_path):
+    data = json.loads((FIXTURES / "issue-approved.json").read_text(encoding="utf-8"))
+    entry = {"author": {"login": "claude"}, "createdAt": "2026-09-03T09:30:00Z"}
+    data["comments"] += [
+        {**entry, "body": "Deviation: the lock moved into one helper,\nordered by level."},
+        {**entry, "body": "Noted: the review ran on the larger model."},
+    ]
+    path = tmp_path / "issue-deviated.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = _finish("context", repo, env={"GH_ISSUE_FILE": str(path)})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    said = lines[lines.index("## Deviations") + 1 : lines.index("## Commits")]
+    assert said == ["  the lock moved into one helper, ordered by level."]
+
+
+def test_context_without_the_issue_still_prints_every_block(fake_gh, repo, branch):
+    result = _finish("context", repo, env={"GH_ISSUE_VIEW_FAILS": "248"})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[2].startswith("Body: unavailable")
+    assert lines[lines.index("## Deviations") + 1].startswith("  unavailable (")
+    assert "## Commits" in lines
+
+
 def test_context_prints_the_commits_the_pull_request_will_carry(fake_gh, repo):
     """The pull request opens from the commit the reviewed ref names, so the commits are the page."""
     _git(repo, "checkout", "-q", "-b", BRANCH)
@@ -312,7 +352,9 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
     assert [line for line in lines if not line.startswith("  ")] == [
         'Apply: deckhand finish apply 248 <summary> --check "<cmd>"',
         lines[1],  # the summary path, which without gh is one line saying why it could not be built
+        "Body: unavailable (the GitHub CLI (gh) is not installed or not on PATH)",
         "",
+        "## Deviations",
         "## Commits",
         "## Diff stat",
         "## Pull request",
@@ -320,7 +362,7 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
         "## Checks detected",
     ]
     assert lines[1].startswith("Summary: ")
-    assert lines[4].startswith("  unavailable (")
+    assert lines[lines.index("## Commits") + 1].startswith("  unavailable (")
 
 
 # --- the gates --------------------------------------------------------------
