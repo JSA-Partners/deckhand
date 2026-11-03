@@ -128,7 +128,7 @@ depend on it, then stop. A story that must not start or merge before another: ru
 ## Branch review
 
 When the plan is done, run one superpowers code-review subagent over `origin/main..HEAD` with the
-story, plan, and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
+Body file and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
 line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
 idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
 and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk the
