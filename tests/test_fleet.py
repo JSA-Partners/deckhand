@@ -204,7 +204,7 @@ def test_a_drafted_issue_that_never_reached_the_board_is_an_anomaly():
     missing = [("acme/widgets", 281, "https://github.com/acme/widgets/issues/281")]
     found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, set(), [], missing)
     entry = next(item for item in found if item.number == 281)
-    assert (entry.what, entry.fix) == ("drafted, but not on the board", "add it")
+    assert (entry.what, entry.fix) == ("drafted, but not on the board", "captain apply --repair")
 
 
 def test_a_fleet_that_agrees_with_its_logs_has_no_status_anomaly():

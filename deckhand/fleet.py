@@ -318,7 +318,7 @@ def anomalies(
         fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
         out.append(Anomaly(story.number, story.repo, what, fix))
     for repo, number, _ in missing or []:
-        out.append(Anomaly(number, repo, "drafted, but not on the board", "add it"))
+        out.append(Anomaly(number, repo, "drafted, but not on the board", "captain apply --repair"))
     for story in archived or []:
         # An archived story is off every board read, and only one still in play is missed there.
         if not touched(story) or story.status == columns.DONE:

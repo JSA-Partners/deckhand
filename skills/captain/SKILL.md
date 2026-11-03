@@ -19,13 +19,13 @@ before; mention it only when asked.
 Every later question in this session reruns `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
 because sessions move. Asking about one session is `captain context --session <id>`.
 
-When an anomaly's fix is `captain apply --repair`, offer it and run it if the person agrees.
-When they ask for the backlog to be put in order, offer `captain apply --order`. Both write the board and nothing else: never a story step, a
-branch, or a commit. An edge the board is missing is written with
+When an anomaly's fix is `captain apply --repair`, offer it and run it if the person agrees. When
+they ask for the backlog to be put in order, offer `captain apply --order`. Both write the board
+and nothing else: never a story step, a branch, or a commit. An edge the board is missing is written with
 `captain apply --block N --by M`, and taken away with `--unblock N --by M`; both refuse a blocker
 that is closed. A duplicate or an abandoned story is withdrawn with
 `captain apply --withdraw REF --note "<why>"`: logged, closed as not planned, off the board. A row
-whose fix names a command is the person's to run in that story's session; name it and leave it.
+whose fix names a story step is the person's to run in that story's session; name it and leave it.
 
 When asked what to merge or in which order, answer from the Merge block, first row first, and say
 which sessions must then bring their branch up to date.

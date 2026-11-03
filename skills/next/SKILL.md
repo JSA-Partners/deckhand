@@ -30,8 +30,7 @@ nothing is amended past the last reviewed commit or pushed by hand.
 ## Speaking
 
 Talk to the person as to a colleague from another project, in plain words, an analogy only when
-they ask. Say one line when something will take
-more than a moment. Recommend every time you ask.
+they ask. Say one line before anything slow. Recommend every time you ask.
 When the run ends because the story waits on something outside this session, say where it is,
 the one link worth opening, and what happens next. Never show what a
 command printed; read it and say what matters. A failure is one sentence on what could not be done.
@@ -64,16 +63,17 @@ on it.
 ## Review
 
 The context names three draft paths: findings, verdicts, decisions. Run the deckhand:reviewer
-agent with the body and brief file paths and write its lines to the findings file.
-If it found something, run the deckhand:skeptic agent with those lines and the body file and
+agent with the body and brief file paths and write its lines as they are to the findings file.
+If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
 write its lines to the verdicts file. Then speak: a verdict on the whole story, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
 story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, with
 `--after` or `--blocks` as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
 ones, each as a sentence on the problem and one on accepting it. Decide the clear ones with the
-skeptic, and under a Budget line say what the plan drops or splits out: accept a confirmed finding
-that improves the story, decline what it rejected, say each in a sentence, and ask only where one changes what the story delivers. Write them to the
+skeptic: accept a confirmed finding that improves the story, decline what it rejected, say each
+in a sentence, and ask only where one changes what the story delivers. When the context prints a
+Budget line, the decisions say what the plan drops or splits out. Write them to the
 decisions file and run
 `review apply $issue <findings> <verdicts> <decisions> --verdict "<sentence>"`; on a clean pass,
 the findings file alone with `--verdict`. Then amend from the accepted findings; when every
@@ -96,10 +96,11 @@ From the ready context (above, or run it), brief the story in three sentences: w
 behavior rather than files; what it leaves alone, from Scope Out; and the one judgment call the
 plan makes, with the alternative named. With none, the third sentence says so. Propose kind, and points by
 naming the reference story it is most like and why, and ask one question about that call: "The
-plan does X rather than Y; board it that way, review it again, or not yet?" A story whose plan waits on other stories
+plan does X rather than Y; board it that way, review it again, or not yet?" A plan that waits on other stories
 boards with them as blockers.
-Say the kind and points before boarding, even when the answer came early. Board it: `ready apply $issue --kind K --points P`, with `--blocked-by REF` per open blocker, as its list names it,
-then carry on to the check. Review it again: the Review section. Not yet: stop.
+Say the kind and points before boarding, even when the answer came early. Board it:
+`ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker, `owner/name#M` for
+one elsewhere, then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Wait
 
