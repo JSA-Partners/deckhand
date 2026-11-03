@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -87,7 +87,7 @@ wheels = [
 
 [[package]]
 name = "deckhand"
-version = "5.0.0"
+version = "5.0.1"
 source = { virtual = "." }
 
 [package.dev-dependencies]
