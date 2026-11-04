@@ -266,7 +266,11 @@ def context(args: argparse.Namespace) -> int:
 
 def _configure_apply(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--order", action="store_true", help="write the build order onto the board")
-    parser.add_argument("--repair", action="store_true", help="put every story the process owns back on the board")
+    parser.add_argument(
+        "--repair",
+        action="store_true",
+        help="add every story the process owns that is off the board, and unarchive any archived before Done",
+    )
     parser.add_argument("--block", type=issue_number, metavar="N", help="the boarded story that gains a blocker")
     parser.add_argument("--unblock", type=issue_number, metavar="N", help="the boarded story that loses one")
     parser.add_argument("--by", metavar="REF", help="the blocker, owner/name#M or M for this repository")
