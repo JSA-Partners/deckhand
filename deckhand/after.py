@@ -14,7 +14,7 @@ import argparse
 import re
 
 from deckhand import columns, config, fields, gh, invoke, issue, log, sections
-from deckhand.step import Refusal, block, indented, resolved_settings, step
+from deckhand.step import Refusal, block, indented, reason, resolved_settings, step
 
 OWED = "After the merge:"
 _BULLET = re.compile(r"^- (?:\[[ xX]\]\s+)?")
@@ -45,7 +45,13 @@ def context(args: argparse.Namespace) -> int:
     it, and a session that only reads the items here would otherwise leave it where it was.
     """
     repo = gh.repo_slug()
-    story = issue.view(repo, args.issue)
+    try:
+        story = issue.view(repo, args.issue)
+    except Exception as error:  # the apply is still worth naming without the story
+        print(invoke.apply_line("after", str(args.issue)))
+        print()
+        print(f"Issue: #{args.issue} could not be read: {reason(error)}")
+        return 0
     items = sections.after_merge_items(story.body)
     position = _next_unticked(items)
     tick = ("--item", str(position)) if position is not None else ()
@@ -53,7 +59,7 @@ def context(args: argparse.Namespace) -> int:
     if column is not None and column not in (columns.VERIFICATION, columns.DONE):
         print(invoke.apply_line("after", str(args.issue)))
         if tick:
-            print(" ".join(["Then: deckhand after apply", str(args.issue), *tick]))
+            print(invoke.then_line("after", str(args.issue), *tick))
     else:
         print(invoke.apply_line("after", str(args.issue), *tick))
     print()
