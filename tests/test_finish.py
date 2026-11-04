@@ -316,6 +316,54 @@ def test_context_detects_checks_from_project_files(fake_gh, repo, branch):
     )
 
 
+def _hook(repo: Path, text: str) -> None:
+    """A pre-push hook outside the tree, so the clean-tree gate still passes."""
+    hooks = repo.parent / "hooks"
+    hooks.mkdir(exist_ok=True)
+    (hooks / "pre-push").write_text(text, encoding="utf-8")
+    (hooks / "pre-push").chmod(0o755)
+    _git(repo, "config", "core.hooksPath", str(hooks))
+
+
+def test_context_says_the_pre_push_hook_runs_a_detected_check(fake_gh, repo, branch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    _hook(repo, "#!/bin/bash\nset -e\nmake test\n")
+
+    lines = _finish("context", repo).stdout.splitlines()
+
+    assert lines[0] == 'Apply: deckhand finish apply 248 <summary> --check "make test"'
+    assert lines[lines.index("## Checks detected") + 1 :] == ["  make test (the pre-push hook runs it)"]
+
+
+def test_a_hook_line_that_only_contains_the_command_is_not_a_match(fake_gh, repo, branch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    _hook(repo, "#!/bin/bash\nmake test || exit 1\n")
+
+    lines = _finish("context", repo).stdout.splitlines()
+
+    assert lines[lines.index("## Checks detected") + 1 :] == ["  make test"]
+
+
+def test_a_hook_git_will_not_run_leaves_every_check_to_finish(fake_gh, repo, branch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    _hook(repo, "#!/bin/bash\nmake test\n")
+    (repo.parent / "hooks" / "pre-push").chmod(0o644)
+
+    lines = _finish("context", repo).stdout.splitlines()
+
+    assert lines[lines.index("## Checks detected") + 1 :] == ["  make test"]
+
+
+def test_apply_leaves_a_check_the_pre_push_hook_runs_to_the_push(fake_gh, gh_calls, repo, origin, branch):
+    _hook(repo, "#!/bin/bash\ntrue\n")
+
+    result = _apply(repo, "--check", "true")
+
+    assert result.returncode == 0, result.stderr
+    assert "Left to the pre-push hook: true" in result.stdout
+    assert "Running true" not in result.stdout
+
+
 def test_context_reads_the_branch_in_a_clone_that_has_no_local_main(fake_gh, clone):
     assert _git(clone, "branch", "--format=%(refname:short)").split() == [BRANCH]
 
