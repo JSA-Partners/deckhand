@@ -323,6 +323,40 @@ def test_a_cycle_refusal_names_the_reverse_edge_and_the_unblock(fake_gh, gh_call
     assert "captain apply --unblock 117 --by 253" in err
 
 
+def test_blocking_a_story_in_another_repository_records_its_dependency(fake_gh, gh_calls, capsys):
+    assert cli.main(["captain", "apply", "--block", "acme/gadgets#13", "--by", "117"]) == 0
+    calls = "\n".join(gh_calls())
+    assert "api -X POST repos/acme/gadgets/issues/13/dependencies/blocked_by" in calls
+    assert "acme/gadgets#13 blocked by #117" in capsys.readouterr().out
+
+
+def test_unblocking_a_story_in_another_repository_drops_its_dependency(fake_gh, gh_calls, capsys):
+    assert cli.main(["captain", "apply", "--unblock", "acme/gadgets#13", "--by", "117"]) == 0
+    calls = "\n".join(gh_calls())
+    assert "api -X DELETE repos/acme/gadgets/issues/13/dependencies/blocked_by" in calls
+    assert "acme/gadgets#13 no longer blocked by #117" in capsys.readouterr().out
+
+
+def test_a_story_in_the_wrong_form_refuses_and_writes_nothing(fake_gh, gh_calls, capsys):
+    assert cli.main(["captain", "apply", "--block", "gadgets13", "--by", "117"]) == 1
+    assert "gadgets13" in capsys.readouterr().err
+    assert not any("dependencies/blocked_by" in call for call in gh_calls())
+
+
+def test_a_cycle_across_repositories_names_the_unblock_to_run(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    mapped = tmp_path / "blocked-by.json"
+    reverse = {"number": 13, "title": "Elsewhere", "state": "open", "repository": {"full_name": "acme/gadgets"}}
+    mapped.write_text(json.dumps({"117": [reverse]}), encoding="utf-8")
+    monkeypatch.setenv("GH_DEPENDENCY_FAILS", "1")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+    assert cli.main(["captain", "apply", "--block", "acme/gadgets#13", "--by", "117"]) == 1
+
+    err = capsys.readouterr().err
+    assert "#117 is already blocked by acme/gadgets#13" in err
+    assert "captain apply --unblock 117 --by acme/gadgets#13" in err
+
+
 def test_block_refuses_without_by(fake_gh, gh_calls, capsys):
     assert cli.main(["captain", "apply", "--block", "253"]) == 1
     assert "--by" in capsys.readouterr().err
