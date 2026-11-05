@@ -291,6 +291,22 @@ def test_context_names_the_repository_of_a_story_elsewhere(fake_gh, tmp_path):
     assert "acme/gadgets#300 " in listed
 
 
+def test_context_leaves_a_draft_item_out_of_the_blockers(fake_gh, tmp_path):
+    """A draft item has no number, so no `--blocked-by` could name it."""
+
+    def add_draft(nodes):
+        status = {"name": "Backlog", "field": {"name": "Status"}}
+        nodes.append({"content": {"title": "An idea"}, "fieldValues": {"nodes": [status]}})
+
+    env = {**REVIEWED, **_items_file(tmp_path, "draft.json", add_draft)}
+    result = run_deckhand("ready", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    listed = result.stdout.split("Could block this story:")[1]
+    assert "#None" not in listed
+    assert "An idea" not in listed
+
+
 def test_context_names_a_story_of_this_repository_by_number(fake_gh):
     result = run_deckhand("ready", "context", "248", env=REVIEWED)
 

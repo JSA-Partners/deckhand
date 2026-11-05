@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 
@@ -213,6 +214,77 @@ def test_the_sweep_removes_closed_stories_and_leaves_open_ones(fake_gh, repo, or
     assert not closed.exists()
     assert opened.exists()
     assert _branches(repo) == ["feat/9-open", "main"]
+
+
+def _in(tmp_path, monkeypatch, cwd) -> None:
+    """A running session `one` whose newest record stands in `cwd`."""
+    live = tmp_path / "live"
+    live.mkdir()
+    (live / "1.json").write_text(json.dumps({"pid": os.getpid(), "sessionId": "one", "status": "idle"}))
+    transcripts = tmp_path / "sessions" / "x"
+    transcripts.mkdir(parents=True)
+    (transcripts / "one.jsonl").write_text(json.dumps({"type": "user", "cwd": str(cwd)}) + "\n")
+    monkeypatch.setenv("DECKHAND_LIVE", str(live))
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "sessions"))
+
+
+def test_the_sweep_leaves_a_closed_story_a_running_session_is_in(fake_gh, repo, origin, monkeypatch, tmp_path):
+    closed = worktree.add("fix/57-closed", new=True)
+    for name, value in _story(tmp_path, 57, "CLOSED").items():
+        monkeypatch.setenv(name, value)
+    _in(tmp_path, monkeypatch, closed / "internal")
+
+    assert worktree.sweep(REPO) == [f"Left worktree {closed}: session one is in it"]
+    assert closed.exists()
+
+
+def test_the_sweep_removes_a_closed_story_nobody_is_in(fake_gh, repo, origin, monkeypatch, tmp_path):
+    closed = worktree.add("fix/57-closed", new=True)
+    for name, value in _story(tmp_path, 57, "CLOSED").items():
+        monkeypatch.setenv(name, value)
+    _in(tmp_path, monkeypatch, repo)
+
+    assert worktree.sweep(REPO) == [f"Removed worktree {closed}"]
+
+
+@pytest.mark.skipif(not os.path.exists(os.getcwd().upper()), reason="the file system tells letter case apart")
+def test_the_sweep_leaves_a_worktree_named_in_other_letter_case(fake_gh, repo, origin, monkeypatch, tmp_path):
+    closed = worktree.add("fix/57-closed", new=True)
+    for name, value in _story(tmp_path, 57, "CLOSED").items():
+        monkeypatch.setenv(name, value)
+    _in(tmp_path, monkeypatch, str(closed).replace("57-closed", "57-CLOSED"))
+
+    assert worktree.sweep(REPO) == [f"Left worktree {closed}: session one is in it"]
+
+
+def test_the_sweep_reads_the_directory_from_the_running_list_without_a_transcript(
+    fake_gh, repo, origin, monkeypatch, tmp_path
+):
+    closed = worktree.add("fix/57-closed", new=True)
+    for name, value in _story(tmp_path, 57, "CLOSED").items():
+        monkeypatch.setenv(name, value)
+    live = tmp_path / "live"
+    live.mkdir()
+    entry = {"pid": os.getpid(), "sessionId": "one", "status": "idle", "cwd": str(closed)}
+    (live / "1.json").write_text(json.dumps(entry))
+    monkeypatch.setenv("DECKHAND_LIVE", str(live))
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "nothing"))
+
+    assert worktree.sweep(REPO) == [f"Left worktree {closed}: session one is in it"]
+
+
+def test_a_transcript_that_cannot_be_read_does_not_stop_the_sweep(fake_gh, repo, origin, monkeypatch, tmp_path):
+    closed = worktree.add("fix/57-closed", new=True)
+    for name, value in _story(tmp_path, 57, "CLOSED").items():
+        monkeypatch.setenv(name, value)
+    live = tmp_path / "live"
+    live.mkdir()
+    (live / "1.json").write_text(json.dumps({"pid": os.getpid(), "sessionId": "one", "status": "idle"}))
+    (tmp_path / "sessions" / "x" / "one.jsonl").mkdir(parents=True)
+    monkeypatch.setenv("DECKHAND_LIVE", str(live))
+    monkeypatch.setenv("DECKHAND_SESSIONS", str(tmp_path / "sessions"))
+
+    assert worktree.sweep(REPO) == [f"Removed worktree {closed}"]
 
 
 def test_the_sweep_skips_the_story_it_is_told_to(fake_gh, repo, origin, monkeypatch, tmp_path):

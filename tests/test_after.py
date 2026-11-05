@@ -127,6 +127,14 @@ def test_context_without_the_column_opens_with_the_item(fake_gh, tmp_path):
     assert result.stdout.splitlines()[0] == "Apply: deckhand after apply 248 --item 2"
 
 
+def test_context_still_names_the_apply_when_the_issue_cannot_be_read(fake_gh, tmp_path):
+    result = run_deckhand("after", "context", "248", env={"GH_ISSUE_FILE": str(tmp_path / "gone.json")})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Apply: deckhand after apply 248"
+    assert "could not be read" in result.stdout
+
+
 def test_context_lists_the_items_and_their_boxes(fake_gh, tmp_path):
     result = run_deckhand("after", "context", "248", env=_story(tmp_path, ONE_DONE))
 

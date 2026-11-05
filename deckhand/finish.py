@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -86,6 +87,18 @@ def checks(cwd: Path) -> list[str]:
     if MAKE_TEST.search(_text(cwd / "Makefile")):
         found.append("make test")
     return found
+
+
+def hooked(cwd: Path) -> set[str]:
+    """The lines of the repository's pre-push hook, so a check it already runs is left to the push."""
+    try:
+        path = cwd / git.run("rev-parse", "--git-path", "hooks/pre-push", cwd=cwd)
+    except git.GitError:
+        return set()
+    # git skips a hook it cannot execute, so such a hook runs nothing.
+    if not os.access(path, os.X_OK):
+        return set()
+    return {line.strip() for line in _text(path).splitlines() if line.strip()}
 
 
 # --- the pull request message -----------------------------------------------
@@ -218,7 +231,9 @@ def context(args: argparse.Namespace) -> int:
     block("## Diff stat", lambda: _stat_block(base))
     block("## Pull request", lambda: _pr_block(args.issue))
     block("## Recent pull requests", _recent_block)
-    block("## Checks detected", lambda: indented(detected, "none detected"))
+    pushed = hooked(Path.cwd())
+    named = [f"{command} (the pre-push hook runs it)" if command in pushed else command for command in detected]
+    block("## Checks detected", lambda: indented(named, "none detected"))
     return 0
 
 
@@ -273,8 +288,12 @@ def apply(args: argparse.Namespace) -> int:
     gates.contains_main(args.issue)
     gates.conventional_commits()
     gates.docs_audit()
+    pushed = hooked(Path.cwd())
     for command in args.check:
-        gates.check(command)
+        if command in pushed:
+            print(f"Left to the pre-push hook: {command}")
+        else:
+            gates.check(command)
 
     # A plain push, with -u for the first time; git's own non-fast-forward refusal stands where the
     # lease once did.

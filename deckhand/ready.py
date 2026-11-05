@@ -104,7 +104,9 @@ def _could_block(settings: Settings | Exception, number: int) -> list[str]:
         content = node.get("content") or {}
         status = board.field_value(node, "Status", "name") or "-"
         where = (content.get("repository") or {}).get("nameWithOwner") or here
-        if (where, content.get("number")) == (here, number) or content.get("closedAt") or status == columns.DONE:
+        if content.get("number") is None or content.get("closedAt") or status == columns.DONE:
+            continue
+        if (where, content.get("number")) == (here, number):
             continue
         name = ref_label(where, content.get("number"), here)
         rows.append(f"{name} {status} {content.get('title') or ''}".rstrip())

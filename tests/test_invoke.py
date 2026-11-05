@@ -29,3 +29,7 @@ def test_stage_line_quotes_a_path_that_needs_it():
 
 def test_stage_line_with_no_paths_is_empty():
     assert invoke.stage_line([]) == ""
+
+
+def test_then_line_names_the_follow_up_apply():
+    assert invoke.then_line("after", "248", "--item", "2") == "Then: deckhand after apply 248 --item 2"

@@ -19,6 +19,11 @@ def apply_line(step: str, *parts: str) -> str:
     return " ".join(["Apply: deckhand", step, "apply", *parts])
 
 
+def then_line(step: str, *parts: str) -> str:
+    """The `apply` to run once the one above it has run, filled the same way."""
+    return " ".join(["Then: deckhand", step, "apply", *parts])
+
+
 def stage_line(paths: list[str]) -> str:
     """The pathspec add for the files a context listed, or nothing when it listed none.
 

@@ -9,11 +9,12 @@ are removed by the first run that can do it from outside the worktree.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
 
-from deckhand import git, issue
+from deckhand import git, issue, sessions
 from deckhand.step import MAIN, ORIGIN_MAIN, reason
 
 WORKTREES = Path(".claude") / "worktrees"
@@ -133,6 +134,34 @@ def remove(branch: str, path: Path) -> None:
         pass
 
 
+def _own_cwd(session: str) -> str:
+    try:
+        return sessions.own_cwd(session)
+    except OSError:
+        return ""
+
+
+def _occupied() -> dict[str, str]:
+    """Each directory a running session stands in, with its id; none when Claude Code's list cannot be read."""
+    found: dict[str, str] = {}
+    for session, entry in (sessions.running() or {}).items():
+        for cwd in (str(entry.get("cwd") or ""), _own_cwd(session)):
+            if cwd:
+                found[cwd] = session[: sessions.ID]
+    return found
+
+
+def _within(cwd: str, path: Path) -> bool:
+    """True when `cwd` is `path` or under it, by the file system's own notion of the same directory."""
+    for candidate in (Path(cwd), *Path(cwd).parents):
+        try:
+            if os.path.samefile(candidate, path):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def sweep(repo: str, exclude: int | None = None) -> list[str]:
     """From the clone, remove every story worktree whose issue is closed; one line per removal or refusal.
 
@@ -146,6 +175,7 @@ def sweep(repo: str, exclude: int | None = None) -> list[str]:
     except git.GitError:
         return []  # not a repository: nothing to sweep, and the command that called is the one to say so
     root = clone_root() / WORKTREES
+    occupied: dict[str, str] | None = None
     lines: list[str] = []
     for branch, path in _worktrees().items():
         match = STORY_BRANCH.match(branch)
@@ -156,6 +186,12 @@ def sweep(repo: str, exclude: int | None = None) -> list[str]:
             continue
         try:
             if issue.view(repo, number).state.upper() != "CLOSED":
+                continue
+            # An isolated session cannot leave the directory it stands in, so its own done row removes it.
+            occupied = _occupied() if occupied is None else occupied
+            inside = next((label for cwd, label in occupied.items() if _within(cwd, path)), None)
+            if inside is not None:
+                lines.append(f"Left worktree {path}: session {inside} is in it")
                 continue
             remove(branch, path)
             lines.append(f"Removed worktree {path}")

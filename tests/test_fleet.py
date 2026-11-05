@@ -159,6 +159,12 @@ def test_a_running_session_idle_overnight_still_holds_its_story():
     assert [item for item in found if item.number == 120 and "no session open" in item.what] == []
 
 
+def test_a_session_on_the_same_number_in_another_repository_does_not_hold_the_story():
+    pulses = [_pulse("120", "a", repo="acme/gadgets", live=True)]
+    found = fleet.anomalies(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=pulses)
+    assert [item for item in found if item.number == 120 and item.what == "In Progress, no session open"]
+
+
 def test_a_stale_transcript_does_not_hide_an_abandoned_story():
     """Without the running list, an old transcript is no evidence that anyone is there."""
     pulses = [_pulse("120", "a", idle=3 * 3600.0)]
