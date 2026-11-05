@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.2](https://github.com/JSA-Partners/deckhand/compare/v5.0.1...v5.0.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* leave a live session's worktree, and seven more watch findings ([#52](https://github.com/JSA-Partners/deckhand/issues/52)) ([d7d7fd9](https://github.com/JSA-Partners/deckhand/commit/d7d7fd92f12240a79a3c63874223f306bce69ecc))
+
 ## [5.0.1](https://github.com/JSA-Partners/deckhand/compare/v5.0.0...v5.0.1) (2026-11-03)
 
 
