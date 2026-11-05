@@ -250,6 +250,20 @@ def test_apply_finishes_an_interrupted_start(fake_gh, gh_calls, repo, origin, tm
     assert copy.read_text(encoding="utf-8").count("Started:") == 1
 
 
+def test_apply_finishes_a_start_interrupted_after_its_worktree_was_made(fake_gh, gh_calls, repo, origin, tmp_path):
+    """The cut made the story's own worktree before the board write failed; a retry from the clone finishes it."""
+    own = _worktree(repo, BRANCH)
+    run_git(repo, "worktree", "add", str(own), "-b", BRANCH)
+
+    result = _start("apply", repo, {}, "--note", STARTED[9:])
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[:2] == [f"Existing branch {BRANCH}; finishing the interrupted start", "Status=In Progress"]
+    assert lines[-1] == f"Worktree: {own}"
+    assert _writes(gh_calls) == [IN_PROGRESS, ASSIGN, COMMENT]
+
+
 def test_apply_works_in_place_when_the_branch_is_checked_out_here(fake_gh, gh_calls, repo, origin, tmp_path):
     """A story started before worktrees, or a session already in the story's worktree: nothing moves."""
     run_git(repo, "checkout", "-q", "-b", BRANCH)

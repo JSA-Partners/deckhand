@@ -220,7 +220,9 @@ def apply(args: argparse.Namespace) -> int:
     values = fields.get_fields(settings, repo, args.issue, ("Status", "Kind"))
     branch, found = _branch_name(settings, values["Kind"], story.title, args.issue)
     where = worktree.checked_out(branch) if found else None
-    if where is not None and not worktree.here(where):
+    # The story's own worktree is where an earlier run of this step left it, so it is resumed, not refused.
+    own = where is not None and where.resolve() == worktree.path_for(branch).resolve()
+    if where is not None and not worktree.here(where) and not own:
         raise Refusal(f"Branch {branch} is checked out at {where}.")
     status = values["Status"]
     # A branch the clone has while the story is still Backlog is a start that failed between the
@@ -234,6 +236,8 @@ def apply(args: argparse.Namespace) -> int:
             raise Refusal(f"#{args.issue} has branch {branch} but is {status or 'off the board'}")
         if where is None:
             made = _worktree(branch, new=False)
+        elif own and not worktree.here(where):
+            made = where
         print(f"Existing branch {branch}; {'finishing the interrupted start' if fresh else 'status unchanged'}")
     elif status is None:
         raise Refusal(f"#{args.issue} is off the board; board it first with /deckhand:next {args.issue}")
