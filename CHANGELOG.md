@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.3](https://github.com/JSA-Partners/deckhand/compare/v5.0.2...v5.0.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* carry features to parked stories, and four more watch findings ([#54](https://github.com/JSA-Partners/deckhand/issues/54)) ([ac07122](https://github.com/JSA-Partners/deckhand/commit/ac071224e94cfa468d12be16f039a8d86d878fb3))
+
 ## [5.0.2](https://github.com/JSA-Partners/deckhand/compare/v5.0.1...v5.0.2) (2026-11-05)
 
 
