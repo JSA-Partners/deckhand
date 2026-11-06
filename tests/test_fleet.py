@@ -699,6 +699,41 @@ def test_a_shed_story_already_in_a_feature_is_not_a_stray():
     assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, feature="OPT_B")]) == []
 
 
+def test_a_story_parked_from_a_feature_s_story_and_left_out_is_a_stray():
+    parent, kid = _logged(1, feature="OPT_A"), _logged(2, "Drafted: parked from #1")
+
+    assert fleet.strays([parent, kid]) == [(kid, parent)]
+
+
+def test_a_story_parked_from_another_repository_s_featured_story_is_a_stray():
+    parent = _logged(1, feature="OPT_A", repo="acme/gadgets")
+    kid = _logged(2, "Drafted: parked from acme/gadgets#1")
+
+    assert fleet.strays([parent, kid]) == [(kid, parent)]
+
+
+def test_a_story_parked_from_a_story_in_no_feature_is_not_a_stray():
+    assert fleet.strays([_logged(1), _logged(2, "Drafted: parked from #1")]) == []
+
+
+def test_a_story_parked_from_an_archived_featured_story_is_a_stray():
+    parent, kid = _logged(1, feature="OPT_A", closed=True), _logged(2, "Drafted: parked from #1")
+
+    assert fleet.strays([kid], archived=[parent]) == [(kid, parent)]
+
+
+def test_a_note_that_mentions_parking_names_no_parent():
+    assert fleet.strays([_logged(1, feature="OPT_A"), _logged(2, "Noted: parked from #1")]) == []
+
+
+def test_a_parked_stray_is_not_called_split():
+    parent, kid = _logged(1, feature="OPT_A"), _logged(2, "Drafted: parked from #1")
+    found = fleet.anomalies([parent, kid], {}, behind=set(), pulses=[])
+
+    (row,) = [item for item in found if item.number == 2]
+    assert row.what.startswith("split or parked from a story of")
+
+
 def test_a_finished_shed_story_is_not_a_stray():
     assert fleet.strays([_logged(1, SPLIT, feature="OPT_A"), _logged(2, closed=True)]) == []
 
@@ -711,7 +746,7 @@ def test_a_stray_is_an_anomaly_that_names_its_fix():
     found = fleet.anomalies([_logged(1, SPLIT, feature="OPT_A"), _logged(2)], {}, set(), [])
 
     assert [(item.number, item.what, item.fix) for item in found] == [
-        (2, "split from a story of Alpha, but in no feature", "epic add OPT_A acme/widgets#2")
+        (2, "split or parked from a story of Alpha, but in no feature", "epic add OPT_A acme/widgets#2")
     ]
 
 
@@ -720,7 +755,7 @@ def test_a_stray_fix_names_the_option_id_whatever_the_feature_is_called():
 
     (found,) = fleet.anomalies([shedder, _logged(2)], {}, set(), [])
 
-    assert found.what == 'split from a story of Say "hi" \\| $HOME `id`, but in no feature'
+    assert found.what == 'split or parked from a story of Say "hi" \\| $HOME `id`, but in no feature'
     assert found.fix == "epic add OPT_A acme/widgets#2"
 
 
