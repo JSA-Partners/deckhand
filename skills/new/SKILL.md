@@ -20,7 +20,8 @@ project's repositories; a story elsewhere is one outcome. Give `new apply` a
 idea: a fix needs a question or two, a feature the whole conversation.
 
 One story: run superpowers:writing-plans into the draft, with a `### After the merge`
-heading at the end of the Plan for anything that can only happen once the code is on main, and run
+heading at the end of the Plan for anything that can only happen once the code is on main (an item
+for another, merged story goes on its list with `after apply N --add "<item>"`, never a hand edit), and run
 `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <file>`. It boards the story as Draft. Then run
 `... next context <number>` and carry on from the Review section of
 `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md`, speaking as its Speaking section says.
