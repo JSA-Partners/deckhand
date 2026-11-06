@@ -527,7 +527,7 @@ def test_a_stray_row_keeps_the_anomalies_table_four_columns_wide(fleet_env, sett
     found = fleet.anomalies([_story(1, "Split: #2 Follow on.", feature="OPT_PAY"), _story(2)], {}, set(), [])
 
     (row,) = [line for line in captain._anomaly_rows(settings, found, set()) if line.startswith("| 2 ")]
-    what = "split from a story of Pay \\| refund, but in no feature"
+    what = "split or parked from a story of Pay \\| refund, but in no feature"
     assert row == f"| 2 | widgets | {what} | epic add OPT_PAY acme/widgets#2 |"
     assert len(re.findall(r"(?<!\\)\|", row)) == 5
 

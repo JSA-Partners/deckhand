@@ -14,7 +14,7 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh 
 
 If no number was given, ask which story. Say where the story is in two sentences from the briefing
 above, then run the step it names and carry on to the next step in the same conversation until a
-decision is the person's, or until you are unsure, and ask. Every command below
+decision is the person's, or you are unsure, and ask. Every command below
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
 did not print, run `<step> context $issue`. A `Plan:` or `Body:` line names a file holding that
 text: read the file, not the context again. When a command refuses, fix the rule it names
@@ -39,9 +39,10 @@ When they approve something, tell the story plainly first: what a user gets when
 will know, and the work as numbered steps of one sentence. The technical body stays on the issue;
 give it or explain any line on request.
 
-A feature this work turns up that belongs in a later story: write it as requirements and park it
-with `new apply --park <file> --title "<name>" --from $issue`, adding `--after $issue` when it
-waits on this one, and name the number it prints.
+Park a feature this work turns up for a later story with
+`new apply --park <file> --title "<name>" --from $issue`, adding `--after $issue` when it waits on
+this one, and name the number it prints. Fold or drop a story only with
+`captain apply --withdraw REF --note "<why>"`.
 
 ## Write
 

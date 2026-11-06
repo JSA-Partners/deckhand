@@ -850,6 +850,20 @@ def test_apply_split_from_a_parked_feature_keeps_it_as_the_first_story(fake_gh, 
     assert ("issue comment", "Split: into #57, #58") in _bodies(copy)
 
 
+def test_apply_split_from_a_featured_feature_gives_every_story_its_feature(fake_gh, gh_calls, tmp_path):
+    items = json.loads((FIXTURES / "epic-items.json").read_text(encoding="utf-8"))
+    nodes = items["data"]["organization"]["projectV2"]["items"]["nodes"]
+    nodes[0]["content"]["number"] = 60  # the parked feature, in Permission rework
+    path = tmp_path / "items.json"
+    path.write_text(json.dumps(items), encoding="utf-8")
+    env = {**_featured(tmp_path), **NUMBERS, **PARKED, "GH_PROJECT_ITEMS_FILE": str(path)}
+
+    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--from", "60", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines().count("Feature=Permission rework") == 3
+
+
 def test_apply_split_hands_what_waited_on_the_feature_to_every_story(fake_gh, gh_calls, tmp_path):
     waits = [{"number": 99, "title": "Waits", "state": "open", "repository": {"full_name": "acme/widgets"}}]
     waiting = json.dumps(waits)
@@ -1017,6 +1031,48 @@ def test_apply_park_opens_a_feature_stub_with_no_stories(fake_gh, gh_calls, tmp_
     assert body == draft.render(FEATURE_LINE, [])
     assert draft.read(body) == (FEATURE_LINE, [])
     assert drafted == "Drafted: parked from acme/widgets"
+
+
+def _featured(tmp_path) -> dict[str, str]:
+    """The epic board, where #301 is in Permission rework and #304 in no feature, with a Feature field to write."""
+    fields = json.loads((FIXTURES / "fields.json").read_text(encoding="utf-8"))
+    options = [{"id": "OPT_PERMISSION", "name": "Permission rework"}, {"id": "OPT_BILLING", "name": "Billing"}]
+    fields["fields"].append(
+        {"id": "PVTSSF_FEATURE", "name": "Feature", "type": "ProjectV2SingleSelectField", "options": options}
+    )
+    path = tmp_path / "fields-with-feature.json"
+    path.write_text(json.dumps(fields), encoding="utf-8")
+    return {
+        "GH_NEW_ISSUE": "61",
+        "GH_PROJECT_ITEMS_FILE": str(FIXTURES / "epic-items.json"),
+        "GH_FIELDS_FILE": str(path),
+    }
+
+
+def test_apply_park_from_a_featured_story_takes_its_feature(fake_gh, gh_calls, tmp_path):
+    path = _park_file(tmp_path, FEATURE)
+    result = run_deckhand("new", "apply", "--park", str(path), "--from", "301", env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Permission rework" in result.stdout.splitlines()
+    assert any("item-edit" in call and "OPT_PERMISSION" in call for call in gh_calls())
+
+
+def test_apply_park_from_a_story_in_no_feature_writes_no_feature(fake_gh, gh_calls, tmp_path):
+    path = _park_file(tmp_path, FEATURE)
+    result = run_deckhand("new", "apply", "--park", str(path), "--from", "304", env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert not [line for line in result.stdout.splitlines() if line.startswith("Feature=")]
+
+
+def test_apply_park_elsewhere_for_a_featured_story_takes_its_feature(fake_gh, gh_calls, tmp_path):
+    path = _park_file(tmp_path, FEATURE)
+    args = ("--park", str(path), "--blocks", "301", "--repo", "acme/gadgets")
+    result = run_deckhand("new", "apply", *args, env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Permission rework" in result.stdout.splitlines()
 
 
 def test_apply_park_takes_the_title_flag(fake_gh, gh_calls, tmp_path):

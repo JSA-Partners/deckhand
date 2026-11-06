@@ -184,16 +184,20 @@ def shed(story: Story) -> list[tuple[str, int]]:
 
 
 def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, Story]]:
-    """Every open story on the board in no feature that a story of a feature shed, with the story that shed it."""
+    """Every open story in no feature that a story of a feature split or parked, with that story."""
     held = {folded(story.key): story for story in found}
+    every = {folded(story.key): story for story in [*found, *(archived or [])]}
     out: dict[tuple[str, int], tuple[Story, Story]] = {}
-    for story in [*found, *(archived or [])]:
-        if story.feature is None:
-            continue
-        for key in shed(story):
-            kid = held.get(key)
-            if kid is not None and kid.feature is None and not kid.closed and touched(kid):
-                out.setdefault(key, (kid, story))
+    pairs = [(key, story) for story in every.values() if story.feature is not None for key in shed(story)]
+    for kid in found:
+        drafted = [entry.text for entry in log.entries(kid.issue) if entry.prefix == "Drafted:"]
+        named = next((text.removeprefix("parked from ") for text in drafted if text.startswith("parked from ")), "")
+        if (match := _SHED.fullmatch(named)) is not None:
+            pairs.append((folded(kid.key), every.get(folded((match.group(1) or kid.repo, int(match.group(2)))))))
+    for key, parent in pairs:
+        kid = held.get(key)
+        if parent and parent.feature and kid and kid.feature is None and not kid.closed and touched(kid):
+            out.setdefault(key, (kid, parent))
     return list(out.values())
 
 
@@ -313,7 +317,7 @@ def anomalies(
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
     for story, shedder in strays(found, archived):
         name = shedder.feature_name.replace("|", "\\|")
-        what = f"split from a story of {name}, but in no feature"
+        what = f"split or parked from a story of {name}, but in no feature"
         # A name may hold quotes or shell characters, and a bare number is the repository epic add runs in.
         fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
         out.append(Anomaly(story.number, story.repo, what, fix))

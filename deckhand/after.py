@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from dataclasses import replace
 
 from deckhand import columns, config, fields, gh, invoke, issue, log, sections
 from deckhand.step import Refusal, block, indented, reason, resolved_settings, step
@@ -81,6 +82,33 @@ def _ticked(body: str, position: int) -> str:
     return sections.replace(body, "Plan", "\n".join(lines))
 
 
+def _added(body: str, text: str) -> str:
+    """The body with `- [ ] text` after the last After the merge item, opening the block when the Plan has none."""
+    lines = sections.get(body, "Plan", "").rstrip("\n").split("\n")
+    start = next((number for number, line in enumerate(lines) if sections.AFTER_MERGE.match(line)), None)
+    if start is None:
+        lines += ["", "### After the merge", ""]
+        start = len(lines) - 1
+    bullets = [number for number in range(start + 1, len(lines)) if lines[number].startswith("- ")]
+    at = (bullets[-1] if bullets else start) + 1
+    # A wrapped item goes on in indented lines, which belong to it, so the new item comes after them.
+    while bullets and at < len(lines) and lines[at][:1].isspace() and lines[at].strip():
+        at += 1
+    lines.insert(at, f"- [ ] {text}")
+    return sections.replace(body, "Plan", "\n".join(lines) + "\n")
+
+
+def _add(repo: str, number: int, story: issue.Issue, text: str) -> str:
+    """Append one item to the story's After the merge list and log it; returns the body the column is read from."""
+    body = _added(story.body, text)
+    entry = log.checked(f"Noted: after the merge item added: {text}")
+    issue.update_body(repo, number, body)
+    print(f"Added item {len(sections.after_merge_items(body))}: {text}", flush=True)
+    issue.comment(repo, number, entry)
+    print("Logged Noted")
+    return body
+
+
 def _tick(repo: str, number: int, story: issue.Issue, items: list[tuple[str, bool]], position: int) -> str:
     """Tick item `position` on the issue and log it; returns the body the column is then read from."""
     if not 1 <= position <= len(items):
@@ -92,7 +120,7 @@ def _tick(repo: str, number: int, story: issue.Issue, items: list[tuple[str, boo
     body = _ticked(story.body, position)
     entry = log.checked(f"After the merge: {text}")
     # The boxes in this block are this step's to write, which is why the freeze `amend` holds does
-    # not reach them: no other command edits the body of a closed story.
+    # not reach them: only this step, ticking or adding, edits the body of a closed story.
     issue.update_body(repo, number, body)
     print(f"Ticked item {position}: {text}", flush=True)
     issue.comment(repo, number, entry)
@@ -101,7 +129,9 @@ def _tick(repo: str, number: int, story: issue.Issue, items: list[tuple[str, boo
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--item", type=int, metavar="N", help="the after-the-merge item to tick, counting from one")
+    act = parser.add_mutually_exclusive_group()
+    act.add_argument("--item", type=int, metavar="N", help="the after-the-merge item to tick, counting from one")
+    act.add_argument("--add", metavar="TEXT", help="an after-the-merge item to append to a merged story")
 
 
 @step("after", _configure)
@@ -109,10 +139,16 @@ def apply(args: argparse.Namespace) -> int:
     """Tick one after-the-merge item on a merged story, and set the column the remaining boxes ask for."""
     repo = gh.repo_slug()
     story = issue.view(repo, args.issue)
+    if args.add is not None and (not args.add.strip() or "\n" in args.add):
+        raise Refusal("--add takes the item as one line of text")
+    if story.state.upper() != "CLOSED" and args.add is not None:
+        raise Refusal(f"#{args.issue} is still open; change its plan with amend before it starts, or log a Deviation")
     if story.state.upper() != "CLOSED":
         raise Refusal(f"#{args.issue} is still open; this step runs once its pull request has merged")
-    items = sections.after_merge_items(story.body)
     settings = resolved_settings()
+    if args.add is not None:
+        story = replace(story, body=_add(repo, args.issue, story, args.add))
+    items = sections.after_merge_items(story.body)
     if not items:
         print(fields.set_field(settings, repo, args.issue, "Status", columns.DONE))
         return 0

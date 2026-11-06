@@ -303,10 +303,6 @@ def apply(args: argparse.Namespace) -> int:
     url = found[0] if found and found[1] == "OPEN" else None
     if url:
         print(f"Reusing {url}")
-        # The run that opened it may have failed before the fields were set, and a re-run is often a
-        # colleague's, so the reused pull request is assigned the same way a new one is.
-        gh.run("pr", "edit", url, "--repo", repo, "--add-assignee", "@me")
-        print("Assigned @me")
     else:
         url = gh.run(
             "pr",
@@ -321,12 +317,12 @@ def apply(args: argparse.Namespace) -> int:
             title,
             "--body",
             body,
-            # Whoever runs the step answers for the branch, so the pull request carries their name
-            # rather than arriving unowned in a review queue.
-            "--assignee",
-            "@me",
         ).strip()
         print(f"Opened {url}")
+    # Whoever runs the step answers for the branch. Assigned apart from the create, so a failed
+    # assignment never costs the pull request, and a re-run that reuses one assigns it the same way.
+    gh.run("pr", "edit", url, "--repo", repo, "--add-assignee", "@me")
+    print("Assigned @me")
     _link(repo, args.issue, url, body)
     issue.comment(repo, args.issue, log.checked(f"Pull request: {url}"))
     print("Logged Pull request")

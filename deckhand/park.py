@@ -16,16 +16,32 @@ from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 PARKED_HEADING = "## Parked feature"
 
 
+def feature_of(stories: list[fleet.Story], came: tuple[str, int] | None) -> str:
+    """The Feature the story `came` names is in, or empty for no story, one in no feature, or one off the board."""
+    if came is None:
+        return ""
+    wanted = fleet.folded(came)
+    return next((story.feature_name for story in stories if fleet.folded(story.key) == wanted), "")
+
+
 def board_draft(
-    settings: Settings, repo: str, number: int, url: str, note: str | None, status: str = columns.DRAFT
+    settings: Settings,
+    repo: str,
+    number: int,
+    url: str,
+    note: str | None,
+    status: str = columns.DRAFT,
+    feature: str = "",
 ) -> None:
-    """Put the issue on the board in `status`, then log that it was written when `note` is given.
+    """Put the issue on the board in `status` and `feature`, then log that it was written when `note` is given.
 
     Every write prints as it lands, so the printed lines are the record of how far the story got.
     """
     board.add(settings, url)
     print("Added to the board", flush=True)
     print(fields.set_field(settings, repo, number, "Status", status), flush=True)
+    if feature:
+        print(fields.set_field(settings, repo, number, board.FEATURE, feature), flush=True)
     if note is not None:
         issue.comment(repo, number, log.checked(note))
         print(f"Logged {note.split(':', 1)[0]}", flush=True)
@@ -39,18 +55,20 @@ def open_parked(
     body: str,
     origin: str,
     stories: list[fleet.Story],
+    came: tuple[str, int] | None = None,
 ) -> tuple[int, str]:
     """Open `body` as a draft titled `title` in `target`, board it as Draft, and log where it came from.
 
     `stories` is the board as read before the first write, so the stories this one resembles are
-    named ahead of it in any repository.
+    named ahead of it in any repository, and `came`, the story it was shed from, lends it a feature.
     """
     gh.split_repo(target)
     for line in related.similar_lines(stories, title, here):
         print(line, flush=True)
     number, url = issue.create(target, title, body)
     print(f"Parked {ref_label(target, number, here)} {url}", flush=True)
-    board_draft(settings, target, number, url, f"Drafted: parked from {origin}")
+    # Work shed from a story belongs to that story's feature until someone moves it with epic add.
+    board_draft(settings, target, number, url, f"Drafted: parked from {origin}", feature=feature_of(stories, came))
     return number, url
 
 
@@ -131,7 +149,9 @@ def feature(
     origin = ref_label(repo, came, target) if came is not None else repo
     # Read before the first write, so a board that fails refuses the park rather than leaving it half done.
     stories = fleet.load(settings)
-    number, _ = open_parked(settings, repo, target, title, draft.render(requirements, []), origin, stories)
+    body = draft.render(requirements, [])
+    parent = (repo, came) if came is not None else None
+    number, _ = open_parked(settings, repo, target, title, body, origin, stories, parent)
     if story is not None:
         block(repo, story[1], target, number, title)
     if waits_on is not None:
