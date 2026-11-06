@@ -90,6 +90,68 @@ def test_apply_refuses_an_item_already_ticked(fake_gh, gh_calls, tmp_path):
     assert not any("item-edit" in call for call in gh_calls())
 
 
+def test_apply_add_appends_an_item_and_moves_the_story_to_verification(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "bodies.md"
+    env = {**_story(tmp_path, TWO), "GH_BODY_FILE_COPY": str(copy)}
+
+    result = run_deckhand("after", "apply", "248", "--add", "Turn on API keys in production", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == ["Added item 3: Turn on API keys in production", "Logged Noted"]
+    written = copy.read_text(encoding="utf-8")
+    assert "- [ ] Check the dashboard\n- [ ] Turn on API keys in production" in written
+    assert "Noted: after the merge item added: Turn on API keys in production" in written
+    assert f"{STATUS} --single-select-option-id opt_verification" in gh_calls()
+
+
+def test_apply_add_opens_the_block_when_the_plan_has_none(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "bodies.md"
+    env = {**_story(tmp_path, NONE), "GH_BODY_FILE_COPY": str(copy)}
+
+    result = run_deckhand("after", "apply", "248", "--add", "Deploy it", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Added item 1: Deploy it"
+    assert "### After the merge\n\n- [ ] Deploy it" in copy.read_text(encoding="utf-8")
+
+
+def test_apply_add_refuses_an_open_story_and_writes_nothing(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--add", "Deploy it", env=_story(tmp_path, TWO, state="OPEN"))
+
+    assert result.returncode == 1
+    assert "amend" in result.stderr
+    assert not [call for call in gh_calls() if call.startswith(("issue edit", "issue comment")) or "item-edit" in call]
+
+
+def test_apply_add_and_item_together_is_a_usage_error(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--add", "x", "--item", "1", env=_story(tmp_path, TWO))
+
+    assert result.returncode != 0
+    assert gh_calls() == []
+
+
+WRAPPED = "### Task 1\n\nDo it.\n\n### After the merge\n\n- [ ] Deploy it to the cluster\n  and watch the rollout\n"
+
+
+def test_apply_add_lands_after_a_wrapped_last_item(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "bodies.md"
+    env = {**_story(tmp_path, WRAPPED), "GH_BODY_FILE_COPY": str(copy)}
+
+    result = run_deckhand("after", "apply", "248", "--add", "Check the dashboard", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "  and watch the rollout\n- [ ] Check the dashboard" in copy.read_text(encoding="utf-8")
+
+
+def test_apply_add_refuses_blank_or_multi_line_text_and_writes_nothing(fake_gh, gh_calls, tmp_path):
+    for text in ("  ", "one\ntwo"):
+        result = run_deckhand("after", "apply", "248", "--add", text, env=_story(tmp_path, TWO))
+
+        assert result.returncode == 1
+        assert "one line" in result.stderr
+    assert not [call for call in gh_calls() if call.startswith(("issue edit", "issue comment")) or "item-edit" in call]
+
+
 def test_context_opens_with_the_apply(fake_gh, tmp_path):
     env = {**_story(tmp_path, ONE_DONE), **_status_reads(tmp_path, "Verification")}
     result = run_deckhand("after", "context", "248", env=env)
