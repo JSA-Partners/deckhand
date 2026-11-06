@@ -78,7 +78,7 @@ def _fieldvalues(tmp_path: Path, kind: str | None) -> dict[str, str]:
 def _create_call(title: str, body: str) -> str:
     """The `pr create` line the fake records; it joins argv and flattens every newline to a space."""
     args = ["pr", "create", "--repo", "acme/widgets", "--base", "main", "--head", BRANCH]
-    return " ".join([*args, "--title", title, "--body", body, "--assignee", "@me"]).replace("\n", " ")
+    return " ".join([*args, "--title", title, "--body", body]).replace("\n", " ")
 
 
 def _issue(tmp_path: Path, name: str, **changes: str) -> dict[str, str]:
@@ -696,9 +696,10 @@ def test_apply_pushes_then_opens_the_pull_request_and_logs_it(fake_gh, gh_calls,
     result = _apply(repo, env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-4:] == [
+    assert result.stdout.splitlines()[-5:] == [
         "Pushed",
         f"Opened {PR_URL}",
+        "Assigned @me",
         "Logged Pull request",
         "Status=In Review",
     ]
@@ -714,6 +715,7 @@ def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo,
         RAN,
         "Pushed",
         f"Opened {PR_URL}",
+        "Assigned @me",
         "Logged Pull request",
         "Status=In Review",
     ]
@@ -722,12 +724,13 @@ def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo,
         "issue view",
         "pr list",
         "pr create",
+        "pr edit",
         "issue comment",
         "project item-edit",
     ]
     assert calls[1] == PR_LIST
     assert calls[2].startswith("pr create ")
-    assert calls[4:] == [PENDING]
+    assert calls[5:] == [PENDING]
 
 
 def test_apply_ends_on_the_fields_and_reads_nothing_more(fake_gh, gh_calls, repo, origin, branch):
@@ -746,6 +749,20 @@ def test_apply_uses_the_kind_in_the_title(fake_gh, gh_calls, repo, origin, branc
     assert result.returncode == 0, result.stderr
     create = next(call for call in gh_calls() if call.startswith("pr create"))
     assert create.startswith(f"pr create --repo acme/widgets --base main --head {BRANCH} --title fix: {SUBJECT} ")
+
+
+def test_apply_assigns_a_new_pull_request_after_creating_it(fake_gh, gh_calls, repo, origin, branch):
+    """Assigning inside the create made a failed assignment cost the pull request; apart, the create stands."""
+    result = _apply(repo)
+
+    assert result.returncode == 0, result.stderr
+    calls = gh_calls()
+    create = next(index for index, call in enumerate(calls) if call.startswith("pr create"))
+    assign = next(
+        index for index, call in enumerate(calls) if call.startswith("pr edit") and "--add-assignee @me" in call
+    )
+    assert "--assignee" not in calls[create]
+    assert create < assign
 
 
 def test_apply_opens_the_pull_request_with_the_computed_message(fake_gh, gh_calls, repo, origin, branch):
@@ -815,13 +832,14 @@ def test_apply_resaves_the_body_when_github_did_not_link_it(fake_gh, gh_calls, r
     result = _apply(repo, env={"GH_PR_UNLINKED_CALLS": "1", "GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-4:] == [
+    assert result.stdout.splitlines()[-5:] == [
         f"Opened {PR_URL}",
+        "Assigned @me",
         "Relinked #248",
         "Logged Pull request",
         "Status=In Review",
     ]
-    edits = [call for call in gh_calls() if call.startswith("pr edit")]
+    edits = [call for call in gh_calls() if call.startswith("pr edit") and "--body-file" in call]
     assert len(edits) == 1
     assert edits[0].startswith(f"pr edit {PR_URL} --repo acme/widgets --body-file ")
     assert f"--- pr edit\n{BODY}" in copy.read_text(encoding="utf-8")
@@ -832,7 +850,7 @@ def test_apply_leaves_a_linked_pull_request_alone(fake_gh, gh_calls, repo, origi
 
     assert result.returncode == 0, result.stderr
     assert "Relinked" not in result.stdout
-    assert [call for call in gh_calls() if call.startswith("pr edit")] == []
+    assert [call for call in gh_calls() if call.startswith("pr edit") and "--body-file" in call] == []
 
 
 def test_apply_says_so_when_the_resave_did_not_link_it_either(fake_gh, gh_calls, repo, origin, branch):
@@ -840,8 +858,9 @@ def test_apply_says_so_when_the_resave_did_not_link_it_either(fake_gh, gh_calls,
     result = _apply(repo, env={"GH_PR_UNLINKED_CALLS": "2"})
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-5:] == [
+    assert result.stdout.splitlines()[-6:] == [
         f"Opened {PR_URL}",
+        "Assigned @me",
         "Relinked #248",
         f"GitHub has not linked {PR_URL} to #248; re-save its body on GitHub if it stays unlinked",
         "Logged Pull request",
