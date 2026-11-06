@@ -290,13 +290,14 @@ def _split(repo: str, text: str, parked: int | None) -> int:
     # name its siblings' numbers until every issue exists.
     provisional = draft.render(requirements, entries)
     origin = f"{repo}#{parked}" if parked is not None else f"a split in {repo}"
+    parent = (repo, parked) if parked is not None else None
     numbers: list[int] = []
     urls: list[str] = []
     local: list[int] = []
     for position, entry in enumerate(entries):
         if entry.repo:
             body = draft.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
-            number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin, stories)
+            number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin, stories, parent)
         elif position == 0 and parked is not None:
             number, url = parked, parked_url or ""
             issue.set_title(repo, number, entry.title)
@@ -314,7 +315,8 @@ def _split(repo: str, text: str, parked: int | None) -> int:
             continue
         issue.update_body(repo, number, body)
         print(f"Numbered #{number}", flush=True)
-        park.board_draft(settings, repo, number, url, None)  # a draft is not written yet; its author logs that
+        # A draft is not written yet, so its author logs that; it joins the feature it was split from now.
+        park.board_draft(settings, repo, number, url, None, feature=park.feature_of(stories, parent))
     park.wire(repo, entries, numbers)
     siblings = [(e.repo or repo, n) for e, n in zip(entries[1:], numbers[1:], strict=True)]
     if parked is not None and siblings:  # one story shed nothing, so there is nothing to say or inherit
