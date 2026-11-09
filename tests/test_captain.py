@@ -763,3 +763,43 @@ def test_a_full_read_finds_the_anomalies_once(fleet_env, tmp_path, monkeypatch, 
     cli.main(["captain", "context"])
 
     assert len(calls) == 1
+
+
+def _blocked_by(tmp_path, monkeypatch, edges: dict) -> None:
+    mapped = tmp_path / "blocked-by.json"
+    mapped.write_text(json.dumps(edges), encoding="utf-8")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+
+def test_block_refuses_a_loop_across_repositories_before_writing(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    back = {"number": 253, "title": "This story", "state": "open", "repository": {"full_name": "acme/widgets"}}
+    _blocked_by(tmp_path, monkeypatch, {"13": [back]})
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "acme/gadgets#13"]) == 1
+
+    err = capsys.readouterr().err
+    assert "#253 -> acme/gadgets#13 -> #253" in err
+    assert "captain apply --unblock acme/gadgets#13 --by 253" in err
+    assert not any("-X POST" in call and "dependencies/blocked_by" in call for call in gh_calls())
+
+
+def test_block_refuses_a_longer_loop(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    hop = {"number": 13, "title": "Elsewhere", "state": "open", "repository": {"full_name": "acme/gadgets"}}
+    back = {"number": 253, "title": "This story", "state": "open", "repository": {"full_name": "acme/widgets"}}
+    _blocked_by(tmp_path, monkeypatch, {"117": [hop], "13": [back]})
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "117"]) == 1
+
+    assert "#253 -> #117 -> acme/gadgets#13 -> #253" in capsys.readouterr().err
+    assert not any("-X POST" in call and "dependencies/blocked_by" in call for call in gh_calls())
+
+
+def test_block_refuses_when_the_walk_cannot_read(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    mapped = tmp_path / "blocked-by.json"
+    mapped.write_text("not json", encoding="utf-8")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "117"]) == 1
+
+    assert "cannot check #117 for a loop" in capsys.readouterr().err
+    assert not any("-X POST" in call and "dependencies/blocked_by" in call for call in gh_calls())

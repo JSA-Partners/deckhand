@@ -78,6 +78,7 @@ def find(
         if beat.live or beat.idle < ACTIVE:
             held.add((beat.repo, beat.story))
     out: list[Anomaly] = []
+    owned = {fleet.folded(story.key) for story in found if fleet.touched(story)}
     for story in found:
         if not fleet.touched(story):
             continue
@@ -104,9 +105,11 @@ def find(
         if story.key in behind:
             out.append(Anomaly(story.number, story.repo, "pull request behind main", f"run next {story.number}"))
         loop = circle(story.key, blockers)
-        if loop:
+        # One loop is one row, on the first of its own stories, so one command is named once.
+        first = min((fleet.folded(key) for key in loop if fleet.folded(key) in owned), default=None)
+        if loop and fleet.folded(story.key) == first:
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
-            fix = "captain apply --unblock on one edge"
+            fix = f"captain apply --unblock {'#'.join(map(str, loop[0]))} --by {'#'.join(map(str, loop[1]))}"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
     for story, shedder in strays(found, archived):
         name = shedder.feature_name.replace("|", "\\|")

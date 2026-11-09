@@ -9,7 +9,7 @@ lives here because every draft and story boards the same way, from new, amend, a
 
 from __future__ import annotations
 
-from deckhand import board, columns, draft, fields, fleet, gh, issue, log, related
+from deckhand import board, columns, draft, edges, fields, fleet, gh, issue, log, related
 from deckhand.config import Settings
 from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 
@@ -142,6 +142,9 @@ def feature(
     if story is not None and story[0] != repo:
         raise Refusal("--blocks names a story in this repository")
     waits_on = _ref(after, repo) if after else None
+    if story is not None and waits_on is not None:
+        # The story waits on the park and the park on `after`, so the story comes to wait on `after`.
+        edges.refuse_loop(repo, story, waits_on)
     first = next(line for line in requirements.splitlines() if line.strip())
     # A notes file opens with a sentence, not a name; the subject limit is what tells the two apart.
     title = fits_title((flag or "").strip() or first.strip())

@@ -149,9 +149,23 @@ def test_a_loop_through_a_draft_names_every_story_on_it():
         ("acme/widgets", 253): [("acme/widgets", 257, "Authorize")],
     }
     found = anomalies.find(fleet.stories(_nodes()), blockers, behind=set(), pulses=[])
-    entry = next(item for item in found if item.number == 257 and "circle" in item.what)
-    assert entry.what == "blockers run in a circle: #257 -> #268 -> #253 -> #257"
-    assert entry.fix == "captain apply --unblock on one edge"
+    loops = [item for item in found if "circle" in item.what]
+    assert [(item.number, item.what) for item in loops] == [
+        (253, "blockers run in a circle: #253 -> #257 -> #268 -> #253")
+    ]
+    assert loops[0].fix == "captain apply --unblock acme/widgets#253 --by acme/widgets#257"
+
+
+def test_a_loop_across_repositories_is_one_row_with_one_command():
+    here, there = _story(253), dataclasses.replace(_story(13), repo="acme/gadgets")
+    blockers = {
+        here.key: [("acme/gadgets", 13, "Elsewhere")],
+        there.key: [("acme/widgets", 253, "Seed")],
+    }
+    loops = [item for item in anomalies.find([here, there], blockers, set(), []) if "circle" in item.what]
+    assert [(item.repo, item.number) for item in loops] == [("acme/gadgets", 13)]
+    assert loops[0].what == "blockers run in a circle: #13 -> acme/widgets#253 -> #13"
+    assert loops[0].fix == "captain apply --unblock acme/gadgets#13 --by acme/widgets#253"
 
 
 def test_an_archived_story_the_process_owns_is_an_anomaly():
