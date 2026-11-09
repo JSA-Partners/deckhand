@@ -12,7 +12,7 @@ import pytest
 from deckhand import draft, lint, log, naming, new, sections, step
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
-from tests.conftest import FIXTURES, ROOT, advance_origin, labeled_board, run_deckhand, run_git
+from tests.conftest import FIXTURES, ROOT, advance_origin, fieldvalues, labeled_board, run_deckhand, run_git
 
 
 @pytest.fixture(autouse=True)
@@ -1376,7 +1376,7 @@ def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):
     result = run_deckhand("new", "context", "248", env=DRAFT)
 
     lines = result.stdout.splitlines()
-    assert lines.index('Apply: deckhand new apply <file> --draft 248 --feature "<name>"') < lines.index("### Story")
+    assert lines.index("Apply: deckhand new apply <file> --draft 248") < lines.index("### Story")
     assert "Park shape:" in lines
     assert 'Apply: deckhand new apply <file> --park --from 248 --title "<title>"' in lines
 
@@ -1479,3 +1479,21 @@ def test_context_lists_the_features_in_pipeline_order(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "Features: Billing, Permission rework, Permission audit" in result.stdout.splitlines()
+
+
+def test_apply_draft_with_no_feature_on_the_board_needs_one(fake_gh, gh_calls, tmp_path):
+    """A draft opened before every story had a feature is not written into a story without one."""
+    unfiled = {**DRAFT, **fieldvalues(tmp_path, "Draft")}
+
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), env=unfiled)
+
+    assert result.returncode == 1
+    assert "a story needs a feature" in result.stderr
+    assert _writes(gh_calls()) == []
+
+
+def test_apply_draft_keeps_the_feature_it_was_boarded_in(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), env=DRAFT)
+
+    assert result.returncode == 0, result.stderr
+    assert not [line for line in result.stdout.splitlines() if line.startswith("Feature=")]

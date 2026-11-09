@@ -21,9 +21,11 @@ from datetime import datetime
 from pathlib import Path
 
 from deckhand import (
+    board,
     columns,
     draft,
     epic,
+    fields,
     gh,
     invoke,
     issue,
@@ -132,7 +134,8 @@ def _tail(name: str, split: str | None = None, park: bool = False, number: int |
     is the draft being written, which the body goes into rather than opening an issue of its own.
     """
     source = ("--from", str(number)) if number else ()
-    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ()), '--feature "<name>"'))
+    # A draft took its feature when it was parked or split, so only a new story is asked for one.
+    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ('--feature "<name>"',))))
     print(file_line("Body", name))
     print(_features())
     if park:
@@ -280,8 +283,10 @@ def _write_draft(repo: str, number: int, edited: str, flag: str | None, named: s
     subject = fits_title((flag or "").strip())
     body = lint.checked(edited)
     settings = resolved_settings()
-    # A draft took its feature when it was parked or split; a name given here sets one.
-    feature = epic.option_name(settings, named) if named else ""
+    # A draft took its feature when it was parked or split; one from before every story had a
+    # feature is refused here unless a name is given, which also moves a draft that has one.
+    boarded = "" if named else fields.get_field(settings, repo, number, board.FEATURE) or ""
+    feature = park.chosen(settings, named, boarded) if named or not boarded else ""
     issue.update_body(repo, number, body)
     print(f"Written #{number} {story.url}", flush=True)
     if subject:  # the draft's own title stands unless the session says otherwise

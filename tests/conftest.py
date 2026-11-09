@@ -233,3 +233,9 @@ def feature_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path.write_text(json.dumps(fields), encoding="utf-8")
     monkeypatch.setenv("GH_FIELDS_FILE", str(path))
     monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(FIXTURES / "feature-fields.json"))
+    # A draft is boarded into a Feature when it is parked or split, so the item read says Billing.
+    values = json.loads((FIXTURES / "graphql-fieldvalues.json").read_text(encoding="utf-8"))
+    values["data"]["node"]["fieldValues"]["nodes"].append({"name": "Billing", "field": {"name": "Feature"}})
+    boarded = tmp_path / "fieldvalues-with-feature.json"
+    boarded.write_text(json.dumps(values), encoding="utf-8")
+    monkeypatch.setenv("GH_FIELDVALUES_FILE", str(boarded))

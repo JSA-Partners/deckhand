@@ -118,9 +118,15 @@ def test_the_earlier_feature_ranks_first_whatever_the_work_freed():
 
 
 def test_a_blocker_ranks_with_the_earliest_feature_waiting_on_it():
-    """#253 is in the last feature, but #257 in the first waits on it, so #253 starts before #13."""
+    """#253 is in the last feature, but #257 in the first waits on it, so both come before #13."""
     stories = _in({13: "OPT_B", 253: "OPT_C", 257: "OPT_A", 258: "OPT_C"})
-    assert _placed(stories, ("OPT_A", "OPT_B", "OPT_C")) == [253, 13, 257, 258]
+    assert _placed(stories, ("OPT_A", "OPT_B", "OPT_C")) == [253, 257, 13, 258]
+
+
+def test_a_waiting_story_of_an_earlier_feature_ranks_above_a_ready_one_of_a_later():
+    """#257 waits on #253, which is building and so not in the backlog; the pipeline still puts it first."""
+    stories = [story for story in _in({13: "OPT_B", 257: "OPT_A", 258: "OPT_A"}) if story.number != 253]
+    assert _placed(stories, ("OPT_A", "OPT_B")) == [257, 258, 13]
 
 
 def test_a_story_in_no_feature_ranks_after_every_featured_one():

@@ -1,6 +1,7 @@
 """Tests for deckhand.deadline, through the gh calls it limits."""
 
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -48,3 +49,60 @@ def test_timed_out_write_says_it_may_have_landed(tmp_path, monkeypatch):
     with pytest.raises(gh.GhError) as read:
         gh.run("api", "user")
     assert "may have landed" not in str(read.value)
+
+
+def _sleeper() -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        ["sleep", "30"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+
+
+def test_an_interrupt_kills_the_call_it_was_waiting_on(monkeypatch):
+    """gh runs in its own session, so a Ctrl-C reaching deckhand never reaches it; the wait kills it."""
+    process = _sleeper()
+    calls = iter([0.0])
+
+    def interrupted():
+        try:
+            return next(calls)
+        except StopIteration:
+            raise KeyboardInterrupt from None
+
+    monkeypatch.setattr(deadline, "_now", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        deadline.wait(process, None)
+    assert process.poll() is not None
+
+
+def test_a_call_that_ends_as_it_is_killed_still_reads_as_expired(monkeypatch):
+    process = _sleeper()
+    monkeypatch.setattr(deadline, "LIMIT", 0.5)
+
+    def gone(pid, sig):
+        os.kill(pid, sig)
+        raise ProcessLookupError
+
+    monkeypatch.setattr(deadline.os, "killpg", gone)
+    with pytest.raises(deadline.Expired):
+        deadline.wait(process, None)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("project", "item-archive", "2"),
+        ("project", "item-delete", "2"),
+        ("project", "field-create", "2"),
+        ("project", "field-delete", "--id", "F"),
+        ("project", "link", "2"),
+        ("repo", "edit", "acme/widgets"),
+    ],
+)
+def test_every_cli_write_may_have_landed(args):
+    assert deadline.writes(args)
+
+
+def test_a_mutation_sent_on_stdin_may_have_landed():
+    args = ("api", "graphql", "--input", "-")
+    assert deadline.writes(args, '{"query": "mutation($id: ID!) { deleteItem(id: $id) { id } }"}')
+    assert not deadline.writes(args, '{"query": "query { viewer { login } }"}')

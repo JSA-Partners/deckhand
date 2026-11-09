@@ -93,16 +93,17 @@ def ranked(backlog: list[Story], blockers: Blockers, place: dict[Key, int] | Non
     """
     waits = waiting(blockers)
     points = {story.key: story.points or 0 for story in backlog}
-    ready = [story for story in backlog if not blockers.get(story.key)]
-    held = [story for story in backlog if blockers.get(story.key)]
     weights = {story.key: downstream(story.key, waits) for story in backlog}
 
-    def rank(story: Story) -> tuple[int, int, int, int]:
+    def rank(story: Story) -> tuple[int, int, int, int, int]:
         below = weights[story.key]
         first = (place or {}).get(story.key, 0)
-        return (first, -sum(points.get(key, 0) for key in below), story.points or 0, story.number)
+        waits = 1 if blockers.get(story.key) else 0
+        return (first, waits, -sum(points.get(key, 0) for key in below), story.points or 0, story.number)
 
-    placed = sorted(ready, key=rank) + topological(held, blockers, rank)
+    # The pipeline place decides first across the whole backlog; within one place a story that can
+    # start goes before one that waits, and nothing precedes a blocker that is also in the backlog.
+    placed = topological(backlog, blockers, rank)
     return [
         Ranked(story=story, why=_why(story, blockers.get(story.key) or [], weights[story.key], points))
         for story in placed
