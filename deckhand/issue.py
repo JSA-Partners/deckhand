@@ -193,8 +193,8 @@ def remove_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> No
     gh.run("api", "-X", "DELETE", f"repos/{repo}/issues/{number}/dependencies/blocked_by/{blocker_id}")
 
 
-def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
-    """`(repository, number, title)` of every open issue blocking `number`; the repository may be another."""
+def blockers(repo: str, number: int, state: str = "open") -> list[tuple[str, int, str]]:
+    """`(repository, number, title)` of every issue in `state` blocking `number`; the repository may be another."""
     gh.split_repo(repo)
     items = gh.paginated(f"repos/{repo}/issues/{number}/dependencies/blocked_by")
     return [
@@ -204,7 +204,7 @@ def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
             " ".join((item.get("title") or "").split()),
         )
         for item in items
-        if item.get("state") == "open"
+        if item.get("state") == state
     ]
 
 

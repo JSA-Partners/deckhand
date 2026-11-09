@@ -1010,3 +1010,50 @@ def test_next_catches_a_stale_clone_up_before_it_briefs(fake_gh, repo, origin, t
     lines = result.stdout.splitlines()
     assert lines[0] == "Caught up: main moved 1 commit to origin/main."
     assert lines[1].startswith("Step: ")
+
+
+SHIPPED = '[{"number":9,"title":"Endpoint","state":"closed","repository":{"full_name":"acme/gadgets"}}]'
+
+
+def _built_on(lines: list[str]) -> list[str]:
+    start = lines.index("Built on:")
+    return lines[start : start + 3]
+
+
+def test_the_check_row_names_shipped_work_in_another_repository(fake_gh, repo, tmp_path):
+    result = _next(repo, env={**fieldvalues(tmp_path, "Backlog"), "GH_BLOCKED_BY": SHIPPED})
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "Step: check"
+    heading, named, body = _built_on(lines)
+    assert named == "  acme/gadgets#9  Endpoint"
+    path = Path(body.split(": ", 1)[1].rsplit(" (", 1)[0])
+    assert body.startswith("    Body: ")
+    assert path.read_text(encoding="utf-8").startswith("### Story\n\nAs a guest user")
+
+
+def test_the_build_row_names_shipped_work_in_another_repository(fake_gh, repo, empty_branch, tmp_path):
+    result = _next(repo, env={**fieldvalues(tmp_path, "In Progress"), "GH_BLOCKED_BY": SHIPPED})
+
+    assert result.returncode == 0, result.stderr
+    assert "  acme/gadgets#9  Endpoint" in _built_on(result.stdout.splitlines())
+
+
+def test_shipped_work_in_this_repository_is_not_listed(fake_gh, repo, tmp_path):
+    here = '[{"number":9,"title":"Endpoint","state":"closed","repository":{"full_name":"acme/widgets"}}]'
+    result = _next(repo, env={**fieldvalues(tmp_path, "Backlog"), "GH_BLOCKED_BY": here})
+
+    assert result.returncode == 0, result.stderr
+    assert "Built on:" not in result.stdout.splitlines()
+
+
+def test_a_shipped_body_that_cannot_be_read_costs_one_line(fake_gh, repo, tmp_path):
+    """The blockers come from the read that decides the step, so the body is what can still fail here."""
+    env = {**fieldvalues(tmp_path, "Backlog"), "GH_BLOCKED_BY": SHIPPED, "GH_ISSUE_FILE_9": str(tmp_path / "gone")}
+    result = _next(repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    named, body = _built_on(result.stdout.splitlines())[1:]
+    assert named == "  acme/gadgets#9  Endpoint"
+    assert body.startswith("    Body: unavailable (")

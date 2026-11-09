@@ -332,6 +332,17 @@ def _worktree(name: str, branch: str | None) -> tuple[str | None, str | None]:
         return f"Worktree: unavailable ({reason(error)})", None
 
 
+def _built_on(repo: str, number: int) -> None:
+    """What shipped in another repository that this story builds on, printed only when there is some."""
+    try:
+        found = related.built_on(repo, number)
+    except Exception as error:
+        found = [f"  unavailable ({reason(error)})"]
+    if found:
+        print("Built on:")
+        print("\n".join(found))
+
+
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("issue", type=issue_number, nargs="?", default=None, help="the issue number")
 
@@ -368,6 +379,8 @@ def context(args: argparse.Namespace) -> int:
         print("Blocked by:")
         for blocker in facts.blockers:
             print(f"  {blocker}")
+    if name in ("check", "build", "resume") and repo:
+        _built_on(repo, number)
     _log_block(story)
     if name == "settle" and story:
         _notes_block(story)
