@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.0](https://github.com/JSA-Partners/deckhand/compare/v5.0.3...v5.1.0) (2026-11-09)
+
+
+### Features
+
+* require a feature and impeccable, and clear the watch findings ([#56](https://github.com/JSA-Partners/deckhand/issues/56)) ([1217de1](https://github.com/JSA-Partners/deckhand/commit/1217de1a2139cc685ce22b89f9f91dbde8c85c52))
+
 ## [5.0.3](https://github.com/JSA-Partners/deckhand/compare/v5.0.2...v5.0.3) (2026-11-06)
 
 
