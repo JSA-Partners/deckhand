@@ -7,10 +7,11 @@
 A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.
 
 deckhand is a [Claude Code](https://code.claude.com/) plugin that runs on
-[superpowers](https://github.com/obra/superpowers). superpowers does the brainstorming, planning,
-and implementation. deckhand adds the process around it: one issue per story, a review you settle in
-conversation, a board that follows the work, and a pull request that opens only from a commit you
-have read.
+[superpowers](https://github.com/obra/superpowers) and [impeccable](https://impeccable.style).
+superpowers does the brainstorming, planning, and implementation, and impeccable the design of
+anything a person sees. deckhand adds the process around them: one issue per story, a review you
+settle in conversation, a board that follows the work, and a pull request that opens only from a
+commit you have read.
 
 ## Table of Contents
 
@@ -66,7 +67,8 @@ story is written to the repository, and you never act on GitHub. You open it to 
 
 ### Dependencies
 
-- [Claude Code](https://code.claude.com/) with [superpowers](https://github.com/obra/superpowers)
+- [Claude Code](https://code.claude.com/) with [superpowers](https://github.com/obra/superpowers) and
+  [impeccable](https://impeccable.style)
 - [`gh`](https://cli.github.com/), authenticated with the `project` scope: `gh auth refresh -s project`
 - Admin rights on the repository, so setup can make squash the only merge
 - Python 3.12 or newer
@@ -80,6 +82,8 @@ deckhand works with GitHub only.
 ```bash
 claude plugin marketplace add obra/superpowers
 claude plugin install superpowers@superpowers-dev
+claude plugin marketplace add pbakaus/impeccable
+claude plugin install impeccable@impeccable
 claude plugin marketplace add JSA-Partners/deckhand
 claude plugin install deckhand@jsapartners
 ```

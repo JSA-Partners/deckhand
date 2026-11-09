@@ -191,15 +191,19 @@ def block(repo: str, number: int, story: issue.Issue, skip: frozenset[tuple[str,
 
 
 def built_on(repo: str, number: int) -> list[str]:
-    """Each closed blocker from another repository, its body cached, so what shipped there is read once.
+    """`Built on:` and each closed blocker from another repository, its body cached; empty when none.
 
     A blocker in this repository is left out: what it shipped is in the checkout.
     """
+    try:
+        found = issue.blockers(repo, number, state="closed")
+    except Exception as error:
+        return ["Built on:", f"  unavailable ({reason(error)})"]
     lines: list[str] = []
-    for where, blocker, title in issue.blockers(repo, number, state="closed"):
+    for where, blocker, title in found:
         if where.lower() == repo.lower():
             continue
         name = f"built-on-{where.replace('/', '-')}-{blocker}.md"
         body = spill("Body", name, lambda where=where, blocker=blocker: issue.view(where, blocker).body, repo)
         lines += [f"  {where}#{blocker}  {title}", f"    {body}"]
-    return lines
+    return ["Built on:", *lines] if lines else []

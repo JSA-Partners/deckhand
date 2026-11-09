@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import next as next_module
 from deckhand.next import Facts, decide
 from tests.conftest import FIXTURES, advance_origin, fieldvalues, labeled_board, run_deckhand, run_git
 
@@ -1057,3 +1058,25 @@ def test_a_shipped_body_that_cannot_be_read_costs_one_line(fake_gh, repo, tmp_pa
     named, body = _built_on(result.stdout.splitlines())[1:]
     assert named == "  acme/gadgets#9  Endpoint"
     assert body.startswith("    Body: unavailable (")
+
+
+def test_every_build_is_reminded_to_use_impeccable_for_what_a_person_sees(fake_gh, repo, empty_branch, tmp_path):
+    result = _next(repo, env=fieldvalues(tmp_path, "In Progress"))
+
+    assert result.returncode == 0, result.stderr
+    assert next_module.VISUAL_LINE in result.stdout.splitlines()
+
+
+def test_a_resume_is_reminded_too(fake_gh, repo, origin, branch, tmp_path):
+    result = _next(repo, env=fieldvalues(tmp_path, "In Progress"))
+
+    assert result.returncode == 0, result.stderr
+    assert next_module.VISUAL_LINE in result.stdout.splitlines()
+
+
+def test_a_step_that_builds_nothing_is_not_reminded(fake_gh, repo, tmp_path):
+    result = _next(repo, env=fieldvalues(tmp_path, "Backlog"))
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "Step: check"
+    assert next_module.VISUAL_LINE not in result.stdout.splitlines()

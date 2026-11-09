@@ -31,11 +31,9 @@ PROJECT_FIELDS: list[tuple[str, str]] = [
 # What `gh project field-list` reports as `type` for each `field-create --data-type`.
 FIELD_TYPES = {"SINGLE_SELECT": "ProjectV2SingleSelectField", "NUMBER": "ProjectV2Field"}
 
-# Where Claude Code records the plugins it installed. deckhand does not declare superpowers as a
-# dependency, so the one thing setup can do about it is say whether it is there.
+# Where Claude Code records the plugins it installed. deckhand does not declare superpowers or
+# impeccable as a dependency, so the one thing setup can do about them is say whether they are there.
 PLUGINS_FILE = Path(".claude") / "plugins" / "installed_plugins.json"
-SUPERPOWERS = "superpowers@"
-NO_PLUGIN_LIST = "superpowers: unknown (no plugin list in the file)"
 
 # The fields the process reads; every other field a person could have made is deleted. Status is
 # GitHub's own, and a single select like any other, so it is kept by name; `epic open` makes Feature.
@@ -73,8 +71,8 @@ def _plugins_path() -> Path:
     return Path(override) if override else Path.home() / PLUGINS_FILE
 
 
-def superpowers_line() -> str:
-    """Whether superpowers is in the plugin cache, as the one line context prints about it.
+def plugin_line(name: str) -> str:
+    """Whether the plugin `name` is in the plugin cache, as the one line context prints about it.
 
     The cache says Claude Code installed the plugin, not that the session has it enabled, and that
     is as much as this can honestly report.
@@ -86,15 +84,15 @@ def superpowers_line() -> str:
     try:
         data = json.loads(_plugins_path().read_text(encoding="utf-8"))
     except Exception as error:
-        return f"superpowers: unknown ({reason(error)})"
+        return f"{name}: unknown ({reason(error)})"
     if not isinstance(data, dict):
-        return NO_PLUGIN_LIST
+        return f"{name}: unknown (no plugin list in the file)"
     plugins = data["plugins"] if "plugins" in data else data
     if not isinstance(plugins, dict):
-        return NO_PLUGIN_LIST
-    if any(str(name).startswith(SUPERPOWERS) for name in plugins):
-        return "superpowers: installed"
-    return "superpowers: not found; install it first"
+        return f"{name}: unknown (no plugin list in the file)"
+    if any(str(key).startswith(f"{name}@") for key in plugins):
+        return f"{name}: installed"
+    return f"{name}: not found; install it first"
 
 
 def _override_source() -> str:
@@ -113,7 +111,7 @@ def _configure_apply(parser: argparse.ArgumentParser) -> None:
 
 
 def context(args: argparse.Namespace) -> int:
-    """Print the repository, its projects, the override, the fields, the checklist, and superpowers."""
+    """Print the repository, its projects, the override, the fields, the checklist, and the plugins."""
     settings = config.load(Path.cwd())  # a malformed .claude/settings.json is worth reporting
     try:
         repo = gh.repo_slug()
@@ -144,7 +142,8 @@ def context(args: argparse.Namespace) -> int:
     print("Checklist:")
     for item in checklist.checklist(settings, repo, fields, unread):
         print(f"  {item.name}: {item.left or 'done'}")
-    print(superpowers_line())
+    print(plugin_line("superpowers"))
+    print(plugin_line("impeccable"))
     return 0
 
 
