@@ -193,8 +193,8 @@ def remove_dependency(repo: str, number: int, blocked_by: tuple[str, int]) -> No
     gh.run("api", "-X", "DELETE", f"repos/{repo}/issues/{number}/dependencies/blocked_by/{blocker_id}")
 
 
-def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
-    """`(repository, number, title)` of every open issue blocking `number`; the repository may be another."""
+def blockers(repo: str, number: int, state: str = "open") -> list[tuple[str, int, str]]:
+    """`(repository, number, title)` of every issue in `state` blocking `number`; the repository may be another."""
     gh.split_repo(repo)
     items = gh.paginated(f"repos/{repo}/issues/{number}/dependencies/blocked_by")
     return [
@@ -204,7 +204,7 @@ def blockers(repo: str, number: int) -> list[tuple[str, int, str]]:
             " ".join((item.get("title") or "").split()),
         )
         for item in items
-        if item.get("state") == "open"
+        if item.get("state") == state
     ]
 
 
@@ -246,15 +246,6 @@ def resave_pull_request(repo: str, url: str, body: str) -> None:
     gh.split_repo(repo)
     with _body_file(body) as path:
         gh.run("pr", "edit", url, "--repo", repo, "--body-file", path)
-
-
-def merged_pull_requests(repo: str, limit: int) -> list[tuple[str, str]]:
-    """The title and body of the last `limit` merged pull requests, newest first."""
-    gh.split_repo(repo)
-    data = gh.json_out("pr", "list", "--repo", repo, "--state", "merged", "--limit", str(limit), "--json", "title,body")
-    if not isinstance(data, list):
-        return []
-    return [(item.get("title", ""), item.get("body", "")) for item in data if isinstance(item, dict)]
 
 
 # One field list for every read of a pull request, so a briefing that wants two of them makes one

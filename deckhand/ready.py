@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 
-from deckhand import board, columns, config, fields, fleet, forecast, gh, invoke, issue, log, sections
+from deckhand import board, columns, config, edges, fields, fleet, forecast, gh, invoke, issue, log, sections
 from deckhand.config import Settings
 from deckhand.step import (
     Refusal,
@@ -219,6 +219,7 @@ def apply(args: argparse.Namespace) -> int:
         raise Refusal(f"#{args.issue} cannot block itself")
     for where, number in blockers:
         open_issue(where, number, repo)
+        edges.refuse_loop(repo, (repo, args.issue), (where, number))
     for where, number in blockers:
         issue.add_dependency(repo, args.issue, (where, number))
         print(f"Blocked by {ref_label(where, number, repo)}")

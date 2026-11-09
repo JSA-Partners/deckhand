@@ -537,6 +537,8 @@ def test_apply_records_dependencies_checks_the_board_and_sets_the_fields(fake_gh
         "api graphql item-id",
         "api graphql field-values",
         "issue view 240 --repo acme/widgets --json state,body",
+        # every blocker is walked for a loop before the first edge is written
+        "api repos/acme/widgets/issues/240/dependencies/blocked_by --paginate --slurp",
         "api repos/acme/widgets/issues/240",
         "api -X POST repos/acme/widgets/issues/248/dependencies/blocked_by -F issue_id=5099965156",
         "api graphql item-id",
@@ -665,3 +667,25 @@ def test_context_names_oversized_in_the_apply_when_the_body_is_over_the_gate(fak
     assert result.stdout.splitlines()[0] == (
         'Apply: deckhand ready apply 248 --kind <kind> --points <1-3> --oversized "<why it is one story>"'
     )
+
+
+def test_apply_checks_every_blocker_for_a_loop_before_adding_any(fake_gh, gh_calls, tmp_path):
+    mapped = tmp_path / "blocked-by.json"
+    back = {"number": 248, "title": "This story", "state": "open", "repository": {"full_name": "acme/widgets"}}
+    mapped.write_text(json.dumps({"241": [back]}), encoding="utf-8")
+
+    result = _apply(
+        "--kind",
+        "feat",
+        "--points",
+        "3",
+        "--blocked-by",
+        "240",
+        "--blocked-by",
+        "241",
+        env={"GH_BLOCKED_BY_MAP": str(mapped)},
+    )
+
+    assert result.returncode == 1
+    assert "#248 -> #241 -> #248" in result.stderr
+    assert _writes(gh_calls) == []

@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
+from deckhand import draft
 from tests.conftest import labeled_board, run_deckhand
+
+
+@pytest.fixture(autouse=True)
+def _every_story_has_a_feature(feature_field):
+    """Every story is written into a Feature, so every test here runs on a project that has the field."""
+
 
 FEATURE = "## Requirements\n\nGuests should be able to share a collection with a guest.\n"
 TITLE = "Share a collection"
@@ -15,7 +25,7 @@ def _park(repo: Path, tmp_path: Path, *flags: str, copy: Path | None = None):
     source = tmp_path / "feature.md"
     source.write_text(FEATURE, encoding="utf-8")
     env = {"GH_BODY_FILE_COPY": str(copy)} if copy is not None else {}
-    return run_deckhand("new", "apply", "--park", *flags, str(source), cwd=repo, env=env)
+    return run_deckhand("new", "apply", "--park", "--feature", "Billing", *flags, str(source), cwd=repo, env=env)
 
 
 def test_a_park_names_the_open_stories_that_look_like_it_in_any_repository(fake_gh, repo, tmp_path, monkeypatch):
@@ -103,3 +113,32 @@ def test_a_bad_after_reference_is_refused_before_any_write(fake_gh, gh_calls, re
     assert result.returncode == 1
     assert "owner/name#M" in result.stderr
     assert [c for c in gh_calls() if c.startswith("issue create")] == []
+
+
+def test_blocks_and_after_that_close_a_loop_refuse_before_any_write(fake_gh, gh_calls, repo, tmp_path, monkeypatch):
+    mapped = tmp_path / "blocked-by.json"
+    back = {"number": 251, "title": "This story", "state": "open", "repository": {"full_name": "acme/widgets"}}
+    mapped.write_text(json.dumps({"13": [back]}), encoding="utf-8")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+    result = _park(repo, tmp_path, "--title", TITLE, "--blocks", "251", "--after", "acme/gadgets#13")
+
+    assert result.returncode == 1
+    assert "#251 -> acme/gadgets#13 -> #251" in result.stderr
+    assert not [c for c in gh_calls() if c.startswith("issue create") or "-X POST" in c]
+
+
+def test_split_after_can_only_name_an_earlier_story():
+    """A split wires each story to stories above it only, so it cannot close a loop among its own."""
+    text = json.dumps(
+        {
+            "kind": "split",
+            "requirements": "Guests share collections.",
+            "stories": [
+                {"key": "a", "title": "One", "sentence": "First.", "after": ["b"]},
+                {"key": "b", "title": "Two", "sentence": "Second."},
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="not a story defined before it"):
+        draft.parse_split(text)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import naming, reviewed
+from deckhand import finish, naming, reviewed
 from tests.conftest import FIXTURES, run_deckhand, spilled
 
 APPROVED = {"GH_ISSUE_FILE": str(FIXTURES / "issue-approved.json")}
@@ -233,7 +233,7 @@ def test_context_prints_the_pull_request_block(fake_gh, repo, branch):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines.index("## Pull request") > lines.index("## Diff stat")
-    said = lines[lines.index("## Pull request") + 1 : lines.index("## Recent pull requests")]
+    said = lines[lines.index("## Pull request") + 1 : lines.index("## Summary rule")]
     preview = "<the summary you write goes here>\n\nCloses #248\n"
     assert said == [
         f"  Title: feat: {SUBJECT}",
@@ -242,39 +242,15 @@ def test_context_prints_the_pull_request_block(fake_gh, repo, branch):
     ]
 
 
-RECENT = json.dumps(
-    [
-        {"title": "fix: keep a grant", "body": "Keeps the grant.\n\nCloses #12\n"},
-        {"title": "feat: list grants", "body": "Lists them."},
-    ]
-)
-
-
-def test_context_prints_the_recent_merged_pull_requests(fake_gh, repo, branch):
-    """The summary follows the shape of what already merged, so the context carries it."""
-    result = _finish("context", repo, env={"GH_PR_LIST_BODY": RECENT})
+def test_context_prints_the_summary_rule_in_place_of_recent_bodies(fake_gh, repo, branch):
+    """Copying recent bodies let their length ratchet up, so the rule is printed instead."""
+    result = _finish("context", repo)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    start = lines.index("## Recent pull requests")
-    assert lines[start + 1 : lines.index("## Checks detected")] == [
-        "  Title: fix: keep a grant",
-        "  Keeps the grant.",
-        "",
-        "  Closes #12",
-        "",
-        "  Title: feat: list grants",
-        "  Lists them.",
-        "",
-    ]
-
-
-def test_context_says_so_when_it_cannot_list_pull_requests(fake_gh, repo, branch):
-    result = _finish("context", repo, env={"GH_PR_LIST_FAILS": "1"})
-
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines[lines.index("## Recent pull requests") + 1].startswith("  unavailable (")
+    assert "## Recent pull requests" not in lines
+    start = lines.index("## Summary rule")
+    assert lines[start + 1] == f"  {finish.SUMMARY_RULE}"
 
 
 @pytest.mark.parametrize(
@@ -287,7 +263,7 @@ def test_context_reports_a_pull_request_it_cannot_compute(fake_gh, repo, branch,
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    said = lines[lines.index("## Pull request") + 1 : lines.index("## Recent pull requests")]
+    said = lines[lines.index("## Pull request") + 1 : lines.index("## Summary rule")]
     assert len(said) == 1 and said[0].startswith("  unavailable (")
     assert lines[lines.index("## Diff stat") + 1].startswith("  ")
 
@@ -406,7 +382,7 @@ def test_context_never_fails(fake_gh, repo, tmp_path):
         "## Commits",
         "## Diff stat",
         "## Pull request",
-        "## Recent pull requests",
+        "## Summary rule",
         "## Checks detected",
     ]
     assert lines[1].startswith("Summary: ")
@@ -906,15 +882,11 @@ def test_apply_reports_a_hook_that_wrote_to_stdout(fake_gh, gh_calls, repo, orig
     assert "make: *** [test] Error 1" in lines
 
 
-def test_apply_puts_the_deviations_in_the_body(fake_gh, gh_calls, repo, origin, branch, tmp_path):
-    """What the branch did that the story did not say goes to main with the story."""
+def test_apply_leaves_the_logged_deviations_out_of_the_body(fake_gh, gh_calls, repo, origin, branch, tmp_path):
+    """The session folds the deviations that still hold into its summary; the raw log stays on the issue."""
     data = json.loads((FIXTURES / "issue-approved.json").read_text(encoding="utf-8"))
     entry = {"author": {"login": "claude"}, "createdAt": "2026-09-03T09:30:00Z"}
     data["comments"] += [
-        {
-            **entry,
-            "body": "Deviation: the lock moved into one helper,\nordered by level.\n\nThe criteria are unchanged.",
-        },
         {**entry, "body": "Deviation: the route table left the server package."},
         {**entry, "body": f"Reviewed: {_sha(repo, 'HEAD')} clean pass"},
     ]
@@ -925,11 +897,36 @@ def test_apply_puts_the_deviations_in_the_body(fake_gh, gh_calls, repo, origin, 
 
     assert result.returncode == 0, result.stderr
     create = next(call for call in gh_calls() if call.startswith("pr create"))
-    assert create == _create_call(
-        f"feat: {SUBJECT}",
-        f"{SUMMARY}\n\nthe lock moved into one helper, ordered by level. The criteria are unchanged.\n\n"
-        "the route table left the server package.\n\nCloses #248\n",
-    )
+    assert create == _create_call(f"feat: {SUBJECT}", f"{SUMMARY}\n\nCloses #248\n")
+
+
+LONG = " ".join(["word"] * 121)
+
+
+@pytest.mark.parametrize(
+    ("summary", "said"),
+    [
+        (LONG, "the summary is 121 words; keep it under 120"),
+        ("One.\n\nTwo.\n\nThree.", "the summary has 3 paragraphs; use one, two at most"),
+        ("Grants:\n\n| Route | Before |\n| --- | --- |", "line 3 is a table row"),
+        ("## What changed\n\nGrants filter.", "line 1 is a heading"),
+        ("Grants:\n- filter\n- list", "line 2 is a list item"),
+        ("Grants:\n1. filter", "line 2 is a list item"),
+    ],
+)
+def test_apply_refuses_a_summary_that_is_not_short_plain_prose(fake_gh, gh_calls, repo, origin, branch, summary, said):
+    result = _apply(repo, summary=summary)
+
+    assert result.returncode == 1
+    assert said in result.stderr
+    assert not [call for call in gh_calls() if call.startswith(("pr create", "pr edit"))]
+
+
+def test_a_summary_line_opening_with_a_reference_is_prose(fake_gh, gh_calls, repo, origin, branch):
+    """A wrapped line may start with an issue number; only a heading's hash and space make a heading."""
+    result = _apply(repo, summary="The filter lands after the grant store from\n#344 shipped first.")
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_apply_refuses_a_blocked_story_before_any_check(fake_gh, gh_calls, repo, origin, branch):

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from deckhand import board, columns, draft, gh, issue, log, sections, sessions, step
+from deckhand import board, columns, draft, gh, issue, log, sections, step
 from deckhand.config import Settings
 
 # gh --paginate advances the cursor only when the variable is named endCursor.
@@ -28,9 +28,6 @@ ITEMS_QUERY = (
     "... on ProjectV2ItemFieldSingleSelectValue{ name optionId field{ ... on ProjectV2FieldCommon{ name } } } "
     "} } } } } } }"
 )
-
-# An open session idle longer than this is not counted as working on its story.
-ACTIVE = 3600.0
 
 
 @dataclass(frozen=True)
@@ -162,7 +159,7 @@ def members(found: list[Story], feature: str) -> list[Story]:
     return [story for story in found if story.feature == feature and touched(story) and not story.dropped]
 
 
-_SHED = re.compile(r"(?:([^\s/#,]+/[^\s/#,]+))?#([0-9]+)")
+SHED = re.compile(r"(?:([^\s/#,]+/[^\s/#,]+))?#([0-9]+)")
 
 
 def shed(story: Story) -> list[tuple[str, int]]:
@@ -177,28 +174,10 @@ def shed(story: Story) -> list[tuple[str, int]]:
         else:
             named = entry.text.split()[:1]
         for token in named:
-            match = _SHED.fullmatch(token)
+            match = SHED.fullmatch(token)
             if match is not None:
                 found.append(folded((match.group(1) or story.repo, int(match.group(2)))))
     return found
-
-
-def strays(found: list[Story], archived: list[Story] | None = None) -> list[tuple[Story, Story]]:
-    """Every open story in no feature that a story of a feature split or parked, with that story."""
-    held = {folded(story.key): story for story in found}
-    every = {folded(story.key): story for story in [*found, *(archived or [])]}
-    out: dict[tuple[str, int], tuple[Story, Story]] = {}
-    pairs = [(key, story) for story in every.values() if story.feature is not None for key in shed(story)]
-    for kid in found:
-        drafted = [entry.text for entry in log.entries(kid.issue) if entry.prefix == "Drafted:"]
-        named = next((text.removeprefix("parked from ") for text in drafted if text.startswith("parked from ")), "")
-        if (match := _SHED.fullmatch(named)) is not None:
-            pairs.append((folded(kid.key), every.get(folded((match.group(1) or kid.repo, int(match.group(2)))))))
-    for key, parent in pairs:
-        kid = held.get(key)
-        if parent and parent.feature and kid and kid.feature is None and not kid.closed and touched(kid):
-            out.setdefault(key, (kid, parent))
-    return list(out.values())
 
 
 def note(story: Story, blockers: list[tuple[str, int, str]], behind: bool) -> str:
@@ -239,99 +218,6 @@ def folded(key: Key) -> Key:
 Blockers = dict[Key, list[tuple[str, int, str]]]
 
 
-def _circle(start: Key, blockers: Blockers) -> list[Key]:
-    """The stories on a loop from `start` back to itself through its blockers, or empty."""
-    stack: list[tuple[Key, list[Key]]] = [(start, [start])]
-    seen: set[Key] = set()
-    while stack:
-        node, path = stack.pop()
-        for where, number, _ in blockers.get(node) or []:
-            if (where, number) == start:
-                return [*path, start]
-            if (where, number) not in seen:
-                seen.add((where, number))
-                stack.append(((where, number), [*path, (where, number)]))
-    return []
-
-
-@dataclass(frozen=True)
-class Anomaly:
-    """Something on the board that no step could have produced, and what puts it right."""
-
-    number: int
-    repo: str
-    what: str
-    fix: str
-
-
-def anomalies(
-    found: list[Story],
-    blockers: Blockers,
-    behind: set[Key],
-    pulses: list,
-    missing: list[tuple[str, int, str]] | None = None,
-    me: str = "",
-    archived: list[Story] | None = None,
-) -> list[Anomaly]:
-    """Every disagreement worth a line: a wrong Status, a story off the board or archived, a stall, a cycle."""
-    on: dict[tuple[str, str], list[str]] = {}
-    # A running session holds its story however long the person has been away.
-    held: set[tuple[str, str]] = set()
-    for beat in pulses:
-        if beat.story == sessions.FREE:
-            continue
-        if beat.idle < ACTIVE:
-            on.setdefault((beat.repo, beat.story), []).append(beat.label)
-        if beat.live or beat.idle < ACTIVE:
-            held.add((beat.repo, beat.story))
-    out: list[Anomaly] = []
-    for story in found:
-        if not touched(story):
-            continue
-        # Two typed sources, so they can still disagree: only finished work closes an issue, and
-        # only a closed story reaches the last two columns.
-        if story.status == columns.DONE and not story.closed:
-            out.append(Anomaly(story.number, story.repo, "Done, but the issue is open", "close it or move it back"))
-        if story.closed and story.status and story.status not in (columns.DONE, columns.VERIFICATION):
-            what = f"closed, but {story.status}"
-            # Dropped work has no step to run; finished work closed by hand still has after to reach Done.
-            if story.dropped:
-                fix = f'captain apply --withdraw {story.repo}#{story.number} --note "<why>"'
-            else:
-                fix = f"run next {story.number}"
-            out.append(Anomaly(story.number, story.repo, what, fix))
-        labels = on.get((story.repo, str(story.number))) or []
-        mine = not me or not story.assignees or me in story.assignees
-        alone = (story.repo, str(story.number)) not in held
-        if story.status == columns.IN_PROGRESS and alone and mine and not blockers.get(story.key):
-            out.append(Anomaly(story.number, story.repo, "In Progress, no session open", "none"))
-        if len(labels) > 1:
-            named = " and ".join(labels)
-            out.append(Anomaly(story.number, story.repo, f"sessions {named} are both on it", "close one"))
-        if story.key in behind:
-            out.append(Anomaly(story.number, story.repo, "pull request behind main", f"run next {story.number}"))
-        loop = _circle(story.key, blockers)
-        if loop:
-            named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
-            fix = "captain apply --unblock on one edge"
-            out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
-    for story, shedder in strays(found, archived):
-        name = shedder.feature_name.replace("|", "\\|")
-        what = f"split or parked from a story of {name}, but in no feature"
-        # A name may hold quotes or shell characters, and a bare number is the repository epic add runs in.
-        fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
-        out.append(Anomaly(story.number, story.repo, what, fix))
-    for repo, number, _ in missing or []:
-        out.append(Anomaly(number, repo, "drafted, but not on the board", "captain apply --repair"))
-    for story in archived or []:
-        # An archived story is off every board read, and only one still in play is missed there.
-        if not touched(story) or story.status == columns.DONE:
-            continue
-        what = f"archived, and still {story.status or 'without a column'}"
-        out.append(Anomaly(story.number, story.repo, what, "captain apply --repair"))
-    return out
-
-
 @dataclass(frozen=True)
 class Fleet:
     """One reading of the project: its stories, its Backlog's blockers, its open pull requests, what is off it."""
@@ -342,6 +228,7 @@ class Fleet:
     me: str = ""
     archived: list[Story] = field(default_factory=list)
     pulls: dict[Key, issue.PullRequest] = field(default_factory=dict)
+    features: tuple[str, ...] = ()  # the Feature option ids in the pipeline order the person set
 
     @property
     def behind(self) -> set[Key]:
@@ -395,4 +282,14 @@ def read(settings: Settings) -> Fleet:
         missing=_missing(every),  # archived included: an archived story is on the board, not off it
         me=gh.login(),
         archived=[story for story in every if story.archived],
+        features=_pipeline(settings),
     )
+
+
+def _pipeline(settings: Settings) -> tuple[str, ...]:
+    """The Feature option ids in order, or empty when there is no such field or it cannot be read."""
+    try:
+        found = next((item for item in gh.project_fields(settings) if item["name"] == board.FEATURE), None)
+    except gh.GhError:
+        return ()
+    return tuple(str(option["id"]) for option in (found or {}).get("options") or [])

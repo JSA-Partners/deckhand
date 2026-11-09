@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from deckhand import config, fleet, gh, issue
 from deckhand.config import Settings
-from deckhand.step import reason, ref_label
+from deckhand.step import reason, ref_label, spill
 
 LIMIT = 25
 STOP = frozenset("with from that this when into only their them then than what have each more over about".split())
@@ -188,3 +188,22 @@ def block(repo: str, number: int, story: issue.Issue, skip: frozenset[tuple[str,
     if resemble:
         for line in resembling(story.title, repo, (repo, number)):
             print(line)
+
+
+def built_on(repo: str, number: int) -> list[str]:
+    """`Built on:` and each closed blocker from another repository, its body cached; empty when none.
+
+    A blocker in this repository is left out: what it shipped is in the checkout.
+    """
+    try:
+        found = issue.blockers(repo, number, state="closed")
+    except Exception as error:
+        return ["Built on:", f"  unavailable ({reason(error)})"]
+    lines: list[str] = []
+    for where, blocker, title in found:
+        if where.lower() == repo.lower():
+            continue
+        name = f"built-on-{where.replace('/', '-')}-{blocker}.md"
+        body = spill("Body", name, lambda where=where, blocker=blocker: issue.view(where, blocker).body, repo)
+        lines += [f"  {where}#{blocker}  {title}", f"    {body}"]
+    return ["Built on:", *lines] if lines else []

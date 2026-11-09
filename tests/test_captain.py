@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import captain, cli, fleet, issue
+from deckhand import anomalies, captain, cli, fleet, issue
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = "acme/widgets"
@@ -524,7 +524,7 @@ def test_a_stray_row_keeps_the_anomalies_table_four_columns_wide(fleet_env, sett
             feature_name="Pay | refund" if feature else "",
         )
 
-    found = fleet.anomalies([_story(1, "Split: #2 Follow on.", feature="OPT_PAY"), _story(2)], {}, set(), [])
+    found = anomalies.find([_story(1, "Split: #2 Follow on.", feature="OPT_PAY"), _story(2)], {}, set(), [])
 
     (row,) = [line for line in captain._anomaly_rows(settings, found, set()) if line.startswith("| 2 ")]
     what = "split or parked from a story of Pay \\| refund, but in no feature"
@@ -752,14 +752,54 @@ def test_a_board_of_only_other_peoples_issues_says_so(fleet_env, tmp_path, monke
 def test_a_full_read_finds_the_anomalies_once(fleet_env, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("DECKHAND_CACHE", str(tmp_path / "snapshots"))
     calls = []
-    found = fleet.anomalies
+    found = anomalies.find
 
     def counted(*args, **kwargs):
         calls.append(1)
         return found(*args, **kwargs)
 
-    monkeypatch.setattr(fleet, "anomalies", counted)
+    monkeypatch.setattr(anomalies, "find", counted)
 
     cli.main(["captain", "context"])
 
     assert len(calls) == 1
+
+
+def _blocked_by(tmp_path, monkeypatch, edges: dict) -> None:
+    mapped = tmp_path / "blocked-by.json"
+    mapped.write_text(json.dumps(edges), encoding="utf-8")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+
+def test_block_refuses_a_loop_across_repositories_before_writing(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    back = {"number": 253, "title": "This story", "state": "open", "repository": {"full_name": "acme/widgets"}}
+    _blocked_by(tmp_path, monkeypatch, {"13": [back]})
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "acme/gadgets#13"]) == 1
+
+    err = capsys.readouterr().err
+    assert "#253 -> acme/gadgets#13 -> #253" in err
+    assert "captain apply --unblock acme/gadgets#13 --by 253" in err
+    assert not any("-X POST" in call and "dependencies/blocked_by" in call for call in gh_calls())
+
+
+def test_block_refuses_a_longer_loop(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    hop = {"number": 13, "title": "Elsewhere", "state": "open", "repository": {"full_name": "acme/gadgets"}}
+    back = {"number": 253, "title": "This story", "state": "open", "repository": {"full_name": "acme/widgets"}}
+    _blocked_by(tmp_path, monkeypatch, {"117": [hop], "13": [back]})
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "117"]) == 1
+
+    assert "#253 -> #117 -> acme/gadgets#13 -> #253" in capsys.readouterr().err
+    assert not any("-X POST" in call and "dependencies/blocked_by" in call for call in gh_calls())
+
+
+def test_block_refuses_when_the_walk_cannot_read(fake_gh, gh_calls, monkeypatch, tmp_path, capsys):
+    mapped = tmp_path / "blocked-by.json"
+    mapped.write_text("not json", encoding="utf-8")
+    monkeypatch.setenv("GH_BLOCKED_BY_MAP", str(mapped))
+
+    assert cli.main(["captain", "apply", "--block", "253", "--by", "117"]) == 1
+
+    assert "cannot check #117 for a loop" in capsys.readouterr().err
+    assert not any("-X POST" in call and "dependencies/blocked_by" in call for call in gh_calls())

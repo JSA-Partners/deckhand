@@ -336,6 +336,10 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("issue", type=issue_number, nargs="?", default=None, help="the issue number")
 
 
+# Every build meets this, whatever the story: impeccable for anything a person sees is the rule.
+VISUAL_LINE = "Visual work: run impeccable:impeccable for anything a person sees"
+
+
 @step("next", issue_bound=False, configure_context=_configure_context)
 def context(args: argparse.Namespace) -> int:
     """Print the step the story is due, why, its title, the log's tail, and the context that step needs."""
@@ -368,11 +372,15 @@ def context(args: argparse.Namespace) -> int:
         print("Blocked by:")
         for blocker in facts.blockers:
             print(f"  {blocker}")
+    for built in related.built_on(repo, number) if name in ("check", "build", "resume") and repo else []:
+        print(built)
     _log_block(story)
     if name == "settle" and story:
         _notes_block(story)
     if repo and story and not facts.closed:
         related.block(repo, number, story, printed, resemble=name == "settle")
+    if name in ("build", "resume"):
+        print(VISUAL_LINE)
     if name in CONTEXT_OF:
         _context(name, number)
         # The after context lists the items and names the tick, so only what the session still owes

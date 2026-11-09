@@ -290,11 +290,11 @@ INSTALLED = {"version": 2, "plugins": {"superpowers@superpowers-marketplace": [{
 
 
 def _checklist(result) -> list[str]:
-    """The lines under `Checklist:`, up to the superpowers line."""
+    """The lines under `Checklist:`, up to the plugin lines."""
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     start = lines.index("Checklist:")
-    return lines[start + 1 : -1]
+    return lines[start + 1 : -2]
 
 
 def test_context_reports_each_checklist_item(repo, fake_gh, tmp_path):
@@ -314,7 +314,7 @@ def test_context_reports_each_checklist_item(repo, fake_gh, tmp_path):
         "  Label: create deckhand; apply creates it",
         "  Merge settings: done",
     ]
-    assert result.stdout.splitlines()[-1] == "superpowers: installed"
+    assert result.stdout.splitlines()[-2] == "superpowers: installed"
 
 
 def test_context_reports_every_checklist_item_as_done_with_a_finished_project(repo, fake_gh, tmp_path):
@@ -1049,3 +1049,22 @@ def test_setup_takes_no_issue_number(repo, fake_gh, verb):
     result = run_deckhand("setup", verb, "248", cwd=repo)
 
     assert result.returncode == 2
+
+
+def test_context_reports_impeccable_beside_superpowers(repo, fake_gh, tmp_path):
+    both = {"plugins": {**INSTALLED["plugins"], "impeccable@impeccable": [{"scope": "user"}]}}
+    env = _plugins_file(tmp_path, "both.json", both)
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[-2:] == ["superpowers: installed", "impeccable: installed"]
+
+
+def test_context_reports_impeccable_missing(repo, fake_gh, tmp_path):
+    env = _plugins_file(tmp_path, "installed.json", INSTALLED)
+
+    result = run_deckhand("setup", "context", cwd=repo, env=env)
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[-1] == "impeccable: not found; install it first"

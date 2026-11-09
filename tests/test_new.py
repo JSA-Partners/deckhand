@@ -12,7 +12,13 @@ import pytest
 from deckhand import draft, lint, log, naming, new, sections, step
 from deckhand.config import BODY_LIMIT
 from deckhand.step import Refusal
-from tests.conftest import FIXTURES, ROOT, advance_origin, labeled_board, run_deckhand, run_git
+from tests.conftest import FIXTURES, ROOT, advance_origin, fieldvalues, labeled_board, run_deckhand, run_git
+
+
+@pytest.fixture(autouse=True)
+def _every_story_has_a_feature(feature_field):
+    """Every story is written into a Feature, so every test here runs on a project that has the field."""
+
 
 VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
@@ -38,6 +44,13 @@ def _draft_writes(number: int, status: str = STATUS_DRAFT) -> list[str]:
         status,
         f"issue comment {number} --repo acme/widgets",
     ]
+
+
+# The Feature write every story the default fixture writes ends on.
+BILLING = (
+    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_FEATURE "
+    "--single-select-option-id OPT_BILLING"
+)
 
 
 def _calls(calls: list[str]) -> list[str]:
@@ -108,7 +121,7 @@ def test_context_prints_the_draft_path_skeleton_and_rules(fake_gh, tmp_path):
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "Apply: deckhand new apply <file>"
+    assert lines[0] == 'Apply: deckhand new apply <file> --feature "<name>"'
     assert _draft_line(lines[1:2], tmp_path, "new")
     assert [line for line in lines if line.startswith("###")] == [
         "### Story",
@@ -196,7 +209,7 @@ def test_apply_refuses_a_bad_body_and_writes_nothing(fake_gh, gh_calls):
 def test_apply_creates_the_issue_with_the_written_body(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "body-copy.md"
 
-    result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
@@ -208,7 +221,7 @@ def test_a_written_story_is_boarded_as_refinement(fake_gh, gh_calls, tmp_path):
     """Draft is where requirements wait; a story with a body is being worked up, which is Refinement."""
     copy = tmp_path / "comment.md"
 
-    result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -216,10 +229,12 @@ def test_a_written_story_is_boarded_as_refinement(fake_gh, gh_calls, tmp_path):
         "Added to the board",
         "Status=Refinement",
         "Logged Drafted",
+        "Feature=Billing",
     ]
-    assert _calls([c for c in gh_calls() if c.startswith(("project item", "issue comment"))]) == _draft_writes(
-        999, STATUS_REFINEMENT
-    )
+    assert _calls([c for c in gh_calls() if c.startswith(("project item", "issue comment"))]) == [
+        *_draft_writes(999, STATUS_REFINEMENT),
+        BILLING,
+    ]
     assert copy.read_text(encoding="utf-8").endswith("--- issue comment\n" + new.DRAFTED)
 
 
@@ -241,7 +256,7 @@ def test_apply_refuses_before_the_first_write_when_no_project_is_linked(fake_gh,
 def test_apply_folds_the_plan_in_the_issue_body(fake_gh, gh_calls, tmp_path):
     copy = tmp_path / "body-copy.md"
 
-    result = run_deckhand("new", "apply", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(VALID), env={"GH_BODY_FILE_COPY": str(copy)})
 
     assert result.returncode == 0, result.stderr
     written = copy.read_text(encoding="utf-8")
@@ -250,7 +265,7 @@ def test_apply_folds_the_plan_in_the_issue_body(fake_gh, gh_calls, tmp_path):
 
 
 def test_apply_title_comes_from_the_flag(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", str(VALID), "--title", "Guest filtering")
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(VALID), "--title", "Guest filtering")
 
     assert result.returncode == 0, result.stderr
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
@@ -290,7 +305,7 @@ def test_apply_refuses_a_title_flag_the_subject_cannot_carry(fake_gh, gh_calls):
 def test_apply_takes_a_title_of_exactly_the_limit(fake_gh, gh_calls):
     exact = "x" * naming.title_limit()
 
-    result = run_deckhand("new", "apply", str(VALID), "--title", exact)
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(VALID), "--title", exact)
 
     assert result.returncode == 0, result.stderr
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
@@ -772,7 +787,7 @@ def _api(calls: list[str]) -> list[str]:
 
 
 def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_gh, gh_calls):
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), env=NUMBERS)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--split", str(SPLIT_FILE), env=NUMBERS)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
@@ -783,12 +798,15 @@ def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_
         "Numbered #57",
         "Added to the board",
         "Status=Draft",
+        "Feature=Billing",
         "Numbered #58",
         "Added to the board",
         "Status=Draft",
+        "Feature=Billing",
         "Numbered #59",
         "Added to the board",
         "Status=Draft",
+        "Feature=Billing",
         "#58 blocked by #57",
         "#59 blocked by #57",
         "#59 blocked by #58",
@@ -803,7 +821,7 @@ def test_apply_split_opens_one_issue_per_story_then_numbers_and_links_them(fake_
         *[
             write
             for number in (57, 58, 59)
-            for write in (f"issue edit {number} --repo acme/widgets", *_draft_writes(number)[:2])
+            for write in (f"issue edit {number} --repo acme/widgets", *_draft_writes(number)[:2], BILLING)
         ],
         "api -X POST repos/acme/widgets/issues/58/dependencies/blocked_by -F issue_id=5099965156",
         "api -X POST repos/acme/widgets/issues/59/dependencies/blocked_by -F issue_id=5099965156",
@@ -823,7 +841,7 @@ def test_apply_split_creates_unnumbered_bodies_and_rewrites_them_numbered(fake_g
     copy = tmp_path / "body-copy.md"
     env = {**NUMBERS, "GH_BODY_FILE_COPY": str(copy)}
 
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--split", str(SPLIT_FILE), env=env)
 
     assert result.returncode == 0, result.stderr
     bodies = _bodies(copy)
@@ -838,7 +856,7 @@ def test_apply_split_from_a_parked_feature_keeps_it_as_the_first_story(fake_gh, 
     copy = tmp_path / "body-copy.md"
     env = {**NUMBERS, **PARKED, "GH_BODY_FILE_COPY": str(copy)}
 
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--from", "60", env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--split", str(SPLIT_FILE), "--from", "60", env=env)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
@@ -869,7 +887,7 @@ def test_apply_split_hands_what_waited_on_the_feature_to_every_story(fake_gh, gh
     waiting = json.dumps(waits)
     env = {**NUMBERS, **PARKED, "GH_BLOCKING": waiting}
 
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--from", "60", env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--split", str(SPLIT_FILE), "--from", "60", env=env)
 
     assert result.returncode == 0, result.stderr
     assert "#99 blocked by #57" in result.stdout
@@ -956,7 +974,7 @@ def test_apply_split_refuses_a_malformed_file_and_names_its_line(fake_gh, gh_cal
 def test_apply_split_leaves_what_it_created_on_the_record(fake_gh, gh_calls):
     env = {**NUMBERS, "GH_ISSUE_CREATE_FAILS_AFTER": "2"}
 
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--split", str(SPLIT_FILE), env=env)
 
     assert result.returncode == 1
     assert result.stdout.splitlines() == ["Created #57 Grant store"]
@@ -967,13 +985,13 @@ def test_apply_split_leaves_what_it_created_on_the_record(fake_gh, gh_calls):
 def test_apply_split_names_the_dependency_it_could_not_record(fake_gh, gh_calls):
     env = {**NUMBERS, "GH_DEPENDENCY_FAILS": "1"}
 
-    result = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--split", str(SPLIT_FILE), env=env)
 
     assert result.returncode == 1
     assert result.stderr.strip() == (
         "deckhand new apply: #58 blocked by #57 failed: could not add dependency; add it by hand"
     )
-    assert result.stdout.splitlines()[-3:] == ["Numbered #59", "Added to the board", "Status=Draft"]
+    assert result.stdout.splitlines()[-4:] == ["Numbered #59", "Added to the board", "Status=Draft", "Feature=Billing"]
     assert len([call for call in gh_calls() if "-X POST" in call]) == 1
 
 
@@ -1016,7 +1034,7 @@ def test_apply_park_opens_a_feature_stub_with_no_stories(fake_gh, gh_calls, tmp_
     copy = tmp_path / "body-copy.md"
     env = {"GH_NEW_ISSUE": "61", "GH_BODY_FILE_COPY": str(copy)}
 
-    result = run_deckhand("new", "apply", "--park", str(_park_file(tmp_path, FEATURE)), env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--park", str(_park_file(tmp_path, FEATURE)), env=env)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -1024,6 +1042,7 @@ def test_apply_park_opens_a_feature_stub_with_no_stories(fake_gh, gh_calls, tmp_
         "Added to the board",
         "Status=Draft",
         "Logged Drafted",
+        "Feature=Billing",
     ]
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
     assert f" --title {FEATURE_LINE} --body-file " in call
@@ -1034,19 +1053,8 @@ def test_apply_park_opens_a_feature_stub_with_no_stories(fake_gh, gh_calls, tmp_
 
 
 def _featured(tmp_path) -> dict[str, str]:
-    """The epic board, where #301 is in Permission rework and #304 in no feature, with a Feature field to write."""
-    fields = json.loads((FIXTURES / "fields.json").read_text(encoding="utf-8"))
-    options = [{"id": "OPT_PERMISSION", "name": "Permission rework"}, {"id": "OPT_BILLING", "name": "Billing"}]
-    fields["fields"].append(
-        {"id": "PVTSSF_FEATURE", "name": "Feature", "type": "ProjectV2SingleSelectField", "options": options}
-    )
-    path = tmp_path / "fields-with-feature.json"
-    path.write_text(json.dumps(fields), encoding="utf-8")
-    return {
-        "GH_NEW_ISSUE": "61",
-        "GH_PROJECT_ITEMS_FILE": str(FIXTURES / "epic-items.json"),
-        "GH_FIELDS_FILE": str(path),
-    }
+    """The epic board, where #301 is in Permission rework and #304 in no feature."""
+    return {"GH_NEW_ISSUE": "61", "GH_PROJECT_ITEMS_FILE": str(FIXTURES / "epic-items.json")}
 
 
 def test_apply_park_from_a_featured_story_takes_its_feature(fake_gh, gh_calls, tmp_path):
@@ -1056,14 +1064,6 @@ def test_apply_park_from_a_featured_story_takes_its_feature(fake_gh, gh_calls, t
     assert result.returncode == 0, result.stderr
     assert "Feature=Permission rework" in result.stdout.splitlines()
     assert any("item-edit" in call and "OPT_PERMISSION" in call for call in gh_calls())
-
-
-def test_apply_park_from_a_story_in_no_feature_writes_no_feature(fake_gh, gh_calls, tmp_path):
-    path = _park_file(tmp_path, FEATURE)
-    result = run_deckhand("new", "apply", "--park", str(path), "--from", "304", env=_featured(tmp_path))
-
-    assert result.returncode == 0, result.stderr
-    assert not [line for line in result.stdout.splitlines() if line.startswith("Feature=")]
 
 
 def test_apply_park_elsewhere_for_a_featured_story_takes_its_feature(fake_gh, gh_calls, tmp_path):
@@ -1078,7 +1078,7 @@ def test_apply_park_elsewhere_for_a_featured_story_takes_its_feature(fake_gh, gh
 def test_apply_park_takes_the_title_flag(fake_gh, gh_calls, tmp_path):
     path = _park_file(tmp_path, FEATURE)
 
-    result = run_deckhand("new", "apply", "--park", str(path), "--title", "Guest sharing")
+    result = run_deckhand("new", "apply", "--feature", "Billing", "--park", str(path), "--title", "Guest sharing")
 
     assert result.returncode == 0, result.stderr
     (call,) = [c for c in gh_calls() if c.startswith("issue create")]
@@ -1128,7 +1128,9 @@ def test_apply_park_takes_a_file_without_the_heading(fake_gh, gh_calls, tmp_path
     text = "Guests should be able to share a collection.\n"
     path = _park_file(tmp_path, text)
 
-    result = run_deckhand("new", "apply", "--park", str(path), env={"GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand(
+        "new", "apply", "--feature", "Billing", "--park", str(path), env={"GH_BODY_FILE_COPY": str(copy)}
+    )
 
     assert result.returncode == 0, result.stderr
     (_, body), *_ = _bodies(copy)
@@ -1141,7 +1143,9 @@ def test_apply_park_takes_the_heading_its_own_context_prints(fake_gh, gh_calls, 
     text = "## Parked feature #61\n\nGuests should be able to share a collection.\n"
     path = _park_file(tmp_path, text)
 
-    result = run_deckhand("new", "apply", "--park", str(path), env={"GH_BODY_FILE_COPY": str(copy)})
+    result = run_deckhand(
+        "new", "apply", "--feature", "Billing", "--park", str(path), env={"GH_BODY_FILE_COPY": str(copy)}
+    )
 
     assert result.returncode == 0, result.stderr
     (_, body), *_ = _bodies(copy)
@@ -1156,7 +1160,7 @@ def test_apply_sweeps_the_worktrees_of_closed_stories_from_the_clone(fake_gh, gh
     (tmp_path / "issue-57.json").write_text(json.dumps(data), encoding="utf-8")
 
     env = {"GH_ISSUE_FILE_57": str(tmp_path / "issue-57.json")}
-    result = run_deckhand("new", "apply", str(VALID), cwd=repo, env=env)
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(VALID), cwd=repo, env=env)
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
@@ -1180,7 +1184,7 @@ def test_apply_says_when_the_body_nears_the_limit(fake_gh, gh_calls, tmp_path):
     draft = tmp_path / "big.md"
     draft.write_text(body, encoding="utf-8")
 
-    result = run_deckhand("new", "apply", str(draft))
+    result = run_deckhand("new", "apply", "--feature", "Billing", str(draft))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1].startswith("Body is ")
@@ -1193,6 +1197,8 @@ def test_park_opens_the_feature_in_another_repository_and_boards_it(fake_gh, gh_
         "new",
         "apply",
         "--park",
+        "--feature",
+        "Billing",
         str(_park_file(tmp_path, FEATURE)),
         "--repo",
         "acme/gadgets",
@@ -1205,6 +1211,7 @@ def test_park_opens_the_feature_in_another_repository_and_boards_it(fake_gh, gh_
         "Added to the board",
         "Status=Draft",
         "Logged Drafted",
+        "Feature=Billing",
     ]
     create = next(c for c in gh_calls() if c.startswith("issue create"))
     assert create.startswith(f"issue create --repo acme/gadgets --title {FEATURE_LINE} --body-file")
@@ -1223,6 +1230,8 @@ def test_park_blocks_a_story_here_and_logs_both_sides(fake_gh, gh_calls, tmp_pat
         "new",
         "apply",
         "--park",
+        "--feature",
+        "Billing",
         str(_park_file(tmp_path, FEATURE)),
         "--repo",
         "acme/gadgets",
@@ -1232,7 +1241,12 @@ def test_park_blocks_a_story_here_and_logs_both_sides(fake_gh, gh_calls, tmp_pat
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-3:] == ["Logged Drafted", "Logged Parked", "#248 blocked by acme/gadgets#999"]
+    assert result.stdout.splitlines()[-4:] == [
+        "Logged Drafted",
+        "Feature=Billing",
+        "Logged Parked",
+        "#248 blocked by acme/gadgets#999",
+    ]
     text = copy.read_text(encoding="utf-8")
     assert "--- issue comment\nDrafted: parked from acme/widgets#248" in text
     assert f"--- issue comment\nParked: acme/gadgets#999 {FEATURE_LINE}" in text
@@ -1286,16 +1300,23 @@ def test_split_parks_a_story_for_another_repository(fake_gh, gh_calls, tmp_path)
     copy = tmp_path / "body.md"
 
     result = run_deckhand(
-        "new", "apply", "--split", str(split), env={"GH_NEW_ISSUE": "60,61", "GH_BODY_FILE_COPY": str(copy)}
+        "new",
+        "apply",
+        "--feature",
+        "Billing",
+        "--split",
+        str(split),
+        env={"GH_NEW_ISSUE": "60,61", "GH_BODY_FILE_COPY": str(copy)},
     )
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[:6] == [
+    assert lines[:7] == [
         "Parked acme/gadgets#60 https://github.com/acme/widgets/issues/60",
         "Added to the board",
         "Status=Draft",
         "Logged Drafted",
+        "Feature=Billing",
         "Created #61 Guest screen",
         "Numbered #61",
     ]
@@ -1346,7 +1367,7 @@ def test_a_new_request_names_the_draft_split_and_park_applies(fake_gh):
     result = run_deckhand("new", "context")
 
     lines = result.stdout.splitlines()
-    assert lines[0] == "Apply: deckhand new apply <file>"
+    assert lines[0] == 'Apply: deckhand new apply <file> --feature "<name>"'
     assert "Apply: deckhand new apply <split> --split" in lines
     assert 'Apply: deckhand new apply <file> --park --title "<title>"' in lines
 
@@ -1358,3 +1379,121 @@ def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):
     assert lines.index("Apply: deckhand new apply <file> --draft 248") < lines.index("### Story")
     assert "Park shape:" in lines
     assert 'Apply: deckhand new apply <file> --park --from 248 --title "<title>"' in lines
+
+
+def test_apply_park_logs_where_it_came_from_before_it_sets_the_feature(fake_gh, gh_calls, tmp_path):
+    """A failed Feature write must still leave the entry the stray check reads."""
+    path = _park_file(tmp_path, FEATURE)
+    result = run_deckhand("new", "apply", "--park", str(path), "--from", "301", env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    calls = gh_calls()
+    logged = next(i for i, call in enumerate(calls) if call.startswith("issue comment"))
+    featured = next(i for i, call in enumerate(calls) if "item-edit" in call and "OPT_PERMISSION" in call)
+    assert logged < featured
+
+
+def test_apply_park_from_an_archived_featured_story_takes_its_feature(fake_gh, gh_calls, tmp_path):
+    items = json.loads((FIXTURES / "epic-items.json").read_text(encoding="utf-8"))
+    for node in items["data"]["organization"]["projectV2"]["items"]["nodes"]:
+        if node["content"]["number"] == 301:
+            node["isArchived"] = True
+    archived = tmp_path / "archived-items.json"
+    archived.write_text(json.dumps(items), encoding="utf-8")
+    path = _park_file(tmp_path, FEATURE)
+    env = {**_featured(tmp_path), "GH_PROJECT_ITEMS_FILE": str(archived)}
+
+    result = run_deckhand("new", "apply", "--park", str(path), "--from", "301", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Permission rework" in result.stdout.splitlines()
+
+
+# --- every story has a feature ----------------------------------------------
+
+
+def test_apply_refuses_a_story_with_no_feature_before_any_write(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("new", "apply", str(VALID), env=_featured(tmp_path))
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "deckhand new apply: a story needs a feature: pass --feature <name>; "
+        "the features are Billing, Permission rework, Permission audit"
+    )
+    assert _writes(gh_calls()) == []
+
+
+def test_apply_sets_the_feature_it_is_given(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("new", "apply", str(VALID), "--feature", "bill", env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Billing" in result.stdout.splitlines()
+
+
+def test_apply_park_with_no_featured_origin_needs_a_feature(fake_gh, gh_calls, tmp_path):
+    path = _park_file(tmp_path, FEATURE)
+
+    refused = run_deckhand("new", "apply", "--park", str(path), "--from", "304", env=_featured(tmp_path))
+
+    assert refused.returncode == 1
+    assert "a story needs a feature" in refused.stderr
+    assert _writes(gh_calls()) == []
+
+
+def test_apply_park_takes_a_feature_over_the_one_it_inherits(fake_gh, gh_calls, tmp_path):
+    path = _park_file(tmp_path, FEATURE)
+    args = ("--park", str(path), "--from", "301", "--feature", "Billing")
+
+    result = run_deckhand("new", "apply", *args, env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Billing" in result.stdout.splitlines()
+
+
+def test_apply_split_with_no_featured_origin_needs_a_feature(fake_gh, gh_calls, tmp_path):
+    env = {**_featured(tmp_path), **NUMBERS}
+
+    refused = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), env=env)
+    taken = run_deckhand("new", "apply", "--split", str(SPLIT_FILE), "--feature", "Billing", env=env)
+
+    assert refused.returncode == 1
+    assert "a story needs a feature" in refused.stderr
+    assert taken.returncode == 0, taken.stderr
+    assert taken.stdout.splitlines().count("Feature=Billing") == 3
+
+
+def test_apply_draft_sets_a_feature_it_is_given(fake_gh, gh_calls, tmp_path):
+    args = ("--draft", "57", str(VALID), "--feature", "Billing")
+
+    result = run_deckhand("new", "apply", *args, env={**_featured(tmp_path), **DRAFT})
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Billing" in result.stdout.splitlines()
+
+
+def test_context_lists_the_features_in_pipeline_order(fake_gh, tmp_path):
+    source = tmp_path / "request.md"
+    source.write_text("Guests should be able to share a collection.\n", encoding="utf-8")
+
+    result = run_deckhand("new", "context", str(source), env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    assert "Features: Billing, Permission rework, Permission audit" in result.stdout.splitlines()
+
+
+def test_apply_draft_with_no_feature_on_the_board_needs_one(fake_gh, gh_calls, tmp_path):
+    """A draft opened before every story had a feature is not written into a story without one."""
+    unfiled = {**DRAFT, **fieldvalues(tmp_path, "Draft")}
+
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), env=unfiled)
+
+    assert result.returncode == 1
+    assert "a story needs a feature" in result.stderr
+    assert _writes(gh_calls()) == []
+
+
+def test_apply_draft_keeps_the_feature_it_was_boarded_in(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("new", "apply", "--draft", "57", str(VALID), env=DRAFT)
+
+    assert result.returncode == 0, result.stderr
+    assert not [line for line in result.stdout.splitlines() if line.startswith("Feature=")]

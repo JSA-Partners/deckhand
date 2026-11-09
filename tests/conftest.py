@@ -215,3 +215,27 @@ def labeled_board(tmp_path: Path, *stories: tuple[str, int, str], status: str = 
     path = tmp_path / "labeled-board.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return {"GH_PROJECT_ITEMS_FILE": str(path)}
+
+
+@pytest.fixture
+def feature_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A project with a Feature field, its options in pipeline order: Billing, Permission rework, Permission audit."""
+    options = [
+        {"id": "OPT_BILLING", "name": "Billing"},
+        {"id": "OPT_PERMISSION", "name": "Permission rework"},
+        {"id": "OPT_AUDIT", "name": "Permission audit"},
+    ]
+    fields = json.loads((FIXTURES / "fields.json").read_text(encoding="utf-8"))
+    fields["fields"].append(
+        {"id": "PVTSSF_FEATURE", "name": "Feature", "type": "ProjectV2SingleSelectField", "options": options}
+    )
+    path = tmp_path / "fields-with-feature.json"
+    path.write_text(json.dumps(fields), encoding="utf-8")
+    monkeypatch.setenv("GH_FIELDS_FILE", str(path))
+    monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(FIXTURES / "feature-fields.json"))
+    # A draft is boarded into a Feature when it is parked or split, so the item read says Billing.
+    values = json.loads((FIXTURES / "graphql-fieldvalues.json").read_text(encoding="utf-8"))
+    values["data"]["node"]["fieldValues"]["nodes"].append({"name": "Billing", "field": {"name": "Feature"}})
+    boarded = tmp_path / "fieldvalues-with-feature.json"
+    boarded.write_text(json.dumps(values), encoding="utf-8")
+    monkeypatch.setenv("GH_FIELDVALUES_FILE", str(boarded))
