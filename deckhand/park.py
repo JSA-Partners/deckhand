@@ -40,11 +40,12 @@ def board_draft(
     board.add(settings, url)
     print("Added to the board", flush=True)
     print(fields.set_field(settings, repo, number, "Status", status), flush=True)
-    if feature:
-        print(fields.set_field(settings, repo, number, board.FEATURE, feature), flush=True)
+    # The log first: a Feature write that fails still leaves the entry the stray check reads.
     if note is not None:
         issue.comment(repo, number, log.checked(note))
         print(f"Logged {note.split(':', 1)[0]}", flush=True)
+    if feature:
+        print(fields.set_field(settings, repo, number, board.FEATURE, feature), flush=True)
 
 
 def open_parked(
@@ -63,7 +64,7 @@ def open_parked(
     named ahead of it in any repository, and `came`, the story it was shed from, lends it a feature.
     """
     gh.split_repo(target)
-    for line in related.similar_lines(stories, title, here):
+    for line in related.similar_lines([story for story in stories if not story.archived], title, here):
         print(line, flush=True)
     number, url = issue.create(target, title, body)
     print(f"Parked {ref_label(target, number, here)} {url}", flush=True)
@@ -151,7 +152,8 @@ def feature(
     came = story[1] if story is not None else came_from
     origin = ref_label(repo, came, target) if came is not None else repo
     # Read before the first write, so a board that fails refuses the park rather than leaving it half done.
-    stories = fleet.load(settings)
+    # Archived too, so a story the project archived still lends the park its feature.
+    stories = fleet.load(settings, archived=True)
     body = draft.render(requirements, [])
     parent = (repo, came) if came is not None else None
     number, _ = open_parked(settings, repo, target, title, body, origin, stories, parent)

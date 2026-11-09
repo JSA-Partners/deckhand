@@ -27,7 +27,7 @@ def split(repo: str, text: str, parked: int | None) -> int:
     if parked is not None and entries[0].repo:
         raise Refusal(f"the first story of #{parked} is written into it, so it stays in this repository")
     settings = resolved_settings()
-    stories = fleet.load(settings)
+    stories = fleet.load(settings, archived=True)
     # Every draft carries the whole feature, so the first pass writes it unnumbered: no story can
     # name its siblings' numbers until every issue exists.
     provisional = draft.render(requirements, entries)

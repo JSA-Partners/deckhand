@@ -111,12 +111,20 @@ def find(
             named = " -> ".join(step.ref_label(where, number, story.repo) for where, number in loop)
             fix = f"captain apply --unblock {'#'.join(map(str, loop[0]))} --by {'#'.join(map(str, loop[1]))}"
             out.append(Anomaly(story.number, story.repo, f"blockers run in a circle: {named}", fix))
+    named: set[fleet.Key] = set()
     for story, shedder in strays(found, archived):
         name = shedder.feature_name.replace("|", "\\|")
         what = f"split or parked from a story of {name}, but in no feature"
         # A name may hold quotes or shell characters, and a bare number is the repository epic add runs in.
         fix = f"epic add {shedder.feature} {story.repo}#{story.number}"
         out.append(Anomaly(story.number, story.repo, what, fix))
+        named.add(fleet.folded(story.key))
+    for story in found:
+        # Every story has a feature; the stray row above already knows which one, so it is not repeated.
+        if fleet.touched(story) and not story.closed and story.status != columns.DONE and story.feature is None:
+            if not story.archived and fleet.folded(story.key) not in named:
+                fix = f"epic add <feature> {story.repo}#{story.number}"
+                out.append(Anomaly(story.number, story.repo, "in no feature", fix))
     for repo, number, _ in missing or []:
         out.append(Anomaly(number, repo, "drafted, but not on the board", "captain apply --repair"))
     for story in archived or []:

@@ -1358,3 +1358,31 @@ def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):
     assert lines.index("Apply: deckhand new apply <file> --draft 248") < lines.index("### Story")
     assert "Park shape:" in lines
     assert 'Apply: deckhand new apply <file> --park --from 248 --title "<title>"' in lines
+
+
+def test_apply_park_logs_where_it_came_from_before_it_sets_the_feature(fake_gh, gh_calls, tmp_path):
+    """A failed Feature write must still leave the entry the stray check reads."""
+    path = _park_file(tmp_path, FEATURE)
+    result = run_deckhand("new", "apply", "--park", str(path), "--from", "301", env=_featured(tmp_path))
+
+    assert result.returncode == 0, result.stderr
+    calls = gh_calls()
+    logged = next(i for i, call in enumerate(calls) if call.startswith("issue comment"))
+    featured = next(i for i, call in enumerate(calls) if "item-edit" in call and "OPT_PERMISSION" in call)
+    assert logged < featured
+
+
+def test_apply_park_from_an_archived_featured_story_takes_its_feature(fake_gh, gh_calls, tmp_path):
+    items = json.loads((FIXTURES / "epic-items.json").read_text(encoding="utf-8"))
+    for node in items["data"]["organization"]["projectV2"]["items"]["nodes"]:
+        if node["content"]["number"] == 301:
+            node["isArchived"] = True
+    archived = tmp_path / "archived-items.json"
+    archived.write_text(json.dumps(items), encoding="utf-8")
+    path = _park_file(tmp_path, FEATURE)
+    env = {**_featured(tmp_path), "GH_PROJECT_ITEMS_FILE": str(archived)}
+
+    result = run_deckhand("new", "apply", "--park", str(path), "--from", "301", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Permission rework" in result.stdout.splitlines()

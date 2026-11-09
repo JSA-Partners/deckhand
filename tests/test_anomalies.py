@@ -92,12 +92,13 @@ def test_a_drafted_issue_that_never_reached_the_board_is_an_anomaly():
 def test_a_fleet_that_agrees_with_its_logs_has_no_status_anomaly():
     kept = [story for story in fleet.stories(_nodes()) if story.number != 268]
     found = anomalies.find(kept, BLOCKERS, behind=set(), pulses=[_pulse("117"), _pulse("120")])
-    assert [item.number for item in found] == []
+    # the fixture's stories predate the Feature field, which the row of its own covers
+    assert [item.number for item in found if item.what != "in no feature"] == []
 
 
 def test_a_finished_story_is_no_anomaly_and_needs_no_repair():
     found = anomalies.find(fleet.stories(_nodes()), BLOCKERS, behind=set(), pulses=[_pulse("120")])
-    assert [item.number for item in found if item.number == 117] == []
+    assert [item.number for item in found if item.number == 117 and item.what != "in no feature"] == []
 
 
 def test_a_teammates_story_in_flight_is_not_the_readers_anomaly():
@@ -299,3 +300,32 @@ def test_a_kid_shed_by_two_stories_of_a_feature_is_one_stray():
     kid = _logged(3)
 
     assert anomalies.strays([first, second, kid]) == [(kid, first)]
+
+
+def _unfiled(found: list) -> list[tuple[int, str, str]]:
+    return [(item.number, item.what, item.fix) for item in found if item.what == "in no feature"]
+
+
+def test_an_open_story_in_no_feature_is_named_with_the_epic_add_to_run():
+    for status in ("Draft", "Refinement", "Backlog", "In Progress"):
+        story = dataclasses.replace(_logged(4), status=status)
+        assert _unfiled(anomalies.find([story], {}, set(), [])) == [
+            (4, "in no feature", "epic add <feature> acme/widgets#4")
+        ], status
+
+
+def test_a_featured_finished_archived_or_foreign_story_is_not_named_for_its_feature():
+    quiet = [
+        _logged(1, feature="OPT_A"),
+        _logged(2, closed=True),
+        dataclasses.replace(_logged(3), archived=True),
+        _logged(4, labels=()),
+    ]
+    assert _unfiled(anomalies.find(quiet, {}, set(), [])) == []
+
+
+def test_the_stray_row_names_a_parked_child_instead():
+    parent, kid = _logged(1, "Split: into #2", feature="OPT_PAY"), _logged(2)
+    found = anomalies.find([parent, kid], {}, set(), [])
+    assert _unfiled(found) == []
+    assert any("split or parked from a story of" in item.what for item in found)
