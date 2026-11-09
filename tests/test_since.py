@@ -121,3 +121,20 @@ def test_the_heading_says_when():
 def test_a_day_or_more_heads_with_the_day():
     later = BEFORE["at"] + 30 * 3600
     assert since.heading(BEFORE, later) == time.strftime("Since %a %H:%M, 30 hours ago", time.localtime(BEFORE["at"]))
+
+
+def test_neither_the_caller_nor_the_writer_reads_as_opened_or_closed():
+    """Each session leaves itself out of what it reads, so two that take turns would flip each other."""
+    written = {**BEFORE, "writer": "aaaa", "sessions": {"bbbb": {"story": "259", "waiting": False}}}
+    read = _after(writer="bbbb", sessions={"aaaa": {"story": "free", "waiting": False}})
+    lines = since.changes(written, read, "acme/widgets", caller="bbbb")
+    assert not [line for line in lines if line.startswith("session ")]
+
+
+def test_a_snapshot_without_a_writer_still_compares():
+    lines = since.changes(BEFORE, _after(sessions={}), "acme/widgets", caller="zzzz")
+    assert "session ce54 on #259 closed" in lines
+
+
+def test_a_snapshot_records_who_wrote_it():
+    assert since.snapshot({}, {}, [], 1.0, writer="aaaa")["writer"] == "aaaa"

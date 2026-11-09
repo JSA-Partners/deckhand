@@ -332,4 +332,9 @@ def discover(repos: dict[str, str], since: float, exclude: str) -> list[Pulse]:
     live = running()
     found = _recent(repos, since, exclude) if live is None else _open(live, repos, exclude)
     found.sort(key=lambda beat: (beat.started, beat.session))
-    return [replace(beat, label=beat.session[:ID]) for beat in found]
+    return [replace(beat, label=label_of(beat.session)) for beat in found]
+
+
+def label_of(session: str) -> str:
+    """The short label a session goes by in every read: the head of its own id."""
+    return session[:ID]

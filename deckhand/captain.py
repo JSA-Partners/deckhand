@@ -170,6 +170,11 @@ def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--only", choices=(*BLOCKS, *ON_REQUEST), help="print one block instead of the full read")
 
 
+def _caller() -> str:
+    """The label of the session running this read, which every read leaves out of its own list."""
+    return sessions.label_of(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+
+
 def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
     return sessions.discover(_repos(read.stories), since, os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
@@ -181,12 +186,12 @@ def _remember(read: fleet.Fleet, pulses: list[sessions.Pulse], found: list[anoma
         if fleet.touched(story)
     }
     held = {beat.label: {"story": beat.story, "waiting": beat.waiting} for beat in pulses}
-    return since.snapshot(stories, held, [_line(item) for item in found], time.time())
+    return since.snapshot(stories, held, [_line(item) for item in found], time.time(), writer=_caller())
 
 
 def _moved(before: dict, after: dict) -> list[str]:
     head = since.heading(before, after["at"])
-    lines = since.changes(before, after, gh.repo_slug())
+    lines = since.changes(before, after, gh.repo_slug(), caller=_caller())
     return [f"  {head}:", *(f"    {line}" for line in lines)] if lines else [f"  Nothing moved {head.lower()}."]
 
 

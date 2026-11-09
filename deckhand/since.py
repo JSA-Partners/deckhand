@@ -19,9 +19,11 @@ def path(settings: Settings) -> Path:
     return settings.cache / f"captain-{settings.owner}-{settings.project}.json"
 
 
-def snapshot(stories: dict[str, dict], pulses: dict[str, dict], anomalies: list[str], at: float) -> dict:
-    """One read as plain data: stories by `repo#number`, sessions by label, anomalies as lines."""
-    return {"at": at, "stories": stories, "sessions": pulses, "anomalies": sorted(anomalies)}
+def snapshot(
+    stories: dict[str, dict], pulses: dict[str, dict], anomalies: list[str], at: float, writer: str = ""
+) -> dict:
+    """One read as plain data: stories by `repo#number`, sessions by label, anomalies as lines, and who read."""
+    return {"at": at, "stories": stories, "sessions": pulses, "anomalies": sorted(anomalies), "writer": writer}
 
 
 def _rows(value: object, shape: dict[str, type]) -> bool:
@@ -95,8 +97,12 @@ def _session(label: str, was: dict | None, now: dict | None) -> str | None:
     return None
 
 
-def changes(before: dict, after: dict, repo: str) -> list[str]:
-    """One line per story, session and anomaly that changed between two snapshots."""
+def changes(before: dict, after: dict, repo: str, caller: str = "") -> list[str]:
+    """One line per story, session and anomaly that changed between two snapshots.
+
+    Every read leaves out the session that made it, so a session that wrote the last snapshot or is
+    reading now is absent from one side for that reason alone, and is never said to open or close.
+    """
     lines: list[str] = []
     old, new = before["stories"], after["stories"]
     for key in sorted(set(old) | set(new), key=_order):
@@ -110,7 +116,9 @@ def changes(before: dict, after: dict, repo: str) -> list[str]:
         else:
             lines.append(_moved(name, was, now))
     held, holds = before["sessions"], after["sessions"]
-    lines += [_session(label, held.get(label), holds.get(label)) for label in sorted(set(held) | set(holds))]
+    unseen = {label for label in (before.get("writer"), caller) if label}
+    labels = sorted((set(held) | set(holds)) - unseen)
+    lines += [_session(label, held.get(label), holds.get(label)) for label in labels]
     gone, came = set(before["anomalies"]), set(after["anomalies"])
     lines += [f"new: {_anomaly(line, repo)}" for line in sorted(came - gone)]
     lines += [f"cleared: {_anomaly(line, repo)}" for line in sorted(gone - came)]

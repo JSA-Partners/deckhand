@@ -329,3 +329,11 @@ def test_the_stray_row_names_a_parked_child_instead():
     found = anomalies.find([parent, kid], {}, set(), [])
     assert _unfiled(found) == []
     assert any("split or parked from a story of" in item.what for item in found)
+
+
+def test_a_blocked_story_in_progress_reads_as_waiting_not_as_left_alone():
+    """A story that gained a blocker mid-build says what it waits on, and no one is told to reopen it."""
+    story = dataclasses.replace(_logged(120), status="In Progress", feature="OPT_A")
+    blockers = {story.key: [("acme/gadgets", 355, "Back end grant")]}
+    assert fleet.note(story, blockers[story.key], behind=False) == "waits on acme/gadgets#355"
+    assert not [item for item in anomalies.find([story], blockers, set(), []) if "no session" in item.what]
