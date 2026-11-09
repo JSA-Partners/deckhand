@@ -11,6 +11,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from deckhand import deadline
+
 if TYPE_CHECKING:  # a runtime import would be circular: config resolves the project through this module
     from deckhand.config import Settings
 
@@ -71,20 +73,31 @@ def cached() -> Iterator[None]:
 
 
 def run(*args: str, stdin: str | None = None) -> str:
-    """Run `gh <args>` and return stdout; raise GhError with stderr on failure."""
+    """Run `gh <args>` and return stdout; raise GhError with stderr on failure or past the deadline."""
     key = (args, stdin)
     if _cache is not None and key in _cache:
         return _cache[key]
     try:
-        result = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=False)
+        process = subprocess.Popen(
+            ["gh", *args],
+            stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
     except FileNotFoundError as error:
         raise GhError("the GitHub CLI (gh) is not installed or not on PATH") from error
-    if result.returncode != 0:
-        message = result.stderr.strip() or f"gh {' '.join(args)} failed with status {result.returncode}"
-        raise GhError(message, result.stdout)
+    try:
+        stdout, stderr = deadline.wait(process, stdin)
+    except deadline.Expired:
+        raise GhError(deadline.message("gh", args)) from None
+    if process.returncode != 0:
+        message = stderr.strip() or f"gh {' '.join(args)} failed with status {process.returncode}"
+        raise GhError(message, stdout)
     if _cache is not None:
-        _cache[key] = result.stdout
-    return result.stdout
+        _cache[key] = stdout
+    return stdout
 
 
 def _parse_json(text: str) -> Any:
