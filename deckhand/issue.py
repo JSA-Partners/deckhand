@@ -248,15 +248,6 @@ def resave_pull_request(repo: str, url: str, body: str) -> None:
         gh.run("pr", "edit", url, "--repo", repo, "--body-file", path)
 
 
-def merged_pull_requests(repo: str, limit: int) -> list[tuple[str, str]]:
-    """The title and body of the last `limit` merged pull requests, newest first."""
-    gh.split_repo(repo)
-    data = gh.json_out("pr", "list", "--repo", repo, "--state", "merged", "--limit", str(limit), "--json", "title,body")
-    if not isinstance(data, list):
-        return []
-    return [(item.get("title", ""), item.get("body", "")) for item in data if isinstance(item, dict)]
-
-
 # One field list for every read of a pull request, so a briefing that wants two of them makes one
 # call: `gh.cached` keys on the arguments, and three readers asking for three sets defeated it.
 FAILED = ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE")

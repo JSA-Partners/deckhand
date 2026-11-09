@@ -11,7 +11,6 @@ A name that cannot be made is a `ValueError`; the step that asked for it turns t
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
 
 from deckhand import config, sections
 from deckhand.config import Settings
@@ -125,18 +124,17 @@ def fits(subject: str) -> str:
     return subject
 
 
-def pr_body(number: str | int, summary: str, breaking: str | None = None, deviations: Sequence[str] = ()) -> str:
-    """The summary's paragraphs, then each deviation, one paragraph each on one line, then the footers.
+def pr_body(number: str | int, summary: str, breaking: str | None = None) -> str:
+    """The summary's paragraphs, each on one line, then the footers.
 
     A line break inside a paragraph is the width of the file it was drafted in, and it goes: GitHub
     renders every line break in a pull request body, and git does not care how long a line of a
-    commit body is. A blank line stays, because one or two paragraphs is the shape of a body. The
-    deviations are what the branch did that the story did not say, so main's history has them.
+    commit body is. A blank line stays, because one or two paragraphs is the shape of a body.
     """
     if not _NUMBER_RE.match(str(number)):
         raise ValueError(f"issue number must be an integer, got {number!r}")
     footers = [f"BREAKING CHANGE: {breaking}"] if breaking else []
     footers.append(f"Closes #{number}")
-    chunks = [*re.split(r"\n\s*\n", summary.strip()), *deviations]
+    chunks = re.split(r"\n\s*\n", summary.strip())
     paragraphs = [" ".join(text.split()) for text in chunks if text.strip()]
     return "\n\n".join(paragraphs) + "\n\n" + "\n".join(footers) + "\n"

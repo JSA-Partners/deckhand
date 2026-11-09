@@ -202,13 +202,7 @@ def test_pr_body_rejects_a_non_numeric_issue():
         naming.pr_body("abc", STORY)
 
 
-def test_pr_body_puts_each_deviation_in_its_own_paragraph():
-    body = naming.pr_body(248, STORY, deviations=["The lock moved\ninto one helper.", "  ", "Routes left the server."])
-
-    assert body == f"{STORY}\n\nThe lock moved into one helper.\n\nRoutes left the server.\n\nCloses #248\n"
-
-
 def test_pr_body_keeps_the_summary_paragraphs_apart():
-    body = naming.pr_body(255, "First paragraph.\n\nSecond paragraph.", deviations=["A deviation."])
+    body = naming.pr_body(255, "First paragraph,\nwrapped.\n\nSecond paragraph.")
 
-    assert body == "First paragraph.\n\nSecond paragraph.\n\nA deviation.\n\nCloses #255\n"
+    assert body == "First paragraph, wrapped.\n\nSecond paragraph.\n\nCloses #255\n"
