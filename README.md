@@ -133,8 +133,9 @@ same files apart. It writes to the board and nowhere else.
 ### Features
 
 A feature is an option of the project's Feature field, never an issue, so it can span every
-repository of the project. The order of the options is the build order: drag them in the project's
-settings to change it.
+repository of the project. Every story belongs to one: `new` writes it into the feature it names or
+inherits. The order of the options is the build order: drag them in the project's settings to
+change it.
 
 ```text
 deckhand epic open "Let guests in" --about "A client sees their own collection and nothing else."

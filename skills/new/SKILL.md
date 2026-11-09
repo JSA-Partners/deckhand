@@ -21,8 +21,10 @@ idea: a fix needs a question or two, a feature the whole conversation.
 
 One story: run superpowers:writing-plans into the draft, with a `### After the merge`
 heading at the end of the Plan for anything that can only happen once the code is on main (an item
-for another, merged story goes on its list with `after apply N --add "<item>"`, never a hand edit), and run
-`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <file>`. It boards the story as Draft. Then run
+for another, merged story goes on its list with `after apply N --add "<item>"`, never a hand edit). Where any
+part changes what a person sees (a screen, a component, a layout, styling, wording on screen), the plan
+names the impeccable:impeccable steps for it; lean toward yes. Run
+`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <file> --feature "<name>"`. It boards the story as Draft. Then run
 `... next context <number>` and carry on from the Review section of
 `${CLAUDE_PLUGIN_ROOT}/skills/next/SKILL.md`, speaking as its Speaking section says.
 
@@ -35,8 +37,7 @@ Review section. Park any other feature the conversation produced with `... new a
 with `--repo owner/name` for another repository, `--blocks N` for the story here waiting on it, and
 `--after REF` for a story the feature itself waits on.
 
-Once a story or a split is boarded, run `... epic list`. When the work belongs to one of the
-features it prints, say which and run `... epic add "<feature>" <number>...` with every story just
-opened. Work that serves no feature joins none.
+Every story goes into a feature: give `new apply` a `--feature` from the Features the context
+prints, or let it inherit the one of the story it was parked or split from. Name the one you chose.
 
 If a command refuses, fix the rule it names and run it again.

@@ -113,7 +113,8 @@ up when that closes.
 From the start context (above, or run it), compare the plan with the code and with what landed on
 main since the review; say what you found and recommend build, amend, or review again. When they say build, run
 `start apply $issue --note "<the check's conclusion>"`; it prints the story's worktree, where the
-build runs. Then superpowers:subagent-driven-development on the plan, using the least
+build runs. Then superpowers:subagent-driven-development on the plan, with impeccable:impeccable
+where the Visual work line applies, using the least
 powerful model that can do the task, one commit per task with
 deckhand:commit, nothing pushed; after each commit run `update apply $issue`, and on a conflict
 resolve it, commit, and log a Deviation. A change that serves the
@@ -122,7 +123,8 @@ alters what the story delivers: say so in one sentence with the diff's size and 
 here or a new story, and log the answer as a Deviation naming the criterion, or split it with the
 amend step. A decision that changes an issue in another repository before it starts: run
 `amend context N --repo owner/name`, edit its draft, run
-`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. When it says resume, say which tasks the commits cover and recommend carrying on,
+`amend apply N <file> --repo owner/name --note "<why>"`, and name it in the Deviation. An item for
+another merged story's list: `after apply N --add "<item>"`, never a hand edit. When it says resume, say which tasks the commits cover and recommend carrying on,
 which skips them, while tasks are left, or reviewing what is there. When the briefing lists `Blocked by:`, say what it waits on, build what does not
 depend on it, then stop. A story that must not start or merge before another: run
 `captain apply --block $issue --by M`, run `log $issue "Noted: <why>"`, and stop.
@@ -147,9 +149,9 @@ and need no pass.
 
 ## Pull request
 
-From the finish context (above, or run it), write the summary it names: one or two paragraphs in
-the third person, never "I" or "we", saying what the branch changed and what it means for a reader,
-in the shape of the recent pull requests it prints. The story's "so that" clause has the why. Read them the title and that summary, and on yes run
+From the finish context (above, or run it), write the summary it names under its Summary rule, in
+the third person, the story's "so that" as the why, folding in only the Deviations that still
+hold. Read them the title and that summary, and on yes run
 `finish apply $issue <summary> --check "<cmd>"`, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
 theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. Take no word for the
