@@ -17,12 +17,23 @@ records what waits on what, and ends on the line that sends one author agent to 
 from __future__ import annotations
 
 import argparse
-import sys
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import columns, draft, fleet, gh, invoke, issue, lint, log, naming, park, related, sections, worktree
+from deckhand import (
+    columns,
+    draft,
+    gh,
+    invoke,
+    issue,
+    lint,
+    naming,
+    park,
+    related,
+    sections,
+    split,
+    worktree,
+)
 from deckhand.lint import RULES
 from deckhand.step import (
     Refusal,
@@ -34,7 +45,6 @@ from deckhand.step import (
     issue_number,
     read_file,
     reason,
-    ref_label,
     resolved_settings,
     step,
     usable,
@@ -268,68 +278,6 @@ def _write_draft(repo: str, number: int, edited: str, flag: str | None) -> int:
     return 0
 
 
-def _split(repo: str, text: str, parked: int | None) -> int:
-    """Open one draft per story of a feature, number them all, then record what waits on what.
-
-    A story that belongs to another repository is parked there instead, with the requirements and
-    its own sentence, for that repository's session to write. A feature these stories came from is
-    the first of them rather than a second issue that closes: its number, its board item and
-    everything already waiting on it stay where they are. Every write prints as it lands and
-    nothing is retried, so a failure part way through leaves the printed lines as the record.
-    """
-    try:
-        requirements, entries = draft.parse_split(text)
-    except ValueError as error:
-        raise Refusal(f"split file {error}") from error
-    parked_url = park.unsplit(repo, parked) if parked is not None else None
-    if parked is not None and entries[0].repo:
-        raise Refusal(f"the first story of #{parked} is written into it, so it stays in this repository")
-    settings = resolved_settings()
-    stories = fleet.load(settings)
-    # Every draft carries the whole feature, so the first pass writes it unnumbered: no story can
-    # name its siblings' numbers until every issue exists.
-    provisional = draft.render(requirements, entries)
-    origin = f"{repo}#{parked}" if parked is not None else f"a split in {repo}"
-    parent = (repo, parked) if parked is not None else None
-    numbers: list[int] = []
-    urls: list[str] = []
-    local: list[int] = []
-    for position, entry in enumerate(entries):
-        if entry.repo:
-            body = draft.render(f"{requirements.rstrip()}\n\n{entry.sentence}", [])
-            number, url = park.open_parked(settings, repo, entry.repo, entry.title, body, origin, stories, parent)
-        elif position == 0 and parked is not None:
-            number, url = parked, parked_url or ""
-            issue.set_title(repo, number, entry.title)
-            print(f"Kept #{number} {entry.title}", flush=True)
-            local.append(number)
-        else:
-            number, url = issue.create(repo, entry.title, provisional)
-            print(f"Created #{number} {entry.title}", flush=True)
-            local.append(number)
-        numbers.append(number)
-        urls.append(url)
-    body = draft.render(requirements, [replace(e, number=n) for e, n in zip(entries, numbers, strict=True)])
-    for number, url in zip(numbers, urls, strict=True):
-        if number not in local:
-            continue
-        issue.update_body(repo, number, body)
-        print(f"Numbered #{number}", flush=True)
-        # A draft is not written yet, so its author logs that; it joins the feature it was split from now.
-        park.board_draft(settings, repo, number, url, None, feature=park.feature_of(stories, parent))
-    park.wire(repo, entries, numbers)
-    siblings = [(e.repo or repo, n) for e, n in zip(entries[1:], numbers[1:], strict=True)]
-    if parked is not None and siblings:  # one story shed nothing, so there is nothing to say or inherit
-        named = ", ".join(ref_label(where, number, repo) for where, number in siblings)
-        issue.comment(repo, parked, log.checked(f"Split: into {named}"))
-        print("Logged Split", flush=True)
-        park.inherit(repo, parked, siblings)
-    # An agent gets no plugin-root substitution, so the launcher it is to run travels in the line.
-    drafted = " ".join(f"#{number}" for number in local)
-    print(f"Dispatch deckhand:author for each of {drafted} with {Path(sys.argv[0]).resolve()}")
-    return 0
-
-
 def _configure_context(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "source",
@@ -384,7 +332,7 @@ def _write(args: argparse.Namespace) -> int:
     if args.draft is not None:
         return _write_draft(gh.repo_slug(), args.draft, edited, args.title)
     if args.split:
-        return _split(gh.repo_slug(), edited, args.parked)
+        return split.split(gh.repo_slug(), edited, args.parked)
     if args.park:
         settings, repo = resolved_settings(), gh.repo_slug()
         return park.feature(settings, repo, edited, args.title, args.repo, args.blocks, args.parked, args.after)

@@ -18,6 +18,7 @@ import time
 from datetime import date
 
 from deckhand import (
+    anomalies,
     board,
     candidates,
     checklist,
@@ -137,17 +138,17 @@ def _setup_rows(settings: Settings, repo: str) -> list[str]:
     return [f"| - | {_name(repo)} | {item.name}: {item.left} | run /deckhand:setup |" for item in owed]
 
 
-def _found(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[fleet.Anomaly]:
-    return fleet.anomalies(
+def _found(read: fleet.Fleet, pulses: list[sessions.Pulse]) -> list[anomalies.Anomaly]:
+    return anomalies.find(
         read.stories, read.blockers, read.behind, pulses, read.missing, read.me, archived=read.archived
     )
 
 
-def _line(item: fleet.Anomaly) -> str:
+def _line(item: anomalies.Anomaly) -> str:
     return f"{item.repo}#{item.number} {item.what}"
 
 
-def _anomaly_rows(settings: Settings, found: list[fleet.Anomaly], standing: set[str]) -> list[str]:
+def _anomaly_rows(settings: Settings, found: list[anomalies.Anomaly], standing: set[str]) -> list[str]:
     repo = gh.repo_slug()
     new = [item for item in found if _line(item) not in standing]
     rows = [f"| {item.number} | {_name(item.repo)} | {item.what} | {item.fix} |" for item in new]
@@ -173,7 +174,7 @@ def _pulses(read: fleet.Fleet, since: float) -> list[sessions.Pulse]:
     return sessions.discover(_repos(read.stories), since, os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
-def _remember(read: fleet.Fleet, pulses: list[sessions.Pulse], found: list[fleet.Anomaly]) -> dict:
+def _remember(read: fleet.Fleet, pulses: list[sessions.Pulse], found: list[anomalies.Anomaly]) -> dict:
     stories = {
         f"{story.repo}#{story.number}": {"status": story.status, "closed": story.closed}
         for story in read.stories
