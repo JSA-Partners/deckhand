@@ -9,7 +9,7 @@ lives here because every draft and story boards the same way, from new, amend, a
 
 from __future__ import annotations
 
-from deckhand import board, columns, draft, edges, fields, fleet, gh, issue, log, related
+from deckhand import board, columns, draft, edges, epic, fields, fleet, gh, issue, log, related
 from deckhand.config import Settings
 from deckhand.step import Refusal, fits_title, issue_ref, reason, ref_label
 
@@ -48,6 +48,16 @@ def board_draft(
         print(fields.set_field(settings, repo, number, board.FEATURE, feature), flush=True)
 
 
+def chosen(settings: Settings, named: str | None, inherited: str) -> str:
+    """The Feature a new story goes into: the one named, else the one it inherits, refused when neither."""
+    if named:
+        return epic.option_name(settings, named)
+    if inherited:
+        return inherited
+    names = ", ".join(epic.option_names(settings)) or "none yet; open one with epic open"
+    raise Refusal(f"a story needs a feature: pass --feature <name>; the features are {names}")
+
+
 def open_parked(
     settings: Settings,
     here: str,
@@ -57,6 +67,7 @@ def open_parked(
     origin: str,
     stories: list[fleet.Story],
     came: tuple[str, int] | None = None,
+    feature: str = "",
 ) -> tuple[int, str]:
     """Open `body` as a draft titled `title` in `target`, board it as Draft, and log where it came from.
 
@@ -69,7 +80,8 @@ def open_parked(
     number, url = issue.create(target, title, body)
     print(f"Parked {ref_label(target, number, here)} {url}", flush=True)
     # Work shed from a story belongs to that story's feature until someone moves it with epic add.
-    board_draft(settings, target, number, url, f"Drafted: parked from {origin}", feature=feature_of(stories, came))
+    taken = feature or feature_of(stories, came)
+    board_draft(settings, target, number, url, f"Drafted: parked from {origin}", feature=taken)
     return number, url
 
 
@@ -125,6 +137,7 @@ def feature(
     blocks: str | None,
     came_from: int | None = None,
     after: str | None = None,
+    named: str | None = None,
 ) -> int:
     """Park a feature with no stories, in this repository or another, saying where it came from.
 
@@ -156,7 +169,8 @@ def feature(
     stories = fleet.load(settings, archived=True)
     body = draft.render(requirements, [])
     parent = (repo, came) if came is not None else None
-    number, _ = open_parked(settings, repo, target, title, body, origin, stories, parent)
+    feature = chosen(settings, named, feature_of(stories, parent))
+    number, _ = open_parked(settings, repo, target, title, body, origin, stories, parent, feature)
     if story is not None:
         block(repo, story[1], target, number, title)
     if waits_on is not None:

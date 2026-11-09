@@ -23,6 +23,7 @@ from pathlib import Path
 from deckhand import (
     columns,
     draft,
+    epic,
     gh,
     invoke,
     issue,
@@ -114,6 +115,15 @@ def _rules() -> int:
     return 0
 
 
+def _features() -> str:
+    """The Feature options in pipeline order, one of which every story is written into."""
+    try:
+        names = epic.option_names(resolved_settings())
+    except Exception as error:
+        return f"Features: unavailable ({reason(error)})"
+    return f"Features: {', '.join(names)}" if names else "Features: none yet; open one with epic open"
+
+
 def _tail(name: str, split: str | None = None, park: bool = False, number: int | None = None) -> int:
     """What to run and where the draft goes, then the shape it takes and the rules it has to meet.
 
@@ -122,8 +132,9 @@ def _tail(name: str, split: str | None = None, park: bool = False, number: int |
     is the draft being written, which the body goes into rather than opening an issue of its own.
     """
     source = ("--from", str(number)) if number else ()
-    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ())))
+    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ()), '--feature "<name>"'))
     print(file_line("Body", name))
+    print(_features())
     if park:
         print(invoke.apply_line("new", "<file>", "--park", *source, '--title "<title>"'))
     if split is not None:
@@ -255,7 +266,7 @@ def title(flag: str | None, body: str) -> str:
         raise Refusal(str(error)) from error
 
 
-def _write_draft(repo: str, number: int, edited: str, flag: str | None) -> int:
+def _write_draft(repo: str, number: int, edited: str, flag: str | None, named: str | None = None) -> int:
     """Rewrite the draft as the story it stands for; its number and dependencies are untouched.
 
     A parked feature is a draft too, and a feature with one outcome is written straight into it: the
@@ -269,12 +280,14 @@ def _write_draft(repo: str, number: int, edited: str, flag: str | None) -> int:
     subject = fits_title((flag or "").strip())
     body = lint.checked(edited)
     settings = resolved_settings()
+    # A draft took its feature when it was parked or split; a name given here sets one.
+    feature = epic.option_name(settings, named) if named else ""
     issue.update_body(repo, number, body)
     print(f"Written #{number} {story.url}", flush=True)
     if subject:  # the draft's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
         print(f"Title: {subject}", flush=True)
-    park.board_draft(settings, repo, number, story.url, FROM_DRAFT, columns.REFINEMENT)
+    park.board_draft(settings, repo, number, story.url, FROM_DRAFT, columns.REFINEMENT, feature)
     return 0
 
 
@@ -305,6 +318,11 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--title", help="the issue title; the default is the Story's I want clause")
     parser.add_argument("--repo", metavar="OWNER/NAME", help="with --park, the repository the feature opens in")
     parser.add_argument("--blocks", metavar="REF", help="with --park, the story here that waits on the feature")
+    parser.add_argument(
+        "--feature",
+        metavar="NAME",
+        help="the Feature option the story goes into, by name or id; else the inherited one",
+    )
     # Only the parser that read these arguments knows the usage line to print a usage error with,
     # and argparse cannot say that one option is allowed only alongside another.
     parser.set_defaults(usage=parser)
@@ -330,19 +348,21 @@ def apply(args: argparse.Namespace) -> int:
 def _write(args: argparse.Namespace) -> int:
     edited = read_file(args.file)
     if args.draft is not None:
-        return _write_draft(gh.repo_slug(), args.draft, edited, args.title)
+        return _write_draft(gh.repo_slug(), args.draft, edited, args.title, args.feature)
     if args.split:
-        return split.split(gh.repo_slug(), edited, args.parked)
+        return split.split(gh.repo_slug(), edited, args.parked, args.feature)
     if args.park:
         settings, repo = resolved_settings(), gh.repo_slug()
-        return park.feature(settings, repo, edited, args.title, args.repo, args.blocks, args.parked, args.after)
+        flags = (args.title, args.repo, args.blocks, args.parked, args.after, args.feature)
+        return park.feature(settings, repo, edited, *flags)
     body = lint.checked(edited)
     subject = title(args.title, body)
     settings = resolved_settings()
+    feature = park.chosen(settings, args.feature, "")
     repo = gh.repo_slug()
     number, url = issue.create(repo, subject, body)
     print(f"Created #{number} {url}", flush=True)
-    park.board_draft(settings, repo, number, url, DRAFTED, columns.REFINEMENT)
+    park.board_draft(settings, repo, number, url, DRAFTED, columns.REFINEMENT, feature)
     if (note := lint.headroom(body, given=edited)) is not None:
         print(note)
     return 0

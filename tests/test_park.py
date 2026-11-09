@@ -10,6 +10,12 @@ import pytest
 from deckhand import draft
 from tests.conftest import labeled_board, run_deckhand
 
+
+@pytest.fixture(autouse=True)
+def _every_story_has_a_feature(feature_field):
+    """Every story is written into a Feature, so every test here runs on a project that has the field."""
+
+
 FEATURE = "## Requirements\n\nGuests should be able to share a collection with a guest.\n"
 TITLE = "Share a collection"
 
@@ -19,7 +25,7 @@ def _park(repo: Path, tmp_path: Path, *flags: str, copy: Path | None = None):
     source = tmp_path / "feature.md"
     source.write_text(FEATURE, encoding="utf-8")
     env = {"GH_BODY_FILE_COPY": str(copy)} if copy is not None else {}
-    return run_deckhand("new", "apply", "--park", *flags, str(source), cwd=repo, env=env)
+    return run_deckhand("new", "apply", "--park", "--feature", "Billing", *flags, str(source), cwd=repo, env=env)
 
 
 def test_a_park_names_the_open_stories_that_look_like_it_in_any_repository(fake_gh, repo, tmp_path, monkeypatch):

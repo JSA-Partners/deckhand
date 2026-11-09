@@ -93,6 +93,17 @@ def _find(options: list[dict], named: str) -> dict:
     raise Refusal(f"no feature matches {named}; the features are {names}")
 
 
+def option_names(settings: Settings) -> list[str]:
+    """The Feature options in pipeline order, or empty before any feature was opened."""
+    found = _field(settings)
+    return [option["name"] for option in found["options"]] if found is not None else []
+
+
+def option_name(settings: Settings, named: str) -> str:
+    """The name of the option `named` names, as `_find` matches it; refused when none or several do."""
+    return _find(_options(settings)[1], named)["name"]
+
+
 def _open(args: argparse.Namespace) -> int:
     name = _plain(" ".join(args.refs))
     if not name:
