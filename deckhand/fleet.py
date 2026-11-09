@@ -228,6 +228,7 @@ class Fleet:
     me: str = ""
     archived: list[Story] = field(default_factory=list)
     pulls: dict[Key, issue.PullRequest] = field(default_factory=dict)
+    features: tuple[str, ...] = ()  # the Feature option ids in the pipeline order the person set
 
     @property
     def behind(self) -> set[Key]:
@@ -281,4 +282,14 @@ def read(settings: Settings) -> Fleet:
         missing=_missing(every),  # archived included: an archived story is on the board, not off it
         me=gh.login(),
         archived=[story for story in every if story.archived],
+        features=_pipeline(settings),
     )
+
+
+def _pipeline(settings: Settings) -> tuple[str, ...]:
+    """The Feature option ids in order, or empty when there is no such field or it cannot be read."""
+    try:
+        found = next((item for item in gh.project_fields(settings) if item["name"] == board.FEATURE), None)
+    except gh.GhError:
+        return ()
+    return tuple(str(option["id"]) for option in (found or {}).get("options") or [])

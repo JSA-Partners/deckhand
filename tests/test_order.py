@@ -100,3 +100,35 @@ def test_the_next_line_names_a_blocker_deckhand_does_not_own_in_backlog():
     )
 
     assert order.next_line(read, []) == "Next per repository: widgets: #268 is Backlog, unblocking 1 story"
+
+
+def _in(features: dict[int, str]):
+    """The backlog with each numbered story moved into the Feature option given for it."""
+    return [replace(story, feature=features.get(story.number)) for story in _backlog()]
+
+
+def _placed(stories, features: tuple[str, ...]) -> list[int]:
+    places = order.places(stories, BLOCKERS, features)
+    return [row.story.number for row in order.ranked(stories, BLOCKERS, places)]
+
+
+def test_the_earlier_feature_ranks_first_whatever_the_work_freed():
+    stories = _in({13: "OPT_A", 253: "OPT_B", 257: "OPT_B", 258: "OPT_B"})
+    assert _placed(stories, ("OPT_A", "OPT_B")) == [13, 253, 257, 258]
+
+
+def test_a_blocker_ranks_with_the_earliest_feature_waiting_on_it():
+    """#253 is in the last feature, but #257 in the first waits on it, so #253 starts before #13."""
+    stories = _in({13: "OPT_B", 253: "OPT_C", 257: "OPT_A", 258: "OPT_C"})
+    assert _placed(stories, ("OPT_A", "OPT_B", "OPT_C")) == [253, 13, 257, 258]
+
+
+def test_a_story_in_no_feature_ranks_after_every_featured_one():
+    """#253 frees the most work, but nothing featured waits on it, so featured #13 starts first."""
+    stories = _in({13: "OPT_B"})
+    assert _placed(stories, ("OPT_A", "OPT_B")) == [13, 253, 257, 258]
+
+
+def test_an_unread_pipeline_keeps_the_order_the_work_freed_gives():
+    stories = _in({13: "OPT_A", 253: "OPT_B"})
+    assert _placed(stories, ()) == [253, 13, 257, 258]

@@ -45,7 +45,7 @@ def waiting(blockers: Blockers) -> dict[Key, set[Key]]:
     return found
 
 
-def topological(held: list[Story], blockers: Blockers, rank: Callable[[Story], tuple[int, int, int]]) -> list[Story]:
+def topological(held: list[Story], blockers: Blockers, rank: Callable[[Story], tuple[int, ...]]) -> list[Story]:
     """`held` placed so nothing precedes a blocker that is also in `held`; a cycle falls back to rank."""
     remaining = list(held)
     left = {story.key for story in remaining}
@@ -70,7 +70,21 @@ def _why(story: Story, blockers: list[tuple[str, int, str]], below: set[Key], po
     return f"ready, unblocks {count} {stories}, {sum(points.get(key, 0) for key in below)} pts"
 
 
-def ranked(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
+def places(stories: list[Story], blockers: Blockers, features: tuple[str, ...]) -> dict[Key, int]:
+    """Each story's place in the Feature pipeline: the earliest of its own and of all that wait on it.
+
+    A blocker takes the place of the feature it holds up, so finishing one feature first never
+    leaves that feature waiting on a story filed under a later one. No feature is last.
+    """
+    last = len(features)
+    own = {story.key: features.index(story.feature) if story.feature in features else last for story in stories}
+    waits = waiting(blockers)
+    return {
+        key: min([place, *(own.get(other, last) for other in downstream(key, waits))]) for key, place in own.items()
+    }
+
+
+def ranked(backlog: list[Story], blockers: Blockers, place: dict[Key, int] | None = None) -> list[Ranked]:
     """The Backlog ranked: what can start first, by the work it frees, then what waits.
 
     Weight is the points of everything transitively waiting on a story rather than a count of its
@@ -83,9 +97,10 @@ def ranked(backlog: list[Story], blockers: Blockers) -> list[Ranked]:
     held = [story for story in backlog if blockers.get(story.key)]
     weights = {story.key: downstream(story.key, waits) for story in backlog}
 
-    def rank(story: Story) -> tuple[int, int, int]:
+    def rank(story: Story) -> tuple[int, int, int, int]:
         below = weights[story.key]
-        return (-sum(points.get(key, 0) for key in below), story.points or 0, story.number)
+        first = (place or {}).get(story.key, 0)
+        return (first, -sum(points.get(key, 0) for key in below), story.points or 0, story.number)
 
     placed = sorted(ready, key=rank) + topological(held, blockers, rank)
     return [
@@ -101,7 +116,7 @@ def _name(repo: str) -> str:
 def backlog(read: Fleet) -> list[Ranked]:
     """The Backlog stories deckhand owns in this reading, ranked; an issue opened by hand is not one."""
     held = [story for story in read.stories if story.status == columns.BACKLOG and touched(story)]
-    return ranked(held, read.blockers)
+    return ranked(held, read.blockers, places(read.stories, read.blockers, read.features))
 
 
 def rows(read: Fleet) -> list[str]:

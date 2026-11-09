@@ -516,3 +516,14 @@ def test_a_story_that_never_split_shed_nothing():
 
 
 SPLIT = "Split: #2 Follow on, blocked by this story."
+
+
+def test_a_read_keeps_the_feature_options_in_pipeline_order(fake_gh, settings, monkeypatch):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(FIXTURES / "feature-fields.json"))
+    assert fleet.read(settings).features == ("OPT_BILLING", "OPT_PERMISSION", "OPT_AUDIT")
+
+
+def test_a_read_without_the_feature_field_has_no_pipeline(fake_gh, settings, monkeypatch):
+    monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
+    assert fleet.read(settings).features == ()
