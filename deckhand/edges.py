@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from deckhand import gh, issue
+from deckhand import fleet, gh, issue
 from deckhand.step import Refusal, issue_ref, open_issue, reason, ref_label
 
 
@@ -103,3 +103,37 @@ def unblock(here: str, story: str, by: str) -> None:
     target, (where, blocker) = _edge(here, story, by)
     issue.remove_dependency(*target, (where, blocker))
     print(f"{ref_label(*target, here)} no longer blocked by {ref_label(where, blocker, here)}")
+
+
+def _state(story: fleet.Story) -> str:
+    return "open" if not story.closed else "dropped" if story.dropped else "closed"
+
+
+def _cell(named: list[tuple[str, int, str]], here: str, columns: dict[tuple[str, int], str]) -> str:
+    """Each story named, with whether it is open, closed or dropped, and its column when it is on the board."""
+    said = [
+        f"{ref_label(repo, number, here)} {state}"
+        + (f", {columns[(repo, number)]}" if (repo, number) in columns else "")
+        for repo, number, state in named
+    ]
+    return "; ".join(said) or "-"
+
+
+def rows(read: fleet.Fleet) -> list[str]:
+    """One row per open story the process owns with an edge either way: what it waits on and what it blocks."""
+    every = [*read.stories, *read.archived]
+    columns = {story.key: story.status for story in every if story.status}
+    blocks: dict[tuple[str, int], list[tuple[str, int, str]]] = {}
+    for story in every:
+        for repo, number, _ in story.edges:
+            blocks.setdefault((repo, number), []).append((story.repo, story.number, _state(story)))
+    table = []
+    for story in read.stories:
+        if story.closed or not fleet.touched(story) or not (story.edges or blocks.get(story.key)):
+            continue
+        waits = _cell(list(story.edges), story.repo, columns)
+        held = _cell(blocks.get(story.key, []), story.repo, columns)
+        table.append(f"| {story.number} | {story.repo.split('/')[-1]} | {waits} | {held} |")
+    if not table:
+        return ["  no blocker edges"]
+    return ["| # | Repo | Waits on | Blocks |", "| --- | --- | --- | --- |", *table]

@@ -158,7 +158,8 @@ def test_context_prints_the_park_shape_without_stories(fake_gh, tmp_path):
         "  <what the feature needs, in full>",
         "",
     ]
-    assert lines.index('Apply: deckhand new apply <file> --park --title "<title>"') < lines.index("### Story")
+    park = 'Apply: deckhand new apply <file> --park --title "<title>" --feature "<name>"'
+    assert lines.index(park) < lines.index("### Story")
     assert "Stub and park shape:" not in lines
 
 
@@ -989,7 +990,7 @@ def test_apply_split_names_the_dependency_it_could_not_record(fake_gh, gh_calls)
 
     assert result.returncode == 1
     assert result.stderr.strip() == (
-        "deckhand new apply: #58 blocked by #57 failed: could not add dependency; add it by hand"
+        "deckhand new apply: #58 blocked by #57 failed: could not add dependency (HTTP 422); add it by hand"
     )
     assert result.stdout.splitlines()[-4:] == ["Numbered #59", "Added to the board", "Status=Draft", "Feature=Billing"]
     assert len([call for call in gh_calls() if "-X POST" in call]) == 1
@@ -1368,8 +1369,16 @@ def test_a_new_request_names_the_draft_split_and_park_applies(fake_gh):
 
     lines = result.stdout.splitlines()
     assert lines[0] == 'Apply: deckhand new apply <file> --feature "<name>"'
-    assert "Apply: deckhand new apply <split> --split" in lines
-    assert 'Apply: deckhand new apply <file> --park --title "<title>"' in lines
+    assert 'Apply: deckhand new apply <split> --split --feature "<name>"' in lines
+    assert 'Apply: deckhand new apply <file> --park --title "<title>" --feature "<name>"' in lines
+
+
+def test_a_split_from_a_parked_feature_takes_its_feature_and_is_not_asked_for_one(fake_gh):
+    result = run_deckhand("new", "context", "60", env=PARKED)
+
+    assert result.returncode == 0, result.stderr
+    applies = [line for line in result.stdout.splitlines() if line.startswith("Apply: ")]
+    assert applies and not [line for line in applies if "--feature" in line]
 
 
 def test_a_stub_context_writes_into_the_stub_and_shows_the_park_shape(fake_gh):

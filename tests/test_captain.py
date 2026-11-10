@@ -117,6 +117,20 @@ def test_the_merge_block_follows_the_order_and_ranks_the_open_pull_requests(flee
     assert "\n\nMerge #1000 first; no other open pull request changes its files.\n" in out
 
 
+def test_the_edges_block_is_asked_for_alone_and_lists_both_directions(fleet_env, capsys):
+    cli.main(["captain", "context", "--only", "edges"])
+    out = capsys.readouterr().out
+    rows = _block(out, "## Edges")
+    assert rows[0] == "| # | Repo | Waits on | Blocks |"
+    assert any(row.startswith("| 253 | widgets | ") and "#257 open" in row for row in rows)
+    assert "## Fleet" not in out
+
+
+def test_the_full_read_leaves_the_edges_out(fleet_env, capsys):
+    cli.main(["captain", "context"])
+    assert "## Edges" not in capsys.readouterr().out
+
+
 def test_the_merge_block_can_be_asked_for_alone(fleet_env, capsys):
     cli.main(["captain", "context", "--only", "merge"])
     out = capsys.readouterr().out

@@ -161,7 +161,7 @@ def _anomaly_rows(settings: Settings, found: list[anomalies.Anomaly], standing: 
 
 
 BLOCKS = ("fleet", "order", "merge", "sessions", "anomalies")
-ON_REQUEST = ("forecast", "candidates")  # neither is worth paying for on every rerun of the context
+ON_REQUEST = ("forecast", "candidates", "edges")  # none is worth printing on every rerun of the context
 
 
 def _configure_context(parser: argparse.ArgumentParser) -> None:
@@ -260,6 +260,8 @@ def context(args: argparse.Namespace) -> int:
             block("## Forecast", lambda: forecast.rows(read, _today()))
         if "candidates" in wanted:
             block("## Candidates", lambda: candidates.rows(read, gh.repo_slug()))
+        if "edges" in wanted:
+            block("## Edges", lambda: edges.rows(read))
         if after:
             try:
                 since.save(since.path(settings), after)

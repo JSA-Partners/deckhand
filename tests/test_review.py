@@ -179,6 +179,53 @@ def test_context_adds_a_lens_named_in_notes(fake_gh, tmp_path):
     assert "State the steady state the story assumes" in brief
 
 
+LAST = (
+    "Review: Needs amending: the delete case is unproven.\n\n- coverage.1, P2, accepted: The delete case lacks a test."
+)
+
+
+def _logged(tmp_path: Path, *bodies: str) -> dict[str, str]:
+    """The issue fixture with `bodies` as its whole log, oldest first."""
+    comments = [
+        {"author": {"login": "mattjmoran"}, "createdAt": f"2026-11-10T0{i}:00:00Z", "body": body}
+        for i, body in enumerate(bodies)
+    ]
+    path = tmp_path / "logged.json"
+    path.write_text(json.dumps({**ISSUE, "comments": comments}), encoding="utf-8")
+    return {"GH_ISSUE_FILE": str(path)}
+
+
+def test_a_review_after_an_amend_carries_the_last_review_into_the_brief(fake_gh, tmp_path):
+    env = _logged(tmp_path, LAST, "Amended: Took the review.")
+
+    result = run_deckhand("review", "context", "248", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "Last review: in the brief" in result.stdout.splitlines()
+    brief = spilled(result.stdout, "Brief")
+    tail = brief.split("### Last review\n\n", 1)[1]
+    assert tail.startswith(
+        "This story was amended after the review below. Confirm each accepted or changed finding was taken; "
+        "report one that was not under its old lens and severity, then anything new. This section is not a lens."
+    )
+    assert LAST in tail
+
+
+def test_a_first_review_has_no_last_review(fake_gh, tmp_path):
+    result = run_deckhand("review", "context", "248", env=_logged(tmp_path, "Drafted: the story."))
+
+    assert result.returncode == 0, result.stderr
+    assert "Last review: in the brief" not in result.stdout
+    assert "### Last review" not in spilled(result.stdout, "Brief")
+
+
+def test_a_review_not_followed_by_an_amend_is_not_carried(fake_gh, tmp_path):
+    result = run_deckhand("review", "context", "248", env=_logged(tmp_path, LAST, "Review: Sound."))
+
+    assert result.returncode == 0, result.stderr
+    assert "### Last review" not in spilled(result.stdout, "Brief")
+
+
 def test_context_prints_the_three_formats_and_their_paths(fake_gh, tmp_path):
     result = run_deckhand("review", "context", "248")
 

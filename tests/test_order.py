@@ -138,3 +138,24 @@ def test_a_story_in_no_feature_ranks_after_every_featured_one():
 def test_an_unread_pipeline_keeps_the_order_the_work_freed_gives():
     stories = _in({13: "OPT_A", 253: "OPT_B"})
     assert _placed(stories, ()) == [253, 13, 257, 258]
+
+
+def _read() -> fleet.Fleet:
+    found = list(fleet.stories(_nodes()))
+    return fleet.Fleet(
+        stories=found,
+        blockers={story.key: list(story.blocked_by) for story in found if story.status != "Done"},
+        missing=[],
+    )
+
+
+def test_first_is_the_top_ranked_story_of_the_repository_that_waits_on_nothing():
+    assert order.first(_read(), "acme/widgets", exclude=0).number == 253
+
+
+def test_first_skips_the_story_just_closed_and_one_that_waits():
+    assert order.first(_read(), "acme/widgets", exclude=253) is None
+
+
+def test_first_keeps_to_its_own_repository():
+    assert order.first(_read(), "acme/gadgets", exclude=0).number == 258

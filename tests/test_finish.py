@@ -683,7 +683,8 @@ def test_apply_pushes_then_opens_the_pull_request_and_logs_it(fake_gh, gh_calls,
     assert copy.read_text(encoding="utf-8").endswith(f"--- issue comment\nPull request: {PR_URL}")
 
 
-def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo, origin, branch):
+def test_apply_reads_the_story_then_writes_in_order(fake_gh, gh_calls, repo, origin, branch):
+    """The second read is the comment's own look at the latest comment, so a retry never posts twice."""
     result = _apply(repo)
 
     assert result.returncode == 0, result.stderr
@@ -701,12 +702,13 @@ def test_apply_reads_the_story_once_and_writes_in_order(fake_gh, gh_calls, repo,
         "pr list",
         "pr create",
         "pr edit",
+        "issue view",
         "issue comment",
         "project item-edit",
     ]
     assert calls[1] == PR_LIST
     assert calls[2].startswith("pr create ")
-    assert calls[5:] == [PENDING]
+    assert calls[6:] == [PENDING]
 
 
 def test_apply_ends_on_the_fields_and_reads_nothing_more(fake_gh, gh_calls, repo, origin, branch):

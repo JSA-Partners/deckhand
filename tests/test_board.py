@@ -68,38 +68,6 @@ def test_items_reads_every_node_across_pages(fake_gh, settings, tmp_path, monkey
     assert [node["content"]["number"] for node in found] == [210, 211, 96, 300]
 
 
-def test_oldest_open_is_the_lowest_numbered_open_story_of_the_repository_that_is_not_done(
-    fake_gh, settings, tmp_path, monkeypatch
-):
-    _board(
-        tmp_path,
-        monkeypatch,
-        [
-            _node(9, "Nine", "Done"),
-            _node(7, "Seven", "Draft"),
-            _node(5, "Five", None, closed="2026-09-01T00:00:00Z"),
-            _node(4, "Four", "Backlog"),
-            _node(2, "Elsewhere", "Backlog", repo="acme/other"),
-            {"content": {}, "fieldValues": {"nodes": []}},
-        ],
-    )
-
-    assert board.oldest_open(settings, REPO, exclude=4) == (7, "Seven")
-    assert board.oldest_open(settings, REPO, exclude=0) == (4, "Four")
-
-
-def test_oldest_open_counts_a_story_with_no_status_as_open(fake_gh, settings, tmp_path, monkeypatch):
-    _board(tmp_path, monkeypatch, [_node(7, "Seven", "Draft"), _node(3, "Three", None), _node(4, "Four", "Backlog")])
-
-    assert board.oldest_open(settings, REPO, exclude=0) == (3, "Three")
-
-
-def test_oldest_open_is_none_on_an_empty_board(fake_gh, settings, tmp_path, monkeypatch):
-    _board(tmp_path, monkeypatch, [])
-
-    assert board.oldest_open(settings, REPO, exclude=0) is None
-
-
 def test_view_fields_names_the_fields_each_view_shows(fake_gh, settings):
     assert board.view_fields(settings) == {
         "Board": ["Title", "Status", "Kind", "Story Points", "Assignees", "Repository"],

@@ -22,7 +22,7 @@ import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from deckhand import board, columns, config, draft, fields, gh, git, issue, log, related, sections, worktree
+from deckhand import columns, config, draft, fields, fleet, gh, git, issue, log, order, related, sections, worktree
 from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
@@ -58,15 +58,19 @@ class Facts(NamedTuple):
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
     parked: bool = False  # an open draft: a feature to settle before anything is written
+    dropped: bool = False  # closed as not planned or a duplicate, so nothing more is owed
 
 
 def decide(number: int, f: Facts) -> tuple[str, str]:
     """`(step, reason)` by the first row that matches; the order is the design's table."""
-    if f.closed and f.pull_requested and f.after_merge_left:
+    # A story closed by hand as finished walks the after step as a merged one does, from any column but Done.
+    walks = f.pull_requested or (not f.dropped and f.status not in (None, columns.DONE))
+    landed = "merged" if f.pull_requested else "closed"
+    if f.closed and walks and f.after_merge_left:
         items = "item is" if f.after_merge_left == 1 else "items are"
-        return "after", f"#{number} is merged; {f.after_merge_left} after-the-merge {items} left."
-    if f.closed and f.pull_requested and f.status not in (None, columns.DONE):
-        return "after", f"#{number} is merged; its column still says {f.status}."
+        return "after", f"#{number} is {landed}; {f.after_merge_left} after-the-merge {items} left."
+    if f.closed and walks and f.status not in (None, columns.DONE):
+        return "after", f"#{number} is {landed}; its column still says {f.status}."
     if f.closed:
         return "done", f"#{number} is closed."
     if f.unavailable:
@@ -216,6 +220,7 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
         parked=story is not None and draft.is_draft(story.body) and not draft.read(story.body)[1],
+        dropped=closed and story.state_reason in issue.DROPPED,
     )
 
 
@@ -286,13 +291,13 @@ def _clear(story: issue.Issue) -> None:
 
 
 def _next_story(repo: str, number: int) -> None:
-    """The oldest open story of the repository on the board, which is the one to take up next."""
+    """The story of the repository the build order puts first, the same pick the captain makes."""
     try:
-        found = board.oldest_open(config.load(), repo, exclude=number)
+        found = order.first(fleet.read_order(config.load()), repo, exclude=number)
     except Exception as error:
         print(f"Next story: unavailable ({reason(error)})")
         return
-    print(f"Next story: #{found[0]} {found[1]}" if found else "Next story: none")
+    print(f"Next story: #{found.number} {found.title}" if found else "Next story: none ready")
 
 
 def _sweep(repo: str, number: int) -> None:

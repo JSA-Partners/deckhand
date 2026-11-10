@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from deckhand import columns, gh
+from deckhand import gh
 from deckhand.config import Settings
 
 FEATURE = "Feature"
@@ -83,25 +83,6 @@ def field_value(node: dict[str, Any], name: str, key: str) -> Any:
         if (value.get("field") or {}).get("name") == name:
             return value.get(key)
     return None
-
-
-def oldest_open(settings: Settings, repo: str, exclude: int) -> tuple[int, str] | None:
-    """`(number, title)` of the lowest-numbered open story of `repo` on the board that is not Done.
-
-    None when there is no such story; an item with no Status counts as open.
-    """
-    candidates: list[tuple[int, str]] = []
-    for node in items(settings):
-        content = node.get("content") or {}
-        number = content.get("number")
-        if number is None or number == exclude or content.get("closedAt"):
-            continue
-        if (content.get("repository") or {}).get("nameWithOwner") != repo:
-            continue
-        if field_value(node, "Status", "name") == columns.DONE:
-            continue
-        candidates.append((number, " ".join((content.get("title") or "").split())))
-    return min(candidates) if candidates else None
 
 
 def view_fields(settings: Settings) -> dict[str, list[str]]:

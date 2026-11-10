@@ -135,13 +135,14 @@ def _tail(name: str, split: str | None = None, park: bool = False, number: int |
     """
     source = ("--from", str(number)) if number else ()
     # A draft took its feature when it was parked or split, so only a new story is asked for one.
-    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else ('--feature "<name>"',))))
+    feature = () if number else ('--feature "<name>"',)
+    print(invoke.apply_line("new", "<file>", *(("--draft", str(number)) if number else feature)))
     print(file_line("Body", name))
     print(_features())
     if park:
-        print(invoke.apply_line("new", "<file>", "--park", *source, '--title "<title>"'))
+        print(invoke.apply_line("new", "<file>", "--park", *source, '--title "<title>"', *feature))
     if split is not None:
-        print(invoke.apply_line("new", "<split>", "--split", *source))
+        print(invoke.apply_line("new", "<split>", "--split", *source, *feature))
         print(file_line("Split file", split))
     print()
     print(skeleton())

@@ -21,7 +21,7 @@ ITEMS_QUERY = (
     "content{ ... on Issue{ number title url state stateReason closedAt body repository{ nameWithOwner } "
     "labels(first:20){ nodes{ name } } "
     "assignees(first:10){ nodes{ login } } "
-    "blockedBy(first:20){ nodes{ number state title repository{ nameWithOwner } } } "
+    "blockedBy(first:20){ nodes{ number state stateReason title repository{ nameWithOwner } } } "
     "comments(last:100){ nodes{ body createdAt author{ login } } } } } "
     "fieldValues(first:30){ nodes{ "
     "... on ProjectV2ItemFieldNumberValue{ number field{ ... on ProjectV2FieldCommon{ name } } } "
@@ -44,6 +44,7 @@ class Story:
     issue: issue.Issue
     assignees: tuple[str, ...] = ()
     blocked_by: tuple[tuple[str, int, str], ...] = ()
+    edges: tuple[tuple[str, int, str], ...] = ()  # every blocker as (repository, number, open|closed|dropped)
     archived: bool = False
     feature: str | None = None
     feature_name: str = ""
@@ -93,6 +94,23 @@ def _open_blockers(content: dict) -> tuple[tuple[str, int, str], ...]:
     )
 
 
+def _edges(content: dict) -> tuple[tuple[str, int, str], ...]:
+    """Every issue blocking this one, open or not, with whether it is open, closed, or dropped."""
+    return tuple(
+        (
+            (node.get("repository") or {}).get("nameWithOwner") or "",
+            int(node["number"]),
+            "open"
+            if node.get("state") == "OPEN"
+            else "dropped"
+            if node.get("stateReason") in issue.DROPPED
+            else "closed",
+        )
+        for node in (content.get("blockedBy") or {}).get("nodes") or []
+        if "number" in node
+    )
+
+
 def stories(nodes: list[dict]) -> list[Story]:
     """One row per item that is an issue, in the order the project gave them."""
     found = []
@@ -114,6 +132,7 @@ def stories(nodes: list[dict]) -> list[Story]:
                     str(person.get("login") or "") for person in (content.get("assignees") or {}).get("nodes") or []
                 ),
                 blocked_by=_open_blockers(content),
+                edges=_edges(content),
                 archived=bool(node.get("isArchived")),
                 feature=board.field_value(node, board.FEATURE, "optionId"),
                 feature_name=board.field_value(node, board.FEATURE, "name") or "",
@@ -254,6 +273,11 @@ def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
     return off
 
 
+def _blockers(found: list[Story]) -> Blockers:
+    """The open blockers of every story still to finish, which is what the order reads."""
+    return {story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE}
+
+
 def read(settings: Settings) -> Fleet:
     """The whole fleet: one query with every unfinished story's blockers, every open pull request it links to.
 
@@ -262,9 +286,7 @@ def read(settings: Settings) -> Fleet:
     """
     every = stories(_nodes(settings))
     found = [story for story in every if not story.archived]
-    blockers: Blockers = {
-        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE
-    }
+    blockers = _blockers(found)
     pulls: dict[Key, issue.PullRequest] = {}
     for story in found:
         if story.status not in (columns.IN_PROGRESS, columns.IN_REVIEW):
@@ -284,6 +306,13 @@ def read(settings: Settings) -> Fleet:
         archived=[story for story in every if story.archived],
         features=_pipeline(settings),
     )
+
+
+def read_order(settings: Settings) -> Fleet:
+    """The stories, their blockers and the feature order, which is all the build order reads."""
+    found = load(settings)
+    blockers = _blockers(found)
+    return Fleet(stories=found, blockers=blockers, missing=[], features=_pipeline(settings))
 
 
 def _pipeline(settings: Settings) -> tuple[str, ...]:

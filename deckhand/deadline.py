@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import signal
 import subprocess
 import time
 
 LIMIT = 120.0
+LANDED = "; it may have landed; check before running it again"
+# A refusal GitHub or gh answered with; a 5xx, a gateway giving up, may hide a write that landed.
+_ANSWERED = re.compile(r"\bHTTP 4\d\d\b|\bGraphQL:|^gh: ", re.MULTILINE)
+_GATEWAY = re.compile(r"\bHTTP 5\d\d\b")
 _now = time.time
 _WRITES = {
     "issue": {"create", "edit", "close", "comment"},
@@ -44,8 +49,15 @@ def writes(args: tuple[str, ...], stdin: str | None = None) -> bool:
 
 def message(tool: str, args: tuple[str, ...], stdin: str | None = None) -> str:
     """What a call that ran out of time says, warning when it may have written."""
-    landed = "; it may have landed; check before running it again" if writes(args, stdin) else ""
+    landed = LANDED if writes(args, stdin) else ""
     return f"{tool} {' '.join(args[:2])} gave no answer in {LIMIT:g} seconds{landed}"
+
+
+def failed(tool: str, args: tuple[str, ...], stdin: str | None, stderr: str, status: int) -> str:
+    """What a call that exited nonzero says, warning when a write lost its answer rather than being refused."""
+    said = stderr or f"{tool} {' '.join(args)} failed with status {status}"
+    lost = writes(args, stdin) and (bool(_GATEWAY.search(stderr)) or not _ANSWERED.search(stderr))
+    return said + (LANDED if lost else "")
 
 
 def wait(process: subprocess.Popen[str], stdin: str | None) -> tuple[str, str]:
