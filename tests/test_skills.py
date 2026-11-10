@@ -228,6 +228,13 @@ def test_the_next_skill_asks_for_the_number_it_was_not_given():
         assert grant in front.get("allowed-tools", ""), grant
 
 
+def test_the_next_skill_can_leave_the_worktree_it_entered():
+    """After the merge the shell is back in the clone, and the worktree guard refuses everything until it is left."""
+    front, body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "ExitWorktree" in front.get("allowed-tools", "")
+    assert "ExitWorktree" in body
+
+
 def test_the_new_skill_runs_the_brainstorm_aimed_at_a_story():
     _, body = _split((ROOT / "skills" / "new" / "SKILL.md").read_text(encoding="utf-8"))
     assert "superpowers:brainstorming" in body
