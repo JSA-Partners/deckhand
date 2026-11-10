@@ -169,7 +169,7 @@ request section again: finish pushes and keeps the pull request.
 
 ## After the merge
 
-On a merged story, run `after apply $issue` first, which sets the column from the boxes:
+On a closed story, run `after apply $issue` first, which sets the column from the boxes:
 Verification while any is left, Done when none is. Then walk the items one at a time, doing what
 can be done here and asking for what is theirs; park one that is a change of its own as above,
 adding `--repo owner/name`. Run `after apply $issue --item <n>` as each is done, ticking its box.

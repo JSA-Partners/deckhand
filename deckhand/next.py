@@ -58,6 +58,7 @@ class Facts(NamedTuple):
     after_merge_left: int
     unavailable: tuple[str, ...] = ()  # the facts whose read failed, in the order they were tried
     parked: bool = False  # an open draft: a feature to settle before anything is written
+    dropped: bool = False  # closed as not planned or a duplicate, so nothing more is owed
 
 
 def decide(number: int, f: Facts) -> tuple[str, str]:
@@ -67,6 +68,8 @@ def decide(number: int, f: Facts) -> tuple[str, str]:
         return "after", f"#{number} is merged; {f.after_merge_left} after-the-merge {items} left."
     if f.closed and f.pull_requested and f.status not in (None, columns.DONE):
         return "after", f"#{number} is merged; its column still says {f.status}."
+    if f.closed and not f.dropped and f.status not in (None, columns.DONE, columns.VERIFICATION):
+        return "after", f"#{number} is closed; its column still says {f.status}."
     if f.closed:
         return "done", f"#{number} is closed."
     if f.unavailable:
@@ -216,6 +219,7 @@ def _facts(repo: str | None, number: int, story: issue.Issue | None, reader: Rea
         after_merge_left=len(_after_merge_left(story)) if story else 0,
         unavailable=tuple(reader.missing),
         parked=story is not None and draft.is_draft(story.body) and not draft.read(story.body)[1],
+        dropped=closed and story.state_reason in issue.DROPPED,
     )
 
 

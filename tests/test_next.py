@@ -73,7 +73,10 @@ def facts(**changes) -> Facts:
             "#248 is merged; its column still says In Review.",
         ),
         ({"closed": True, "pull_requested": True, "status": "Done"}, "done", "#248 is closed."),
-        ({"closed": True, "status": "In Review"}, "done", "#248 is closed."),
+        ({"closed": True, "status": "In Review"}, "after", "#248 is closed; its column still says In Review."),
+        ({"closed": True, "status": "Draft"}, "after", "#248 is closed; its column still says Draft."),
+        ({"closed": True, "status": "Draft", "dropped": True}, "done", "#248 is closed."),
+        ({"closed": True, "status": "Verification"}, "done", "#248 is closed."),
         ({"closed": True}, "done", "#248 is closed."),
         ({"closed": True, "unavailable": ("board",)}, "done", "#248 is closed."),
         ({"unavailable": ("board",)}, "stop", "Cannot read board; nothing decided."),
@@ -627,7 +630,7 @@ def test_a_done_story_names_work_the_checkout_would_lose(fake_gh, repo, tmp_path
     (repo / "scratch.txt").write_text("unsaved\n", encoding="utf-8")
     story = _story(tmp_path, "closed.json", state="CLOSED")
 
-    result = _next(repo, env={**story, **_board(tmp_path)})
+    result = _next(repo, env={**story, **_board(tmp_path), **fieldvalues(tmp_path, "Done")})
 
     lines = _briefing(result, "done", "#248 is closed.")
     assert f"Clear: uncommitted changes in {repo.resolve()}" in lines
@@ -637,7 +640,9 @@ def test_a_session_in_a_worktree_hears_that_its_folder_goes(fake_gh, repo, tmp_p
     other = _worktree(repo, "feat/900-somewhere")
     story = _story(tmp_path, "closed.json", state="CLOSED")
 
-    result = run_deckhand("next", "context", "248", cwd=other, env={**story, **_board(tmp_path)})
+    result = run_deckhand(
+        "next", "context", "248", cwd=other, env={**story, **_board(tmp_path), **fieldvalues(tmp_path, "Done")}
+    )
 
     lines = _briefing(result, "done", "#248 is closed.")
     assert "Clear: nothing owed" in lines
@@ -652,7 +657,7 @@ def test_a_closed_story_with_items_left_and_no_pull_request_is_done(fake_gh, rep
     body = body.replace("### Notes", f"{AFTER_MERGE}\n### Notes")
     story = _story(tmp_path, "abandoned.json", body=body, state="CLOSED")
 
-    result = _next(repo, env={**story, **_board(tmp_path)})
+    result = _next(repo, env={**story, **_board(tmp_path), **fieldvalues(tmp_path, "Done")})
 
     _briefing(result, "done", "#248 is closed.")
 
@@ -660,7 +665,7 @@ def test_a_closed_story_with_items_left_and_no_pull_request_is_done(fake_gh, rep
 def test_a_closed_stub_is_done(fake_gh, repo, tmp_path):
     story = _story(tmp_path, "closed-draft.json", fixture="draft.json", state="CLOSED")
 
-    result = _next(repo, "57", env={**story, **_board(tmp_path)})
+    result = _next(repo, "57", env={**story, **_board(tmp_path), **fieldvalues(tmp_path, "Done")})
 
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
@@ -668,8 +673,31 @@ def test_a_closed_stub_is_done(fake_gh, repo, tmp_path):
     assert lines[-1] == "Next story: none"
 
 
+def test_a_closed_draft_still_in_draft_walks_the_after_step(fake_gh, repo, tmp_path):
+    """Closed as completed by hand, with no pull request: the after step is what moves it to Done."""
+    story = _story(tmp_path, "closed-draft.json", fixture="draft.json", state="CLOSED", stateReason="COMPLETED")
+
+    result = _next(repo, "57", env={**story, **fieldvalues(tmp_path, "Draft")})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == ["Step: after", "#57 is closed; its column still says Draft."]
+
+
+def test_a_draft_closed_as_not_planned_stays_done(fake_gh, repo, tmp_path):
+    story = _story(tmp_path, "dropped.json", fixture="draft.json", state="CLOSED", stateReason="NOT_PLANNED")
+
+    result = _next(repo, "57", env={**story, **fieldvalues(tmp_path, "Draft")})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == ["Step: done", "#57 is closed."]
+
+
 def test_done_names_the_oldest_open_story_on_the_board(fake_gh, repo, tmp_path):
-    env = {**_story(tmp_path, "closed.json", state="CLOSED"), **_board(tmp_path, (9, "Nine"), (4, "Four"))}
+    env = {
+        **_story(tmp_path, "closed.json", state="CLOSED"),
+        **_board(tmp_path, (9, "Nine"), (4, "Four")),
+        **fieldvalues(tmp_path, "Done"),
+    }
 
     result = _next(repo, env=env)
 
@@ -678,7 +706,7 @@ def test_done_names_the_oldest_open_story_on_the_board(fake_gh, repo, tmp_path):
 
 
 def test_done_with_an_empty_board_says_so(fake_gh, repo, tmp_path):
-    env = {**_story(tmp_path, "closed.json", state="CLOSED"), **_board(tmp_path)}
+    env = {**_story(tmp_path, "closed.json", state="CLOSED"), **_board(tmp_path), **fieldvalues(tmp_path, "Done")}
 
     result = _next(repo, env=env)
 
