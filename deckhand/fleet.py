@@ -254,6 +254,11 @@ def _missing(on_board: list[Story]) -> list[tuple[str, int, str]]:
     return off
 
 
+def _blockers(found: list[Story]) -> Blockers:
+    """The open blockers of every story still to finish, which is what the order reads."""
+    return {story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE}
+
+
 def read(settings: Settings) -> Fleet:
     """The whole fleet: one query with every unfinished story's blockers, every open pull request it links to.
 
@@ -262,9 +267,7 @@ def read(settings: Settings) -> Fleet:
     """
     every = stories(_nodes(settings))
     found = [story for story in every if not story.archived]
-    blockers: Blockers = {
-        story.key: list(story.blocked_by) for story in found if not story.closed and story.status != columns.DONE
-    }
+    blockers = _blockers(found)
     pulls: dict[Key, issue.PullRequest] = {}
     for story in found:
         if story.status not in (columns.IN_PROGRESS, columns.IN_REVIEW):
@@ -284,6 +287,13 @@ def read(settings: Settings) -> Fleet:
         archived=[story for story in every if story.archived],
         features=_pipeline(settings),
     )
+
+
+def read_order(settings: Settings) -> Fleet:
+    """The stories, their blockers and the feature order, which is all the build order reads."""
+    found = load(settings)
+    blockers = _blockers(found)
+    return Fleet(stories=found, blockers=blockers, missing=[], features=_pipeline(settings))
 
 
 def _pipeline(settings: Settings) -> tuple[str, ...]:

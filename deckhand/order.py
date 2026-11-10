@@ -120,6 +120,18 @@ def backlog(read: Fleet) -> list[Ranked]:
     return ranked(held, read.blockers, places(read.stories, read.blockers, read.features))
 
 
+def first(read: Fleet, repo: str, exclude: int) -> Story | None:
+    """The story of `repo` the build order puts first and nothing holds up, other than `exclude`."""
+    return next(
+        (
+            row.story
+            for row in backlog(read)
+            if row.story.repo == repo and row.story.number != exclude and not row.why.startswith("waits")
+        ),
+        None,
+    )
+
+
 def rows(read: Fleet) -> list[str]:
     """The order table, one row per Backlog story in its rank."""
     placed = backlog(read)

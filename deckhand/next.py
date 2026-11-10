@@ -22,7 +22,7 @@ import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-from deckhand import board, columns, config, draft, fields, gh, git, issue, log, related, sections, worktree
+from deckhand import columns, config, draft, fields, fleet, gh, git, issue, log, order, related, sections, worktree
 from deckhand.step import MAIN, branch_for, issue_number, local_branch, reason, ref_label, step, trunk
 
 # The module whose context a step prints; the steps `next` answers itself are absent.
@@ -290,13 +290,13 @@ def _clear(story: issue.Issue) -> None:
 
 
 def _next_story(repo: str, number: int) -> None:
-    """The oldest open story of the repository on the board, which is the one to take up next."""
+    """The story of the repository the build order puts first, the same pick the captain makes."""
     try:
-        found = board.oldest_open(config.load(), repo, exclude=number)
+        found = order.first(fleet.read_order(config.load()), repo, exclude=number)
     except Exception as error:
         print(f"Next story: unavailable ({reason(error)})")
         return
-    print(f"Next story: #{found[0]} {found[1]}" if found else "Next story: none")
+    print(f"Next story: #{found.number} {found.title}" if found else "Next story: none ready")
 
 
 def _sweep(repo: str, number: int) -> None:

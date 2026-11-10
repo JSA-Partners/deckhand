@@ -159,11 +159,31 @@ def _logged(tmp_path: Path, name: str, *entries: dict, **changes) -> dict[str, s
     return _story(tmp_path, name, comments=list(entries), **changes)
 
 
-def _board(tmp_path: Path, *stories: tuple[int, str]) -> dict[str, str]:
-    """A one-page board holding `stories` as open items of the repository."""
+def _board(tmp_path: Path, *stories: tuple[int, str], waits: dict[int, int] | None = None) -> dict[str, str]:
+    """A one-page board of open Backlog stories of the repository; `waits` maps a story to its blocker."""
+    waits = waits or {}
     nodes = [
         {
-            "content": {"number": number, "closedAt": None, "title": title, "repository": {"nameWithOwner": REPO}},
+            "id": f"I_{number}",
+            "isArchived": False,
+            "content": {
+                "number": number,
+                "title": title,
+                "url": f"https://github.com/{REPO}/issues/{number}",
+                "state": "OPEN",
+                "closedAt": None,
+                "body": "",
+                "repository": {"nameWithOwner": REPO},
+                "labels": {"nodes": [{"name": "deckhand"}]},
+                "comments": {"nodes": []},
+                "blockedBy": {
+                    "nodes": [
+                        {"number": waits[number], "state": "OPEN", "title": "", "repository": {"nameWithOwner": REPO}}
+                    ]
+                    if number in waits
+                    else []
+                },
+            },
             "fieldValues": {"nodes": [{"name": "Backlog", "field": {"name": "Status"}}]},
         }
         for number, title in stories
@@ -621,7 +641,7 @@ def test_a_merged_story_with_every_item_ticked_is_done(fake_gh, repo, tmp_path):
     result = _next(repo, env={**story, **fieldvalues(tmp_path, "Done"), **_board(tmp_path)})
 
     lines = _briefing(result, "done", "#248 is closed.")
-    assert lines[-2:] == ["Clear: nothing owed", "Next story: none"]
+    assert lines[-2:] == ["Clear: nothing owed", "Next story: none ready"]
     assert "Left:" not in lines
 
 
@@ -670,7 +690,7 @@ def test_a_closed_stub_is_done(fake_gh, repo, tmp_path):
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert lines[:2] == ["Step: done", "#57 is closed."]
-    assert lines[-1] == "Next story: none"
+    assert lines[-1] == "Next story: none ready"
 
 
 def test_a_closed_draft_still_in_draft_walks_the_after_step(fake_gh, repo, tmp_path):
@@ -692,17 +712,31 @@ def test_a_draft_closed_as_not_planned_stays_done(fake_gh, repo, tmp_path):
     assert result.stdout.splitlines()[:2] == ["Step: done", "#57 is closed."]
 
 
-def test_done_names_the_oldest_open_story_on_the_board(fake_gh, repo, tmp_path):
+def test_done_names_the_story_the_build_order_puts_first(fake_gh, repo, tmp_path):
+    """#4 is the oldest, but it waits on #9, so #9 is the one to take up."""
     env = {
         **_story(tmp_path, "closed.json", state="CLOSED"),
-        **_board(tmp_path, (9, "Nine"), (4, "Four")),
+        **_board(tmp_path, (9, "Nine"), (4, "Four"), waits={4: 9}),
         **fieldvalues(tmp_path, "Done"),
     }
 
     result = _next(repo, env=env)
 
     lines = _briefing(result, "done", "#248 is closed.")
-    assert lines[5:] == ["  none", "Clear: nothing owed", "Next story: #4 Four"]
+    assert lines[5:] == ["  none", "Clear: nothing owed", "Next story: #9 Nine"]
+
+
+def test_done_with_only_waiting_stories_says_none_is_ready(fake_gh, repo, tmp_path):
+    env = {
+        **_story(tmp_path, "closed.json", state="CLOSED"),
+        **_board(tmp_path, (4, "Four"), waits={4: 9}),
+        **fieldvalues(tmp_path, "Done"),
+    }
+
+    result = _next(repo, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == "Next story: none ready"
 
 
 def test_done_with_an_empty_board_says_so(fake_gh, repo, tmp_path):
@@ -711,7 +745,7 @@ def test_done_with_an_empty_board_says_so(fake_gh, repo, tmp_path):
     result = _next(repo, env=env)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines()[-1] == "Next story: none"
+    assert result.stdout.splitlines()[-1] == "Next story: none ready"
 
 
 def test_a_closed_issue_is_done_even_when_the_board_cannot_be_read(fake_gh, repo, tmp_path):
@@ -911,7 +945,7 @@ def test_done_from_the_clone_removes_the_worktree_and_the_branch(fake_gh, repo, 
     assert "Worktree:" not in result.stdout
     assert not path.exists()
     assert run_git(repo, "branch", "--format=%(refname:short)").split() == ["main"]
-    assert lines[-1] == "Next story: none"
+    assert lines[-1] == "Next story: none ready"
 
 
 def test_done_from_inside_the_worktree_only_says_where_it_is(fake_gh, repo, origin, tmp_path):
