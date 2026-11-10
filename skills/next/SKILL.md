@@ -5,7 +5,7 @@ arguments: issue
 argument-hint: "<issue-number>"
 effort: high
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh pr merge *) Bash(gh run view *) Read Write Edit Grep Glob Agent AskUserQuestion EnterWorktree Skill(superpowers:*) Skill(deckhand:*)
+allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh pr merge *) Bash(gh run view *) Read Write Edit Grep Glob Agent AskUserQuestion EnterWorktree ExitWorktree Skill(superpowers:*) Skill(deckhand:*)
 ---
 
 # Next $issue
@@ -22,8 +22,8 @@ and rerun it, or say in one sentence why you cannot. When the briefing or a comm
 `Worktree:` path that is not this directory, enter it with EnterWorktree first; in a worktree entered for the first time, run the repository's setup commands from its
 CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
 baseline; start copies the ignored files `.worktreeinclude` names; when setup or a test fails for
-another the clone has, copy it once and say it belongs there. Done and stop have nothing to run:
-say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook;
+another the clone has, copy it once and say it belongs there. On the after or done row in a worktree,
+leave it with ExitWorktree, keep, before anything. Done and stop: say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook;
 nothing is amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
@@ -98,14 +98,13 @@ plan makes, with the alternative named. With none, the third sentence says so. P
 naming the reference story it is most like and why, and ask one question about that call: "The
 plan does X rather than Y; board it that way, review it again, or not yet?" A plan that waits on other stories
 boards with them as blockers.
-Say the kind and points before boarding, even when the answer came early. Board it:
+Say the kind and points before boarding. Board it:
 `ready apply $issue --kind K --points P`, with `--blocked-by M` per open blocker, `owner/name#M` for
 one elsewhere, then carry on to the check. Review it again: the Review section. Not yet: stop.
 
 ## Wait
 
-The story waits on what the briefing lists: say so in one sentence and stop; the captain picks it
-up when that closes.
+The story waits on what the briefing lists: say so in one sentence and stop.
 
 ## Check and build
 
