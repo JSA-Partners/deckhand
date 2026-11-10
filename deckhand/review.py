@@ -20,7 +20,7 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from deckhand import columns, fields, gh, invoke, issue, lint, sections
+from deckhand import columns, fields, gh, invoke, issue, lint, log, sections
 from deckhand import findings as findings_file
 from deckhand.step import (
     PLUGIN_ROOT,
@@ -153,6 +153,21 @@ def _brief_text(lenses: dict[str, str], names: list[str]) -> str:
     return "\n\n".join(f"### {name}\n\n{_body_text(lenses[name])}" for name in names)
 
 
+SECOND_LOOK = (
+    "This story was amended after the review below. Confirm each accepted or changed finding was taken; "
+    "report one that was not at its old severity, then anything new."
+)
+
+
+def last_review(story: issue.Issue) -> log.Entry | None:
+    """The latest review when an amend came after it, which makes this review a second look."""
+    found = log.entries(story)
+    at = next((i for i in range(len(found) - 1, -1, -1) if found[i].prefix == "Review:"), None)
+    if at is None or not any(entry.prefix == "Amended:" for entry in found[at + 1 :]):
+        return None
+    return found[at]
+
+
 def context(args: argparse.Namespace) -> int:
     """Print the apply and where the findings go, then where the body and the reviewer brief were written."""
     print(
@@ -176,7 +191,11 @@ def context(args: argparse.Namespace) -> int:
         print(budget)
     lenses = _lens_files()
     selected = _selected(lenses, text, named_lenses(text))
-    print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected)))
+    last = None if isinstance(story, Exception) else last_review(story)
+    tail = f"\n\n### Last review\n\n{SECOND_LOOK}\n\n{last.body.strip()}" if last else ""
+    print(spill("Brief", f"{args.issue}-brief.md", lambda: _brief_text(lenses, selected) + tail))
+    if last:
+        print("Last review: in the brief")
     print()
     print(FINDING_FORMAT)
     print(VERDICT_FORMAT)

@@ -245,8 +245,7 @@ def _amend(
     a later step reads it, and never into the story the draft is a rewrite of. The title is checked
     here against the subject the pull request will carry, because a title is written far more often
     than a pull request is opened and the refusal belongs at the write. `minor` says the review this
-    amend answers found P3s only, which is a clean pass, so the column stands and nothing asks for
-    the review again.
+    amend answers needs no fresh look, so the column stands and nothing asks for the review again.
     """
     note = _note(note)
     title = _title(title_flag, story)
@@ -324,7 +323,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--minor",
         action="store_true",
-        help="with --note: the review found P3s only, so the story keeps its column and is not reviewed again",
+        help="with --note: the review this answers needs no fresh look, so the story keeps its column",
     )
     # Only the parser that read these arguments knows the usage line to print a usage error with.
     parser.set_defaults(usage=parser)

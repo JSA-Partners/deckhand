@@ -13,14 +13,13 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git *) Bash(gh 
 !`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" next context $issue`
 
 If no number was given, ask which story. Say where the story is in two sentences from the briefing
-above, then run the step it names and carry on to the next step in the same conversation until a
+above, then run the step it names and carry on to the next one until a
 decision is the person's, or you are unsure, and ask. Every command below
 runs as `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" <command>`; when a step needs a context the briefing
 did not print, run `<step> context $issue`. A `Plan:` or `Body:` line names a file holding that
 text: read the file, not the context again. When a command refuses, fix the rule it names
-and run it again; when you cannot, say so in one sentence. When the briefing or a command prints a
-`Worktree:` path that is not this directory, enter it with the EnterWorktree tool before anything
-else; in a worktree entered for the first time, run the repository's setup commands from its
+and rerun it, or say in one sentence why you cannot. When the briefing or a command prints a
+`Worktree:` path that is not this directory, enter it with EnterWorktree first; in a worktree entered for the first time, run the repository's setup commands from its
 CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
 baseline; start copies the ignored files `.worktreeinclude` names; when setup or a test fails for
 another the clone has, copy it once and say it belongs there. Done and stop have nothing to run:
@@ -33,7 +32,7 @@ Talk to the person as to a colleague from another project, in plain words, an an
 they ask. Say one line before anything slow. Recommend every time you ask.
 When the run ends because the story waits on something outside this session, say where it is,
 the one link worth opening, and what happens next. Never show what a
-command printed; read it and say what matters. A failure is one sentence on what could not be done.
+command printed; say what matters. A failure is one sentence on what could not be done.
 
 When they approve something, tell the story plainly first: what a user gets when it is done, how we
 will know, and the work as numbered steps of one sentence. The technical body stays on the issue;
@@ -68,7 +67,7 @@ agent with the body and brief file paths and write its lines as they are to the 
 If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
 write its lines to the verdicts file. Then speak: a verdict on the whole story, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
-story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name`, with
+story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name --from $issue`, with
 `--after` or `--blocks` as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
 ones, each as a sentence on the problem and one on accepting it. Decide the clear ones with the
@@ -77,9 +76,9 @@ in a sentence, and ask only where one changes what the story delivers. When the 
 Budget line, the decisions say what the plan drops or splits out. Write them to the
 decisions file and run
 `review apply $issue <findings> <verdicts> <decisions> --verdict "<sentence>"`; on a clean pass,
-the findings file alone with `--verdict`. Then amend from the accepted findings; when every
-confirmed finding is P3 the story is sound, so amend with `--minor`, which keeps it in Ready, and
-carry on to Board.
+the findings file alone with `--verdict`. Then amend from the accepted findings, with `--minor`,
+which keeps it in Ready, when every confirmed finding is P3 or the context says a last review is
+in the brief and none is P1, and carry on to Board.
 
 ## Amend
 
@@ -88,7 +87,7 @@ edit that, keeping every heading, with superpowers:writing-plans for a plan rewr
 `amend apply $issue <file> --note "<what changed and why>"`, never where it came from, with
 `--title "<new title>"` when the Story no longer matches
 it. An amend writes Refinement, so the next briefing asks for the review again, unless `--minor`
-says the review found P3s only; say what changed and carry on. Work that belongs in its own story: overwrite the draft with its whole body
+says it needs no fresh look; say what changed and carry on. Work that belongs in its own story: overwrite the draft with its whole body
 and run `amend apply $issue <file> --new-issue "<title>"`; work that must land first takes `--before`.
 
 ## Board
