@@ -155,7 +155,7 @@ def _brief_text(lenses: dict[str, str], names: list[str]) -> str:
 
 SECOND_LOOK = (
     "This story was amended after the review below. Confirm each accepted or changed finding was taken; "
-    "report one that was not at its old severity, then anything new."
+    "report one that was not under its old lens and severity, then anything new. This section is not a lens."
 )
 
 

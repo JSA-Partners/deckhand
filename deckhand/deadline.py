@@ -15,8 +15,9 @@ import time
 
 LIMIT = 120.0
 LANDED = "; it may have landed; check before running it again"
-# What GitHub prints when it answered and refused; anything else on a failed write is a lost answer.
-_ANSWERED = re.compile(r"\bHTTP \d{3}\b|^GraphQL:", re.MULTILINE)
+# A refusal GitHub or gh answered with; a 5xx, a gateway giving up, may hide a write that landed.
+_ANSWERED = re.compile(r"\bHTTP 4\d\d\b|\bGraphQL:|^gh: ", re.MULTILINE)
+_GATEWAY = re.compile(r"\bHTTP 5\d\d\b")
 _now = time.time
 _WRITES = {
     "issue": {"create", "edit", "close", "comment"},
@@ -55,7 +56,7 @@ def message(tool: str, args: tuple[str, ...], stdin: str | None = None) -> str:
 def failed(tool: str, args: tuple[str, ...], stdin: str | None, stderr: str, status: int) -> str:
     """What a call that exited nonzero says, warning when a write lost its answer rather than being refused."""
     said = stderr or f"{tool} {' '.join(args)} failed with status {status}"
-    lost = writes(args, stdin) and not _ANSWERED.search(stderr)
+    lost = writes(args, stdin) and (bool(_GATEWAY.search(stderr)) or not _ANSWERED.search(stderr))
     return said + (LANDED if lost else "")
 
 

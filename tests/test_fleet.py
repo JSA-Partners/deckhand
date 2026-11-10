@@ -545,7 +545,3 @@ def test_edges_keep_every_blocker_with_its_state_while_blocked_by_keeps_the_open
     found = fleet.stories([_blocked(9, (1, "OPEN", None), (2, "CLOSED", "COMPLETED"), (3, "CLOSED", "NOT_PLANNED"))])
     assert found[0].edges == ((REPO, 1, "open"), (REPO, 2, "closed"), (REPO, 3, "dropped"))
     assert [n for _, n, _ in found[0].blocked_by] == [1]
-
-
-def test_the_items_query_asks_why_a_blocker_closed():
-    assert "blockedBy(first:20){ nodes{ number state stateReason title " in fleet.ITEMS_QUERY

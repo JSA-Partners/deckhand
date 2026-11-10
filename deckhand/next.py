@@ -63,13 +63,14 @@ class Facts(NamedTuple):
 
 def decide(number: int, f: Facts) -> tuple[str, str]:
     """`(step, reason)` by the first row that matches; the order is the design's table."""
-    if f.closed and f.pull_requested and f.after_merge_left:
+    # A story closed by hand as finished walks the after step as a merged one does, from any column but Done.
+    walks = f.pull_requested or (not f.dropped and f.status not in (None, columns.DONE))
+    landed = "merged" if f.pull_requested else "closed"
+    if f.closed and walks and f.after_merge_left:
         items = "item is" if f.after_merge_left == 1 else "items are"
-        return "after", f"#{number} is merged; {f.after_merge_left} after-the-merge {items} left."
-    if f.closed and f.pull_requested and f.status not in (None, columns.DONE):
-        return "after", f"#{number} is merged; its column still says {f.status}."
-    if f.closed and not f.dropped and f.status not in (None, columns.DONE, columns.VERIFICATION):
-        return "after", f"#{number} is closed; its column still says {f.status}."
+        return "after", f"#{number} is {landed}; {f.after_merge_left} after-the-merge {items} left."
+    if f.closed and walks and f.status not in (None, columns.DONE):
+        return "after", f"#{number} is {landed}; its column still says {f.status}."
     if f.closed:
         return "done", f"#{number} is closed."
     if f.unavailable:

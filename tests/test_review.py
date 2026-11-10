@@ -206,7 +206,7 @@ def test_a_review_after_an_amend_carries_the_last_review_into_the_brief(fake_gh,
     tail = brief.split("### Last review\n\n", 1)[1]
     assert tail.startswith(
         "This story was amended after the review below. Confirm each accepted or changed finding was taken; "
-        "report one that was not at its old severity, then anything new."
+        "report one that was not under its old lens and severity, then anything new. This section is not a lens."
     )
     assert LAST in tail
 

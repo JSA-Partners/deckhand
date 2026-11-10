@@ -76,7 +76,14 @@ def facts(**changes) -> Facts:
         ({"closed": True, "status": "In Review"}, "after", "#248 is closed; its column still says In Review."),
         ({"closed": True, "status": "Draft"}, "after", "#248 is closed; its column still says Draft."),
         ({"closed": True, "status": "Draft", "dropped": True}, "done", "#248 is closed."),
-        ({"closed": True, "status": "Verification"}, "done", "#248 is closed."),
+        ({"closed": True, "status": "Verification"}, "after", "#248 is closed; its column still says Verification."),
+        (
+            {"closed": True, "status": "Verification", "after_merge_left": 2},
+            "after",
+            "#248 is closed; 2 after-the-merge items are left.",
+        ),
+        ({"closed": True, "status": "Done", "after_merge_left": 2}, "done", "#248 is closed."),
+        ({"closed": True, "status": "In Progress", "after_merge_left": 1, "dropped": True}, "done", "#248 is closed."),
         ({"closed": True}, "done", "#248 is closed."),
         ({"closed": True, "unavailable": ("board",)}, "done", "#248 is closed."),
         ({"unavailable": ("board",)}, "stop", "Cannot read board; nothing decided."),
@@ -671,8 +678,8 @@ def test_a_session_in_a_worktree_hears_that_its_folder_goes(fake_gh, repo, tmp_p
     )
 
 
-def test_a_closed_story_with_items_left_and_no_pull_request_is_done(fake_gh, repo, tmp_path):
-    """Closed without a pull request is closed by hand; nothing merged, so nothing is owed after it."""
+def test_a_story_closed_by_hand_and_already_done_owes_nothing_more(fake_gh, repo, tmp_path):
+    """Its column says Done, so the items it never ticked are not asked for again."""
     body = json.loads((FIXTURES / "issue.json").read_text(encoding="utf-8"))["body"]
     body = body.replace("### Notes", f"{AFTER_MERGE}\n### Notes")
     story = _story(tmp_path, "abandoned.json", body=body, state="CLOSED")

@@ -55,7 +55,7 @@ until the requirements say what a user gets, what is in and out, and how we will
 One outcome: dispatch deckhand:author as for a draft. Several: propose the split as one story per line
 in dependency order, each opening with `owner/name:` when it belongs elsewhere, confirm it in one
 question, write the split file, run `new apply --split <file> --from $issue`, and dispatch one
-author per draft it prints, all at once, then carry on to each one's review. Park each feature
+author per draft it prints, all at once, then review each. Park each feature
 the brainstorm turns up as in Speaking, with `--repo owner/name` for another repository, `--after
 REF` for any story it waits on, and `--blocks $issue` in place of `--from` when this story waits
 on it.
@@ -67,8 +67,8 @@ agent with the body and brief file paths and write its lines as they are to the 
 If it found something, run the deckhand:skeptic agent with those lines and the body file's path and
 write its lines to the verdicts file. Then speak: a verdict on the whole story, sound, needs
 amending, flawed, or more than one story, and why; a flawed story is rewritten and reviewed again before anything else is asked; a
-story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name --from $issue`, with
-`--after` or `--blocks` as the split says, this story is narrowed with a plain amend, and the review runs again. Then the findings
+story that is more than one gets the split proposed as `new` does; on yes the rest go out with `new apply --park <file> --repo owner/name --from $issue`, adding
+`--after` as the split says, or `--blocks $issue` in place of `--from`, this story is narrowed with a plain amend, and the review runs again. Then the findings
 in three groups, what changes what the story delivers, what changes how it is built, and the small
 ones, each as a sentence on the problem and one on accepting it. Decide the clear ones with the
 skeptic: accept a confirmed finding that improves the story, decline what it rejected, say each

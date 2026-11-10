@@ -149,3 +149,20 @@ def test_a_comment_that_lost_its_answer_says_so_through_gh(tmp_path, monkeypatch
 
     with pytest.raises(gh.GhError, match="it may have landed; check before running it again$"):
         gh.run("issue", "comment", "5", "--body", "x")
+
+
+def test_a_gateway_error_on_a_write_may_have_landed():
+    said = deadline.failed("gh", ("issue", "create"), None, "HTTP 502: Bad Gateway (https://api.github.com/graphql)", 1)
+    assert said.endswith("; it may have landed; check before running it again")
+
+
+def test_a_graphql_refusal_inside_the_line_did_not_land():
+    said = deadline.failed("gh", ("pr", "create"), None, "pull request create failed: GraphQL: No commits between", 1)
+    assert said == "pull request create failed: GraphQL: No commits between"
+
+
+def test_a_refusal_gh_names_itself_did_not_land():
+    stderr = "gh: Field 'nope' doesn't exist on type 'Query'"
+    body = '{"query": "mutation { nope }"}'
+    assert deadline.writes(("api", "graphql", "--input", "-"), body)
+    assert deadline.failed("gh", ("api", "graphql", "--input", "-"), body, stderr, 1) == stderr
