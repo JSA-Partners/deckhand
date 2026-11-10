@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.1.1](https://github.com/JSA-Partners/deckhand/compare/v5.1.0...v5.1.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* clear six watch findings from the 5.1.0 fleet ([#58](https://github.com/JSA-Partners/deckhand/issues/58)) ([60ed130](https://github.com/JSA-Partners/deckhand/commit/60ed130fc4ba0232763b7229fd6d1d5b96fb0d78))
+* **next:** leave the story worktree on the after and done rows ([#60](https://github.com/JSA-Partners/deckhand/issues/60)) ([887f1b8](https://github.com/JSA-Partners/deckhand/commit/887f1b82689e734438ef9f48406dc17c1f01f5d1))
+
 ## [5.1.0](https://github.com/JSA-Partners/deckhand/compare/v5.0.3...v5.1.0) (2026-11-09)
 
 
