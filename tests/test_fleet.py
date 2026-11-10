@@ -527,3 +527,25 @@ def test_a_read_keeps_the_feature_options_in_pipeline_order(fake_gh, settings, m
 def test_a_read_without_the_feature_field_has_no_pipeline(fake_gh, settings, monkeypatch):
     monkeypatch.setenv("GH_PROJECT_ITEMS_FILE", str(FIXTURES / "captain-items.json"))
     assert fleet.read(settings).features == ()
+
+
+def _blocked(number: int, *held: tuple[int, str, str | None]) -> dict:
+    """An item blocked by `held`, each `(number, state, stateReason)`."""
+    node = _item(number, ("deckhand",))
+    node["content"]["blockedBy"] = {
+        "nodes": [
+            {"number": n, "state": state, "stateReason": why, "title": "", "repository": {"nameWithOwner": REPO}}
+            for n, state, why in held
+        ]
+    }
+    return node
+
+
+def test_edges_keep_every_blocker_with_its_state_while_blocked_by_keeps_the_open_ones():
+    found = fleet.stories([_blocked(9, (1, "OPEN", None), (2, "CLOSED", "COMPLETED"), (3, "CLOSED", "NOT_PLANNED"))])
+    assert found[0].edges == ((REPO, 1, "open"), (REPO, 2, "closed"), (REPO, 3, "dropped"))
+    assert [n for _, n, _ in found[0].blocked_by] == [1]
+
+
+def test_the_items_query_asks_why_a_blocker_closed():
+    assert "blockedBy(first:20){ nodes{ number state stateReason title " in fleet.ITEMS_QUERY

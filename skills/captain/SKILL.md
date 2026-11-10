@@ -10,22 +10,22 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) AskUserQuestion
 !`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
 
 The blocks above are the whole picture. Anomalies is the whole board check, every column, blocker
-and cycle; checking the board needs no hand reads. Clear what is waiting first, longest wait first: name
+and cycle; checking the board needs no hand reads, and auditing blockers reads
+`captain context --only edges`. Clear what is waiting first, longest wait first: name
 each session, what it asks, and your recommendation. A `said` row quotes the session's last words,
 which may be older than a question the transcript has not written yet; ask in that session. Then
-say what moved since they last looked, and where the work stands, leading with what to run next
-and in which repository. Then stop. An anomaly under Standing has been seen
+say what moved since they last looked and where the work stands, leading with what to run next
+and where. Then stop. An anomaly under Standing has been seen
 before; mention it only when asked.
 
-Rerun `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context` for every later question, since
-sessions move. Asking about one session is `captain context --session <id>`.
+Rerun `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context` for every later question. Asking about one session is `captain context --session <id>`.
 
 When an anomaly's fix is `captain apply --repair`, offer it and run it if the person agrees. When
 they ask for the backlog to be put in order, offer `captain apply --order`. Both write only the
 board. An edge the board is missing is written with
 `captain apply --block REF --by REF`, and taken away with `--unblock REF --by REF`, each REF
 `owner/name#M` or a bare number for this repository; both refuse a blocker that is closed. A duplicate or an abandoned story is withdrawn with
-`captain apply --withdraw REF --note "<why>"`: logged, closed as not planned, off the board. A row
+`captain apply --withdraw REF --note "<why>"`: logged, closed as not planned, unboarded. A row
 whose fix names a story step belongs to that story's session; name it and leave it.
 
 When asked what to merge or in which order, answer from the Merge block, first row first, and say
