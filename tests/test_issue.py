@@ -201,6 +201,53 @@ def test_comment_returns_the_url(fake_gh, gh_calls, body_copy, monkeypatch):
     assert body_copy.read_text() == f"--- issue comment\n{TRICKY_BODY}"
 
 
+def _with_comments(tmp_path, monkeypatch, *comments: dict) -> None:
+    data = json.loads((Path(__file__).parent / "fixtures" / "issue.json").read_text(encoding="utf-8"))
+    data["comments"] = list(comments)
+    path = tmp_path / "commented.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("GH_ISSUE_FILE", str(path))
+
+
+def _said(body: str, url: str) -> dict:
+    return {"author": {"login": "mattjmoran"}, "createdAt": "2026-11-10T02:24:22Z", "body": body, "url": url}
+
+
+def test_a_comment_the_issue_already_ends_with_is_not_posted_again(fake_gh, gh_calls, tmp_path, monkeypatch):
+    """A retry after a lost answer finds its own comment there and posts nothing."""
+    posted = "https://github.com/acme/widgets/issues/248#issuecomment-6757189773"
+    _with_comments(tmp_path, monkeypatch, _said("Review: Needs amending.\n", posted))
+
+    assert issue.comment(REPO, 248, "Review: Needs amending.\n") == posted
+    assert not [call for call in gh_calls() if call.startswith("issue comment")]
+
+
+def test_a_comment_like_an_earlier_one_but_not_the_latest_is_posted(fake_gh, gh_calls, tmp_path, monkeypatch):
+    _with_comments(
+        tmp_path,
+        monkeypatch,
+        _said("Review: Sound.\n", "https://github.com/acme/widgets/issues/248#issuecomment-1"),
+        _said("Amended: Took the review.\n", "https://github.com/acme/widgets/issues/248#issuecomment-2"),
+    )
+    monkeypatch.setenv("GH_NEW_COMMENT", "88")
+
+    assert issue.comment(REPO, 248, "Review: Sound.\n") == "https://github.com/acme/widgets/issues/248#issuecomment-88"
+
+
+def test_the_first_comment_on_an_issue_is_posted(fake_gh, gh_calls, tmp_path, monkeypatch):
+    _with_comments(tmp_path, monkeypatch)
+    monkeypatch.setenv("GH_NEW_COMMENT", "88")
+
+    assert issue.comment(REPO, 248, "Drafted: x\n") == "https://github.com/acme/widgets/issues/248#issuecomment-88"
+
+
+def test_view_carries_each_comment_url(fake_gh, tmp_path, monkeypatch):
+    url = "https://github.com/acme/widgets/issues/248#issuecomment-5"
+    _with_comments(tmp_path, monkeypatch, _said("Noted: x\n", url))
+
+    assert issue.view(REPO, 248).comments[0].url == url
+
+
 def test_comment_failure_raises_gh_error(fake_gh, monkeypatch):
     monkeypatch.setenv("GH_ISSUE_COMMENT_FAILS", "1")
     with pytest.raises(gh.GhError, match="could not add comment"):

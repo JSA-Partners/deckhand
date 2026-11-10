@@ -31,6 +31,7 @@ class Comment:
     author: str
     body: str
     created_at: str
+    url: str = ""
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ def _comment(raw: dict[str, Any]) -> Comment:
         author=(raw.get("author") or {}).get("login") or "",
         body=raw.get("body") or "",
         created_at=raw.get("createdAt") or "",
+        url=raw.get("url") or "",
     )
 
 
@@ -153,8 +155,15 @@ def close(repo: str, number: int, reason: str) -> None:
 
 
 def comment(repo: str, number: int, body: str) -> str:
-    """Add a comment to the issue; returns its URL."""
+    """Add a comment to the issue; returns its URL.
+
+    When the issue already ends with this very comment, a retry after a lost answer has found its own
+    write, so nothing is posted and that comment's URL is returned.
+    """
     gh.split_repo(repo)
+    said = view(repo, number).comments
+    if said and said[-1].body.rstrip() == body.rstrip():
+        return said[-1].url
     with _body_file(body) as path:
         output = gh.run("issue", "comment", str(number), "--repo", repo, "--body-file", path)
     return _parsed_url(output, "issue comment")[1]
