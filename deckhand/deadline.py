@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import signal
 import subprocess
 import time
 
 LIMIT = 120.0
+LANDED = "; it may have landed; check before running it again"
+# What GitHub prints when it answered and refused; anything else on a failed write is a lost answer.
+_ANSWERED = re.compile(r"\bHTTP \d{3}\b|^GraphQL:", re.MULTILINE)
 _now = time.time
 _WRITES = {
     "issue": {"create", "edit", "close", "comment"},
@@ -44,8 +48,15 @@ def writes(args: tuple[str, ...], stdin: str | None = None) -> bool:
 
 def message(tool: str, args: tuple[str, ...], stdin: str | None = None) -> str:
     """What a call that ran out of time says, warning when it may have written."""
-    landed = "; it may have landed; check before running it again" if writes(args, stdin) else ""
+    landed = LANDED if writes(args, stdin) else ""
     return f"{tool} {' '.join(args[:2])} gave no answer in {LIMIT:g} seconds{landed}"
+
+
+def failed(tool: str, args: tuple[str, ...], stdin: str | None, stderr: str, status: int) -> str:
+    """What a call that exited nonzero says, warning when a write lost its answer rather than being refused."""
+    said = stderr or f"{tool} {' '.join(args)} failed with status {status}"
+    lost = writes(args, stdin) and not _ANSWERED.search(stderr)
+    return said + (LANDED if lost else "")
 
 
 def wait(process: subprocess.Popen[str], stdin: str | None) -> tuple[str, str]:

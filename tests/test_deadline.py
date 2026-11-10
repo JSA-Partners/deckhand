@@ -106,3 +106,46 @@ def test_a_mutation_sent_on_stdin_may_have_landed():
     args = ("api", "graphql", "--input", "-")
     assert deadline.writes(args, '{"query": "mutation($id: ID!) { deleteItem(id: $id) { id } }"}')
     assert not deadline.writes(args, '{"query": "query { viewer { login } }"}')
+
+
+RESET = "read tcp 10.0.0.2:56817->140.82.114.5:443: read: connection reset by peer"
+
+
+def test_a_write_that_got_no_answer_may_have_landed():
+    said = deadline.failed("gh", ("issue", "comment", "5"), None, RESET, 1)
+    assert said == RESET + "; it may have landed; check before running it again"
+
+
+def test_a_write_github_refused_did_not_land():
+    args = ("api", "-X", "POST", "repos/acme/widgets/issues")
+    assert deadline.failed("gh", args, None, "HTTP 422: Validation Failed", 1) == "HTTP 422: Validation Failed"
+
+
+def test_a_refusal_with_its_status_at_the_end_did_not_land():
+    said = deadline.failed("gh", ("api", "-X", "POST", "x"), None, "gh: Validation Failed (HTTP 422)", 1)
+    assert said == "gh: Validation Failed (HTTP 422)"
+
+
+def test_a_graphql_error_on_a_mutation_did_not_land():
+    said = deadline.failed("gh", ("api", "graphql"), "mutation { x }", "GraphQL: Could not resolve to an Issue", 1)
+    assert said == "GraphQL: Could not resolve to an Issue"
+
+
+def test_a_failed_read_never_may_have_landed():
+    assert deadline.failed("gh", ("issue", "view", "5"), None, RESET, 1) == RESET
+
+
+def test_an_empty_stderr_names_the_command_and_its_status():
+    assert deadline.failed("gh", ("issue", "view", "5"), None, "", 4) == "gh issue view 5 failed with status 4"
+
+
+def test_a_comment_that_lost_its_answer_says_so_through_gh(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "reset"
+    bin_dir.mkdir()
+    script = bin_dir / "gh"
+    script.write_text(f"#!/bin/sh\necho '{RESET}' >&2\nexit 1\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    with pytest.raises(gh.GhError, match="it may have landed; check before running it again$"):
+        gh.run("issue", "comment", "5", "--body", "x")

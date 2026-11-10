@@ -93,8 +93,7 @@ def run(*args: str, stdin: str | None = None) -> str:
     except deadline.Expired:
         raise GhError(deadline.message("gh", args, stdin)) from None
     if process.returncode != 0:
-        message = stderr.strip() or f"gh {' '.join(args)} failed with status {process.returncode}"
-        raise GhError(message, stdout)
+        raise GhError(deadline.failed("gh", args, stdin, stderr.strip(), process.returncode), stdout)
     if _cache is not None:
         _cache[key] = stdout
     return stdout

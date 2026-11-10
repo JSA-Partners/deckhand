@@ -989,7 +989,7 @@ def test_apply_split_names_the_dependency_it_could_not_record(fake_gh, gh_calls)
 
     assert result.returncode == 1
     assert result.stderr.strip() == (
-        "deckhand new apply: #58 blocked by #57 failed: could not add dependency; add it by hand"
+        "deckhand new apply: #58 blocked by #57 failed: could not add dependency (HTTP 422); add it by hand"
     )
     assert result.stdout.splitlines()[-4:] == ["Numbered #59", "Added to the board", "Status=Draft", "Feature=Billing"]
     assert len([call for call in gh_calls() if "-X POST" in call]) == 1
