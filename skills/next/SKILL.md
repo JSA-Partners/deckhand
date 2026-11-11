@@ -28,15 +28,13 @@ nothing is amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
 
-Talk to the person as to a colleague from another project, in plain words, an analogy only when
-they ask. Say one line before anything slow. Recommend every time you ask.
+Talk to the person as to a colleague from another project, in plain words. Say one line before anything slow. Recommend every time you ask.
 When the run ends because the story waits on something outside this session, say where it is,
 the one link worth opening, and what happens next. Never show what a
 command printed; say what matters. A failure is one sentence on what could not be done.
 
 When they approve something, tell the story plainly first: what a user gets when it is done, how we
-will know, and the work as numbered steps of one sentence. The technical body stays on the issue;
-give it or explain any line on request.
+will know, and the work as numbered steps of one sentence. The technical body stays on the issue.
 
 Park a feature this work turns up for a later story with
 `new apply --park <file> --title "<name>" --from $issue`, adding `--after $issue` when it waits on
@@ -133,7 +131,7 @@ When the plan is done, run one superpowers code-review subagent over `origin/mai
 Body file and Deviations from `finish context` as its brief, reporting P1 to P3 with file and
 line. Fix every finding worth taking through deckhand:commit: P1 and P2 always, a P3 when it is
 idiomatic and matches the patterns already in the file. Then say in a sentence what the review found
-and what you fixed, name only a finding you are unsure of, with a recommendation. Then walk the
+and fixed, naming only a finding you are unsure of. Then walk the
 change one group of files at a time, in reading order: what it does and why, a short
 snippet, the criterion it serves, and any Deviation it carries; wait for them before the next.
 After the last, give them
@@ -152,7 +150,7 @@ the third person, the story's "so that" as the why, folding in only the Deviatio
 hold. Read them the title and that summary, and on yes run
 `finish apply $issue <summary> --check "<cmd>"`, the check commands from CLAUDE.md or the detected list, adding
 `--breaking "<text>"` when a client must react. Say where the pull request is and that merging is
-theirs, on GitHub or by saying merge here, which runs `gh pr merge --squash`. Take no word for the
+theirs, on GitHub or by saying merge here (`gh pr merge --squash`). Take no word for the
 state: when they come back, run `next context $issue` and act on what it says. On the merge row,
 say which checks are still running when the briefing names them, and make the same offer. On the
 update row, run `update apply $issue`, say main moved on and the checks run again, and carry on;
@@ -170,7 +168,8 @@ request section again: finish pushes and keeps the pull request.
 On a closed story, run `after apply $issue` first, which sets the column from the boxes:
 Verification while any is left, Done when none is. Then walk the items one at a time, doing what
 can be done here and asking for what is theirs; park one that is a change of its own as above,
-adding `--repo owner/name`. Run `after apply $issue --item <n>` as each is done, ticking its box.
+adding `--repo owner/name`. An item that cannot be done where a merge deploys is parked, then dropped with
+`after apply $issue --drop <n> --note "<where>"`. Run `after apply $issue --item <n>` as each is done, ticking its box.
 When nothing is left, say the story is finished and name the next story the briefing gave.
 Read the briefing's `Clear:` line out either way.
 With no story in hand, `/deckhand:captain` says what to pick up next across every repository.

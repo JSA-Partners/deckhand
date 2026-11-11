@@ -11,18 +11,19 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Read Write Edit Grep
 
 !`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new context --idea "$source"`
 
-What is printed above is the whole request; nothing needs reading again. When it says an issue
+What is printed above is the whole request. When it says an issue
 number is next's, say so in one sentence and stop.
 Run superpowers:brainstorming from what is printed above, aimed at a story: the design it reaches is
-Story, Scope In and Out, and Acceptance Criteria, told plainly, what a user gets and how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Design the feature across the
+Story, Scope In and Out, and Acceptance Criteria: what a user gets and how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Design the feature across the
 project's repositories; a story elsewhere is one outcome. Give `new apply` a
 `--title` that reads as the change would in a commit subject: what it does, not what was wanted. Scale it to the
 idea: a fix needs a question or two, a feature the whole conversation.
 
 One story: run superpowers:writing-plans into the draft, with a `### After the merge`
-heading at the end of the Plan for anything that can only happen once the code is on main (an item
-for another, merged story goes on its list with `after apply N --add "<item>"`, never a hand edit). Where any
-part changes what a person sees (a screen, a component, a layout, styling, wording on screen), the plan
+heading at the end of the Plan for what can only be checked once the code is on main, where a merge
+deploys; a step that waits on a later release is a story of its own, and an item for another,
+merged story goes on its list with `after apply N --add "<item>"`, never a hand edit. Where any
+part changes what a person sees, the plan
 names the impeccable:impeccable steps for it; lean toward yes. Run
 `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new apply <file> --feature "<name>"`. It boards the story as Draft. Then run
 `... next context <number>` and carry on from the Review section of
@@ -38,6 +39,6 @@ with `--repo owner/name` for another repository, `--blocks N` for the story here
 `--after REF` for a story the feature itself waits on.
 
 Every story goes into a feature: give `new apply` a `--feature` from the Features the context
-prints, or let it inherit the one of the story it was parked or split from. Name the one you chose.
+prints, or let it inherit one from where it was parked or split. Name the one you chose.
 
 If a command refuses, fix the rule it names and run it again.
