@@ -541,7 +541,6 @@ def test_the_freeze_leaves_a_new_issue_alone(fake_gh, gh_calls, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1] == "Logged Split"
-    assert [call for call in gh_calls() if "fieldValues" in call] == []
 
 
 # --- apply, the column --------------------------------------------------------
@@ -623,6 +622,17 @@ def test_new_issue_boards_the_new_story_as_refinement_and_logs_split_and_drafted
         ("comment", DRAFTED),
         ("comment", f"Split: #999 {TITLE}, blocked by this story."),
     ]
+
+
+def test_a_new_issue_from_amend_takes_the_feature_of_the_story_amended(fake_gh, gh_calls, tmp_path, feature_field):
+    """Work shed from a story belongs to its feature, as a park with --from does."""
+    body = (FIXTURES / "body-valid.md").read_text(encoding="utf-8")
+
+    result = run_deckhand("amend", "apply", "248", _draft(tmp_path, body), "--new-issue", TITLE)
+
+    assert result.returncode == 0, result.stderr
+    assert "Feature=Billing" in result.stdout.splitlines()
+    assert any(c.startswith("project item-edit") and c.endswith("OPT_BILLING") for c in gh_calls())
 
 
 def test_new_issue_refuses_before_the_first_write_when_no_project_is_linked(fake_gh, gh_calls, tmp_path):
