@@ -7,7 +7,7 @@ built work, which is merged or has its pull request closed by hand.
 
 from __future__ import annotations
 
-from deckhand import board, columns, fields, gh, issue, log
+from deckhand import board, columns, edges, fields, gh, issue, log
 from deckhand.config import Settings
 from deckhand.step import Refusal, issue_ref, ref_label
 
@@ -39,7 +39,11 @@ def withdraw(settings: Settings, here: str, ref: str, note: str) -> None:
     waiting = issue.blocking(repo, number)
     if waiting:
         named = ", ".join(ref_label(where, found, here) for where, found, _ in waiting)
-        raise Refusal(f"{named} wait on {label}; captain apply --unblock first")
+        unblock = [
+            f"  captain apply --unblock {edges.flag_ref(where, found, here)} --by {edges.flag_ref(repo, number, here)}"
+            for where, found, _ in waiting
+        ]
+        raise Refusal("\n".join([f"{named} wait on {label}; unblock each first:", *unblock]))
     issue.comment(repo, number, log.checked(f"Withdrawn: {note}"))
     print("Logged Withdrawn", flush=True)
     if not closed:

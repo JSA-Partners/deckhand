@@ -119,7 +119,9 @@ def test_a_story_others_wait_on_refuses_and_names_them(fake_gh, gh_calls, monkey
     assert _withdraw() == 1
 
     assert capsys.readouterr().err == (
-        "deckhand captain apply: acme/gadgets#7, #250 wait on #248; captain apply --unblock first\n"
+        "deckhand captain apply: acme/gadgets#7, #250 wait on #248; unblock each first:\n"
+        "  captain apply --unblock acme/gadgets#7 --by 248\n"
+        "  captain apply --unblock 250 --by 248\n"
     )
     assert _writes(gh_calls) == []
 

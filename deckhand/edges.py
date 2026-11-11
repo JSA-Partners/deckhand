@@ -13,7 +13,7 @@ def _ref(by: str, repo: str) -> tuple[str, int]:
         raise Refusal(str(error)) from error
 
 
-def _arg(repo: str, number: int, here: str) -> str:
+def flag_ref(repo: str, number: int, here: str) -> str:
     """The story as a flag takes it: a bare number in `here`, `owner/name#M` elsewhere."""
     return str(number) if repo == here else f"{repo}#{number}"
 
@@ -30,7 +30,7 @@ def _cycle(here: str, story: tuple[str, int], where: str, blocker: int) -> str |
     label = ref_label(where, blocker, here)
     return (
         f"{label} is already blocked by {ref_label(*story, here)}, which is this edge reversed; drop it with "
-        f"captain apply --unblock {_arg(where, blocker, here)} --by {_arg(*story, here)}, then add this one"
+        f"captain apply --unblock {flag_ref(where, blocker, here)} --by {flag_ref(*story, here)}, then add this one"
     )
 
 
@@ -76,7 +76,7 @@ def refuse_loop(here: str, story: tuple[str, int], blocker: tuple[str, int]) -> 
     raise Refusal(
         f"{ref_label(*path[0], here)} is already blocked by {ref_label(*path[1], here)}, so "
         f"{ref_label(*story, here)} waiting on {ref_label(*blocker, here)} closes a loop: {chain}; drop one "
-        f"edge first with captain apply --unblock {_arg(*path[0], here)} --by {_arg(*path[1], here)}"
+        f"edge first with captain apply --unblock {flag_ref(*path[0], here)} --by {flag_ref(*path[1], here)}"
     )
 
 
