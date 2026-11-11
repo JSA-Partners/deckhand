@@ -203,3 +203,63 @@ def test_context_lists_the_items_and_their_boxes(fake_gh, tmp_path):
     assert result.returncode == 0, result.stderr
     assert "Deploy it" in result.stdout
     assert "Check the dashboard" in result.stdout
+
+
+DROPPABLE = (
+    "### Task 1\n\nDo it.\n\n### After the merge\n\n"
+    "- [ ] Release it to production\n  with the cutover runbook\n- [ ] Check the dashboard\n- [x] Deploy it\n"
+)
+
+
+def test_drop_takes_one_unticked_item_and_its_continuation_off_the_list(fake_gh, gh_calls, tmp_path):
+    copy = tmp_path / "bodies.md"
+    env = {**_story(tmp_path, DROPPABLE), "GH_BODY_FILE_COPY": str(copy)}
+
+    result = run_deckhand("after", "apply", "248", "--drop", "1", "--note", "parked as #300", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == ["Dropped item 1: Release it to production", "Logged After the merge"]
+    written = copy.read_text(encoding="utf-8")
+    assert "### After the merge\n\n- [ ] Check the dashboard\n- [x] Deploy it\n" in written
+    assert "Release it to production" not in written.split("--- issue comment")[0]
+    assert "with the cutover runbook" not in written
+    assert "### Task 1\n\nDo it.\n" in written
+    assert "After the merge: dropped item 1: Release it to production. parked as #300" in written
+    assert f"{STATUS} --single-select-option-id opt_verification" in gh_calls()
+
+
+def test_dropping_the_last_open_item_reaches_done(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--drop", "2", "--note", "moved", env=_story(tmp_path, ONE_DONE))
+
+    assert result.returncode == 0, result.stderr
+    assert f"{STATUS} --single-select-option-id opt_done" in gh_calls()
+
+
+def test_drop_refuses_a_ticked_item(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--drop", "1", "--note", "x", env=_story(tmp_path, ONE_DONE))
+
+    assert result.returncode == 1
+    assert "item 1 of #248 is ticked; a done item stays on the record" in result.stderr
+    assert not [call for call in gh_calls() if call.startswith(("issue edit", "issue comment", "project item-edit"))]
+
+
+def test_drop_refuses_without_a_note(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--drop", "1", env=_story(tmp_path, TWO))
+
+    assert result.returncode != 0
+    assert not [call for call in gh_calls() if call.startswith(("issue edit", "issue comment", "project item-edit"))]
+
+
+def test_drop_refuses_an_item_out_of_range(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--drop", "5", "--note", "x", env=_story(tmp_path, TWO))
+
+    assert result.returncode == 1
+    assert "#248 has 2 after-the-merge items; there is no item 5" in result.stderr
+    assert not [call for call in gh_calls() if call.startswith(("issue edit", "issue comment", "project item-edit"))]
+
+
+def test_drop_refuses_an_open_issue(fake_gh, gh_calls, tmp_path):
+    result = run_deckhand("after", "apply", "248", "--drop", "1", "--note", "x", env=_story(tmp_path, TWO, "OPEN"))
+
+    assert result.returncode == 1
+    assert not [call for call in gh_calls() if call.startswith(("issue edit", "issue comment", "project item-edit"))]
