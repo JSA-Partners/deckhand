@@ -142,3 +142,24 @@ def test_split_after_can_only_name_an_earlier_story():
     )
     with pytest.raises(ValueError, match="not a story defined before it"):
         draft.parse_split(text)
+
+
+def test_a_park_whose_field_read_fails_creates_nothing(fake_gh, gh_calls, repo, tmp_path, monkeypatch):
+    """Every field a park writes is read first, so a slow read leaves no stray issue behind."""
+    monkeypatch.setenv("GH_FIELD_LIST_FAILS", "1")
+
+    result = _park(repo, tmp_path, "--title", TITLE)
+
+    assert result.returncode == 1
+    assert not [call for call in gh_calls() if call.startswith(("issue create", "project item-add"))]
+
+
+def test_a_feature_write_that_fails_names_the_epic_add_that_finishes_it(fake_gh, gh_calls, repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("GH_ITEM_EDIT_FAILS_FOR", "OPT_BILLING")
+
+    result = _park(repo, tmp_path, "--title", TITLE)
+
+    assert result.returncode == 1
+    assert "Feature not set; epic add OPT_BILLING acme/widgets#" in result.stderr
+    assert "--field-id PVTSSF_STATUS --single-select-option-id opt_draft" in "\n".join(gh_calls())
+    assert [call for call in gh_calls() if call.startswith("issue comment")]

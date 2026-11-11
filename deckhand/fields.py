@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from deckhand import gh
 from deckhand.config import Settings
@@ -14,6 +15,41 @@ _NUMBER_RE = re.compile(r"^-?[0-9]+(\.[0-9]+)?$")
 
 class NotOnBoard(gh.GhError):
     """The issue exists but has no item on the configured project board."""
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """The project and each single-select field's id and options, read once before a step writes."""
+
+    project: str
+    ids: dict[str, tuple[str, dict[str, str]]]
+
+
+def resolve(settings: Settings, names: tuple[str, ...]) -> Resolved:
+    """Read the project's fields once, so every write after the first needs no read that could fail."""
+    settings.resolve()
+    found = {item["name"]: item for item in gh.field_list(settings)}
+    missing = [name for name in names if name not in found]
+    if missing:
+        raise gh.GhError(f"no such project field: {missing[0]}")
+    ids = {name: (found[name]["id"], {o["name"]: o["id"] for o in found[name].get("options") or []}) for name in names}
+    return Resolved(gh.project_id(settings), ids)
+
+
+def option(resolved: Resolved, field: str, value: str) -> str:
+    """The id of `value` on single-select `field`, refused when the field has no such option."""
+    choices = resolved.ids[field][1]
+    if value not in choices:
+        raise gh.GhError(f"no option '{value}' on field '{field}' (options: {', '.join(choices)})")
+    return choices[value]
+
+
+def write(resolved: Resolved, item: str, field: str, value: str) -> str:
+    """Set single-select `field` on board item `item` to `value` by id; returns `FIELD=VALUE`."""
+    chosen = option(resolved, field, value)
+    flags = ("--project-id", resolved.project, "--field-id", resolved.ids[field][0])
+    gh.run("project", "item-edit", "--id", item, *flags, "--single-select-option-id", chosen)
+    return f"{field}={value}"
 
 
 _FIELD_VALUES_QUERY = (

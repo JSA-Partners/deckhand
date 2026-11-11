@@ -124,6 +124,9 @@ elif head == "project view":
         )
     )
 elif head == "project field-list":
+    if os.environ.get("GH_FIELD_LIST_FAILS"):
+        print("gh project field-list gave no answer in 120 seconds", file=sys.stderr)
+        sys.exit(1)
     respond(fixture("GH_FIELDS_FILE", "fields.json"))
 elif head == "project link":
     if os.environ.get("GH_PROJECT_LINK_FAILS"):
@@ -134,6 +137,9 @@ elif head == "project list":
     respond(fixture("GH_PROJECT_LIST_FILE", "project-list.json"))
 elif head == "project item-add":
     respond('{"id":"PVTI_ADDED"}')
+elif head == "project item-edit" and os.environ.get("GH_ITEM_EDIT_FAILS_FOR", "\0") in argv:
+    print("could not set the field (HTTP 502)", file=sys.stderr)
+    sys.exit(1)
 elif head in (
     "project field-create",
     "project field-delete",

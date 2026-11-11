@@ -288,12 +288,13 @@ def _write_draft(repo: str, number: int, edited: str, flag: str | None, named: s
     # feature is refused here unless a name is given, which also moves a draft that has one.
     boarded = "" if named else fields.get_field(settings, repo, number, board.FEATURE) or ""
     feature = park.chosen(settings, named, boarded) if named or not boarded else ""
+    resolved = park.fields_for(settings, feature)
     issue.update_body(repo, number, body)
     print(f"Written #{number} {story.url}", flush=True)
     if subject:  # the draft's own title stands unless the session says otherwise
         issue.set_title(repo, number, subject)
         print(f"Title: {subject}", flush=True)
-    park.board_draft(settings, repo, number, story.url, FROM_DRAFT, columns.REFINEMENT, feature)
+    park.board_draft(settings, repo, number, story.url, FROM_DRAFT, columns.REFINEMENT, feature, resolved=resolved)
     return 0
 
 
@@ -365,10 +366,11 @@ def _write(args: argparse.Namespace) -> int:
     subject = title(args.title, body)
     settings = resolved_settings()
     feature = park.chosen(settings, args.feature, "")
+    resolved = park.fields_for(settings, feature)
     repo = gh.repo_slug()
     number, url = issue.create(repo, subject, body)
     print(f"Created #{number} {url}", flush=True)
-    park.board_draft(settings, repo, number, url, DRAFTED, columns.REFINEMENT, feature)
+    park.board_draft(settings, repo, number, url, DRAFTED, columns.REFINEMENT, feature, resolved=resolved)
     if (note := lint.headroom(body, given=edited)) is not None:
         print(note)
     return 0

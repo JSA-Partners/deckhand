@@ -32,20 +32,38 @@ def board_draft(
     note: str | None,
     status: str = columns.DRAFT,
     feature: str = "",
+    *,
+    resolved: fields.Resolved,
 ) -> None:
     """Put the issue on the board in `status` and `feature`, then log that it was written when `note` is given.
 
     Every write prints as it lands, so the printed lines are the record of how far the story got.
+    `resolved` was read before the caller's first write, so no field read can strand the story here.
     """
     board.add(settings, url)
     print("Added to the board", flush=True)
-    print(fields.set_field(settings, repo, number, "Status", status), flush=True)
+    item = gh.item_id(settings, repo, number)
+    if item is None:
+        raise fields.NotOnBoard(f"issue #{number} did not reach project {settings.owner}/{settings.project}")
+    print(fields.write(resolved, item, "Status", status), flush=True)
     # The log first: a Feature write that fails still leaves the entry the stray check reads.
     if note is not None:
         issue.comment(repo, number, log.checked(note))
         print(f"Logged {note.split(':', 1)[0]}", flush=True)
     if feature:
-        print(fields.set_field(settings, repo, number, board.FEATURE, feature), flush=True)
+        try:
+            print(fields.write(resolved, item, board.FEATURE, feature), flush=True)
+        except gh.GhError as error:
+            option = fields.option(resolved, board.FEATURE, feature)
+            raise Refusal(f"Feature not set; epic add {option} {repo}#{number}: {reason(error)}") from error
+
+
+def fields_for(settings: Settings, feature: str) -> fields.Resolved:
+    """Every field a new story is boarded with, read and checked before anything is written."""
+    resolved = fields.resolve(settings, ("Status", board.FEATURE) if feature else ("Status",))
+    if feature:
+        fields.option(resolved, board.FEATURE, feature)
+    return resolved
 
 
 def chosen(settings: Settings, named: str | None, inherited: str) -> str:
@@ -68,6 +86,7 @@ def open_parked(
     stories: list[fleet.Story],
     came: tuple[str, int] | None = None,
     feature: str = "",
+    resolved: fields.Resolved | None = None,
 ) -> tuple[int, str]:
     """Open `body` as a draft titled `title` in `target`, board it as Draft, and log where it came from.
 
@@ -75,13 +94,14 @@ def open_parked(
     named ahead of it in any repository, and `came`, the story it was shed from, lends it a feature.
     """
     gh.split_repo(target)
+    # Work shed from a story belongs to that story's feature until someone moves it with epic add.
+    taken = feature or feature_of(stories, came)
+    resolved = resolved or fields_for(settings, taken)
     for line in related.similar_lines([story for story in stories if not story.archived], title, here):
         print(line, flush=True)
     number, url = issue.create(target, title, body)
     print(f"Parked {ref_label(target, number, here)} {url}", flush=True)
-    # Work shed from a story belongs to that story's feature until someone moves it with epic add.
-    taken = feature or feature_of(stories, came)
-    board_draft(settings, target, number, url, f"Drafted: parked from {origin}", feature=taken)
+    board_draft(settings, target, number, url, f"Drafted: parked from {origin}", feature=taken, resolved=resolved)
     return number, url
 
 
