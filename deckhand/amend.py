@@ -29,10 +29,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from deckhand import columns, config, draft, fields, gh, invoke, issue, lint, log, sections
+from deckhand import board, columns, config, draft, fields, gh, invoke, issue, lint, log, sections
 from deckhand.lint import RULES as BODY_RULES
 from deckhand.new import skeleton
-from deckhand.park import board_draft
+from deckhand.park import board_draft, fields_for
 from deckhand.step import (
     Refusal,
     block,
@@ -292,6 +292,9 @@ def _new_issue(repo: str, number: int, edited: str, title: str, before: bool) ->
     fits_title(title)
     body = lint.checked(edited)
     settings = resolved_settings()
+    # Work shed from a story belongs to its feature, as a park with --from does.
+    feature = fields.get_field(settings, repo, number, board.FEATURE) or ""
+    resolved = fields_for(settings, feature)
     new, url = issue.create(repo, title, body)
     # Printed before the links are written: the issue exists from here on, and a failure below has
     # to leave the number where the user can see it rather than in a lost temp file.
@@ -302,7 +305,7 @@ def _new_issue(repo: str, number: int, edited: str, title: str, before: bool) ->
     else:
         issue.add_dependency(repo, new, blocked_by=(repo, number))
         print(f"Blocked by #{number}", flush=True)
-    board_draft(settings, repo, new, url, SPLIT_DRAFTED, columns.REFINEMENT)
+    board_draft(settings, repo, new, url, SPLIT_DRAFTED, columns.REFINEMENT, feature, resolved=resolved)
     ran = "which this story waits on" if before else "blocked by this story"
     issue.comment(repo, number, log.checked(f"Split: #{new} {title}, {ran}."))
     print("Logged Split")

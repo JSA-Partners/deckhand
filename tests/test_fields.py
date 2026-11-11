@@ -164,3 +164,29 @@ def test_set_field_resolves_the_project_before_it_reads_the_board(fake_gh, gh_ca
     assert "not on project acme/2" in str(info.value)
     graphql = [call for call in gh_calls() if call.startswith("api graphql")]
     assert "projectsV2(first" in graphql[0]
+
+
+def test_resolve_reads_the_fields_once_and_writes_by_id(fake_gh, gh_calls, settings):
+    resolved = fields.resolve(settings, ("Status", "Kind"))
+
+    assert fields.write(resolved, "PVTI_X", "Status", "Draft") == "Status=Draft"
+    assert fields.write(resolved, "PVTI_X", "Kind", "fix") == "Kind=fix"
+    calls = gh_calls()
+    assert len([call for call in calls if call.startswith("project field-list")]) == 1
+    edit = "project item-edit --id PVTI_X --project-id PVT_TEST --field-id"
+    assert [call for call in calls if call.startswith("project item-edit")] == [
+        f"{edit} PVTSSF_STATUS --single-select-option-id opt_draft",
+        f"{edit} PVTSSF_KIND --single-select-option-id opt_fix",
+    ]
+
+
+def test_resolve_refuses_a_field_the_project_does_not_have(fake_gh, settings):
+    with pytest.raises(gh.GhError, match="no such project field: Feature"):
+        fields.resolve(settings, ("Status", "Feature"))
+
+
+def test_write_refuses_an_option_the_field_does_not_have(fake_gh, settings):
+    resolved = fields.resolve(settings, ("Status",))
+
+    with pytest.raises(gh.GhError, match="no option 'Shipped' on field 'Status'"):
+        fields.write(resolved, "PVTI_X", "Status", "Shipped")

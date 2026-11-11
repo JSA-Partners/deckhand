@@ -98,6 +98,41 @@ def _added(body: str, text: str) -> str:
     return sections.replace(body, "Plan", "\n".join(lines) + "\n")
 
 
+def _dropped(body: str, position: int) -> str:
+    """The body without item `position` and the indented lines that go on from it, the rest as it was."""
+    plan = sections.get(body, "Plan", "")
+    lines = plan.split("\n")
+    start = next(number for number, line in enumerate(lines) if sections.AFTER_MERGE.match(line))
+    bullets = [number for number in range(start + 1, len(lines)) if lines[number].startswith("- ")]
+    first = bullets[position - 1]
+    end = first + 1
+    while end < len(lines) and lines[end][:1].isspace() and lines[end].strip():
+        end += 1
+    return sections.replace(body, "Plan", "\n".join(lines[:first] + lines[end:]))
+
+
+def _drop(repo: str, number: int, story: issue.Issue, items: list[tuple[str, bool]], position: int, note: str) -> str:
+    """Take unticked item `position` off the list and log where it went; returns the body the column is read from."""
+    text, ticked = _owned(number, items, position)
+    if ticked:
+        raise Refusal(f"item {position} of #{number} is ticked; a done item stays on the record")
+    body = _dropped(story.body, position)
+    entry = log.checked(f"After the merge: dropped item {position}: {text}. {note}")
+    issue.update_body(repo, number, body)
+    print(f"Dropped item {position}: {text}", flush=True)
+    issue.comment(repo, number, entry)
+    print("Logged After the merge")
+    return body
+
+
+def _owned(number: int, items: list[tuple[str, bool]], position: int) -> tuple[str, bool]:
+    """Item `position` as `(text, ticked)`, refused when the list has no such item."""
+    if not 1 <= position <= len(items):
+        owed = "item" if len(items) == 1 else "items"
+        raise Refusal(f"#{number} has {len(items)} after-the-merge {owed}; there is no item {position}")
+    return items[position - 1]
+
+
 def _add(repo: str, number: int, story: issue.Issue, text: str) -> str:
     """Append one item to the story's After the merge list and log it; returns the body the column is read from."""
     body = _added(story.body, text)
@@ -111,10 +146,7 @@ def _add(repo: str, number: int, story: issue.Issue, text: str) -> str:
 
 def _tick(repo: str, number: int, story: issue.Issue, items: list[tuple[str, bool]], position: int) -> str:
     """Tick item `position` on the issue and log it; returns the body the column is then read from."""
-    if not 1 <= position <= len(items):
-        owed = "item" if len(items) == 1 else "items"
-        raise Refusal(f"#{number} has {len(items)} after-the-merge {owed}; there is no item {position}")
-    text, already = items[position - 1]
+    text, already = _owned(number, items, position)
     if already:
         raise Refusal(f"item {position} of #{number} is already ticked: {text}")
     body = _ticked(story.body, position)
@@ -132,6 +164,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     act = parser.add_mutually_exclusive_group()
     act.add_argument("--item", type=int, metavar="N", help="the after-the-merge item to tick, counting from one")
     act.add_argument("--add", metavar="TEXT", help="an after-the-merge item to append to a merged story")
+    act.add_argument("--drop", type=int, metavar="N", help="an unticked item to take off the list, with --note")
+    parser.add_argument("--note", metavar="TEXT", help="with --drop: where the item went")
 
 
 @step("after", _configure)
@@ -141,6 +175,8 @@ def apply(args: argparse.Namespace) -> int:
     story = issue.view(repo, args.issue)
     if args.add is not None and (not args.add.strip() or "\n" in args.add):
         raise Refusal("--add takes the item as one line of text")
+    if (args.drop is None) != (args.note is None or not args.note.strip()):
+        raise Refusal("--drop takes --note, saying where the item went; --note goes only with --drop")
     if story.state.upper() != "CLOSED" and args.add is not None:
         raise Refusal(f"#{args.issue} is still open; change its plan with amend before it starts, or log a Deviation")
     if story.state.upper() != "CLOSED":
@@ -152,7 +188,12 @@ def apply(args: argparse.Namespace) -> int:
     if not items:
         print(fields.set_field(settings, repo, args.issue, "Status", columns.DONE))
         return 0
-    body = _tick(repo, args.issue, story, items, args.item) if args.item is not None else story.body
+    if args.drop is not None:
+        body = _drop(repo, args.issue, story, items, args.drop, " ".join(args.note.split()))
+    elif args.item is not None:
+        body = _tick(repo, args.issue, story, items, args.item)
+    else:
+        body = story.body
     left = [text for text, ticked in sections.after_merge_items(body) if not ticked]
     print(fields.set_field(settings, repo, args.issue, "Status", columns.VERIFICATION if left else columns.DONE))
     return 0
