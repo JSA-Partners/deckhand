@@ -24,13 +24,13 @@ VALID = FIXTURES / "body-valid.md"
 INVALID = FIXTURES / "body-invalid.md"
 STORY_TITLE = "See only the collections I was granted"
 WANT = "to see only the collections I was granted"
-# The fake answers the item lookup with PVTI_TEST_248 for any issue number, so the edit names it.
+# The fake answers every item-add with PVTI_ADDED, and a story's fields are written on that item.
 STATUS_DRAFT = (
-    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
+    "project item-edit --id PVTI_ADDED --project-id PVT_TEST --field-id PVTSSF_STATUS "
     "--single-select-option-id opt_draft"
 )
 STATUS_REFINEMENT = (
-    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_STATUS "
+    "project item-edit --id PVTI_ADDED --project-id PVT_TEST --field-id PVTSSF_STATUS "
     "--single-select-option-id opt_refinement"
 )
 NO_PROJECT = "deckhand new apply: no project is linked to acme/widgets; run /deckhand:setup"
@@ -48,7 +48,7 @@ def _draft_writes(number: int, status: str = STATUS_DRAFT) -> list[str]:
 
 # The Feature write every story the default fixture writes ends on.
 BILLING = (
-    "project item-edit --id PVTI_TEST_248 --project-id PVT_TEST --field-id PVTSSF_FEATURE "
+    "project item-edit --id PVTI_ADDED --project-id PVT_TEST --field-id PVTSSF_FEATURE "
     "--single-select-option-id OPT_BILLING"
 )
 

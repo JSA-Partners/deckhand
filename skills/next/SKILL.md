@@ -23,14 +23,15 @@ and rerun it, or say in one sentence why you cannot. When the briefing or a comm
 CLAUDE.md or README, saying one line while they run; no test run, main's checks are the
 baseline; start copies the ignored files `.worktreeinclude` names; when setup or a test fails for
 another the clone has, copy it once and say it belongs there. On the after or done row in a worktree,
-leave it with ExitWorktree, keep, before anything. Done and stop: say what the briefing says. Every commit goes through deckhand:commit, which never skips a hook;
+leave it with ExitWorktree, keep, before anything. Done and stop: say the briefing. Every commit goes through deckhand:commit, which never skips a hook;
 nothing is amended past the last reviewed commit or pushed by hand.
 
 ## Speaking
 
-Talk to the person as to a colleague from another project, in plain words. Say one line before anything slow. Recommend every time you ask.
+Talk to the person as to a colleague from another project, in plain words, an analogy only when
+they ask. Say one line before anything slow. Recommend every time you ask.
 When the run ends because the story waits on something outside this session, say where it is,
-the one link worth opening, and what happens next. Never show what a
+the link worth opening, what comes next. Never show what a
 command printed; say what matters. A failure is one sentence on what could not be done.
 
 When they approve something, tell the story plainly first: what a user gets when it is done, how we

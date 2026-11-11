@@ -40,9 +40,8 @@ def board_draft(
     Every write prints as it lands, so the printed lines are the record of how far the story got.
     `resolved` was read before the caller's first write, so no field read can strand the story here.
     """
-    board.add(settings, url)
+    item = board.add(settings, url) or gh.item_id(settings, repo, number)
     print("Added to the board", flush=True)
-    item = gh.item_id(settings, repo, number)
     if item is None:
         raise fields.NotOnBoard(f"issue #{number} did not reach project {settings.owner}/{settings.project}")
     print(fields.write(resolved, item, "Status", status), flush=True)

@@ -329,3 +329,11 @@ def test_the_after_the_merge_rule_is_written_where_plans_are_made_and_reviewed()
     assert "where a merge deploys" in " ".join(new_body.split())
     assert "after apply $issue --drop" in " ".join(next_body.split())
     assert "After the merge" in coverage
+
+
+def test_the_skills_keep_their_rules_on_analogies_and_rereading():
+    """Two rules a trim once dropped: no analogy unasked, and the injected request is not read twice."""
+    _, new_body = _split((ROOT / "skills" / "new" / "SKILL.md").read_text(encoding="utf-8"))
+    _, next_body = _split((ROOT / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8"))
+    assert "nothing needs reading again" in " ".join(new_body.split())
+    assert "an analogy only when they ask" in " ".join(next_body.split())

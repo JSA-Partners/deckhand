@@ -11,13 +11,13 @@ allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Read Write Edit Grep
 
 !`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" new context --idea "$source"`
 
-What is printed above is the whole request. When it says an issue
+What is printed above is the whole request; nothing needs reading again. When it says an issue
 number is next's, say so in one sentence and stop.
 Run superpowers:brainstorming from what is printed above, aimed at a story: the design it reaches is
 Story, Scope In and Out, and Acceptance Criteria: what a user gets and how we will know. Skip the brainstorm's spec file and commit; the issue is the spec. Design the feature across the
 project's repositories; a story elsewhere is one outcome. Give `new apply` a
-`--title` that reads as the change would in a commit subject: what it does, not what was wanted. Scale it to the
-idea: a fix needs a question or two, a feature the whole conversation.
+`--title` that reads as the change would in a commit subject: what it does, not what was wanted. Scale it: a fix needs
+a question or two, a feature the whole conversation.
 
 One story: run superpowers:writing-plans into the draft, with a `### After the merge`
 heading at the end of the Plan for what can only be checked once the code is on main, where a merge

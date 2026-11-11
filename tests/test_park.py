@@ -163,3 +163,13 @@ def test_a_feature_write_that_fails_names_the_epic_add_that_finishes_it(fake_gh,
     assert "Feature not set; epic add OPT_BILLING acme/widgets#" in result.stderr
     assert "--field-id PVTSSF_STATUS --single-select-option-id opt_draft" in "\n".join(gh_calls())
     assert [call for call in gh_calls() if call.startswith("issue comment")]
+
+
+def test_a_park_writes_its_fields_on_the_item_the_board_returned(fake_gh, gh_calls, repo, tmp_path):
+    """No read stands between the board add and the field writes, so a slow one cannot strand the story."""
+    result = _park(repo, tmp_path, "--title", TITLE)
+
+    assert result.returncode == 0, result.stderr
+    edits = [call for call in gh_calls() if call.startswith("project item-edit")]
+    assert edits and all(call.startswith("project item-edit --id PVTI_ADDED ") for call in edits)
+    assert not [call for call in gh_calls() if "issue(number:" in call and "projectItems" in call]
