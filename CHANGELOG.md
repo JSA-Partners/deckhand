@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.1.2](https://github.com/JSA-Partners/deckhand/compare/v5.1.1...v5.1.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* keep a story's after-the-merge list to what its merge proves ([#61](https://github.com/JSA-Partners/deckhand/issues/61)) ([d9e3f84](https://github.com/JSA-Partners/deckhand/commit/d9e3f84f30354f74f221ce859192a0c575c7fb19))
+
 ## [5.1.1](https://github.com/JSA-Partners/deckhand/compare/v5.1.0...v5.1.1) (2026-11-10)
 
 
