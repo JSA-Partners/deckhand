@@ -40,8 +40,8 @@ class GitError(Exception):
         self.stderr_tail = stderr_tail
 
 
-def stderr_tail(stderr: str) -> str:
-    lines = stderr.strip().splitlines()[-TAIL_LINES:]
+def stderr_tail(stderr: str, count: int = TAIL_LINES) -> str:
+    lines = stderr.strip().splitlines()[-count:]
     return TOKEN.sub("[redacted]", "\n".join(lines))
 
 

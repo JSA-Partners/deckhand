@@ -12,6 +12,7 @@ from deckhand.linear.connect import connect
 from deckhand.policy import STAGES, Policy
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register
+from deckhand.steps.checks import passing
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
@@ -174,10 +175,17 @@ class Review:
             return None, "the previously reviewed text is not on this machine; review the whole text"
         return review.text_diff(old, target.text), ""
 
+    def _checked(self, subject: Subject, repo: Path) -> None:
+        if subject.stage != "branch":
+            return
+        if not passing(subject.records, subject.stories[0], git.head(repo, self._runner)):
+            raise Refusal(f"{subject.label} has no passing checks at this commit; run checks apply {subject.label}")
+
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
         subject = self._subject(parsed)
         store, repo = self._store_for_run(), self._repo or Path.cwd()
+        self._checked(subject, repo)
         rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
@@ -232,6 +240,7 @@ class Review:
             raise Refusal(f"--target is required; {USAGE}")
         subject = self._subject(parsed)
         store, repo = self._store_for_run(), self._repo or Path.cwd()
+        self._checked(subject, repo)
         counted, cut = review.counted(subject.records, subject.prefix)
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:

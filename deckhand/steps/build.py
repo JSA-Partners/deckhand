@@ -27,7 +27,7 @@ def _config_dir() -> Path:
     return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
-def _parse(args: list[str]) -> dict:
+def parse(args: list[str], usage: str) -> dict:
     found: dict = {"words": [], "json": False}
     rest = iter(args)
     for arg in rest:
@@ -36,21 +36,20 @@ def _parse(args: list[str]) -> dict:
         elif arg == "--team-key":
             found["team_key"] = next(rest, "")
         elif arg.startswith("--"):
-            raise Refusal(f"unknown argument {arg}; {USAGE}")
+            raise Refusal(f"unknown argument {arg}; {usage}")
         else:
             found["words"].append(arg)
     if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
+        raise Refusal(f"--team-key is required; {usage}")
     return found
 
 
-def _branch(records: list[Record], story: dict) -> str | None:
+def branch_of(records: list[Record], story: dict) -> str | None:
     held = versions.held(records, WORKTREE, story["id"])
     return held.data.get("branch") if held else None
 
 
-@register("build")
-class Build:
+class StoryStep:
     def __init__(self, store: Store | None = None, runner: git.Runner = git.run, repo: Path | None = None) -> None:
         self._store = store
         self._runner = runner
@@ -80,8 +79,11 @@ class Build:
             )
         return feature, story, policy
 
+
+@register("build")
+class Build(StoryStep):
     def context(self, args: list[str]) -> None:
-        parsed = _parse(args)
+        parsed = parse(args, USAGE)
         if len(parsed["words"]) != 1:
             raise Refusal(f"build takes one story REF; {USAGE}")
         clone = self._clone()
@@ -92,7 +94,7 @@ class Build:
         level = tiers.from_record(held.data) if held else None
         plan = store.document(ops.create_id(story["id"], implplan.PURPOSE))
         sitting = store.document(ops.create_id(story["id"], "sitting"))
-        branch = _branch(records, story) or story["branch_name"]
+        branch = branch_of(records, story) or story["branch_name"]
         facts = {
             "story": story["identifier"],
             "title": story["title"],
@@ -111,7 +113,7 @@ class Build:
         _print(facts)
 
     def apply(self, args: list[str]) -> None:
-        parsed = _parse(args)
+        parsed = parse(args, USAGE)
         if len(parsed["words"]) != 2 or parsed["words"][1] not in ACTIONS:
             raise Refusal(f"apply takes REF and worktree or push; {USAGE}")
         ref, action = parsed["words"]
@@ -126,7 +128,7 @@ class Build:
 
     def _worktree(self, feature: features.Feature, story: dict, clone: Path) -> None:
         records = feature.records.get(story["id"], [])
-        branch = _branch(records, story) or story["branch_name"]
+        branch = branch_of(records, story) or story["branch_name"]
         if not branch:
             raise Refusal(f"{story['identifier']} has no branch name in Linear")
         path = git.worktree_add(clone, branch, DEFAULT_BASE, self._runner)
@@ -141,7 +143,7 @@ class Build:
                 f"the plan review of {story['identifier']} has not stopped clean; finish it,"
                 " or at the cap let the person decide: decide context review-cap"
             )
-        branch = _branch(records, story)
+        branch = branch_of(records, story)
         path = git.worktree_path(clone, branch) if branch else None
         if branch is None or path is None or not path.is_dir():
             raise Refusal(f"{story['identifier']} has no worktree; run build apply {story['identifier']} worktree")

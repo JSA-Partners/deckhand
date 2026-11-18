@@ -10,6 +10,7 @@ import pytest
 
 from deckhand import answers, features, planning, review
 from deckhand.features import FEATURE_LABEL
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
@@ -48,6 +49,10 @@ def raw(**over: object) -> dict:
         "confidence": 0.9,
     }
     return item | over
+
+
+def checked(store: FakeStore, head: str, story: str = "s1") -> None:
+    store.put_record(story, Record("checks", story, head, "agent:checks", {"head": head, "passed": True}))
 
 
 def finding_id(item: dict) -> str:
@@ -234,10 +239,12 @@ class BranchGit:
 def test_branch_revision_is_scoped_to_the_new_commits(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
     store = planned(tmp_path, repo)
     git = BranchGit("c1", {"base1...HEAD": "+one\n"})
+    checked(store, "c1")
     record_round(Review(store, git, repo), tmp_path, raw(severity="P1"), stage="branch")
     [held] = rounds(store)
     assert (held.subject, held.data["head"], held.version) == ("s1:branch:1", "c1", review.content_hash("+one\n"))
     git = BranchGit("c2", {"base1...HEAD": "+one\n+two\n", "c1..HEAD": "+two\n"})
+    checked(store, "c2")
     found = shown(Review(store, git, repo), capsys, "s1", "--stage", "branch")
     assert (found["round"], found["scoped"], found["diff"]) == (2, True, "+two\n")
     assert ["git", "diff", "c1..HEAD"] in git.argvs
@@ -305,7 +312,9 @@ def test_plan_revised_after_context_refuses_the_round(tmp_path: Path, repo: Path
 
 def test_branch_commit_after_context_refuses_the_round(tmp_path: Path, repo: Path):
     store = planned(tmp_path, repo)
+    checked(store, "c1")
     seen = target_of(Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo), stage="branch")
+    checked(store, "c2")
     moved = Review(store, BranchGit("c2", {"base1...HEAD": "+one\n+two\n"}), repo)
     before = list(store.writes)
     with pytest.raises(Refusal, match="changed since context"):
@@ -337,6 +346,7 @@ def test_branch_round_without_a_head_refuses(tmp_path: Path, repo: Path):
     plan = review.RoundPlan(1, scoped=False, base_hash="")
     found = review.parse_findings(json.dumps([raw(severity="P1")]))
     store.put_record("s1", review.round_record("s1", "branch", plan, "h1", found))
+    checked(store, "c2")
     step = Review(store, BranchGit("c2", {"base1...HEAD": "+two\n"}), repo)
     with pytest.raises(Refusal, match="holds no head"):
         step.context(["s1", "--stage", "branch", *TEAM])
