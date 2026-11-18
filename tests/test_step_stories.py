@@ -105,6 +105,20 @@ def test_map_twice_writes_once(tmp_path: Path):
     assert store.writes == []
 
 
+def test_map_rerun_keeps_a_label_a_person_added_and_swaps_only_the_repository(tmp_path: Path):
+    store = setup()
+    store.add_repository_label("ACME", "gadgets")
+    run(store, tmp_path, [entry("api")])
+    store.set_labels(story_id("api"), ["widgets", "urgent"])
+    store.writes.clear()
+    run(store, tmp_path, [entry("api")])
+    assert store.writes == []
+    run(store, tmp_path, [entry("api", repository="gadgets")])
+    found = store.issue(story_id("api"))
+    assert found is not None
+    assert sorted(found["labels"]) == ["gadgets", "urgent"]
+
+
 def test_map_changed_outcome_updates_the_description(tmp_path: Path):
     store = setup()
     run(store, tmp_path, [entry("api")])

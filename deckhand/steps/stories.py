@@ -195,7 +195,7 @@ class Stories:
                 labels=[entry["repository"]],
             )
             ops.ensure_issue_text(store, id, entry["title"], _description(entry))
-            ops.ensure_labels(store, id, [entry["repository"]])
+            ops.ensure_labels(store, id, [entry["repository"]], known)
             for dep in entry["depends_on"]:
                 ops.ensure_relation(store, ids[dep], id)
             stub = {

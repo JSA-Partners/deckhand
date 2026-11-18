@@ -29,11 +29,13 @@ def ensure_issue(store: Store, key: str, purpose: str, **fields: Any) -> str:
     return id
 
 
-def ensure_labels(store: Store, issue: str, labels: list[str]) -> None:
+def ensure_labels(store: Store, issue: str, labels: list[str], group: list[str]) -> None:
     found = store.issue(issue)
-    if found is not None and set(found["labels"]) == set(labels):
+    held = set(found["labels"]) if found is not None else set()
+    wanted = (held - set(group)) | set(labels)
+    if found is not None and held == wanted:
         return
-    store.set_labels(issue, sorted(labels))
+    store.set_labels(issue, sorted(wanted))
 
 
 def ensure_issue_text(store: Store, issue: str, title: str, description: str) -> None:

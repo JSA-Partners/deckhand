@@ -64,12 +64,19 @@ def test_concurrent_duplicate_counts_as_success() -> None:
 def test_ensure_labels_writes_only_on_difference() -> None:
     store = FakeStore()
     issue = ensure_issue(store, "story-1", "issue", **FIELDS)
-    ensure_labels(store, issue, ["deckhand"])
+    ensure_labels(store, issue, ["deckhand"], LABELS)
     assert len(store.writes) == 1
-    ensure_labels(store, issue, ["deckhand", "review"])
+    ensure_labels(store, issue, ["deckhand", "review"], LABELS)
     assert len(store.writes) == 2
-    ensure_labels(store, issue, ["review", "deckhand"])
+    ensure_labels(store, issue, ["review", "deckhand"], LABELS)
     assert len(store.writes) == 2
+
+
+def test_ensure_labels_swaps_only_labels_of_the_group() -> None:
+    store = FakeStore()
+    issue = ensure_issue(store, "story-1", "issue", **{**FIELDS, "labels": ["api", "urgent"]})
+    ensure_labels(store, issue, ["web"], ["api", "web"])
+    assert sorted(store.issue(issue)["labels"]) == ["urgent", "web"]
 
 
 def test_ensure_document_writes_only_on_difference() -> None:
@@ -126,7 +133,7 @@ def run(store: FakeStore, operations: list[tuple]) -> None:
         if name == "issue":
             ensure_issue(store, key, "issue", **FIELDS)
         elif name == "labels":
-            ensure_labels(store, issue, DESIRED_LABELS[key])
+            ensure_labels(store, issue, DESIRED_LABELS[key], LABELS)
         elif name == "document":
             ensure_document(store, key, "doc", issue, f"Doc {key}", f"body {key}")
         elif name == "record":
