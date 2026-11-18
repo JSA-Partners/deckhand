@@ -258,3 +258,22 @@ def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsy
     )
     step.apply([shown["nonce"], *TEAM])
     assert features.phase(load(store)) is Phase.BUILDING
+
+
+def test_a_decision_item_added_after_approval_voids_it():
+    store = setup()
+    expect(store, "s2", "receipts", "Send receipts by email")
+    decided(store, "decision-item", "Send receipts by email", "Keep", ["s2"])
+    approve_everything(store)
+    assert features.phase(load(store)) is Phase.BUILDING
+    expect(store, "s2", "receipts", "Send receipts by email", "Keep receipts a year")
+    feature = load(store)
+    assert features.phase(feature) is Phase.PLANNING
+    assert "ACME-2: decision item Keep receipts a year is not decided" in features.approval_gaps(store, feature)
+
+
+def test_a_state_chart_decided_after_approval_voids_it():
+    store = setup()
+    approve_everything(store)
+    decided(store, "state-chart", "s1", "Approve", ["s1"])
+    assert features.phase(load(store)) is Phase.PLANNING

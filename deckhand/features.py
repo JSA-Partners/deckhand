@@ -73,8 +73,7 @@ def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, w
 
 def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
     records = feature.records.get(story["id"], [])
-    stub = next((r for r in records if r.kind == "stub"), None)
-    expected = stub.data.get("decisions", []) if stub else []
+    expected = versions.expected_items(records)
     if not isinstance(expected, list):
         return []
     found = []

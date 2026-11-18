@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from deckhand import planning
@@ -37,10 +38,18 @@ def story_version(issue: dict, records: list[Record]) -> str:
     return _hash(story_text_version(issue), tier.version if tier else "", answer)
 
 
+def expected_items(records: list[Record]) -> object:
+    stub = next((r for r in records if r.kind == "stub"), None)
+    return stub.data.get("decisions", []) if stub else []
+
+
 def feature_version(store: Store, feature: Feature) -> str:
     parts = [planning.section(store, feature, name) or "" for name in planning.SECTIONS]
     for story in sorted(feature.live, key=lambda s: s["id"]):
-        parts += [story["id"], story_version(story, feature.records.get(story["id"], []))]
+        records = feature.records.get(story["id"], [])
+        chart = held(records, "state-chart", story["id"])
+        items = json.dumps(expected_items(records), sort_keys=True)
+        parts += [story["id"], story_version(story, records), items, chart.version if chart else ""]
     return _hash(*parts)
 
 
