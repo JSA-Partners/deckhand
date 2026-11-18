@@ -20,6 +20,11 @@ class Hunk:
     header: str
     lines: list[str]
     reason: str
+    old_path: str = ""
+
+    @property
+    def paths(self) -> set[str]:
+        return {self.path, self.old_path or self.path}
 
 
 def glob_match(pattern: str, path: str) -> bool:
@@ -43,28 +48,40 @@ def glob_match(pattern: str, path: str) -> bool:
     return re.fullmatch("".join(out), path) is not None
 
 
-def _file_path(header: list[str]) -> str:
-    for prefix in ("+++ b/", "--- a/"):
-        for line in header:
-            if line.startswith(prefix):
-                return line[len(prefix) :].split("\t")[0]
-    return ""
+def _paths(header: list[str]) -> tuple[str, str]:
+    def find(*prefixes: str) -> str:
+        for prefix in prefixes:
+            for line in header:
+                if line.startswith(prefix):
+                    return line[len(prefix) :].split("\t")[0]
+        return ""
+
+    new = find("+++ b/", "rename to ")
+    old = find("--- a/", "rename from ")
+    if not new or not old:
+        both = re.match(r"diff --git a/(.+) b/(.+)$", header[0])
+        new = new or (both.group(2) if both else "")
+        old = old or (both.group(1) if both else new)
+    return new or old, old or new
 
 
 def parse_hunks(diff: str) -> list[Hunk]:
     hunks: list[Hunk] = []
     for block in re.split(r"^(?=diff --git )", diff, flags=re.MULTILINE):
+        if not block.startswith("diff --git "):
+            continue
         lines = block.split("\n")
-        if lines and lines[-1] == "":
+        if lines[-1] == "":
             lines.pop()
         starts = [i for i, line in enumerate(lines) if line.startswith("@@ ")]
-        if not starts:
-            continue
-        header = lines[: starts[0]]
-        path = _file_path(header)
+        header = lines[: starts[0]] if starts else lines
+        path, old_path = _paths(header)
         text = "\n".join(header) + "\n"
+        if not starts:
+            hunks.append(Hunk(path, text, [], "", old_path))
+            continue
         for start, end in zip(starts, [*starts[1:], len(lines)], strict=True):
-            hunks.append(Hunk(path, text, lines[start:end], ""))
+            hunks.append(Hunk(path, text, lines[start:end], "", old_path))
     return hunks
 
 
@@ -77,17 +94,22 @@ def select_hunks(
 ) -> list[Hunk]:
     selected = []
     for hunk in parse_hunks(diff):
-        reasons = [f"sensitive path {p}" for p in policy.sensitive_paths if glob_match(p, hunk.path)]
-        if hunk.path in doubtful_paths:
+        reasons = [
+            f"sensitive path {p}" for p in policy.sensitive_paths if any(glob_match(p, path) for path in hunk.paths)
+        ]
+        if hunk.paths & doubtful_paths:
             reasons.append("file of a doubtful finding")
-        if hunk.path in manifest["contract_sites"]:
+        if hunk.paths & set(manifest["contract_sites"]):
             reasons.append("contract site")
-        if hunk.path in manifest["invariant_sites"]:
+        if hunk.paths & set(manifest["invariant_sites"]):
             reasons.append("invariant site")
         if summary:
-            reasons += [f"new here: {n.text}" for n in summary.new_here if n.path == hunk.path]
-        if reasons:
-            selected.append(Hunk(hunk.path, hunk.header, hunk.lines, "; ".join(reasons)))
+            reasons += [f"new here: {n.text}" for n in summary.new_here if n.path in hunk.paths]
+        if not reasons:
+            continue
+        if not hunk.lines and "\nBinary files " in hunk.header:
+            raise Refusal(f"{hunk.path} is a binary change that cannot be trimmed into a review commit")
+        selected.append(Hunk(hunk.path, hunk.header, hunk.lines, "; ".join(reasons), hunk.old_path))
     return selected
 
 
@@ -98,7 +120,8 @@ def _patch(hunks: list[Hunk]) -> str:
         if hunk.path not in seen:
             seen.add(hunk.path)
             out.append(hunk.header)
-        out.append("\n".join(hunk.lines) + "\n")
+        if hunk.lines:
+            out.append("\n".join(hunk.lines) + "\n")
     return "".join(out)
 
 
@@ -106,6 +129,8 @@ def review_commit(worktree: Path, base: str, hunks: list[Hunk], runner: Runner =
     if not hunks:
         raise Refusal("no hunk is selected for review")
     branch = call(["git", "branch", "--show-current"], worktree, runner).strip()
+    if not branch:
+        raise Refusal("the review commit needs a branch, but the worktree has a detached head")
     return apply_hunks(worktree, base, _patch(hunks), "review: selected hunks", REF_PREFIX + branch, runner)
 
 
@@ -137,16 +162,17 @@ def _anchor(hunk: Hunk, shift: int) -> tuple[int, str]:
 def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run) -> None:
     shifts: dict[str, int] = {}
     for hunk in hunks:
-        shift = shifts.get(hunk.path, 0)
-        line, side = _anchor(hunk, shift)
-        _, old_count, _, new_count = _counts(hunk.lines[0])
-        shifts[hunk.path] = shift + new_count - old_count
         argv = ["tuicr", "review", "add", "--session", session]
         if repo is not None:
             argv += ["--repo", str(repo)]
-        argv += ["--target-file", hunk.path, "--line", str(line), "--side", side]
-        argv += ["--username", USERNAME, hunk.reason]
-        call(argv, None, runner)
+        argv += ["--target-file", hunk.path]
+        if hunk.lines:
+            shift = shifts.get(hunk.path, 0)
+            line, side = _anchor(hunk, shift)
+            _, old_count, _, new_count = _counts(hunk.lines[0])
+            shifts[hunk.path] = shift + new_count - old_count
+            argv += ["--line", str(line), "--side", side]
+        call([*argv, "--username", USERNAME, hunk.reason], None, runner)
 
 
 def command(base: str, sha: str) -> list[str]:

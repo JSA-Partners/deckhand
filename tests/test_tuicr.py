@@ -7,6 +7,7 @@ import pytest
 
 from deckhand import git, tuicr
 from deckhand.policy import Policy
+from deckhand.step import Refusal
 from deckhand.summary import ChangeSummary, NewHere
 
 BASE_FILES = {
@@ -206,3 +207,89 @@ def test_seed_comments_numbers_lines_in_the_trimmed_commit() -> None:
 
 def test_command_is_the_range_argv() -> None:
     assert tuicr.command("abc", "def") == ["tuicr", "-r", "abc..def"]
+
+
+def sh(*args: str, cwd: Path) -> str:
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+def renamed_story(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change) -> tuple[Path, Path]:
+    for key, value in (("NAME", "t"), ("EMAIL", "t@t")):
+        monkeypatch.setenv(f"GIT_AUTHOR_{key}", value)
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", value)
+    clone = tmp_path / "clone"
+    (clone / "auth").mkdir(parents=True)
+    sh("git", "init", "-q", "-b", "main", cwd=clone)
+    (clone / "auth/secret.py").write_text("".join(f"line{i}\n" for i in range(10)))
+    (clone / "plain.py").write_text("x\n")
+    sh("git", "add", ".", cwd=clone)
+    sh("git", "commit", "-q", "-m", "base", cwd=clone)
+    work = git.worktree_add(clone, "story", "main")
+    change(work)
+    sh("git", "add", "-A", cwd=work)
+    sh("git", "commit", "-q", "-m", "story", cwd=work)
+    return clone, work
+
+
+def move_out(work: Path, edit: bool) -> None:
+    (work / "lib").mkdir()
+    sh("git", "mv", "auth/secret.py", "lib/secret.py", cwd=work)
+    if edit:
+        text = (work / "lib/secret.py").read_text().replace("line3", "LINE3")
+        (work / "lib/secret.py").write_text(text)
+
+
+def test_renamed_and_edited_sensitive_file_is_selected_by_its_old_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone, work = renamed_story(tmp_path, monkeypatch, lambda w: move_out(w, True))
+    hunks = tuicr.select_hunks(git.diff(work, "main"), policy("auth/*"), set(), MANIFEST)
+    assert [(h.path, h.old_path) for h in hunks] == [("lib/secret.py", "auth/secret.py")]
+    sha = tuicr.review_commit(work, "main", hunks)
+    assert sh("git", "show", f"{sha}:lib/secret.py", cwd=clone).count("LINE3") == 1
+    assert "auth/secret.py" not in sh("git", "ls-tree", "-r", "--name-only", sha, cwd=clone)
+
+
+def test_pure_rename_of_a_sensitive_file_is_selected_and_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone, work = renamed_story(tmp_path, monkeypatch, lambda w: move_out(w, False))
+    manifest = {"contract_sites": ["auth/secret.py"], "invariant_sites": []}
+    hunks = tuicr.select_hunks(git.diff(work, "main"), policy(), set(), manifest)
+    assert [(h.path, h.old_path, h.lines) for h in hunks] == [("lib/secret.py", "auth/secret.py", [])]
+    sha = tuicr.review_commit(work, "main", hunks)
+    assert sh("git", "ls-tree", "-r", "--name-only", sha, cwd=clone).split() == ["lib/secret.py", "plain.py"]
+
+
+def test_mode_change_is_selected_and_seeded_at_file_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def chmod(work: Path) -> None:
+        (work / "auth/secret.py").chmod(0o755)
+
+    clone, work = renamed_story(tmp_path, monkeypatch, chmod)
+    hunks = tuicr.select_hunks(git.diff(work, "main"), policy("auth/*"), set(), MANIFEST)
+    assert [h.path for h in hunks] == ["auth/secret.py"]
+    sha = tuicr.review_commit(work, "main", hunks)
+    assert "100755" in sh("git", "ls-tree", sha, "auth/secret.py", cwd=clone)
+    fake = Fake()
+    tuicr.seed_comments("s", hunks, None, fake)
+    assert fake.calls[0][0] == [
+        "tuicr", "review", "add", "--session", "s", "--target-file", "auth/secret.py",
+        "--username", "deckhand", hunks[0].reason,
+    ]  # fmt: skip
+
+
+def test_selected_binary_change_is_refused_by_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def binary(work: Path) -> None:
+        (work / "auth/blob.bin").write_bytes(b"\x00\x01\x02")
+
+    _, work = renamed_story(tmp_path, monkeypatch, binary)
+    with pytest.raises(Refusal, match="auth/blob.bin"):
+        tuicr.select_hunks(git.diff(work, "main"), policy("auth/*"), set(), MANIFEST)
+
+
+def test_detached_head_is_refused(story: tuple[Path, Path]) -> None:
+    _, work = story
+    hunks = tuicr.select_hunks(story_diff(work), policy("src/*.py"), set(), MANIFEST)
+    sh("git", "checkout", "-q", "--detach", cwd=work)
+    with pytest.raises(Refusal, match="detached"):
+        tuicr.review_commit(work, "main", hunks)
