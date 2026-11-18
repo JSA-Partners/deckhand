@@ -47,3 +47,26 @@ def test_missing_field_refused():
 def test_hash_is_stable():
     assert content_hash("a\n") == content_hash("a\n")
     assert content_hash("a\n") != content_hash("a")
+
+
+@pytest.mark.parametrize("text", ["[]", "null", "3", '"x"'])
+def test_non_object_refused(text):
+    with pytest.raises(ValueError, match="not a JSON object"):
+        Record.from_json(text)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("kind", 1),
+        ("subject", None),
+        ("version", 3),
+        ("author", ["mjm"]),
+        ("data", ["steps"]),
+    ],
+)
+def test_wrong_field_type_refused(field, value):
+    payload = json.loads(_record().to_json())
+    payload[field] = value
+    with pytest.raises(ValueError, match=field):
+        Record.from_json(json.dumps(payload))
