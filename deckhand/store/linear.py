@@ -50,6 +50,16 @@ class LinearStore(Store):
                 return None
             raise
 
+    def _uuid(self, issue: str) -> str:
+        try:
+            Ref.parse(issue)
+        except ValueError:
+            return issue
+        node = self._issue_node(issue)
+        if node is None:
+            raise Refusal(f"no Linear issue {issue}")
+        return node["id"]
+
     def create_issue(
         self,
         id: str,
@@ -93,16 +103,18 @@ class LinearStore(Store):
         return self.issue(str(ref))
 
     def set_labels(self, issue: str, labels: list[str]) -> None:
-        label_ids: list[str] = []
-        if labels:
-            node = self._issue_node(issue)
-            if node is None:
-                raise Refusal(f"no Linear issue {issue}")
-            label_ids = self._label_ids(self._team_id(node["team"]["key"]), labels)
-        self._client.query(queries.ISSUE_UPDATE, {"id": issue, "input": {"labelIds": label_ids}})
+        if not labels:
+            self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": {"labelIds": []}})
+            return
+        node = self._issue_node(issue)
+        if node is None:
+            raise Refusal(f"no Linear issue {issue}")
+        label_ids = self._label_ids(self._team_id(node["team"]["key"]), labels)
+        self._client.query(queries.ISSUE_UPDATE, {"id": node["id"], "input": {"labelIds": label_ids}})
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
-        owner = "issueId" if self._issue_node(parent) is not None else "projectId"
+        node = self._issue_node(parent)
+        owner, parent = ("issueId", node["id"]) if node is not None else ("projectId", parent)
         created = {"id": id, owner: parent, "title": title, "content": body}
         try:
             self._client.query(queries.DOCUMENT_CREATE, {"input": created})
@@ -129,7 +141,7 @@ class LinearStore(Store):
 
     def put_record(self, issue: str, record: Record) -> None:
         attachment = {
-            "issueId": issue,
+            "issueId": self._uuid(issue),
             "url": f"{RECORD_URL}{record.kind}/{record.subject}",
             "title": f"deckhand {record.kind}",
             "metadata": {"record": record.to_json()},
@@ -154,7 +166,7 @@ class LinearStore(Store):
         return found
 
     def relate(self, blocker: str, blocked: str) -> None:
-        relation = {"issueId": blocker, "relatedIssueId": blocked, "type": "blocks"}
+        relation = {"issueId": self._uuid(blocker), "relatedIssueId": self._uuid(blocked), "type": "blocks"}
         self._client.query(queries.RELATION_CREATE, {"input": relation})
 
     def relations(self, issue: str) -> list[tuple[str, str]]:

@@ -7,6 +7,8 @@ from deckhand.ref import Ref
 
 
 class Store(Protocol):
+    """Every id is a Linear UUID."""
+
     def create_issue(
         self,
         id: str,

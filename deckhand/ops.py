@@ -6,6 +6,8 @@ from typing import Any
 
 from deckhand.linear.client import DuplicateId
 from deckhand.records import Record
+from deckhand.ref import Ref
+from deckhand.step import Refusal
 from deckhand.store import Store
 
 
@@ -48,6 +50,18 @@ def ensure_record(store: Store, issue: str, record: Record) -> None:
     store.put_record(issue, record)
 
 
+def _issue_id(store: Store, issue: str) -> str:
+    try:
+        ref = Ref.parse(issue)
+    except ValueError:
+        return issue
+    found = store.issue_by_ref(ref)
+    if found is None:
+        raise Refusal(f"no issue {issue}")
+    return found["id"]
+
+
 def ensure_relation(store: Store, blocker: str, blocked: str) -> None:
+    blocker, blocked = _issue_id(store, blocker), _issue_id(store, blocked)
     if (blocker, blocked) not in store.relations(blocker):
         store.relate(blocker, blocked)

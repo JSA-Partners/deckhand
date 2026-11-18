@@ -6,6 +6,7 @@ import pytest
 
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearError
+from deckhand.ops import ensure_relation
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
@@ -364,3 +365,49 @@ def test_a_page_overflow_refuses_naming_the_issue(name: str, response: dict, rea
     client = FakeClient(**{name: response})
     with pytest.raises(Refusal, match=rf"{UUID}.*more than {queries.PAGE_SIZE}"):
         getattr(LinearStore(client), read)(UUID)
+
+
+OTHER = "7c1d2e3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
+OTHER_NODE = {**ISSUE_NODE, "id": OTHER, "identifier": "ACME-6", "number": 6}
+
+
+def test_set_labels_writes_the_uuid_whichever_form_is_passed() -> None:
+    for form in (UUID, "ACME-5"):
+        client = FakeClient(Issue={"issue": ISSUE_NODE}, IssueUpdate={"issueUpdate": {"success": True}})
+        LinearStore(client).set_labels(form, [])
+        assert client.calls[-1] == ("IssueUpdate", {"id": UUID, "input": {"labelIds": []}})
+
+
+def test_put_record_and_relate_write_uuids_for_identifiers() -> None:
+    client = FakeClient(
+        Issue=[{"issue": ISSUE_NODE}, {"issue": ISSUE_NODE}, {"issue": OTHER_NODE}],
+        AttachmentCreate={"attachmentCreate": {"success": True, "attachment": {"id": "a"}}},
+        IssueRelationCreate={"issueRelationCreate": {"success": True}},
+    )
+    store = LinearStore(client)
+    store.put_record("ACME-5", record())
+    store.relate("ACME-5", "ACME-6")
+    writes = [variables["input"] for name, variables in client.calls if name != "Issue"]
+    assert writes[0]["issueId"] == UUID
+    assert (writes[1]["issueId"], writes[1]["relatedIssueId"]) == (UUID, OTHER)
+
+
+def test_ensure_relation_writes_nothing_when_held_whichever_form_is_passed() -> None:
+    held = {
+        "issue": {
+            "id": UUID,
+            "relations": {"nodes": [{"type": "blocks", "relatedIssue": {"id": OTHER}}], "pageInfo": DONE},
+            "inverseRelations": {"nodes": [], "pageInfo": DONE},
+        }
+    }
+    for blocker, blocked in ((UUID, OTHER), ("ACME-5", "ACME-6")):
+        client = FakeClient(Issue=[{"issue": ISSUE_NODE}, {"issue": OTHER_NODE}], IssueRelations=held)
+        ensure_relation(LinearStore(client), blocker, blocked)
+        assert "IssueRelationCreate" not in client.names
+
+
+def test_an_unknown_identifier_refuses_before_any_write() -> None:
+    client = FakeClient(Issue=LinearError("INPUT_ERROR", "Entity not found: Issue"))
+    with pytest.raises(Refusal, match="ACME-99"):
+        LinearStore(client).relate("ACME-99", UUID)
+    assert client.names == ["Issue"]
