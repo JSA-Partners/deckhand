@@ -134,6 +134,28 @@ def test_canceled_story_needs_no_approval():
     assert features.phase(load(store)) is Phase.BUILDING
 
 
+def expect(store: FakeStore, story: str, key: str, *items: str) -> None:
+    data = {"unknowns": [], "new_here": [], "decisions": list(items)}
+    store.put_record(story, Record("stub", key, "1", "agent:stories", data))
+
+
+@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
+def test_expected_decision_item_blocks_approval_until_answered(answer: str):
+    store = setup()
+    approve_everything(store)
+    expect(store, "s2", "receipts", "Send receipts by email")
+    assert features.approval_gaps(store, load(store)) == ["ACME-2: decision item Send receipts by email is not decided"]
+    decided(store, "decision-item", "Send receipts by email", answer, ["s2"])
+    assert features.approval_gaps(store, load(store)) == []
+
+
+def test_expected_decision_item_answered_on_another_story_still_blocks():
+    store = setup()
+    expect(store, "s2", "receipts", "Send receipts by email")
+    decided(store, "decision-item", "Send receipts by email", "Keep", ["s1"])
+    assert "ACME-2: decision item Send receipts by email is not decided" in features.approval_gaps(store, load(store))
+
+
 @pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
 def test_any_answer_settles_a_decision_item(answer: str):
     store = setup()

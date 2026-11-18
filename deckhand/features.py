@@ -70,6 +70,20 @@ def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, w
     return None if record.version == version else words[1]
 
 
+def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
+    records = feature.records.get(story["id"], [])
+    stub = next((r for r in records if r.kind == "stub"), None)
+    expected = stub.data.get("decisions", []) if stub else []
+    if not isinstance(expected, list):
+        return []
+    found = []
+    for item in expected:
+        held = versions.held(records, "decision-item", versions.item_subject(str(item)))
+        if held is None or not versions.current(store, feature, held):
+            found.append(str(item))
+    return found
+
+
 def approval_gaps(store: Store, feature: Feature) -> list[str]:
     gaps = [
         f"the {name} section is not saved"
@@ -100,6 +114,9 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
             gap = _gap(feature, story, kind, story["id"], version, _STORY_GAPS[kind])
             if gap:
                 gaps.append(f"{story['identifier']}: {gap}")
+        gaps += [
+            f"{story['identifier']}: decision item {item} is not decided" for item in _undecided(store, feature, story)
+        ]
     items: dict[str, str] = {}
     settled: set[str] = set()
     for story in sorted(feature.stories, key=lambda s: s["id"]):

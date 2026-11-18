@@ -71,7 +71,27 @@ def test_map_creates_stubs_with_labels_and_blockers(tmp_path: Path):
     assert store.relations(story_id("api")) == [(story_id("api"), story_id("ui"))]
     [stub] = store.records(story_id("api"))
     assert (stub.kind, stub.subject) == ("stub", "api")
-    assert stub.data == {"unknowns": ["rate limits"], "new_here": ["queue"]}
+    assert stub.data == {"unknowns": ["rate limits"], "new_here": ["queue"], "decisions": []}
+
+
+def test_map_keeps_expected_decisions_in_the_stub_and_reruns_write_nothing(tmp_path: Path):
+    store = setup()
+    entries = [entry("api", decisions=["Keep orders in one table"])]
+    run(store, tmp_path, entries)
+    [stub] = store.records(story_id("api"))
+    assert stub.data["decisions"] == ["Keep orders in one table"]
+    store.writes.clear()
+    run(store, tmp_path, entries)
+    assert store.writes == []
+
+
+@pytest.mark.parametrize("bad", ["Keep it", ["Keep it", 3]])
+def test_map_refuses_a_malformed_decisions_field(tmp_path: Path, bad: object):
+    store = setup()
+    store.writes.clear()
+    with pytest.raises(Refusal, match="entry 1 field decisions must be a list of strings"):
+        run(store, tmp_path, [entry("api"), entry("ui", decisions=bad)])
+    assert store.writes == []
 
 
 def test_map_twice_writes_once(tmp_path: Path):

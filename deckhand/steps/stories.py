@@ -17,7 +17,7 @@ USAGE = "stories takes --team-key KEY on both verbs, --json on context only, and
 MISSED_BY = ("rule", "example", "invariant", "spike", "external")
 _LISTS = ("depends_on", "unknowns", "new_here")
 _REQUIRED = ("key", "title", "outcome", "repository")
-_OPTIONAL = ("missed_by", "cuts", "spends_budget")
+_OPTIONAL = ("missed_by", "cuts", "spends_budget", "decisions")
 
 
 def _config_dir() -> Path:
@@ -69,6 +69,9 @@ def _check_entry(index: int, entry: object) -> None:
         value = entry.get(name)
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise Refusal(f"entry {index} field {name} must be a list of strings")
+    decisions = entry.get("decisions", [])
+    if not isinstance(decisions, list) or not all(isinstance(item, str) for item in decisions):
+        raise Refusal(f"entry {index} field decisions must be a list of strings")
     for name in ("missed_by", "cuts"):
         if name in entry and not isinstance(entry[name], str):
             raise Refusal(f"entry {index} field {name} must be a string")
@@ -196,7 +199,11 @@ class Stories:
             ops.ensure_labels(store, id, [entry["repository"]])
             for dep in entry["depends_on"]:
                 ops.ensure_relation(store, ids[dep], id)
-            stub = {"unknowns": entry["unknowns"], "new_here": entry["new_here"]}
+            stub = {
+                "unknowns": entry["unknowns"],
+                "new_here": entry["new_here"],
+                "decisions": entry.get("decisions", []),
+            }
             ops.ensure_record(store, id, Record("stub", entry["key"], "1", "agent:stories", stub))
             if "missed_by" in entry:
                 record = Record("discovered", entry["key"], "1", "agent:stories", _discovery(entry))
