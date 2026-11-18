@@ -156,7 +156,8 @@ def _quiz_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
     if quiz.missed(records, story["id"], n):
         detail += f" (the code is at {item.where})"
     label = _label(story)
-    return Pin(quiz.subject(story["id"], n), held.version, [story["id"]], detail, label, [label], item.options)
+    options = quiz.shown_options(held.version, n, item.options)
+    return Pin(quiz.subject(story["id"], n), held.version, [story["id"]], detail, label, [label], options)
 
 
 def pin(

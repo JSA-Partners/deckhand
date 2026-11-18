@@ -50,3 +50,9 @@ def test_refuses_bad_documents() -> None:
             summary.parse_summary(text)
     with pytest.raises(Refusal, match="unknown field extra"):
         summary.parse_summary(json.dumps({**GOOD, "extra": 1}))
+
+
+def test_digest_ignores_layout_and_key_order() -> None:
+    spaced = summary.parse_summary(json.dumps(dict(reversed(GOOD.items())), indent=4))
+    assert summary.digest(spaced) == summary.digest(parse())
+    assert summary.digest(parse(state_diagram="docs/state.svg")) != summary.digest(parse())

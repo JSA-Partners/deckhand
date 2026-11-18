@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -86,12 +87,17 @@ def parse_quiz(text: str, size: int) -> list[Item]:
 
 
 def set_version(head: str, items: list[Item]) -> str:
-    asked = [{"question": i.question, "options": i.options, "where": i.where} for i in items]
-    return content_hash(json.dumps({"head": head, "items": asked}, sort_keys=True))
+    asked = [{"question": i.question, "options": sorted(i.options), "where": i.where} for i in items]
+    key = content_hash(json.dumps([i.options[i.correct] for i in items]))
+    return content_hash(json.dumps({"head": head, "items": asked, "key": key}, sort_keys=True))
 
 
-def set_record(story: str, head: str, items: list[Item], summary: str, new_here: int) -> Record:
-    data = {"head": head, "items": [asdict(i) for i in items], "summary": content_hash(summary), "new_here": new_here}
+def shown_options(version: str, n: int, options: list[str]) -> list[str]:
+    return random.Random(f"{version}:{n}").sample(sorted(options), len(options))
+
+
+def set_record(story: str, head: str, items: list[Item], summary_digest: str, new_here: int) -> Record:
+    data = {"head": head, "items": [asdict(i) for i in items], "summary": summary_digest, "new_here": new_here}
     return Record(SET, story, set_version(head, items), "agent:quiz", data)
 
 
@@ -107,23 +113,22 @@ def subject(story: str, n: int) -> str:
     return f"{story}:{n}"
 
 
-def _answer(records: list[Record], story: str, n: int) -> tuple[Item, str | None] | None:
+def _graded(records: list[Record], story: str, n: int) -> bool | None:
     found = held_set(records, story)
     if found is None or not 1 <= n <= len(found.data.get("items", [])):
         return None
     answer = versions.held(records, KIND, subject(story, n))
-    given = answer.data.get("answer") if answer is not None and answer.version == found.version else None
-    return items_of(found)[n - 1], given
+    if answer is None or answer.version != found.version:
+        return None
+    return answer.data.get("correct") is True
 
 
 def right(records: list[Record], story: str, n: int) -> bool:
-    found = _answer(records, story, n)
-    return found is not None and found[1] == found[0].options[found[0].correct]
+    return _graded(records, story, n) is True
 
 
 def missed(records: list[Record], story: str, n: int) -> bool:
-    found = _answer(records, story, n)
-    return found is not None and found[1] is not None and not right(records, story, n)
+    return _graded(records, story, n) is False
 
 
 def open_items(records: list[Record], story: str) -> list[int]:
@@ -144,7 +149,7 @@ def grade(records: list[Record], asked: str, version: str, options: list[str], a
     if found is None or found.version != version or not n.isdigit() or not 1 <= int(n) <= len(items):
         raise Refusal("the quiz changed since the question was asked; ask the item again")
     item = items[int(n) - 1]
-    if item.options != options:
+    if sorted(item.options) != sorted(options):
         raise Refusal("the quiz changed since the question was asked; ask the item again")
     return answer == item.options[item.correct]
 

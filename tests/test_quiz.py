@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from deckhand import answers, quiz, tiers
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.quiz import Quiz
 from deckhand.store.fake import FakeStore
+from deckhand.summary import digest, parse_summary
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import TEAM
 
 __all__ = ["repo", "state"]
 
+HASH = re.compile(r"[0-9a-f]{12}")
 SOURCE = "".join(f"line {n}\n" for n in range(1, 31))
 
 
@@ -125,10 +129,60 @@ def test_correct_index_not_in_question(tmp_path: Path, repo: Path, state: Path, 
         asked = ask(step, capsys)
         pending = json.loads((state / "pending" / f"{asked['nonce']}.json").read_text())
         question = asked["tool_input"]["questions"][0]
-        assert [o["label"] for o in question["options"]] == item()["options"]
+        assert sorted(o["label"] for o in question["options"]) == sorted(item()["options"])
         assert "correct" not in pending and "recommended" not in json.dumps(question).lower()
-        shown.append(({k: v for k, v in question.items() if k != "header"}, pending | {"nonce": ""}))
+        masked = HASH.sub("#", question["question"])
+        kept = {k: v for k, v in pending.items() if k not in ("nonce", "version", "question", "options")}
+        shown.append((masked, kept))
     assert shown[0] == shown[1]
+
+
+def test_options_are_shown_in_an_order_seeded_by_the_set(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    step = decide(store, repo)
+    orders = []
+    listed = ["The order id", "The idempotency key", "A new key"]
+    for agent in (item(), item(options=listed, correct=1)):
+        submit(store, tmp_path, repo, [agent])
+        for _ in range(2):
+            orders.append([o["label"] for o in ask(step, capsys)["tool_input"]["questions"][0]["options"]])
+    assert orders[0] == orders[1] == orders[2] == orders[3]
+    [held] = [r for r in store.records("s1") if r.kind == quiz.SET]
+    assert orders[0] == quiz.shown_options(held.version, 1, listed)
+
+
+def test_key_change_voids_every_answer(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "A new key")
+    submit(store, tmp_path, repo, [item(correct=1)])
+    assert not quiz.passed(store.records("s1"), "s1", "c2")
+    assert quiz.open_items(store.records("s1"), "s1") == [1]
+    reply(state, step, ask(step, capsys), "A new key")
+    assert quiz.open_items(store.records("s1"), "s1") == []
+    submit(store, tmp_path, repo, [item(correct=2)])
+    assert quiz.open_items(store.records("s1"), "s1") == [1]
+
+
+def test_set_records_the_canonical_summary_hash(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    [held] = [r for r in store.records("s1") if r.kind == quiz.SET]
+    assert held.data["summary"] == digest(parse_summary(json.dumps(summary(), indent=4)))
+
+
+def test_retry_with_a_malformed_worktree_record_notes_it(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "A new key")
+    store.put_record("s1", Record("worktree", "s1", BRANCH, "agent:build", {}))
+    assert ask(step, capsys)["code"] == ["the worktree is not on this machine"]
 
 
 def test_wrong_answer_keeps_item_open_and_names_where(

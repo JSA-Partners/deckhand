@@ -110,9 +110,10 @@ class Decide:
             clone = self._repo or git.clone_root(Path.cwd(), self._runner)
         except git.GitError:
             clone = None
-        if worktree is None or clone is None:
+        branch = worktree.data.get("branch") if worktree else None
+        if not isinstance(branch, str) or not branch or clone is None:
             return {"where": where, "code": ["the worktree is not on this machine"]}
-        path = git.worktree_path(clone, worktree.data["branch"])
+        path = git.worktree_path(clone, branch)
         return {"where": where, "code": quiz.code_at(path, where, self._reader)}
 
     def apply(self, args: list[str]) -> None:

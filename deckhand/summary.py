@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
+from deckhand.records import content_hash
 from deckhand.step import Refusal
 
 SHAPE = {
@@ -98,3 +99,7 @@ def parse_summary(text: str) -> ChangeSummary:
     if diagram is not None:
         diagram = _text(diagram, "summary field state_diagram")
     return ChangeSummary(intents, new_here, screenshots, diagram)
+
+
+def digest(summary: ChangeSummary) -> str:
+    return content_hash(json.dumps(asdict(summary), sort_keys=True))

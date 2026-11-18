@@ -7,7 +7,7 @@ from deckhand import git, ops, quiz, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register
 from deckhand.steps.build import StoryStep, branch_of
-from deckhand.summary import parse_summary
+from deckhand.summary import digest, parse_summary
 
 USAGE = (
     "quiz takes REF and --team-key KEY on both verbs; context [--json], apply --quiz QUIZ.json --summary SUMMARY.json"
@@ -92,11 +92,12 @@ class Quiz(StoryStep):
         if tier is None:
             raise Refusal(f"{story['identifier']} has no tier decided; the quiz is sized by its tier")
         text, summary = _read(parsed.get("quiz", ""), "--quiz"), _read(parsed.get("summary", ""), "--summary")
-        new_here = len(parse_summary(summary).new_here)
+        parsed_summary = parse_summary(summary)
+        new_here = len(parsed_summary.new_here)
         items = quiz.parse_quiz(text, quiz.quiz_size(tier, new_here))
         if git.dirty(path, self._runner):
             raise Refusal(f"{path} has uncommitted changes; commit them first so the quiz is pinned to {head}")
-        record = quiz.set_record(story["id"], head, items, summary, new_here)
+        record = quiz.set_record(story["id"], head, items, digest(parsed_summary), new_here)
         ops.ensure_record(self._store_for_run(), story["id"], record)
         print(f"done: saved a quiz of {len(items)} items for {story['identifier']} at {head}")
 
