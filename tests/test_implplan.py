@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from deckhand import implplan
+from deckhand.step import Refusal
+from deckhand.steps.implplan import ImplPlan
+from deckhand.store.fake import FakeStore
+from tests.test_feature_approval import approve_everything, setup
+
+TEAM = ["--team-key", "ACME"]
+BASE = {"src/a.py", "src/b.py", "docs/guide.md"}
+
+
+def manifest(**over: object) -> dict:
+    found: dict = {
+        "files": [{"path": "src/a.py", "change": "modify"}, {"path": "src/new.py", "change": "create"}],
+        "criteria": [{"text": "an order is queued", "tests": ["tests/test_a.py::test_queue"]}],
+        "docs_false": [{"path": "docs/guide.md", "sentence": "Orders are sent at once."}],
+        "contract_sites": ["src/a.py"],
+        "invariant_sites": [],
+    }
+    return {**found, **over}
+
+
+class Git:
+    def __init__(self, paths: set[str]) -> None:
+        self.paths = paths
+        self.argvs: list[list[str]] = []
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        self.argvs.append(argv)
+        out = "base1\n" if argv[1] == "merge-base" else "\n".join(sorted(self.paths))
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+
+def files(tmp_path: Path, data: object) -> list[str]:
+    plan, found = tmp_path / "plan.md", tmp_path / "manifest.json"
+    plan.write_text("# Plan\n\n- [ ] one\n")
+    found.write_text(data if isinstance(data, str) else json.dumps(data))
+    return ["s1", *TEAM, "--plan", str(plan), "--manifest", str(found)]
+
+
+def step(store: FakeStore, git: Git | None = None) -> ImplPlan:
+    return ImplPlan(store, git or Git(BASE), Path("/worktree"))
+
+
+def test_criterion_without_test_refuses(tmp_path: Path):
+    store = setup()
+    approve_everything(store)
+    args = files(tmp_path, manifest(criteria=[{"text": "an order is queued", "tests": []}]))
+    with pytest.raises(Refusal, match="an order is queued"):
+        step(store).apply(args)
+    assert [d for d in store._documents.values() if d["title"] == "Implementation plan"] == []
+    assert [r for r in store.records("s1") if r.kind == "implplan"] == []
+
+
+def test_modify_of_missing_file_is_a_check_failure():
+    failures = implplan.plan_checks(manifest(files=[{"path": "src/gone.py", "change": "modify"}]), BASE)
+    assert failures == ["src/gone.py is to be modified but does not exist at base"]
+
+
+def test_create_of_existing_file_and_missing_docs_file_fail():
+    found = manifest(
+        files=[{"path": "src/a.py", "change": "create"}],
+        docs_false=[{"path": "docs/none.md", "sentence": "x"}],
+    )
+    assert implplan.plan_checks(found, BASE) == [
+        "src/a.py is to be created but already exists at base",
+        "docs/none.md is named as a false doc but does not exist at base",
+    ]
+
+
+def test_a_good_manifest_passes():
+    assert implplan.plan_checks(manifest(), BASE) == []
+
+
+def test_plan_saved_with_manifest_record(tmp_path: Path):
+    store = setup()
+    approve_everything(store)
+    git = Git(BASE)
+    args = files(tmp_path, manifest(after_merge=["drop the old queue"]))
+    step(store, git).apply(args)
+    step(store, git).apply(args)
+    docs = [d for d in store._documents.values() if d["title"] == "Implementation plan"]
+    assert [d["parent"] for d in docs] == ["s1"]
+    assert docs[0]["body"] == "# Plan\n\n- [ ] one\n"
+    [record] = [r for r in store.records("s1") if r.kind == "implplan"]
+    assert record.subject == "s1"
+    assert record.data == manifest(after_merge=["drop the old queue"])
+    assert record.version == implplan.version((tmp_path / "plan.md").read_bytes(), record.data)
+    assert ["git", "merge-base", "HEAD", "origin/HEAD"] in git.argvs
+    assert ["git", "ls-tree", "-r", "--name-only", "base1"] in git.argvs
+
+
+def test_version_changes_with_plan_or_manifest():
+    one = implplan.version(b"a", manifest())
+    assert one == implplan.version(b"a", manifest())
+    assert one != implplan.version(b"b", manifest())
+    assert one != implplan.version(b"a", manifest(contract_sites=[]))
+
+
+def test_refuses_before_feature_approval(tmp_path: Path):
+    store = setup()
+    with pytest.raises(Refusal, match="planning"):
+        step(store).apply(files(tmp_path, manifest()))
+    assert [r for r in store.records("s1") if r.kind == "implplan"] == []
+
+
+def test_refuses_when_no_feature_is_open(tmp_path: Path):
+    with pytest.raises(Refusal, match="no feature is open"):
+        step(FakeStore()).apply(files(tmp_path, manifest()))
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ("{", "not valid JSON"),
+        ([], "must be a JSON object"),
+        ({**manifest(), "extra": 1}, "unknown field extra"),
+        ({k: v for k, v in manifest().items() if k != "files"}, "field files is missing"),
+        (
+            manifest(files=[{"path": "a", "change": "create"}, {"path": "b", "change": "rename"}]),
+            "files entry 1 field change",
+        ),
+        (manifest(files=[{"path": "", "change": "create"}]), "files entry 0 field path"),
+        (manifest(criteria=[{"text": "t", "tests": "x"}]), "criteria entry 0 field tests"),
+        (manifest(docs_false=[{"path": "p"}]), "docs_false entry 0 field sentence"),
+        (manifest(contract_sites=["a", 3]), "contract_sites entry 1"),
+        (manifest(after_merge="x"), "after_merge must be a list"),
+    ],
+)
+def test_manifest_refusals_name_the_first_bad_entry(tmp_path: Path, data: object, message: str):
+    store = setup()
+    approve_everything(store)
+    with pytest.raises(Refusal, match=message):
+        step(store).apply(files(tmp_path, data))
+    assert [r for r in store.records("s1") if r.kind == "implplan"] == []
+
+
+def test_context_names_the_manifest_shape_and_never_fails(capsys: pytest.CaptureFixture[str]):
+    step(FakeStore()).context(["s1", *TEAM])
+    assert "files" in capsys.readouterr().out

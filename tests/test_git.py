@@ -165,3 +165,9 @@ def test_worktree_add_creates_a_new_branch() -> None:
     fake = Fake((1, "", ""), (0, "", ""))
     git.worktree_add(Path("/nowhere"), "b", "main", fake)
     assert fake.argvs[1] == ["git", "worktree", "add", "-b", "b", "/nowhere/.worktrees/b", "main"]
+
+
+def test_merge_base_reads_the_common_ancestor() -> None:
+    fake = Fake((0, "abc123\n", ""))
+    assert git.merge_base(WT, "HEAD", "origin/HEAD", fake) == "abc123"
+    assert fake.calls == [(["git", "merge-base", "HEAD", "origin/HEAD"], WT, None)]

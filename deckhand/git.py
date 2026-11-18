@@ -84,6 +84,10 @@ def ls_files(repo: Path, ref: str, runner: Runner = run) -> list[str]:
     return call(["git", "ls-tree", "-r", "--name-only", ref], repo, runner).splitlines()
 
 
+def merge_base(repo: Path, a: str, b: str, runner: Runner = run) -> str:
+    return call(["git", "merge-base", a, b], repo, runner).strip()
+
+
 def push(worktree: Path, branch: str, runner: Runner = run) -> None:
     call(["git", "push", "--set-upstream", "origin", branch], worktree, runner)
 
