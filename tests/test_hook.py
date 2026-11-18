@@ -117,3 +117,34 @@ def test_hook_ask_ignores_a_malformed_nonce_with_one_stderr_line(monkeypatch, tm
     captured = capsys.readouterr()
     assert captured.out == ""
     assert len(captured.err.splitlines()) == 1
+
+
+def deny(capsys) -> bool:
+    out = capsys.readouterr().out
+    return bool(out) and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        {"label": "Wide", "description": "The wider scope (Recommended)"},
+        {"label": "Wide", "description": "Recommended for most teams"},
+        {"label": "Recommended", "description": "contract: s"},
+    ],
+)
+def test_hook_ask_denies_recommended_in_a_label_or_description(monkeypatch, tmp_path: Path, capsys, option):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    pending_for(tmp_path, "abcd1234", "Q?", [option["label"], "Narrow"])
+    payload = asked("dh abcd1234", [option["label"], "Narrow"])
+    payload["tool_input"]["questions"][0]["options"][0] = option
+    assert run(monkeypatch, ["ask"], payload) == 0
+    assert deny(capsys)
+
+
+def test_hook_ask_denies_a_deckhand_question_that_carries_answers(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    pending_for(tmp_path, "abcd1234", "Q?", ["Wide", "Narrow"])
+    payload = asked("dh abcd1234", ["Wide", "Narrow"])
+    payload["tool_input"]["answers"] = {"Q?": "Wide"}
+    assert run(monkeypatch, ["ask"], payload) == 0
+    assert deny(capsys)

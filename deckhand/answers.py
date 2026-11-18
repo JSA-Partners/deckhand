@@ -26,6 +26,8 @@ class Answer:
     at: float
     session_id: str = ""
     copied: bool = False
+    options: list[dict] | None = None
+    multi: bool | None = None
 
 
 MIN_COPIED = 20
@@ -90,6 +92,10 @@ def record(hook_input: dict, state: Path) -> None:
                 "question": question,
                 "answer": given[question],
                 "copied": _is_copied(item, str(given[question]), hook_input),
+                "options": [
+                    {"label": o.get("label"), "description": o.get("description")} for o in item.get("options") or []
+                ],
+                "multiSelect": item.get("multiSelect"),
             }
         )
     if not rows:
@@ -134,5 +140,7 @@ def find(nonce: str, question: str, state: Path) -> Answer | None:
                 row.get("at", 0.0),
                 row.get("session_id", ""),
                 bool(row.get("copied", False)),
+                row.get("options"),
+                row.get("multiSelect"),
             )
     return None

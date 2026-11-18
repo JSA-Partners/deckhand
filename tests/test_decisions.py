@@ -24,15 +24,10 @@ def ask(tmp_path: Path, kind: str = "contract", stories: list[str] | None = None
     return question, decisions.load_pending(question.nonce, tmp_path)
 
 
-def answered(tmp_path: Path, question, answer: str, session: str = "sess") -> None:
+def answered(tmp_path: Path, question, answer: str, session: str = "sess", **changes) -> None:
+    shown = {**as_tool_input(question)["questions"][0], **changes}
     answers.record(
-        {
-            "session_id": session,
-            "tool_response": {
-                "questions": [{"question": question.text, "header": question.header}],
-                "answers": {question.text: answer},
-            },
-        },
+        {"session_id": session, "tool_response": {"questions": [shown], "answers": {question.text: answer}}},
         tmp_path,
     )
 
@@ -227,6 +222,8 @@ def test_answer_marked_copied_refuses(tmp_path: Path):
         "question": question.text,
         "answer": "x" * 25,
         "copied": True,
+        "options": as_tool_input(question)["questions"][0]["options"],
+        "multiSelect": False,
     }
     (tmp_path / answers.FILE).write_text(json.dumps(row) + "\n")
     (tmp_path / answers.FILE).chmod(0o600)
@@ -252,3 +249,32 @@ def test_load_pending_refuses_a_nonce_outside_the_pending_folder(tmp_path: Path)
     escaped.write_text(decisions.pending_path(question.nonce, tmp_path).read_text())
     with pytest.raises(Refusal, match="not a deckhand nonce"):
         decisions.load_pending("../x", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"options": [{"label": "Approve", "description": "contract: Checkout"}]},
+        {
+            "options": [
+                {"label": "Not yet", "description": "contract: Checkout"},
+                {"label": "Approve", "description": "contract: Checkout"},
+            ]
+        },
+        {
+            "options": [
+                {"label": "Approve", "description": "Safe"},
+                {"label": "Not yet", "description": "contract: Checkout"},
+            ]
+        },
+        {"multiSelect": True},
+        {"options": None, "multiSelect": None},
+    ],
+)
+def test_options_the_person_saw_must_match_the_pending_question(tmp_path: Path, changes: dict):
+    question, pending = ask(tmp_path)
+    answered(tmp_path, question, "Approve", **changes)
+    store = store_with("s1")
+    with pytest.raises(Refusal, match="options the person saw"):
+        decisions.decide(store, pending, tmp_path)
+    assert store.writes == []

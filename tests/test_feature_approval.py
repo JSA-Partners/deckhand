@@ -250,7 +250,7 @@ def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsy
         {
             "session_id": "sess",
             "tool_response": {
-                "questions": [{"question": asked["question"], "header": asked["header"]}],
+                "questions": [asked],
                 "answers": {asked["question"]: "Approve"},
             },
         },

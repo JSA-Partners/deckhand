@@ -65,7 +65,7 @@ class Session:
             "session_id": "sess",
             "tool_use_id": "tool",
             "tool_response": {
-                "questions": [{k: asked[k] for k in ("question", "header", "options")}],
+                "questions": [asked],
                 "answers": {asked["question"]: answer},
             },
         }

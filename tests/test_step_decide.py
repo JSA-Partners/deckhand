@@ -41,7 +41,7 @@ def record_answer(state: Path, asked: dict, answer: str) -> None:
         {
             "session_id": "sess",
             "tool_response": {
-                "questions": [{"question": asked["question"], "header": asked["header"]}],
+                "questions": [asked],
                 "answers": {asked["question"]: answer},
             },
         },
@@ -64,7 +64,7 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
         {
             "session_id": "sess",
             "tool_response": {
-                "questions": [{"question": asked["question"], "header": asked["header"]}],
+                "questions": [asked],
                 "answers": {asked["question"]: "Approve"},
             },
         },

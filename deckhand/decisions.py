@@ -172,6 +172,14 @@ def _creates_record(pending: Pending, answer: str) -> bool:
     return answer == _POSITIVE[pending.kind]
 
 
+def _saw_the_options(pending: Pending, found: Answer) -> bool:
+    shown = found.options
+    if not isinstance(shown, list) or not all(isinstance(o, dict) for o in shown):
+        return False
+    labels, texts = [o.get("label") for o in shown], [o.get("description") for o in shown]
+    return (labels, texts, found.multi) == (pending.options, pending.descriptions, pending.kind == "tier")
+
+
 def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
@@ -180,6 +188,8 @@ def check(pending: Pending, state: Path) -> Answer:
     asked = question_text(pending.kind, pin)
     if pending.question != asked:
         raise Refusal(f"the pending question for {pending.nonce} differs from the question the person saw")
+    if not _saw_the_options(pending, found):
+        raise Refusal(f"the options the person saw for {pending.nonce} differ from the pending question")
     if found.copied:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier" and not _offered(pending, found.answer):

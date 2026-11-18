@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 from deckhand import answers, decisions
@@ -9,6 +10,7 @@ from deckhand.step import Refusal, register
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 USAGE = "hook apply answer|ask reads one hook event as JSON on stdin"
+RECOMMENDED = re.compile(r"\brecommended\b", re.IGNORECASE)
 
 
 def _read() -> dict:
@@ -32,10 +34,11 @@ def _deckhand_items(hook_input: dict) -> list[dict]:
 
 
 def _recommended(items: list[dict]) -> bool:
-    for item in items:
-        if any("recommended" in str(o.get("label", "")).lower() for o in item.get("options") or []):
-            return True
-    return False
+    return any(
+        RECOMMENDED.search(f"{o.get('label', '')}\n{o.get('description', '')}")
+        for item in items
+        for o in item.get("options") or []
+    )
 
 
 def _unpending(items: list[dict]) -> bool:
@@ -51,8 +54,11 @@ def _unpending(items: list[dict]) -> bool:
     return False
 
 
-def _denied(items: list[dict]) -> bool:
-    return _recommended(items) or _unpending(items)
+def _denied(hook_input: dict) -> bool:
+    items = _deckhand_items(hook_input)
+    if not items:
+        return False
+    return "answers" in (hook_input.get("tool_input") or {}) or _recommended(items) or _unpending(items)
 
 
 @register("hook")
@@ -66,7 +72,7 @@ class Hook:
             hook_input = _read()
             if action == "answer":
                 answers.record(hook_input, answers.state_dir())
-            elif action == "ask" and _denied(_deckhand_items(hook_input)):
+            elif action == "ask" and _denied(hook_input):
                 print(
                     json.dumps(
                         {
