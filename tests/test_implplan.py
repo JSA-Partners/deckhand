@@ -28,12 +28,15 @@ def manifest(**over: object) -> dict:
 
 
 class Git:
-    def __init__(self, paths: set[str]) -> None:
+    def __init__(self, paths: set[str], head: bool = True) -> None:
         self.paths = paths
+        self.head = head
         self.argvs: list[list[str]] = []
 
     def __call__(self, argv, cwd=None, stdin=None):
         self.argvs.append(argv)
+        if argv[1] == "rev-parse":
+            return subprocess.CompletedProcess(argv, 0 if self.head else 128, "", "fatal: bad ref")
         out = "base1\n" if argv[1] == "merge-base" else "\n".join(sorted(self.paths))
         return subprocess.CompletedProcess(argv, 0, out, "")
 
@@ -145,3 +148,48 @@ def test_manifest_refusals_name_the_first_bad_entry(tmp_path: Path, data: object
 def test_context_names_the_manifest_shape_and_never_fails(capsys: pytest.CaptureFixture[str]):
     step(FakeStore()).context(["s1", *TEAM])
     assert "files" in capsys.readouterr().out
+
+
+def test_missing_origin_head_refuses_with_the_fix(tmp_path: Path):
+    store = setup()
+    approve_everything(store)
+    with pytest.raises(Refusal, match="git remote set-head origin --auto"):
+        step(store, Git(BASE, head=False)).apply(files(tmp_path, manifest()))
+    assert [r for r in store.records("s1") if r.kind == "implplan"] == []
+
+
+@pytest.mark.parametrize("name", ["plan", "manifest"])
+def test_non_utf8_input_refuses_naming_the_file(tmp_path: Path, name: str):
+    store = setup()
+    approve_everything(store)
+    args = files(tmp_path, manifest())
+    (tmp_path / ("plan.md" if name == "plan" else "manifest.json")).write_bytes(b"\xff\xfe bad")
+    with pytest.raises(Refusal, match="not valid UTF-8") as caught:
+        step(store).apply(args)
+    assert (tmp_path / ("plan.md" if name == "plan" else "manifest.json")).name in caught.value.rule
+
+
+def test_paths_are_normalized_at_parse_time():
+    found = implplan.parse_manifest(
+        json.dumps(manifest(files=[{"path": "./src/a.py", "change": "modify"}], contract_sites=["./src/a.py"]))
+    )
+    assert found["files"][0]["path"] == "src/a.py"
+    assert found["contract_sites"] == ["src/a.py"]
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (manifest(files=[{"path": "/etc/x", "change": "create"}]), "files entry 0 field path"),
+        (manifest(files=[{"path": "a/../b", "change": "create"}]), "files entry 0 field path"),
+        (manifest(docs_false=[{"path": "../x.md", "sentence": "s"}]), "docs_false entry 0 field path"),
+        (manifest(contract_sites=["ok", "/abs"]), "contract_sites entry 1"),
+        (
+            manifest(files=[{"path": "a.py", "change": "create"}, {"path": "./a.py", "change": "modify"}]),
+            "files entry 1 field path .* duplicate",
+        ),
+    ],
+)
+def test_unusable_paths_refuse(data: object, message: str):
+    with pytest.raises(Refusal, match=message):
+        implplan.parse_manifest(json.dumps(data))

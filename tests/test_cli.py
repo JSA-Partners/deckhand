@@ -223,6 +223,21 @@ def test_apply_linear_error_prints_code_and_message_and_exits_1(registry, capsys
     assert capsys.readouterr().err == "deckhand: network: could not reach Linear\n"
 
 
+def test_apply_git_error_prints_command_code_and_tail_and_exits_1(registry, capsys):
+    from deckhand.git import GitError
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            raise GitError("git merge-base", 128, "fatal: no such ref")
+
+    assert main(["probe", "apply"]) == 1
+    assert capsys.readouterr().err == "deckhand: probe failed (exit 128): fatal: no such ref\n"
+
+
 def test_apply_header_unfit_token_prints_a_fixed_line_without_it(registry, capsys):
     import http.client
     import json

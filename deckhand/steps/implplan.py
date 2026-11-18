@@ -38,13 +38,16 @@ def _parse(args: list[str]) -> dict:
     return found
 
 
-def _read(path: str, flag: str) -> bytes:
+def _read(path: str, flag: str) -> tuple[bytes, str]:
     if not path:
         raise Refusal(f"{flag} is required; {USAGE}")
     try:
-        return Path(path).read_bytes()
+        data = Path(path).read_bytes()
+        return data, data.decode()
     except OSError:
         raise Refusal(f"{path}: cannot be read") from None
+    except UnicodeDecodeError:
+        raise Refusal(f"{path}: not valid UTF-8") from None
 
 
 @register("implplan")
@@ -67,8 +70,8 @@ class ImplPlan:
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
-        plan = _read(parsed.get("plan", ""), "--plan")
-        manifest = implplan.parse_manifest(_read(parsed.get("manifest", ""), "--manifest").decode(errors="replace"))
+        plan, plan_text = _read(parsed.get("plan", ""), "--plan")
+        manifest = implplan.parse_manifest(_read(parsed.get("manifest", ""), "--manifest")[1])
         store = self._store_for_run()
         feature = features.open_feature(store, parsed["team_key"])
         if feature is None:
@@ -78,11 +81,13 @@ class ImplPlan:
             raise Refusal(f"{features.describe(feature.project)} is {current.value}, not building; approve it first")
         story = features.story(store, feature, parsed["words"][0])
         repo = self._repo or Path.cwd()
+        if self._runner(["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"], repo, None).returncode != 0:
+            raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
         base = git.merge_base(repo, "HEAD", "origin/HEAD", self._runner)
         failures = implplan.plan_checks(manifest, set(git.ls_files(repo, base, self._runner)))
         if failures:
             raise Refusal("the plan fails its checks: " + "; ".join(failures))
-        ops.ensure_document(store, story["id"], PURPOSE, story["id"], TITLE, plan.decode(errors="replace"))
+        ops.ensure_document(store, story["id"], PURPOSE, story["id"], TITLE, plan_text)
         record = Record(PURPOSE, story["id"], implplan.version(plan, manifest), "agent:implplan", manifest)
         ops.ensure_record(store, story["id"], record)
         print(f"done: saved the implementation plan for {story['identifier']}")

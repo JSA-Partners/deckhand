@@ -21,6 +21,15 @@ def _text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _path(value: object, where: str) -> str:
+    if not _text(value):
+        raise Refusal(f"{where} must be a non-empty string")
+    path = str(value).strip().removeprefix("./")
+    if path.startswith("/") or ".." in path.split("/"):
+        raise Refusal(f"{where} must be a relative path without .., not {path!r}")
+    return path
+
+
 def _entries(manifest: dict, name: str, fields: tuple[str, ...]) -> list[dict]:
     value = manifest[name]
     if not isinstance(value, list):
@@ -56,9 +65,12 @@ def parse_manifest(text: str) -> dict:
     for name in _REQUIRED:
         if name not in manifest:
             raise Refusal(f"manifest field {name} is missing")
+    seen: set[str] = set()
     for index, entry in enumerate(_entries(manifest, "files", ("path", "change"))):
-        if not _text(entry.get("path")):
-            raise Refusal(f"files entry {index} field path must be a non-empty string")
+        entry["path"] = _path(entry.get("path"), f"files entry {index} field path")
+        if entry["path"] in seen:
+            raise Refusal(f"files entry {index} field path is a duplicate of {entry['path']}")
+        seen.add(entry["path"])
         if entry.get("change") not in CHANGES:
             raise Refusal(f"files entry {index} field change must be create or modify")
     for index, entry in enumerate(_entries(manifest, "criteria", ("text", "tests"))):
@@ -68,12 +80,14 @@ def parse_manifest(text: str) -> dict:
         if not isinstance(tests, list) or not all(_text(t) for t in tests):
             raise Refusal(f"criteria entry {index} field tests must be a list of non-empty strings")
     for index, entry in enumerate(_entries(manifest, "docs_false", ("path", "sentence"))):
-        for field in ("path", "sentence"):
-            if not _text(entry.get(field)):
-                raise Refusal(f"docs_false entry {index} field {field} must be a non-empty string")
-    for name in ("contract_sites", "invariant_sites", "after_merge"):
-        if name in manifest:
-            _strings(manifest, name)
+        entry["path"] = _path(entry.get("path"), f"docs_false entry {index} field path")
+        if not _text(entry.get("sentence")):
+            raise Refusal(f"docs_false entry {index} field sentence must be a non-empty string")
+    for name in ("contract_sites", "invariant_sites"):
+        _strings(manifest, name)
+        manifest[name] = [_path(item, f"{name} entry {i}") for i, item in enumerate(manifest[name])]
+    if "after_merge" in manifest:
+        _strings(manifest, "after_merge")
     return manifest
 
 
