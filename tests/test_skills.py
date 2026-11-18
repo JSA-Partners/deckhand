@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+import shlex
+import sys
 from pathlib import Path
 
 import pytest
 
 from deckhand.cli import _load_steps
-from deckhand.step import REGISTRY
+from deckhand.step import REGISTRY, VERBS, Refusal
 
 SKILLS = Path(__file__).resolve().parent.parent / "skills"
 FILES = sorted(SKILLS.glob("*/SKILL.md"))
@@ -39,9 +41,23 @@ def test_feature_skill_stays_short() -> None:
     assert len(body.split()) < 400
 
 
-def test_feature_skill_names_only_registered_commands() -> None:
-    _, body = split(SKILLS / "feature" / "SKILL.md")
+def named_commands(body: str) -> list[list[str]]:
+    spans = re.findall(r"`(deckhand [^`]*)`", " ".join(body.split()))
+    return [shlex.split(re.sub(r"[\[\]]|\.\.\.", "", span))[1:] for span in spans]
+
+
+def test_feature_skill_commands_parse_as_written() -> None:
     _load_steps()
-    named = re.findall(r"`deckhand (\w+)", body)
-    assert named
-    assert set(named) <= set(REGISTRY)
+    _, body = split(SKILLS / "feature" / "SKILL.md")
+    commands = named_commands(body)
+    assert commands
+    for tokens in commands:
+        name, verb, *args = tokens
+        assert name in REGISTRY, name
+        assert verb in VERBS, f"{name} {verb}"
+        assert hasattr(REGISTRY[name], verb)
+        parse = sys.modules[type(REGISTRY[name]).__module__]._parse
+        try:
+            parse(args)
+        except Refusal as refusal:
+            pytest.fail(f"deckhand {' '.join(tokens)}: {refusal}")
