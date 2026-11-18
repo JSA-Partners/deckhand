@@ -17,6 +17,19 @@ MISSED_BY = ("rule", "example", "invariant", "spike", "external")
 _LISTS = ("depends_on", "unknowns", "new_here")
 _REQUIRED = ("key", "title", "outcome", "repository")
 _OPTIONAL = ("missed_by", "cuts", "spends_budget", "decisions")
+SHAPE = {
+    "key": "a short name for the story, unique in the map",
+    "title": "the story title",
+    "outcome": "what is true once the story is done",
+    "repository": "a repository label of the team",
+    "depends_on": "keys of the stories this one waits for",
+    "unknowns": "what is not known yet, a list of strings",
+    "new_here": "what is new to this codebase, a list of strings",
+    "decisions": "optional, the decision items this story expects, a list of strings",
+    "missed_by": f"after approval, the planning step that missed this story, one of {', '.join(MISSED_BY)}",
+    "cuts": "after approval, the key of a story this one replaces",
+    "spends_budget": "after approval, true when the story spends budget instead of cutting one",
+}
 
 
 def _config_dir() -> Path:
@@ -160,12 +173,19 @@ class Stories:
         feature = features.open_feature(self._store_for_run(), parsed["team_key"])
         if feature is None:
             raise Refusal("no feature is open")
-        facts = {"feature": feature.project["name"], "stories": len(feature.stories), "next": planning.STORY_MAP}
+        facts = {
+            "feature": feature.project["name"],
+            "stories": len(feature.stories),
+            "next": planning.STORY_MAP,
+            "map": SHAPE,
+        }
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
         print(f"feature: {facts['feature']}, {facts['stories']} stories")
-        print("map: a JSON list of {key, title, outcome, repository, depends_on, unknowns, new_here}")
+        print("map: a JSON list of objects with these fields")
+        for name, meaning in SHAPE.items():
+            print(f"  {name}: {meaning}")
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)

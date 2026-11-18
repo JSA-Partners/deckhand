@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -266,3 +267,29 @@ def test_feature_context_names_the_next_planning_step(capsys: pytest.CaptureFixt
     store = setup()
     Feature(store).context([*TEAM, "--json"])
     assert json.loads(capsys.readouterr().out)["open"][0]["next_planning_step"] == "Frame"
+
+
+FIELDS = {
+    "key",
+    "title",
+    "outcome",
+    "repository",
+    "depends_on",
+    "unknowns",
+    "new_here",
+    "decisions",
+    "missed_by",
+    "cuts",
+    "spends_budget",
+}
+
+
+def test_context_prints_every_field_the_map_accepts(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+    Stories(store).context([*TEAM, "--json"])
+    assert set(json.loads(capsys.readouterr().out)["map"]) == FIELDS
+    Stories(store).context(TEAM)
+    shown = capsys.readouterr().out
+    for field in FIELDS:
+        assert re.search(rf"^  {field}: ", shown, re.MULTILINE), field
+    assert "rule, example, invariant, spike, external" in shown
