@@ -11,6 +11,7 @@ from deckhand.step import Refusal
 
 KIND = "review-round"
 DECISION = "finding"
+HAND_ACCEPT = "finding-accept"
 DECLINE, ACCEPT = "Decline", "Accept"
 PERSON = "person:"
 TEXTS = "plans"
@@ -125,17 +126,21 @@ def last(rounds: list[Record]) -> Record | None:
     return max(rounds, key=_n) if rounds else None
 
 
+def decided(records: list[Record]) -> dict[str, str]:
+    return {r.subject: r.data.get("answer") for r in records if r.kind == DECISION and r.author.startswith(PERSON)}
+
+
 def declined(records: list[Record]) -> set[str]:
-    answers = {r.subject: r.data.get("answer") for r in records if r.kind == DECISION and r.author.startswith(PERSON)}
-    return {id for id, answer in answers.items() if answer == DECLINE}
+    return {id for id, answer in decided(records).items() if answer == DECLINE}
 
 
 def accepted(records: list[Record]) -> set[str]:
-    return {r.subject for r in records if r.kind == DECISION and r.data.get("answer") == ACCEPT}
+    by_person = {id for id, answer in decided(records).items() if answer == ACCEPT}
+    return by_person | {r.subject for r in records if r.kind == HAND_ACCEPT}
 
 
 def accept_record(finding: str, version: str) -> Record:
-    return Record(DECISION, finding, version, "agent:review", {"answer": ACCEPT})
+    return Record(HAND_ACCEPT, finding, version, "agent:review", {"answer": ACCEPT})
 
 
 def locate(records: list[Record], finding: str) -> tuple[Record, dict] | None:
@@ -168,7 +173,7 @@ def next_round(rounds: list[Record], target_hash: str, declined: set[str]) -> Ro
 def feature_gaps(project: str, records: list[Record]) -> list[str]:
     latest = last(rounds_of(records, f"{project}:feature"))
     if latest is None:
-        return []
+        return ["the feature review has not run"]
     found = open_p1(latest, declined(records))
     return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]
 

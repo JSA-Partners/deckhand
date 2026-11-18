@@ -17,7 +17,8 @@ from deckhand.store.linear import LinearStore
 
 USAGE = (
     "review takes REF, --stage plan|branch and --team-key KEY, feature-review --team-key KEY alone; context takes"
-    " --json; apply takes round --findings FINDINGS.json, or resolve --accept ID (repeat for each)"
+    " --json; apply takes round --findings FINDINGS.json --target HASH (the target_hash context printed),"
+    " or resolve --accept ID (repeat for each)"
 )
 FEATURE = "feature"
 ACTIONS = ("round", "resolve")
@@ -38,7 +39,7 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg in ("--team-key", "--stage", "--findings"):
+        elif arg in ("--team-key", "--stage", "--findings", "--target"):
             found[arg[2:]] = next(rest, "")
         elif arg in ("--accept", "--decline"):
             found[arg[2:]].append(next(rest, ""))
@@ -101,6 +102,8 @@ class Review:
                 raise Refusal(f"feature-review takes no story REF; {USAGE}")
             if current is not Phase.PLANNING:
                 raise Refusal(f"{features.describe(feature.project)} is {current.value}; the feature review is over")
+            if not feature.live:
+                raise Refusal(f"{features.describe(feature.project)} has no stories to review")
             held = [r for s in feature.live for r in feature.records.get(s["id"], [])]
             project = feature.project["id"]
             ids = [s["id"] for s in feature.live]
@@ -160,8 +163,10 @@ class Review:
 
     def _scoped_diff(self, subject: Subject, target: Target, last: Record, repo: Path) -> tuple[str | None, str]:
         if subject.stage == "branch":
+            if not last.data.get("head"):
+                raise Refusal(f"the last branch round of {subject.label} holds no head to scope the diff from")
             try:
-                return git.diff_since(repo, last.data.get("head", ""), self._runner), ""
+                return git.diff_since(repo, last.data["head"], self._runner), ""
             except git.GitError:
                 return None, "the last reviewed commit is gone; review the whole diff"
         old = review.saved_text(answers.state_dir(), subject.prefix.split(":")[0], last.data["target_hash"])
@@ -214,10 +219,14 @@ class Review:
             self._resolve(parsed)
             return
         found = review.parse_findings(_read(parsed.get("findings", "")))
+        if not parsed.get("target"):
+            raise Refusal(f"--target is required; {USAGE}")
         subject = self._subject(parsed)
         store, repo = self._store_for_run(), self._repo or Path.cwd()
         rounds = review.rounds_of(subject.records, subject.prefix)
         target = self._target(store, subject, repo)
+        if target.hash != parsed["target"]:
+            raise Refusal(f"the target changed since context; run context again and review {target.hash}")
         plan = review.next_round(rounds, target.hash, review.declined(subject.records))
         if isinstance(plan, review.Stop):
             raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
@@ -239,9 +248,12 @@ class Review:
         store = self._store_for_run()
         last = review.last(review.rounds_of(subject.records, subject.prefix))
         held = {item["id"]: item for item in last.data["findings"]} if last else {}
+        by_person = review.decided(subject.records)
         for id in parsed["accept"]:
             if id not in held:
                 raise Refusal(f"{id} is not a finding of the last round of {subject.label} {subject.stage}")
+            if id in by_person:
+                raise Refusal(f"{id} is already decided: the person decided {by_person[id]}")
             if held[id].get("changes_delivery"):
                 raise Refusal(
                     f"{id} changes what the story delivers; the person decides it: decide context finding"
@@ -283,6 +295,7 @@ def _print(facts: dict) -> None:
     else:
         scope = "scoped to the revision" if facts["scoped"] else "the whole target"
         print(f"{head}: round {facts['round']}, {scope}")
+        print(f"target_hash: {facts['target_hash']}")
         print("lenses:")
         for lens in facts["lenses"]:
             print(f"- {lens['name']}: {lens['path']}")

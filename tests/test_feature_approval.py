@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, ops, planning, tiers, versions
+from deckhand import answers, features, ops, planning, review, tiers, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record
@@ -55,7 +55,14 @@ def sat(store: FakeStore, story: str, tier_answer: str = tiers.NONE) -> None:
     decided(store, "sitting", story, "Done", [story])
 
 
+def reviewed(store: FakeStore) -> None:
+    clean = review.round_record(P1, "feature", review.RoundPlan(1, scoped=False, base_hash=""), "h1", [])
+    for story in load(store).live:
+        ops.ensure_record(store, story["id"], clean)
+
+
 def approve_everything(store: FakeStore) -> None:
+    reviewed(store)
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     sat(store, "s1")
@@ -73,6 +80,7 @@ def test_approval_gaps_lists_each_missing_decision():
         "ACME-1: the sitting is not done",
         "ACME-2: the tier is not decided",
         "ACME-2: the sitting is not done",
+        "the feature review has not run",
     ]
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1"])
@@ -82,6 +90,7 @@ def test_approval_gaps_lists_each_missing_decision():
         "ACME-1: the state chart is not approved",
         "ACME-2: the tier is not decided",
         "ACME-2: the sitting is not done",
+        "the feature review has not run",
     ]
 
 
@@ -131,6 +140,7 @@ def test_canceled_story_needs_no_approval():
     decided(store, "contract", P1, "Approve", ["s1"])
     decided(store, "invariants", P1, "Approve", ["s1"])
     sat(store, "s1")
+    reviewed(store)
     assert features.approval_gaps(store, load(store)) == []
     decided(store, "feature-approval", P1, "Approve", ["s1"])
     assert features.phase(load(store)) is Phase.BUILDING
@@ -250,6 +260,7 @@ def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsy
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     sat(store, "s1")
     sat(store, "s2")
+    reviewed(store)
     step = Decide(store)
     step.context(["feature-approval", P1, *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)

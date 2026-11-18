@@ -13,6 +13,7 @@ from deckhand.step import REGISTRY
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
 from deckhand.steps.plan import Plan
+from deckhand.steps.review import FeatureReview
 from deckhand.steps.sitting import Sitting
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
@@ -35,6 +36,7 @@ class Session:
             ("stories", Stories(store)),
             ("decide", Decide(store)),
             ("sitting", Sitting(store)),
+            ("feature-review", FeatureReview(store)),
         ):
             monkeypatch.setitem(REGISTRY, name, step)
         capsys.readouterr()
@@ -72,6 +74,12 @@ class Session:
         self.run("hook", "apply", "answer", stdin=json.dumps(hook))
         out = self.run("decide", "apply", shown["nonce"], *TEAM)
         assert out.startswith("done: recorded")
+
+    def review_feature(self, run) -> None:
+        shown = run("feature-review", "context", *TEAM)
+        target = next(line for line in shown.splitlines() if line.startswith("target_hash: "))
+        findings = self.write("findings.json", "[]")
+        run("feature-review", "apply", "round", *TEAM, "--findings", findings, "--target", target.split()[1])
 
     def facts(self) -> dict:
         [held] = json.loads(self.run("feature", "context", *TEAM, "--json"))["open"]
@@ -145,6 +153,8 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
         session.decide("sitting", ref, "Done")
     session.decide("decision-item", ITEM, "Keep", "--story", "ACME-1")
 
+    assert session.facts()["gaps"] == ["the feature review has not run"]
+    session.review_feature(session.run)
     assert session.facts()["gaps"] == []
     session.decide("feature-approval", alpha, "Approve")
     held = session.facts()
@@ -246,9 +256,11 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
         session.skill("sitting", "apply", ref, *TEAM, "--file", session.write(f"{ref}.md", f"Answers for {ref}."))
         session.ask("sitting", ref, "Done")
 
-    [gap] = session.gaps()
+    [gap] = [found for found in session.gaps() if ": decision item " in found]
     ref, _, rest = gap.partition(": decision item ")
     session.ask("decision-item", rest.removesuffix(" is not decided"), "Keep", "--story", ref)
+    assert session.gaps() == ["the feature review has not run"]
+    session.review_feature(session.skill)
     assert session.gaps() == []
     session.ask("feature-approval", alpha, "Approve")
 
