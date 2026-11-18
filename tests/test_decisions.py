@@ -48,6 +48,14 @@ def test_decide_without_recorded_answer_refuses_and_writes_nothing(tmp_path: Pat
     assert store.writes == []
 
 
+def test_decide_without_an_answers_file_names_the_file(tmp_path: Path):
+    _, pending = ask(tmp_path)
+    store = store_with("s1")
+    with pytest.raises(Refusal, match=str(tmp_path / answers.FILE)):
+        decisions.decide(store, pending, tmp_path)
+    assert store.writes == []
+
+
 def test_decide_with_option_description_refuses(tmp_path: Path):
     question, pending = ask(tmp_path)
     answered(tmp_path, question, "contract: Checkout")

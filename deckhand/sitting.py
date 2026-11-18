@@ -22,7 +22,7 @@ def questions_for(
     asked = []
     if tier.level == 3:
         asked += [FAILURE, RETRY]
-    if tier.level == 1:
+    if tier.data_rule:
         asked.append(DATA_RULE)
     text = f"{issue['title']}\n{issue['description'] or ''}".lower()
     if tier.contract or any(name.lower() in text for name in contract_names if name.strip()):

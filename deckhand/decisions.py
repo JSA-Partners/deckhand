@@ -183,7 +183,7 @@ def _saw_the_options(pending: Pending, found: Answer) -> bool:
 def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
-        raise Refusal(f"no recorded answer for {pending.nonce}")
+        raise Refusal(f"no recorded answer for {pending.nonce} in {state / answers.FILE}")
     pin = Pin(pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels)
     asked = question_text(pending.kind, pin)
     if pending.question != asked:

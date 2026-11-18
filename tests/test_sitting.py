@@ -31,8 +31,10 @@ def test_tier_3_story_gets_failure_questions():
     assert asked == [sitting.FAILURE, sitting.RETRY]
 
 
-def test_tier_1_story_gets_the_data_rule_question():
+def test_a_story_with_a_data_rule_gets_the_data_rule_question():
     assert sitting.questions_for(STORY, tier({"data_rule"}), [], [], []) == [sitting.DATA_RULE]
+    assert sitting.DATA_RULE in sitting.questions_for(STORY, tier({"data_rule", "concurrency"}), [], [], [])
+    assert sitting.DATA_RULE not in sitting.questions_for(STORY, tier({"concurrency"}), [], [], [])
 
 
 def test_story_touching_a_contract_gets_the_contract_question():

@@ -16,6 +16,7 @@ class Fact:
 class Tier:
     level: int
     contract: bool
+    data_rule: bool
     tools_key: str
 
 
@@ -58,7 +59,8 @@ def tier(chosen: set[str]) -> Tier:
         facts.append(_BY_KEY[key])
     level = max((fact.tier for fact in facts), default=0)
     contract = any(fact.key == "crosses_repositories" for fact in facts)
-    return Tier(level=level, contract=contract, tools_key=str(level))
+    data_rule = any(fact.key == "data_rule" for fact in facts)
+    return Tier(level=level, contract=contract, data_rule=data_rule, tools_key=str(level))
 
 
 NONE = "None of these"

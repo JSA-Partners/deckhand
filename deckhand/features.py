@@ -201,9 +201,6 @@ class Budget:
     def over(self) -> bool:
         return self.days_used > self.budget_days
 
-    def line(self) -> str:
-        return f"{self.days_used} of {self.budget_days} days used" + (" (over budget)" if self.over else "")
-
 
 def budget_of(project: dict, today: date) -> Budget | None:
     if not project["start_date"] or not project["target_date"]:
