@@ -133,3 +133,15 @@ def test_registering_a_name_twice_raises(registry):
         @register("probe")
         class Second:
             pass
+
+
+def test_broken_step_module_does_not_stop_other_commands(tmp_path, monkeypatch, capsys, registry):
+    from deckhand import steps
+
+    (tmp_path / "broken.py").write_text("raise RuntimeError('boom')\n")
+    monkeypatch.setattr(steps, "__path__", [*steps.__path__, str(tmp_path)])
+    assert main(["nonesuch"]) == 2
+    err = capsys.readouterr().err
+    assert "cannot load step broken: boom" in err
+    assert "Traceback" not in err
+    assert "setup" in REGISTRY

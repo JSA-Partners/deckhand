@@ -10,7 +10,10 @@ from deckhand.step import REGISTRY, VERBS, Refusal
 
 def _load_steps() -> None:
     for module in pkgutil.iter_modules(steps.__path__):
-        importlib.import_module(f"{steps.__name__}.{module.name}")
+        try:
+            importlib.import_module(f"{steps.__name__}.{module.name}")
+        except Exception as problem:
+            print(f"deckhand: cannot load step {module.name}: {problem}", file=sys.stderr)
 
 
 def main(argv: list[str]) -> int:

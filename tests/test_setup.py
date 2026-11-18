@@ -5,6 +5,7 @@ import re
 import pytest
 
 from deckhand.github import Github
+from deckhand.linear.client import LinearError
 from deckhand.linear.workspace import Workspace
 from deckhand.step import Refusal
 from deckhand.steps.setup import Setup
@@ -25,31 +26,31 @@ class FakeLinear:
             for key in keys
         }
         self.writes: list[tuple[str, dict]] = []
+        self.fail_after: int | None = None
+        self.more = False
+        self.reads = {
+            "TeamStates": ("states", "states"),
+            "TeamLabels": ("labels", "labels"),
+            "TeamAutomation": ("gitAutomationStates", "automation"),
+        }
 
     def _team(self, team_id: str) -> dict:
         return next(team for team in self.teams.values() if team["id"] == team_id)
 
     def query(self, document: str, variables: dict) -> dict:
         name = re.search(r"(?:query|mutation) (\w+)", document).group(1)
-        if name == "TeamSetup":
+        if name == "TeamByKey":
             found = self.teams.get(variables["key"])
             if found is None:
                 return {"teams": {"nodes": []}}
-            return {
-                "teams": {
-                    "nodes": [
-                        {
-                            "id": found["id"],
-                            "key": found["key"],
-                            "states": {"nodes": found["states"]},
-                            "gitAutomationStates": {"nodes": found["automation"]},
-                            "labels": {"nodes": found["labels"]},
-                            "autoArchivePeriod": found["autoArchivePeriod"],
-                            "autoCloseParentIssues": found["autoCloseParentIssues"],
-                        }
-                    ]
-                }
-            }
+            keep = ("id", "key", "autoArchivePeriod", "autoCloseParentIssues")
+            return {"teams": {"nodes": [{k: found[k] for k in keep}]}}
+        if name in self.reads:
+            field, source = self.reads[name]
+            rows = self._team(variables["id"])[source]
+            return {"team": {field: {"nodes": rows, "pageInfo": {"hasNextPage": self.more}}}}
+        if self.fail_after is not None and len(self.writes) >= self.fail_after:
+            raise LinearError("network", "could not reach Linear")
         self.writes.append((name, variables))
         data = variables.get("input", {})
         if name == "WorkflowStateCreate":
@@ -195,3 +196,50 @@ def test_auto_merge_only_with_flag():
     assert patches == [["api", "-X", "PATCH", "repos/acme/widgets", "-F", "allow_auto_merge=true"]]
     setup.apply([*ARGS, "--enable-auto-merge"])
     assert len([call for call in runner.calls if "PATCH" in call]) == 1
+
+
+def test_wrong_automation_state_is_updated_not_created():
+    linear = FakeLinear("ACME", states=[(n, "started") for n in ("In Progress", "In Review", "Done", "Backlog")])
+    linear.teams["ACME"]["automation"] = [{"id": "a-merge", "event": "merge", "state": {"name": "In Review"}}]
+    setup, _ = make(linear)
+    setup.apply(ARGS)
+    names = [w[0] for w in linear.writes]
+    assert "GitAutomationStateUpdate" in names
+    assert [w[1]["input"]["event"] for w in linear.writes if w[0] == "GitAutomationStateCreate"] == ["draft", "start"]
+    update = next(w for w in linear.writes if w[0] == "GitAutomationStateUpdate")
+    assert update[1] == {"id": "a-merge", "input": {"stateId": "s-Done"}}
+
+
+def test_rerun_after_partial_apply_writes_only_what_is_missing():
+    linear = FakeLinear("ACME")
+    setup, _ = make(linear)
+    linear.fail_after = 3
+    with pytest.raises(LinearError):
+        setup.apply(ARGS)
+    done = list(linear.writes)
+    assert len(done) == 3
+    linear.fail_after = None
+    setup.apply(ARGS)
+    rest = linear.writes[3:]
+    assert all(w not in done for w in rest)
+    before = len(linear.writes)
+    setup.apply(ARGS)
+    assert len(linear.writes) == before
+    assert len(linear.teams["ACME"]["states"]) == 6
+
+
+def test_context_without_team_prints_message_and_does_not_raise(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME")
+    setup, _ = make(linear)
+    setup.context(["--team-key", "NOPE"])
+    assert "no team has this key" in capsys.readouterr().out
+    assert linear.writes == []
+
+
+def test_team_past_one_page_refuses():
+    linear = FakeLinear("ACME")
+    linear.more = True
+    setup, _ = make(linear)
+    with pytest.raises(Refusal, match="more than"):
+        setup.apply(ARGS)
+    assert linear.writes == []

@@ -28,6 +28,7 @@ STATES = {
 }
 AUTOMATION = {"draft": "In Progress", "start": "In Review", "merge": "Done"}
 ARCHIVE_MONTHS = 1
+PAGE_SIZE = 250
 
 
 @dataclass(frozen=True)
@@ -41,8 +42,20 @@ class Workspace:
         self._client = client
 
     def team(self, key: str) -> dict[str, Any] | None:
-        nodes = self._client.query(queries.TEAM_SETUP, {"key": key})["teams"]["nodes"]
-        return nodes[0] if nodes else None
+        nodes = self._client.query(queries.TEAM_BY_KEY, {"key": key})["teams"]["nodes"]
+        if not nodes:
+            return None
+        team = dict(nodes[0])
+        team["states"] = self._page(queries.TEAM_STATES, team["id"], "states")
+        team["labels"] = self._page(queries.TEAM_LABELS, team["id"], "labels")
+        team["gitAutomationStates"] = self._page(queries.TEAM_AUTOMATION, team["id"], "gitAutomationStates")
+        return team
+
+    def _page(self, document: str, team_id: str, field: str) -> dict[str, Any]:
+        connection = self._client.query(document, {"id": team_id})["team"][field]
+        if connection["pageInfo"]["hasNextPage"]:
+            raise Refusal(f"the team has more than {PAGE_SIZE} {field}; setup cannot plan safely")
+        return connection
 
     def plan(self, team: dict[str, Any], labels: list[str]) -> list[Change]:
         team_id = team["id"]
@@ -53,7 +66,7 @@ class Workspace:
             def run(ids: dict[str, str]) -> None:
                 input = {"teamId": team_id, "name": name, "type": STATES[name], "color": COLORS[name]}
                 self._client.query(queries.WORKFLOW_STATE_CREATE, {"input": input})
-                ids[name] = self._state_id(team["key"], name)
+                ids[name] = self._state_id(team_id, name)
 
             return run
 
@@ -75,10 +88,9 @@ class Workspace:
     def state_ids(self, team: dict[str, Any]) -> dict[str, str]:
         return {state["name"]: state["id"] for state in team["states"]["nodes"]}
 
-    def _state_id(self, key: str, name: str) -> str:
-        team = self.team(key)
-        assert team is not None
-        return self.state_ids(team)[name]
+    def _state_id(self, team_id: str, name: str) -> str:
+        states = self._page(queries.TEAM_STATES, team_id, "states")
+        return self.state_ids({"states": states})[name]
 
     def _automation(self, team: dict[str, Any], held: dict[str, str]) -> list[Change]:
         rows = {row["event"]: row for row in team["gitAutomationStates"]["nodes"]}

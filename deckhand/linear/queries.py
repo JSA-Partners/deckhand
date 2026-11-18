@@ -87,18 +87,34 @@ mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
 }
 """
 
-TEAM_SETUP = """
-query TeamSetup($key: String!) {
+TEAM_BY_KEY = """
+query TeamByKey($key: String!) {
   teams(filter: { key: { eq: $key } }) {
-    nodes {
-      id
-      key
-      states { nodes { id name type } }
-      gitAutomationStates { nodes { id event state { name } } }
-      labels { nodes { id name isGroup parent { name } } }
-      autoArchivePeriod
-      autoCloseParentIssues
-    }
+    nodes { id key autoArchivePeriod autoCloseParentIssues }
+  }
+}
+"""
+
+TEAM_STATES = """
+query TeamStates($id: String!) {
+  team(id: $id) {
+    states(first: 250) { nodes { id name type } pageInfo { hasNextPage } }
+  }
+}
+"""
+
+TEAM_LABELS = """
+query TeamLabels($id: String!) {
+  team(id: $id) {
+    labels(first: 250) { nodes { id name isGroup parent { name } } pageInfo { hasNextPage } }
+  }
+}
+"""
+
+TEAM_AUTOMATION = """
+query TeamAutomation($id: String!) {
+  team(id: $id) {
+    gitAutomationStates(first: 250) { nodes { id event state { name } } pageInfo { hasNextPage } }
   }
 }
 """
