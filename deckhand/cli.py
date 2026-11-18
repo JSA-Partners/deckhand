@@ -1,99 +1,28 @@
-"""Argument parsing and dispatch. Each subcommand maps to one function in one module."""
-
 from __future__ import annotations
 
-import argparse
-import os
-import re
 import sys
-from collections.abc import Callable, Sequence
-from pathlib import Path
 
-from deckhand import __version__
-
-Handler = Callable[[argparse.Namespace], int]
-Configure = Callable[[argparse.ArgumentParser], None]
-_REGISTRY: dict[str, tuple[Configure, Handler]] = {}
-
-_SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+from deckhand.step import REGISTRY, VERBS, Refusal
 
 
-def command(name: str, configure: Configure) -> Callable[[Handler], Handler]:
-    """Register `handler` as the `deckhand <name>` subcommand; `configure` adds its arguments."""
-
-    def register(handler: Handler) -> Handler:
-        if name in _REGISTRY:
-            raise ValueError(f"command registered twice: {name}")
-        _REGISTRY[name] = (configure, handler)
-        return handler
-
-    return register
-
-
-def _summary(handler: Handler) -> tuple[str, str]:
-    """Return `handler`'s docstring as `(full description, first-line help)`."""
-    doc = (handler.__doc__ or "").strip()
-    help_text = doc.splitlines()[0] if doc else ""
-    return doc, help_text
-
-
-def build_parser() -> argparse.ArgumentParser:
-    import deckhand.commands  # noqa: F401  (side effect: every module imported so its decorators run)
-
-    description = "A story process for shipping code."
-    parser = argparse.ArgumentParser(prog="deckhand", description=description)
-    parser.add_argument("--version", action="version", version=f"deckhand {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    for name, (configure, handler) in sorted(_REGISTRY.items()):
-        sub_description, help_text = _summary(handler)
-        sub = subparsers.add_parser(name, description=sub_description, help=help_text)
-        configure(sub)
-        sub.set_defaults(handler=handler)
-    return parser
-
-
-def main(argv: Sequence[str]) -> int:
-    for stream, errors in ((sys.stdout, "strict"), (sys.stderr, "backslashreplace")):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors=errors)
-    try:
-        parser = build_parser()
-    except Exception as error:  # one line for the model, never a traceback
-        print(f"deckhand: {error}", file=sys.stderr)
-        return 1
-    args = parser.parse_args(argv)
-    try:
-        return args.handler(args)
-    except KeyboardInterrupt:
-        return 130
-    except BrokenPipeError:
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] not in REGISTRY:
+        name = argv[0] if argv else ""
+        print(f"deckhand: unknown command {name!r}", file=sys.stderr)
+        return 2
+    if len(argv) < 2 or argv[1] not in VERBS:
+        print(f"deckhand: {argv[0]} takes one of {', '.join(VERBS)}", file=sys.stderr)
+        return 2
+    command, verb, args = REGISTRY[argv[0]], argv[1], argv[2:]
+    if verb == "context":
+        try:
+            getattr(command, verb)(args)
+        except Exception as problem:
+            print(f"deckhand: {argv[0]} context could not be read: {problem!r}")
         return 0
-    except Exception as error:  # one line for the model, never a traceback
-        print(f"deckhand {args.command}: {error}", file=sys.stderr)
-        return 1
-
-
-def _package_dir() -> Path:
-    return Path(__file__).resolve().parent
-
-
-def _version_key(value: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in value.split("."))
-
-
-def newer_installed() -> str:
-    """The newest deckhand beside this one in the plugin cache, or empty when this is it.
-
-    The plugin cache holds one directory per version and a session resolves that path once, at
-    start, so a session upgraded mid-flight keeps running the version it opened with.
-    """
-    parent = _package_dir().parent
-    if not _SEMVER.match(parent.name):
-        return ""
     try:
-        siblings = [p.name for p in parent.parent.iterdir() if p.is_dir() and _SEMVER.match(p.name)]
-    except OSError:
-        return ""
-    newer = sorted((v for v in siblings if _version_key(v) > _version_key(__version__)), key=_version_key)
-    return newer[-1] if newer else ""
+        getattr(command, verb)(args)
+    except Refusal as refusal:
+        print(f"deckhand: {refusal.rule}", file=sys.stderr)
+        return 1
+    return 0
