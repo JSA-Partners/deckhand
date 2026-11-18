@@ -131,7 +131,12 @@ class LinearStore(Store):
         self._client.query(queries.ATTACHMENT_CREATE, {"input": attachment})
 
     def records(self, issue: str) -> list[Record]:
-        data = self._client.query(queries.ISSUE_ATTACHMENTS, {"id": issue})
+        try:
+            data = self._client.query(queries.ISSUE_ATTACHMENTS, {"id": issue})
+        except LinearError as error:
+            if _missing(error):
+                return []
+            raise
         held = [n for n in data["issue"]["attachments"]["nodes"] if n["url"].startswith(RECORD_URL)]
         found = []
         for node in sorted(held, key=lambda n: n["url"]):

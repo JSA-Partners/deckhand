@@ -331,3 +331,8 @@ def test_relations_reads_both_directions_blocks_only_sorted() -> None:
 def test_relations_of_a_missing_issue_is_empty() -> None:
     client = FakeClient(IssueRelations=LinearError("INPUT_ERROR", "Entity not found: Issue"))
     assert LinearStore(client).relations("m") == []
+
+
+def test_records_of_a_missing_issue_is_empty() -> None:
+    client = FakeClient(IssueAttachments=LinearError("INPUT_ERROR", "Entity not found: Issue"))
+    assert LinearStore(client).records(UUID) == []
