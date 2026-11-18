@@ -78,3 +78,58 @@ def test_context_never_raises(registry, capsys):
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1
     assert "probe" in lines[0]
+
+
+def test_unknown_verb_exits_2_and_names_the_choices(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "bogus"]) == 2
+    assert "context, apply" in capsys.readouterr().err
+    assert main(["probe"]) == 2
+    assert "context, apply" in capsys.readouterr().err
+
+
+def test_apply_success_exits_0_with_its_args(registry):
+    seen = []
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            seen.append(args)
+
+    assert main(["probe", "apply", "7"]) == 0
+    assert seen == [["7"]]
+
+
+def test_context_success_exits_0_and_passes_stdout_through(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            print("briefing", *args)
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context", "7"]) == 0
+    assert capsys.readouterr().out == "briefing 7\n"
+
+
+def test_registering_a_name_twice_raises(registry):
+    @register("probe")
+    class First:
+        pass
+
+    with pytest.raises(ValueError, match="command registered twice: probe"):
+
+        @register("probe")
+        class Second:
+            pass

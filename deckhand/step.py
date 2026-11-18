@@ -15,6 +15,8 @@ class Refusal(Exception):
 
 def register(name: str) -> Callable[[type], type]:
     def add(cls: type) -> type:
+        if name in REGISTRY:
+            raise ValueError(f"command registered twice: {name}")
         REGISTRY[name] = cls()
         return cls
 
