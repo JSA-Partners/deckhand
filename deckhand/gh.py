@@ -59,7 +59,10 @@ def mark_ready(number: int, repo: str, runner: Runner = run) -> None:
 
 def checks(number: int, repo: str, runner: Runner = run) -> Checks:
     argv = ["gh", "pr", "checks", str(number), "--repo", repo, "--required", "--json", "name,bucket"]
-    done = runner(argv, None, None)
+    try:
+        done = runner(argv, None, None)
+    except GitError as error:
+        raise GhError(error.command, error.code, error.stderr_tail) from None
     rows = _rows(done.stdout)
     if rows is None:
         if "no required checks" in done.stderr.lower():

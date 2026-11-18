@@ -115,3 +115,14 @@ def test_gh_error_carries_no_secret() -> None:
     with pytest.raises(gh.GhError) as caught:
         gh.mark_ready(7, REPO, fake)
     assert "SECRET" not in str(caught.value)
+
+
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired(["gh", "pr"], 120), FileNotFoundError("gh")])
+@pytest.mark.parametrize("call", [lambda: gh.mark_ready(7, REPO), lambda: gh.checks(7, REPO)])
+def test_default_runner_failures_become_gh_error(error: Exception, call, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(gh.GhError):
+        call()

@@ -58,16 +58,63 @@ def test_push_sets_upstream() -> None:
     assert fake.calls == [(["git", "push", "--set-upstream", "origin", "b"], WT, None)]
 
 
-def test_apply_hunks_commits_on_base_and_returns_sha() -> None:
-    fake = Fake((0, "", ""), (0, "", ""), (0, "", ""), (0, "sha9\n", ""))
-    assert git.apply_hunks(WT, "main", "PATCH", "scratch", fake) == "sha9"
-    assert fake.argvs == [
-        ["git", "checkout", "--detach", "main"],
-        ["git", "apply", "--index", "-"],
-        ["git", "commit", "-m", "scratch"],
-        ["git", "rev-parse", "HEAD"],
-    ]
-    assert fake.calls[1][2] == "PATCH"
+def repo_with_story(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    for key in ("NAME", "EMAIL"):
+        monkeypatch.setenv(f"GIT_AUTHOR_{key}", "t" if key == "NAME" else "t@t")
+        monkeypatch.setenv(f"GIT_COMMITTER_{key}", "t" if key == "NAME" else "t@t")
+    clone = tmp_path / "clone"
+    clone.mkdir()
+
+    def git_(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=clone, check=True, capture_output=True)
+
+    git_("init", "-q", "-b", "main")
+    (clone / "a.txt").write_text("one\n")
+    git_("add", "a.txt")
+    git_("commit", "-q", "-m", "base")
+    return clone
+
+
+def test_apply_hunks_builds_in_a_scratch_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clone = repo_with_story(tmp_path, monkeypatch)
+    story = git.worktree_add(clone, "story", "main")
+    (story / "b.txt").write_text("extra\n")
+    subprocess.run(["git", "add", "b.txt"], cwd=story, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "story"], cwd=story, check=True)
+    before = git.head(story)
+    patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n one\n+two\n"
+    sha = git.apply_hunks(clone, "main", patch, "scratch", "refs/deckhand/reviewed/x")
+
+    def out(*args: str, cwd: Path = clone) -> str:
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+    assert git.head(story) == before
+    assert out("branch", "--show-current", cwd=story) == "story"
+    assert out("rev-parse", "refs/deckhand/reviewed/x") == sha
+    assert out("diff", "--name-only", "main", sha) == "a.txt"
+    assert out("show", f"{sha}:a.txt") == "one\ntwo"
+    assert out("worktree", "list", "--porcelain").count("worktree ") == 2
+
+
+def test_apply_hunks_removes_the_scratch_worktree_when_apply_fails() -> None:
+    fake = Fake((0, "", ""), (1, "", "error: patch failed"), (0, "", ""))
+    with pytest.raises(git.GitError):
+        git.apply_hunks(Path("/clone"), "main", "bad", "m", "refs/x", fake)
+    assert fake.argvs[0][:5] == ["git", "worktree", "add", "--detach", fake.argvs[0][4]]
+    assert fake.argvs[-1][:4] == ["git", "worktree", "remove", "--force"]
+    assert fake.argvs[-1][4] == fake.argvs[0][4]
+    assert not any(a[:2] == ["git", "update-ref"] for a in fake.argvs)
+
+
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired(["git", "push"], 120), FileNotFoundError("git")])
+def test_default_runner_failures_become_git_error(error: Exception, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(git.GitError) as caught:
+        git.head(WT)
+    assert caught.value.command == "git rev-parse"
 
 
 def test_failure_raises_git_error_with_tail() -> None:

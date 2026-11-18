@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,16 +14,22 @@ TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
 
-def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None):
-    return subprocess.run(
-        argv,
-        cwd=cwd,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=TIMEOUT,
-    )
+def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    command = " ".join(argv[:2])
+    try:
+        return subprocess.run(
+            argv,
+            cwd=cwd,
+            input=stdin,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise GitError(command, -1, f"timed out after {TIMEOUT} seconds") from None
+    except FileNotFoundError:
+        raise GitError(command, -1, f"{argv[0]} not found") from None
 
 
 class GitError(Exception):
@@ -80,8 +88,16 @@ def push(worktree: Path, branch: str, runner: Runner = run) -> None:
     call(["git", "push", "--set-upstream", "origin", branch], worktree, runner)
 
 
-def apply_hunks(worktree: Path, base: str, patch: str, message: str, runner: Runner = run) -> str:
-    call(["git", "checkout", "--detach", base], worktree, runner)
-    call(["git", "apply", "--index", "-"], worktree, runner, stdin=patch)
-    call(["git", "commit", "-m", message], worktree, runner)
-    return head(worktree, runner)
+def apply_hunks(clone: Path, base: str, patch: str, message: str, ref: str, runner: Runner = run) -> str:
+    scratch = Path(tempfile.mkdtemp(prefix="deckhand-"))
+    try:
+        call(["git", "worktree", "add", "--detach", str(scratch), base], clone, runner)
+        call(["git", "apply", "-"], scratch, runner, stdin=patch)
+        call(["git", "add", "-A"], scratch, runner)
+        call(["git", "commit", "-m", message], scratch, runner)
+        sha = head(scratch, runner)
+        call(["git", "update-ref", ref, sha], clone, runner)
+        return sha
+    finally:
+        runner(["git", "worktree", "remove", "--force", str(scratch)], clone, None)
+        shutil.rmtree(scratch, ignore_errors=True)
