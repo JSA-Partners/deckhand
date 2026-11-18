@@ -12,6 +12,8 @@ from deckhand.ops import (
     ensure_document,
     ensure_issue,
     ensure_labels,
+    ensure_project,
+    ensure_project_dates,
     ensure_record,
     ensure_relation,
 )
@@ -155,3 +157,32 @@ def test_rerun_converges(operations: list[tuple], k: int) -> None:
     assert broken.snapshot() == clean.snapshot()
     relations = broken.snapshot()["relations"]
     assert len(relations) == len({tuple(edge) for edge in relations})
+
+
+def test_ensure_project_twice_writes_once() -> None:
+    store = FakeStore()
+    first = ensure_project(store, "feature-1", "project", "ACME", "Feature", "about")
+    second = ensure_project(store, "feature-1", "project", "ACME", "Feature", "about")
+    assert first == second == create_id("feature-1", "project")
+    assert store.project(first)["name"] == "Feature"
+    assert [w[0] for w in store.writes] == ["create_project"]
+
+
+def test_ensure_project_tolerates_a_lost_race() -> None:
+    store = FakeStore()
+    id = create_id("feature-1", "project")
+    store.create_project(id, "ACME", "Feature", "about")
+    store.project = lambda _id: None
+    assert ensure_project(store, "feature-1", "project", "ACME", "Feature", "about") == id
+    assert len(store.team_projects("ACME")) == 1
+
+
+def test_ensure_project_dates_writes_only_on_change() -> None:
+    store = FakeStore()
+    store.create_project("p1", "ACME", "Feature", "")
+    ensure_project_dates(store, "p1", "2026-11-01", None)
+    ensure_project_dates(store, "p1", "2026-11-01", None)
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_dates"]
+    ensure_project_dates(store, "p1", "2026-11-01", "2026-12-01")
+    assert store.project("p1")["target_date"] == "2026-12-01"
+    assert len(store.writes) == 3

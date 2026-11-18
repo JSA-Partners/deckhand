@@ -33,6 +33,52 @@ query Issue($id: String!) {{
 }}
 """
 
+TEAM_PROJECTS = f"""
+query TeamProjects($id: String!) {{
+  team(id: $id) {{
+    projects{PAGE} {{ nodes {{ id name description startDate targetDate }} {MORE} }}
+  }}
+}}
+"""
+
+PROJECT = """
+query Project($id: String!) {
+  project(id: $id) { id name description startDate targetDate }
+}
+"""
+
+PROJECT_ISSUES = f"""
+query ProjectIssues($id: String!) {{
+  project(id: $id) {{
+    issues{PAGE} {{
+      nodes {{
+        id
+        identifier
+        number
+        title
+        description
+        team {{ key }}
+        state {{ name }}
+        labels{PAGE} {{ nodes {{ name }} {MORE} }}
+      }}
+      {MORE}
+    }}
+  }}
+}}
+"""
+
+PROJECT_CREATE = """
+mutation ProjectCreate($input: ProjectCreateInput!) {
+  projectCreate(input: $input) { success project { id } }
+}
+"""
+
+PROJECT_UPDATE = """
+mutation ProjectUpdate($id: String!, $input: ProjectUpdateInput!) {
+  projectUpdate(id: $id, input: $input) { success }
+}
+"""
+
 ISSUE_ATTACHMENTS = f"""
 query IssueAttachments($id: String!) {{
   issue(id: $id) {{ attachments{PAGE} {{ nodes {{ url metadata }} {MORE} }} }}

@@ -18,6 +18,7 @@ class WriteFailed(Exception):
 class FakeStore(Store):
     def __init__(self) -> None:
         self._issues: dict[str, dict[str, Any]] = {}
+        self._projects: dict[str, dict[str, Any]] = {}
         self._documents: dict[str, dict[str, Any]] = {}
         self._attachments: dict[str, dict[str, dict[str, Any]]] = {}
         self._relations: list[list[str]] = []
@@ -30,6 +31,7 @@ class FakeStore(Store):
         data = json.loads(path.read_text())
         store = cls()
         store._issues = data["issues"]
+        store._projects = data["projects"]
         store._documents = data["documents"]
         store._attachments = data["attachments"]
         store._relations = data["relations"]
@@ -40,6 +42,7 @@ class FakeStore(Store):
         return copy.deepcopy(
             {
                 "issues": self._issues,
+                "projects": self._projects,
                 "documents": self._documents,
                 "attachments": self._attachments,
                 "relations": sorted(self._relations),
@@ -77,19 +80,27 @@ class FakeStore(Store):
             "description": description,
             "project": project,
             "labels": list(labels),
+            "state": "Backlog",
         }
         self._wrote("create_issue", id)
         return id
 
     def issue(self, id: str) -> dict | None:
         found = self._issues.get(id)
-        return copy.deepcopy(found) if found else None
+        return self._public(found) if found else None
 
     def issue_by_ref(self, ref: Ref) -> dict | None:
         for found in self._issues.values():
             if found["team"] == ref.team and found["number"] == ref.number:
-                return copy.deepcopy(found)
+                return self._public(found)
         return None
+
+    @staticmethod
+    def _public(issue: dict[str, Any]) -> dict[str, Any]:
+        return {key: copy.deepcopy(value) for key, value in issue.items() if key != "state"}
+
+    def set_issue_state(self, issue: str, state: str) -> None:
+        self._issues[issue]["state"] = state
 
     def set_labels(self, issue: str, labels: list[str]) -> None:
         self._issues[issue]["labels"] = list(labels)
@@ -119,3 +130,39 @@ class FakeStore(Store):
 
     def relations(self, issue: str) -> list[tuple[str, str]]:
         return [(a, b) for a, b in sorted(self._relations) if issue in (a, b)]
+
+    def create_project(self, id: str, team: str, name: str, description: str) -> str:
+        if id in self._projects:
+            raise DuplicateId("INPUT_ERROR", f"{CONFLICT_PREFIX} Project")
+        self._projects[id] = {
+            "id": id,
+            "team": team,
+            "name": name,
+            "description": description,
+            "start_date": None,
+            "target_date": None,
+        }
+        self._wrote("create_project", id)
+        return id
+
+    @staticmethod
+    def _project(project: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in project.items() if key != "team"}
+
+    def project(self, id: str) -> dict | None:
+        found = self._projects.get(id)
+        return self._project(found) if found else None
+
+    def team_projects(self, team: str) -> list[dict]:
+        held = [p for p in self._projects.values() if p["team"] == team]
+        return [self._project(p) for p in sorted(held, key=lambda p: p["id"])]
+
+    def set_project_dates(self, project: str, start: str | None, target: str | None) -> None:
+        self._projects[project]["start_date"] = start
+        self._projects[project]["target_date"] = target
+        self._wrote("set_project_dates", project, start, target)
+
+    def project_issues(self, project: str) -> list[dict]:
+        held = [i for i in self._issues.values() if i["project"] == project]
+        held.sort(key=lambda i: (i["team"], i["number"]))
+        return [copy.deepcopy(i) for i in held]

@@ -65,3 +65,21 @@ def ensure_relation(store: Store, blocker: str, blocked: str) -> None:
     blocker, blocked = _issue_id(store, blocker), _issue_id(store, blocked)
     if (blocker, blocked) not in store.relations(blocker):
         store.relate(blocker, blocked)
+
+
+def ensure_project(store: Store, key: str, purpose: str, team: str, name: str, description: str) -> str:
+    id = create_id(key, purpose)
+    if store.project(id) is not None:
+        return id
+    try:
+        store.create_project(id, team, name, description)
+    except DuplicateId:
+        pass
+    return id
+
+
+def ensure_project_dates(store: Store, project: str, start: str | None, target: str | None) -> None:
+    found = store.project(project)
+    if found is not None and (found["start_date"], found["target_date"]) == (start, target):
+        return
+    store.set_project_dates(project, start, target)
