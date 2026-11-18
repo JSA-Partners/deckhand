@@ -138,6 +138,13 @@ def story(store: Store, feature: Feature, ref: str) -> dict:
     return held
 
 
+def crosses_repositories(store: Store, feature: Feature, story: dict) -> bool:
+    group = set(store.repository_labels(story["team"]))
+    edges = {end for pair in store.relations(story["id"]) for end in pair} - {story["id"]}
+    mine = group & set(story["labels"])
+    return any(group & set(other["labels"]) != mine for other in feature.live if other["id"] in edges)
+
+
 def load(store: Store, project: dict) -> Feature:
     stories = store.project_issues(project["id"])
     feature = Feature(project, stories, {s["id"]: store.records(s["id"]) for s in stories})

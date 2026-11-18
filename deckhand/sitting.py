@@ -17,7 +17,7 @@ STARTED = "sitting"
 
 
 def questions_for(
-    issue: dict, tier: Tier, unknowns: list[str], new_here: list[str], contract_names: list[str]
+    issue: dict, tier: Tier, crosses: bool, unknowns: list[str], new_here: list[str], contract_names: list[str]
 ) -> list[str]:
     asked = []
     if tier.level == 3:
@@ -25,7 +25,7 @@ def questions_for(
     if tier.data_rule:
         asked.append(DATA_RULE)
     text = f"{issue['title']}\n{issue['description'] or ''}".lower()
-    if tier.contract or any(name.lower() in text for name in contract_names if name.strip()):
+    if crosses or any(name.lower() in text for name in contract_names if name.strip()):
         asked.append(CONTRACT)
     asked += [f"Unknown: {item}. What is known, and what would settle it?" for item in unknowns]
     asked += [f"New here: {item}. What should it do, in your words?" for item in new_here]

@@ -19,7 +19,6 @@ P1 = create_id("ACME:Alpha", "feature")
 
 TEAM = ["--team-key", "ACME"]
 STATE_CHART = next(f.question for f in FACTS if f.key == "multi_step")
-CONTRACT = next(f.question for f in FACTS if f.key == "crosses_repositories")
 
 
 def setup() -> FakeStore:
@@ -51,7 +50,7 @@ def decided(store: FakeStore, kind: str, subject: str, answer: str, stories: lis
         ops.ensure_record(store, story, Record(kind, subject, version, "person:s", data))
 
 
-def sat(store: FakeStore, story: str, tier_answer: str = CONTRACT) -> None:
+def sat(store: FakeStore, story: str, tier_answer: str = tiers.NONE) -> None:
     decided(store, "tier", story, tier_answer, [story])
     decided(store, "sitting", story, "Done", [story])
 

@@ -23,34 +23,34 @@ START = datetime(2026, 11, 18, 9, 0)
 
 
 def test_tier_0_story_with_nothing_new_gets_no_questions():
-    assert sitting.questions_for(STORY, tier(set()), [], [], []) == []
+    assert sitting.questions_for(STORY, tier(set()), False, [], [], []) == []
 
 
 def test_tier_3_story_gets_failure_questions():
-    asked = sitting.questions_for(STORY, tier({"concurrency"}), [], [], [])
+    asked = sitting.questions_for(STORY, tier({"concurrency"}), False, [], [], [])
     assert asked == [sitting.FAILURE, sitting.RETRY]
 
 
 def test_a_story_with_a_data_rule_gets_the_data_rule_question():
-    assert sitting.questions_for(STORY, tier({"data_rule"}), [], [], []) == [sitting.DATA_RULE]
-    assert sitting.DATA_RULE in sitting.questions_for(STORY, tier({"data_rule", "concurrency"}), [], [], [])
-    assert sitting.DATA_RULE not in sitting.questions_for(STORY, tier({"concurrency"}), [], [], [])
+    assert sitting.questions_for(STORY, tier({"data_rule"}), False, [], [], []) == [sitting.DATA_RULE]
+    assert sitting.DATA_RULE in sitting.questions_for(STORY, tier({"data_rule", "concurrency"}), False, [], [], [])
+    assert sitting.DATA_RULE not in sitting.questions_for(STORY, tier({"concurrency"}), False, [], [], [])
 
 
 def test_story_touching_a_contract_gets_the_contract_question():
-    assert sitting.questions_for(STORY, tier(set()), [], [], ["orders"]) == [sitting.CONTRACT]
-    assert sitting.questions_for(STORY, tier({"crosses_repositories"}), [], [], []) == [sitting.CONTRACT]
-    assert sitting.questions_for(STORY, tier(set()), [], [], ["refunds"]) == []
+    assert sitting.questions_for(STORY, tier(set()), False, [], [], ["orders"]) == [sitting.CONTRACT]
+    assert sitting.questions_for(STORY, tier(set()), True, [], [], []) == [sitting.CONTRACT]
+    assert sitting.questions_for(STORY, tier(set()), False, [], [], ["refunds"]) == []
 
 
 def test_each_unknown_adds_a_question():
-    asked = sitting.questions_for(STORY, tier(set()), ["rate limits", "retention"], [], [])
+    asked = sitting.questions_for(STORY, tier(set()), False, ["rate limits", "retention"], [], [])
     assert len(asked) == 2
     assert ["rate limits" in q for q in asked] == [True, False]
 
 
 def test_each_new_here_item_is_its_own_screen():
-    asked = sitting.questions_for(STORY, tier(set()), [], ["queue", "cron"], [])
+    asked = sitting.questions_for(STORY, tier(set()), False, [], ["queue", "cron"], [])
     assert len(asked) == 2
     assert ["queue" in q for q in asked] == [True, False]
     assert ["cron" in q for q in asked] == [False, True]

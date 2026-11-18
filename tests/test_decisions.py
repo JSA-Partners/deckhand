@@ -98,7 +98,7 @@ def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer:
 def test_tier_selection_creates_a_record(tmp_path: Path):
     question, pending = ask(tmp_path, "tier")
     assert question.multi
-    assert len(question.options) == 6
+    assert len(question.options) == 5
     answered(tmp_path, question, question.options[0])
     store = store_with("s1")
     assert decisions.decide(store, pending, tmp_path) is True
@@ -174,7 +174,7 @@ def test_question_text_states_version_and_story_labels_not_ids():
 def test_tier_offers_none_of_these_last():
     question = decisions.make_question("tier", pin())
     assert question.options[-1] == "None of these"
-    assert len(question.options) == 6
+    assert len(question.options) == 5
 
 
 def test_tier_none_of_these_records_tier_0(tmp_path: Path):

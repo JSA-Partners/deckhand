@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import cli, features, planning
+from deckhand import cli, features, planning, sitting
 from deckhand.features import Phase
 from deckhand.step import REGISTRY
 from deckhand.steps.decide import Decide
@@ -141,6 +141,7 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     for ref in ("ACME-1", "ACME-2", "ACME-3"):
         shown = session.run("sitting", "context", ref, *TEAM)
         assert shown.startswith(f"story: {ref}")
+        assert (sitting.CONTRACT in shown) is (ref != "ACME-3")
         session.run("sitting", "apply", ref, *TEAM, "--file", session.write(f"{ref}.md", f"Answers for {ref}."))
         session.decide("sitting", ref, "Done")
     session.decide("decision-item", ITEM, "Keep", "--story", "ACME-1")

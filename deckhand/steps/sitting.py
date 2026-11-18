@@ -76,8 +76,9 @@ class Sitting:
         if level is None:
             raise Refusal(f"the tier record of {story['identifier']} holds no facts; decide the tier again")
         stub = next((r.data for r in records if r.kind == "stub"), {})
+        crosses = features.crosses_repositories(store, feature, story)
         questions = sitting.questions_for(
-            story, level, stub.get("unknowns", []), stub.get("new_here", []), parsed["contracts"]
+            story, level, crosses, stub.get("unknowns", []), stub.get("new_here", []), parsed["contracts"]
         )
         now = self._now()
         line = sitting.progress(store, feature, sitting.started(answers.state_dir(), feature.project["id"], now), now)
