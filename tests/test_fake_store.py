@@ -108,12 +108,16 @@ def test_snapshot_round_trip(tmp_path: Path) -> None:
     store.put_document("d1", "i1", "Plan", "text")
     store.put_record("i1", approval("1"))
     store.relate("i1", "i2")
+    store.create_project("p1", "ACME", "Feature", "about")
+    store.set_project_dates("p1", "2026-11-01", None)
+    store.set_issue_state("i1", "Done")
     path = tmp_path / "snapshot.json"
     path.write_text(json.dumps(store.snapshot()))
     loaded = FakeStore.from_snapshot(path)
     assert loaded.snapshot() == store.snapshot()
     assert loaded.writes == []
     assert loaded.records("i1") == [approval("1")]
+    assert loaded.project("p1") == store.project("p1")
     assert loaded.create_issue("i2", "ACME", "Next", "", None, []) == "i2"
     assert loaded.issue("i2")["number"] == 2
 
@@ -150,3 +154,56 @@ def test_relations_keep_duplicates() -> None:
     store.relate("i1", "i2")
     store.relate("i1", "i2")
     assert store.relations("i1") == [("i1", "i2"), ("i1", "i2")]
+
+
+def test_project_round_trip() -> None:
+    store = FakeStore()
+    assert store.project("p1") is None
+    assert store.create_project("p1", "ACME", "Feature", "about") == "p1"
+    expected = {
+        "id": "p1",
+        "name": "Feature",
+        "description": "about",
+        "start_date": None,
+        "target_date": None,
+    }
+    assert store.project("p1") == expected
+    store.set_project_dates("p1", "2026-11-01", "2026-12-01")
+    assert store.project("p1") == {**expected, "start_date": "2026-11-01", "target_date": "2026-12-01"}
+    store.set_project_dates("p1", None, None)
+    assert store.project("p1") == expected
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_dates", "set_project_dates"]
+
+
+def test_duplicate_project_raises_duplicate() -> None:
+    store = FakeStore()
+    store.create_project("p1", "ACME", "Feature", "about")
+    with pytest.raises(DuplicateId) as caught:
+        store.create_project("p1", "ACME", "Other", "")
+    assert caught.value.entity == "Project"
+    assert store.project("p1")["name"] == "Feature"
+    assert len(store.writes) == 1
+
+
+def test_team_projects_lists_only_that_team() -> None:
+    store = FakeStore()
+    store.create_project("p2", "ACME", "Second", "")
+    store.create_project("p1", "ACME", "First", "")
+    store.create_project("p3", "OTHER", "Third", "")
+    assert [p["id"] for p in store.team_projects("ACME")] == ["p1", "p2"]
+    assert [p["id"] for p in store.team_projects("OTHER")] == ["p3"]
+    assert store.team_projects("NONE") == []
+
+
+def test_project_issues_lists_members_with_state() -> None:
+    store = FakeStore()
+    store.create_project("p1", "ACME", "Feature", "")
+    store.create_issue("i1", "ACME", "One", "", "p1", [])
+    store.create_issue("i2", "ACME", "Two", "", "p1", ["deckhand"])
+    store.create_issue("i3", "ACME", "Three", "", None, [])
+    store.set_issue_state("i2", "Done")
+    members = store.project_issues("p1")
+    assert [(m["id"], m["state"]) for m in members] == [("i1", "Backlog"), ("i2", "Done")]
+    assert {k: v for k, v in members[1].items() if k != "state"} == store.issue("i2")
+    assert "state" not in store.issue("i2")
+    assert store.project_issues("none") == []

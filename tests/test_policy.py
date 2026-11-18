@@ -39,7 +39,7 @@ front_end = true
 
 [tier_tools]
 "0" = ["git"]
-"4" = ["gh"]
+"3" = ["gh"]
 
 [extra_lenses]
 security = ["lenses/auth.md"]
@@ -63,8 +63,8 @@ def test_tier_tools_keys_become_ints(tmp_path):
     assert Policy.load(tmp_path).tier_tools == {0: ["git"], 3: ["pytest"]}
 
 
-@pytest.mark.parametrize("key", ["5", "-1", "one", "01x"])
-def test_tier_tools_refuses_keys_outside_zero_to_four(tmp_path, key):
+@pytest.mark.parametrize("key", ["4", "5", "-1", "one", "01x"])
+def test_tier_tools_refuses_keys_outside_zero_to_three(tmp_path, key):
     path = write_policy(
         tmp_path,
         f'repository_label = "acme/widgets"\n\n[tier_tools]\n"{key}" = ["git"]\n',

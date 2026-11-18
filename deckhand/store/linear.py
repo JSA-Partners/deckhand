@@ -4,6 +4,7 @@ from typing import Any
 
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
+from deckhand.linear.workspace import GROUP
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
@@ -20,6 +21,16 @@ def _nodes(connection: dict[str, Any], issue: str, field: str) -> list[dict[str,
     if connection["pageInfo"]["hasNextPage"]:
         raise Refusal(f"{issue} has more than {queries.PAGE_SIZE} {field}; deckhand cannot read them safely")
     return connection["nodes"]
+
+
+def _project(node: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": node["id"],
+        "name": node["name"],
+        "description": node["description"],
+        "start_date": node["startDate"],
+        "target_date": node["targetDate"],
+    }
 
 
 class LinearStore(Store):
@@ -112,6 +123,15 @@ class LinearStore(Store):
         label_ids = self._label_ids(self._team_id(node["team"]["key"]), labels)
         self._client.query(queries.ISSUE_UPDATE, {"id": node["id"], "input": {"labelIds": label_ids}})
 
+    def set_issue_text(self, issue: str, title: str, description: str) -> None:
+        fields = {"title": title, "description": description}
+        self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": fields})
+
+    def repository_labels(self, team: str) -> list[str]:
+        node = self._client.query(queries.TEAM_LABELS, {"id": self._team_id(team)})["team"]
+        found = _nodes(node["labels"], team, "labels")
+        return sorted(n["name"] for n in found if (n.get("parent") or {}).get("name") == GROUP)
+
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
         node = self._issue_node(parent)
         owner, parent = ("issueId", node["id"]) if node is not None else ("projectId", parent)
@@ -181,3 +201,52 @@ class LinearStore(Store):
         pairs = [(node["id"], r["relatedIssue"]["id"]) for r in outward if r["type"] == "blocks"]
         pairs += [(r["issue"]["id"], node["id"]) for r in inward if r["type"] == "blocks"]
         return sorted(pairs)
+
+    def create_project(self, id: str, team: str, name: str, description: str) -> str:
+        fields = {
+            "id": id,
+            "name": name,
+            "description": description,
+            "teamIds": [self._team_id(team)],
+        }
+        self._client.query(queries.PROJECT_CREATE, {"input": fields})
+        return id
+
+    def project(self, id: str) -> dict | None:
+        try:
+            node = self._client.query(queries.PROJECT, {"id": id})["project"]
+        except LinearError as error:
+            if _missing(error):
+                return None
+            raise
+        return _project(node)
+
+    def team_projects(self, team: str) -> list[dict]:
+        node = self._client.query(queries.TEAM_PROJECTS, {"id": self._team_id(team)})["team"]
+        return [_project(n) for n in _nodes(node["projects"], team, "projects")]
+
+    def set_project_dates(self, project: str, start: str | None, target: str | None) -> None:
+        dates = {"startDate": start, "targetDate": target}
+        self._client.query(queries.PROJECT_UPDATE, {"id": project, "input": dates})
+
+    def project_issues(self, project: str) -> list[dict]:
+        try:
+            node = self._client.query(queries.PROJECT_ISSUES, {"id": project})["project"]
+        except LinearError as error:
+            if _missing(error):
+                return []
+            raise
+        return [
+            {
+                "id": n["id"],
+                "team": n["team"]["key"],
+                "number": n["number"],
+                "identifier": n["identifier"],
+                "title": n["title"],
+                "description": n["description"],
+                "project": project,
+                "labels": [label["name"] for label in _nodes(n["labels"], n["id"], "labels")],
+                "state": n["state"]["name"],
+            }
+            for n in _nodes(node["issues"], project, "issues")
+        ]

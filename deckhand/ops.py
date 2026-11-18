@@ -29,11 +29,20 @@ def ensure_issue(store: Store, key: str, purpose: str, **fields: Any) -> str:
     return id
 
 
-def ensure_labels(store: Store, issue: str, labels: list[str]) -> None:
+def ensure_labels(store: Store, issue: str, labels: list[str], group: list[str]) -> None:
     found = store.issue(issue)
-    if found is not None and set(found["labels"]) == set(labels):
+    held = set(found["labels"]) if found is not None else set()
+    wanted = (held - set(group)) | set(labels)
+    if found is not None and held == wanted:
         return
-    store.set_labels(issue, sorted(labels))
+    store.set_labels(issue, sorted(wanted))
+
+
+def ensure_issue_text(store: Store, issue: str, title: str, description: str) -> None:
+    found = store.issue(issue)
+    if found is not None and (found["title"], found["description"]) == (title, description):
+        return
+    store.set_issue_text(issue, title, description)
 
 
 def ensure_document(store: Store, key: str, purpose: str, parent: str, title: str, body: str) -> str:
@@ -50,18 +59,41 @@ def ensure_record(store: Store, issue: str, record: Record) -> None:
     store.put_record(issue, record)
 
 
-def _issue_id(store: Store, issue: str) -> str:
+def issue_id_or_none(store: Store, issue: str) -> str | None:
     try:
         ref = Ref.parse(issue)
     except ValueError:
         return issue
     found = store.issue_by_ref(ref)
+    return found["id"] if found else None
+
+
+def _issue_id(store: Store, issue: str) -> str:
+    found = issue_id_or_none(store, issue)
     if found is None:
         raise Refusal(f"no issue {issue}")
-    return found["id"]
+    return found
 
 
 def ensure_relation(store: Store, blocker: str, blocked: str) -> None:
     blocker, blocked = _issue_id(store, blocker), _issue_id(store, blocked)
     if (blocker, blocked) not in store.relations(blocker):
         store.relate(blocker, blocked)
+
+
+def ensure_project(store: Store, key: str, purpose: str, team: str, name: str, description: str) -> str:
+    id = create_id(key, purpose)
+    if store.project(id) is not None:
+        return id
+    try:
+        store.create_project(id, team, name, description)
+    except DuplicateId:
+        pass
+    return id
+
+
+def ensure_project_dates(store: Store, project: str, start: str | None, target: str | None) -> None:
+    found = store.project(project)
+    if found is not None and (found["start_date"], found["target_date"]) == (start, target):
+        return
+    store.set_project_dates(project, start, target)

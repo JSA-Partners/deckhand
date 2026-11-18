@@ -9,6 +9,7 @@ import urllib.request
 
 import pytest
 
+from deckhand.credentials import APP_FILE
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
 from deckhand.linear.oauth import fetch_app_token
 from deckhand.step import Refusal
@@ -156,9 +157,18 @@ def test_fetch_app_token_posts_client_credentials() -> None:
     }
 
 
-def test_fetch_app_token_failure_hides_secret() -> None:
+@pytest.mark.parametrize("status", [400, 401])
+def test_token_endpoint_refusal_names_app_file(status: int) -> None:
+    with pytest.raises(Refusal) as raised:
+        fetch_app_token("id1", "sec1", Transport(http_error(status, {"error": "invalid_client"})))
+    assert APP_FILE in raised.value.rule
+    assert "id1" not in raised.value.rule
+    assert "sec1" not in raised.value.rule
+
+
+def test_token_endpoint_server_error_stays_a_linear_error() -> None:
     with pytest.raises(LinearError) as raised:
-        fetch_app_token("id1", "sec1", Transport(http_error(400, {"error": "invalid_client"})))
+        fetch_app_token("id1", "sec1", Transport(http_error(500)))
     assert raised.value.code == "token"
     assert "sec1" not in str(raised.value)
 

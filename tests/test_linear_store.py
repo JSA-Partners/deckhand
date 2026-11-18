@@ -428,3 +428,163 @@ def test_issue_reads_ask_linear_for_a_full_page() -> None:
     for document in client.documents:
         assert f"(first: {queries.PAGE_SIZE})" in document
     assert client.documents[2].count(f"(first: {queries.PAGE_SIZE})") == 2
+
+
+PROJECT_NODE = {
+    "id": "proj-1",
+    "name": "Feature",
+    "description": "about",
+    "startDate": "2026-11-01",
+    "targetDate": None,
+}
+PROJECT = {
+    "id": "proj-1",
+    "name": "Feature",
+    "description": "about",
+    "start_date": "2026-11-01",
+    "target_date": None,
+}
+
+
+def test_create_project_resolves_the_team_and_sends_teamids() -> None:
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        ProjectCreate={"projectCreate": {"success": True, "project": {"id": "proj-1"}}},
+    )
+    assert LinearStore(client).create_project("proj-1", "ACME", "Feature", "about") == "proj-1"
+    assert client.calls == [
+        ("TeamId", {"key": "ACME"}),
+        (
+            "ProjectCreate",
+            {"input": {"id": "proj-1", "name": "Feature", "description": "about", "teamIds": [TEAM_ID]}},
+        ),
+    ]
+
+
+def test_create_project_repeat_id_raises_duplicate() -> None:
+    client = FakeClient(TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}}, ProjectCreate=duplicate("Project"))
+    with pytest.raises(DuplicateId) as caught:
+        LinearStore(client).create_project("proj-1", "ACME", "Feature", "about")
+    assert caught.value.entity == "Project"
+
+
+def test_project_maps_the_node() -> None:
+    client = FakeClient(Project={"project": PROJECT_NODE})
+    assert LinearStore(client).project("proj-1") == PROJECT
+    assert client.calls == [("Project", {"id": "proj-1"})]
+
+
+def test_project_not_found_is_none() -> None:
+    client = FakeClient(Project=LinearError("INPUT_ERROR", "Entity not found: Project"))
+    assert LinearStore(client).project("proj-1") is None
+
+
+def test_project_other_errors_propagate() -> None:
+    client = FakeClient(Project=LinearError("INPUT_ERROR", "bad"))
+    with pytest.raises(LinearError):
+        LinearStore(client).project("proj-1")
+
+
+def test_team_projects_queries_the_team_and_maps_nodes() -> None:
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        TeamProjects={"team": {"projects": {"nodes": [PROJECT_NODE], "pageInfo": DONE}}},
+    )
+    assert LinearStore(client).team_projects("ACME") == [PROJECT]
+    assert client.calls[1] == ("TeamProjects", {"id": TEAM_ID})
+    assert f"(first: {queries.PAGE_SIZE})" in client.documents[1]
+
+
+def test_team_projects_overflow_refuses() -> None:
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        TeamProjects={"team": {"projects": {"nodes": [], "pageInfo": MORE}}},
+    )
+    with pytest.raises(Refusal, match=rf"ACME.*more than {queries.PAGE_SIZE}"):
+        LinearStore(client).team_projects("ACME")
+
+
+def test_set_project_dates_sends_both_dates_and_null_clears() -> None:
+    client = FakeClient(ProjectUpdate={"projectUpdate": {"success": True}})
+    store = LinearStore(client)
+    store.set_project_dates("proj-1", "2026-11-01", "2026-12-01")
+    store.set_project_dates("proj-1", None, None)
+    assert client.calls == [
+        ("ProjectUpdate", {"id": "proj-1", "input": {"startDate": "2026-11-01", "targetDate": "2026-12-01"}}),
+        ("ProjectUpdate", {"id": "proj-1", "input": {"startDate": None, "targetDate": None}}),
+    ]
+
+
+def test_project_issues_maps_nodes_with_state() -> None:
+    node = {
+        "id": UUID,
+        "identifier": "ACME-5",
+        "number": 5,
+        "title": "Title",
+        "description": "body",
+        "team": {"key": "ACME"},
+        "state": {"name": "Done"},
+        "labels": {"nodes": [{"name": "deckhand"}], "pageInfo": DONE},
+    }
+    client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [node], "pageInfo": DONE}}})
+    assert LinearStore(client).project_issues("proj-1") == [
+        {
+            "id": UUID,
+            "team": "ACME",
+            "number": 5,
+            "identifier": "ACME-5",
+            "title": "Title",
+            "description": "body",
+            "project": "proj-1",
+            "labels": ["deckhand"],
+            "state": "Done",
+        }
+    ]
+    assert client.calls == [("ProjectIssues", {"id": "proj-1"})]
+    assert f"(first: {queries.PAGE_SIZE})" in client.documents[0]
+
+
+def test_project_issues_overflow_refuses() -> None:
+    client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [], "pageInfo": MORE}}})
+    with pytest.raises(Refusal, match=rf"proj-1.*more than {queries.PAGE_SIZE}"):
+        LinearStore(client).project_issues("proj-1")
+
+
+def test_project_issues_label_overflow_refuses() -> None:
+    node = {
+        "id": UUID,
+        "identifier": "ACME-5",
+        "number": 5,
+        "title": "T",
+        "description": "",
+        "team": {"key": "ACME"},
+        "state": {"name": "Done"},
+        "labels": {"nodes": [], "pageInfo": MORE},
+    }
+    client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [node], "pageInfo": DONE}}})
+    with pytest.raises(Refusal, match=rf"{UUID}.*more than {queries.PAGE_SIZE}"):
+        LinearStore(client).project_issues("proj-1")
+
+
+def test_project_issues_of_a_missing_project_is_empty() -> None:
+    client = FakeClient(ProjectIssues=LinearError("INPUT_ERROR", "Entity not found: Project"))
+    assert LinearStore(client).project_issues("proj-1") == []
+
+
+def test_set_issue_text_updates_title_and_description() -> None:
+    client = FakeClient(IssueUpdate={"issueUpdate": {"success": True}})
+    LinearStore(client).set_issue_text(UUID, "New", "Body")
+    assert client.calls == [("IssueUpdate", {"id": UUID, "input": {"title": "New", "description": "Body"}})]
+
+
+def test_repository_labels_lists_the_children_of_the_group() -> None:
+    nodes = [
+        {"id": "g", "name": "Repository", "isGroup": True, "parent": None},
+        {"id": "l1", "name": "widgets", "isGroup": False, "parent": {"name": "Repository"}},
+        {"id": "l2", "name": "ready", "isGroup": False, "parent": None},
+    ]
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        TeamLabels={"team": {"labels": {"nodes": nodes, "pageInfo": DONE}}},
+    )
+    assert LinearStore(client).repository_labels("ACME") == ["widgets"]

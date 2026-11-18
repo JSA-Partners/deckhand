@@ -12,6 +12,8 @@ from deckhand.ops import (
     ensure_document,
     ensure_issue,
     ensure_labels,
+    ensure_project,
+    ensure_project_dates,
     ensure_record,
     ensure_relation,
 )
@@ -62,12 +64,19 @@ def test_concurrent_duplicate_counts_as_success() -> None:
 def test_ensure_labels_writes_only_on_difference() -> None:
     store = FakeStore()
     issue = ensure_issue(store, "story-1", "issue", **FIELDS)
-    ensure_labels(store, issue, ["deckhand"])
+    ensure_labels(store, issue, ["deckhand"], LABELS)
     assert len(store.writes) == 1
-    ensure_labels(store, issue, ["deckhand", "review"])
+    ensure_labels(store, issue, ["deckhand", "review"], LABELS)
     assert len(store.writes) == 2
-    ensure_labels(store, issue, ["review", "deckhand"])
+    ensure_labels(store, issue, ["review", "deckhand"], LABELS)
     assert len(store.writes) == 2
+
+
+def test_ensure_labels_swaps_only_labels_of_the_group() -> None:
+    store = FakeStore()
+    issue = ensure_issue(store, "story-1", "issue", **{**FIELDS, "labels": ["api", "urgent"]})
+    ensure_labels(store, issue, ["web"], ["api", "web"])
+    assert sorted(store.issue(issue)["labels"]) == ["urgent", "web"]
 
 
 def test_ensure_document_writes_only_on_difference() -> None:
@@ -124,7 +133,7 @@ def run(store: FakeStore, operations: list[tuple]) -> None:
         if name == "issue":
             ensure_issue(store, key, "issue", **FIELDS)
         elif name == "labels":
-            ensure_labels(store, issue, DESIRED_LABELS[key])
+            ensure_labels(store, issue, DESIRED_LABELS[key], LABELS)
         elif name == "document":
             ensure_document(store, key, "doc", issue, f"Doc {key}", f"body {key}")
         elif name == "record":
@@ -155,3 +164,32 @@ def test_rerun_converges(operations: list[tuple], k: int) -> None:
     assert broken.snapshot() == clean.snapshot()
     relations = broken.snapshot()["relations"]
     assert len(relations) == len({tuple(edge) for edge in relations})
+
+
+def test_ensure_project_twice_writes_once() -> None:
+    store = FakeStore()
+    first = ensure_project(store, "feature-1", "project", "ACME", "Feature", "about")
+    second = ensure_project(store, "feature-1", "project", "ACME", "Feature", "about")
+    assert first == second == create_id("feature-1", "project")
+    assert store.project(first)["name"] == "Feature"
+    assert [w[0] for w in store.writes] == ["create_project"]
+
+
+def test_ensure_project_tolerates_a_lost_race() -> None:
+    store = FakeStore()
+    id = create_id("feature-1", "project")
+    store.create_project(id, "ACME", "Feature", "about")
+    store.project = lambda _id: None
+    assert ensure_project(store, "feature-1", "project", "ACME", "Feature", "about") == id
+    assert len(store.team_projects("ACME")) == 1
+
+
+def test_ensure_project_dates_writes_only_on_change() -> None:
+    store = FakeStore()
+    store.create_project("p1", "ACME", "Feature", "")
+    ensure_project_dates(store, "p1", "2026-11-01", None)
+    ensure_project_dates(store, "p1", "2026-11-01", None)
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_dates"]
+    ensure_project_dates(store, "p1", "2026-11-01", "2026-12-01")
+    assert store.project("p1")["target_date"] == "2026-12-01"
+    assert len(store.writes) == 3
