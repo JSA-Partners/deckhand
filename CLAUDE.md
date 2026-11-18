@@ -2,39 +2,23 @@
 
 ## Tech Stack
 
-- Python package: `deckhand/`, standard library only, behind the entry point `bin/deckhand`
-- One module per step, `deckhand/<step>.py`, the story steps with `context` and `apply`, commit and
-  document with `context` alone; there is no `plan` step, `new` writes a plan and `amend` rewrites
-  the body until the story starts; `sections.py` folds the Plan into a details block on the way out
-  and unfolds it for every reader; `log.py` the prefix table and the `log` command, written for
-  people and never read for a decision; `columns.py` the eight columns and their order, so a column
-  is named in one place; `board.py` the project's items and views; `checklist.py` what setup
-  verifies; `step.py` the registration, `Refusal`, `issue_number`, and the shared helpers;
-  `issue.py` every issue read and write; `draft.py` an issue whose body is requirements, open until
-  its Stories list names what to write; `edges.py` every blocker edge between two stories, added or
-  dropped; `withdraw.py` a story closed as not planned and taken off the board; `order.py` the
-  build order the blocker graph implies; `git.py` every git call;
-  `park.py` a parked feature in any repository, boarded and logged;
-  `update.py` GitHub brings a pull request behind main up to date; `worktree.py` every story's
-  worktree, where its branch is checked out, and the sweep of merged ones; `drift.py` the plan references
-  `start` checks; `next.py` reads the board, git, and the pull request the issue links to, picks the
-  step, and prints a briefing; `reviewed.py` records the commit a branch review passed as
-  `refs/deckhand/reviewed/<n>`; `finish.py` opens the pull request only from the commit that ref
-  names; `gates.py` what must be true before a branch becomes a pull request, run only from
-  `finish.apply`; `findings.py` reads the findings, verdicts or decisions document into data, for
-  `review.py` to join; `forecast.py` measures what a finished story took and prints the captain's
-  forecast of the board, its weeks from `throughput.py` and its critical path through the blockers;
-  `epic.py` the features, the options of the project's Feature field, opened, filled, listed and
-  forecast in dates; `throughput.py` how many stories finish a week, and the weeks a feature's open
-  ones or the board's will take; `related.py` the issues a story
-  names, with their column, and the open stories whose titles resemble one, for the briefing;
-  `deadline.py` how long a gh call may take, by the wall clock; `fleet.py` the one board read the
-  captain works from; `anomalies.py` every disagreement that read
-  names; `split.py` a feature split into stories; `sessions.py`
-  which Claude Code sessions are open and on what, `transcript.py` what one of them says;
-  `since.py` the snapshot a full captain read leaves, and what changed against the last;
-  `candidates.py` what to open next and which plans touch the same files; `merges.py` which pull
-  request to merge first
+- Python package: `deckhand/`, standard library only, behind `bin/deckhand`, a uv script entry
+  point that runs `deckhand/cli.py`
+- `cli.py` dispatches `<command> context|apply` to the registry, prints a `Refusal` or a Linear
+  error on stderr at exit 1, and never prints the text of an unexpected exception; `step.py` the
+  registry, `Refusal`, and the shared TOML read; one module per step in `deckhand/steps/`, each
+  registered by name, `setup.py` the team, states, automation, labels and repositories
+- `ref.py` a story reference such as `ACME-12`; `records.py` the typed records an issue holds;
+  `credentials.py` the app and personal Linear credentials, their files private to the owner, and
+  the cached app token
+- `linear/` every Linear call: `client.py` the GraphQL client and its errors, `oauth.py` the app
+  token, `queries.py` every query and the page size, `workspace.py` what setup reads and plans for
+  a team, `connect.py` a client for the app or the person
+- `store/` the issue store: `__init__.py` the `Store` protocol, its ids Linear UUIDs; `fake.py` the
+  in-memory store the tests use; `linear.py` the store backed by Linear
+- `ops.py` the idempotent ensure operations over any store, with deterministic ids; `policy.py` a
+  repository's `.claude/deckhand.toml`; `config.py` the per-person local config; `github.py` every
+  `gh` call
 - Skills: `skills/<name>/SKILL.md` with YAML frontmatter; the `next` skill carries the guidance for
   every step; lenses in `skills/next/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
@@ -61,11 +45,10 @@ claude --plugin-dir .        # then /reload-plugins after edits
 - `context` prints what the model needs and never fails; `apply` validates everything, then writes,
   and a `Refusal` names the failed rule on stderr at exit 1 before any write
 - Python: `from __future__ import annotations`, type hints on public functions, no module over 400 lines
-- Tests: one module per module under test, the fake `gh` through the `fake_gh` fixture,
-  `acme/widgets` in the fixtures; an apply asserts the exact recorded calls, a refusal asserts no
-  write
+- Tests: one module per module under test, fakes for Linear and `gh` passed in, `acme/widgets` in
+  the fixtures; an apply asserts the exact recorded calls, a refusal asserts no write
 - Skills: short bodies, judgment over directive stacks, no capitalized emphasis, one injection line,
-  each under its own word limit; `tests/test_skills.py` enforces the shape
+  each under its own word limit
 - Severity P1, P2, P3; a clean result is `Nothing found.`
 - kebab-case file names; no em dashes or en dashes in prose
 - Commit messages: subject under 72, body as paragraphs on their own lines, no trailers of any

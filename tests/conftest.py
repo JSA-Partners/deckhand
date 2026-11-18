@@ -1,241 +1,26 @@
-"""Shared fixtures: a fake gh on PATH, a scratch repo, and an isolated cache and config."""
-
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from deckhand import cli, gh, issue
-from deckhand.config import Settings
-
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
-@pytest.fixture(autouse=True)
-def _clear_repo_slug_cache() -> None:
-    """repo_slug() and ensure_label() are memoized in the process; clear them so fixtures don't leak."""
-    gh.repo_slug.cache_clear()
-    issue.ensure_label.cache_clear()
-
-
-@pytest.fixture
-def settings() -> Settings:
-    """Settings already resolved to acme #2, so a unit test needs no project-link lookup."""
-    return Settings(resolved=gh.LinkedProject(owner="acme", owner_type="Organization", number=2, title="Widgets"))
 
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear the ambient env a test could read by accident, so a run does not depend on its machine.
-
-    CLAUDE_CODE_SESSION_ID is set whenever the suite runs inside a session, and `gh.repo_slug` reads
-    it to find that session's own directory, which would be this machine's real transcripts.
-    """
     for name in list(os.environ):
         if name.startswith("DECKHAND_"):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    # Claude Code's own list of running sessions; a test that wants one points this at a tmp folder.
-    monkeypatch.setenv("DECKHAND_LIVE", os.devnull + "-deckhand-live")
 
 
 @pytest.fixture(autouse=True)
 def isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hide the ambient git repository and the user's git config from every test.
-
-    git exports GIT_DIR, GIT_INDEX_FILE, GIT_PREFIX, and friends to its hooks, so a hook-invoked
-    pytest must never see the ambient repository: a test that inits a scratch repo would otherwise
-    re-init the real one and write its config, index, and objects there. Only GIT_EXEC_PATH survives.
-    A test also starts outside any repository, since a command run from the checkout would fetch
-    and fast-forward its main.
-    """
     monkeypatch.chdir(tmp_path)
     for name in list(os.environ):
         if name.startswith("GIT_") and name != "GIT_EXEC_PATH":
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
-
-
-@pytest.fixture(scope="session")
-def _no_real_gh_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Build the failing `gh` stub once per session; tests only need to put it on PATH."""
-    stub_dir = tmp_path_factory.mktemp("no-real-gh")
-    script = stub_dir / "gh"
-    script.write_text('#!/bin/sh\necho "unstubbed gh call: $*" >&2\nexit 1\n')
-    script.chmod(0o755)
-    return stub_dir
-
-
-@pytest.fixture(autouse=True)
-def no_real_gh(_no_real_gh_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Put a `gh` stub first on PATH that fails loudly, so a test that forgets `fake_gh` errors out."""
-    monkeypatch.setenv("PATH", f"{_no_real_gh_dir}{os.pathsep}{os.environ['PATH']}")
-
-
-@pytest.fixture
-def fake_gh(no_real_gh: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Put tests/fakes/gh first on PATH and point it at the fixtures; returns the calls log path."""
-    if not (ROOT / "tests" / "fakes" / "gh").exists():
-        pytest.fail("tests/fakes/gh is missing")
-    calls = tmp_path / "gh-calls"
-    monkeypatch.setenv("PATH", f"{ROOT / 'tests' / 'fakes'}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("GH_FIXTURES", str(FIXTURES))
-    monkeypatch.setenv("GH_CALLS", str(calls))
-    monkeypatch.setenv("DECKHAND_CACHE", str(tmp_path / "cache"))
-    return calls
-
-
-@pytest.fixture
-def gh_calls(fake_gh: Path):
-    """A function that returns the recorded gh invocations, one per line."""
-    return lambda: fake_gh.read_text().splitlines() if fake_gh.exists() else []
-
-
-@pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """An initialized git repository with one commit, as the working directory."""
-    path = tmp_path / "repo"
-    path.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
-    (path / "f").write_text("x\n")
-    subprocess.run(["git", "add", "f"], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-qm", "init"], cwd=path, check=True)
-    monkeypatch.chdir(path)
-    return path
-
-
-@pytest.fixture
-def registry():
-    """Snapshot and restore `deckhand.cli._REGISTRY`, so an in-process test can register commands.
-
-    Discovery runs lazily the first time a parser is built, so import the discovery module first;
-    otherwise an early snapshot would restore an empty registry and hide every real command.
-    """
-    import deckhand.commands  # noqa: F401  (side effect: registers every command module)
-
-    original = dict(cli._REGISTRY)
-    try:
-        yield cli._REGISTRY
-    finally:
-        cli._REGISTRY.clear()
-        cli._REGISTRY.update(original)
-
-
-def run_git(path: Path, *args: str) -> str:
-    """git's stdout in the repository at `path`; a non-zero exit fails the test."""
-    return subprocess.run(["git", *args], cwd=path, capture_output=True, text=True, check=True).stdout
-
-
-def fieldvalues(tmp_path: Path, status: str | None, kind: str | None = "feat") -> dict[str, str]:
-    """The field values fixture with Status and Kind set, or removed where they are None."""
-    data = json.loads((FIXTURES / "graphql-fieldvalues.json").read_text(encoding="utf-8"))
-    values = data["data"]["node"]["fieldValues"]
-    wanted = {"Status": status, "Kind": kind}
-    nodes = []
-    for node in values["nodes"]:
-        name = (node.get("field") or {}).get("name")
-        if name not in wanted:
-            nodes.append(node)
-        elif wanted[name] is not None:
-            nodes.append({**node, "name": wanted[name]})
-    values["nodes"] = nodes
-    path = tmp_path / f"fieldvalues-{(status or 'none')}-{kind or 'none'}.json".replace(" ", "-").lower()
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return {"GH_FIELDVALUES_FILE": str(path)}
-
-
-def run_deckhand(
-    *args: str,
-    stdin: str | None = None,
-    cwd: Path | str | None = None,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run bin/deckhand as a subprocess, the way a skill or workflow does."""
-    return subprocess.run(
-        [str(ROOT / "bin" / "deckhand"), *args],
-        input=stdin,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-        cwd=cwd,
-        env={**os.environ, **env} if env is not None else None,
-    )
-
-
-def spilled(stdout: str, label: str) -> str:
-    """The text a context wrote to the file its `<label>: <path> (<n> lines)` line names."""
-    line = next(found for found in stdout.splitlines() if found.startswith(f"{label}: "))
-    return Path(line.removeprefix(f"{label}: ").rsplit(" (", 1)[0]).read_text(encoding="utf-8")
-
-
-def advance_origin(origin: Path, tmp_path: Path, count: int = 1, name: str = "landed") -> None:
-    """Push `count` commits to `origin` from a second clone, so another clone's main falls behind."""
-    other = tmp_path / f"other-{name}"
-    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
-    run_git(other, "config", "user.email", "t@t")
-    run_git(other, "config", "user.name", "t")
-    for index in range(count):
-        (other / f"{name}{index}").write_text(f"{index}\n")
-        run_git(other, "add", f"{name}{index}")
-        run_git(other, "commit", "-qm", f"feat: {name} {index}")
-    run_git(other, "push", "-q", "origin", "main")
-
-
-def labeled_board(tmp_path: Path, *stories: tuple[str, int, str], status: str = "Draft") -> dict[str, str]:
-    """A one-page board of open deckhand stories, `(repository, number, title)` each, in `status`."""
-    nodes = [
-        {
-            "id": f"I_{number}",
-            "isArchived": False,
-            "content": {
-                "number": number,
-                "title": title,
-                "url": f"https://github.com/{repo}/issues/{number}",
-                "state": "OPEN",
-                "closedAt": None,
-                "body": "",
-                "repository": {"nameWithOwner": repo},
-                "labels": {"nodes": [{"name": "deckhand"}]},
-                "comments": {"nodes": []},
-            },
-            "fieldValues": {"nodes": [{"name": status, "field": {"name": "Status"}}]},
-        }
-        for repo, number, title in stories
-    ]
-    data = {"data": {"organization": {"projectV2": {"items": {"pageInfo": {"hasNextPage": False}, "nodes": nodes}}}}}
-    path = tmp_path / "labeled-board.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return {"GH_PROJECT_ITEMS_FILE": str(path)}
-
-
-@pytest.fixture
-def feature_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A project with a Feature field, its options in pipeline order: Billing, Permission rework, Permission audit."""
-    options = [
-        {"id": "OPT_BILLING", "name": "Billing"},
-        {"id": "OPT_PERMISSION", "name": "Permission rework"},
-        {"id": "OPT_AUDIT", "name": "Permission audit"},
-    ]
-    fields = json.loads((FIXTURES / "fields.json").read_text(encoding="utf-8"))
-    fields["fields"].append(
-        {"id": "PVTSSF_FEATURE", "name": "Feature", "type": "ProjectV2SingleSelectField", "options": options}
-    )
-    path = tmp_path / "fields-with-feature.json"
-    path.write_text(json.dumps(fields), encoding="utf-8")
-    monkeypatch.setenv("GH_FIELDS_FILE", str(path))
-    monkeypatch.setenv("GH_PROJECT_FIELDS_FILE", str(FIXTURES / "feature-fields.json"))
-    # A draft is boarded into a Feature when it is parked or split, so the item read says Billing.
-    values = json.loads((FIXTURES / "graphql-fieldvalues.json").read_text(encoding="utf-8"))
-    values["data"]["node"]["fieldValues"]["nodes"].append({"name": "Billing", "field": {"name": "Feature"}})
-    boarded = tmp_path / "fieldvalues-with-feature.json"
-    boarded.write_text(json.dumps(values), encoding="utf-8")
-    monkeypatch.setenv("GH_FIELDVALUES_FILE", str(boarded))

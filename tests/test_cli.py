@@ -1,28 +1,27 @@
 from __future__ import annotations
 
-import argparse
 import json
-import os
-import re
-import subprocess
-import sys
 import tomllib
-from pathlib import Path
 
 import pytest
 
-from deckhand import __version__, cli
-from deckhand.cli import command
-from tests.conftest import ROOT, run_deckhand
+from deckhand import __version__
+from deckhand.cli import main
+from deckhand.step import REGISTRY, Refusal, register
+from tests.conftest import ROOT
 
 
-def test_version_prints_the_package_version():
-    result = run_deckhand("--version")
-    assert result.returncode == 0
-    assert result.stdout.strip() == f"deckhand {__version__}"
+@pytest.fixture
+def registry():
+    original = dict(REGISTRY)
+    try:
+        yield REGISTRY
+    finally:
+        REGISTRY.clear()
+        REGISTRY.update(original)
 
 
-def test_every_version_source_agrees():
+def test_version_matches_every_manifest():
     """A release bumps the version wherever it is written; this is the check that keeps them together."""
     manifests = ROOT / ".claude-plugin"
     manifest = json.loads((ROOT / ".release-please-manifest.json").read_text(encoding="utf-8"))
@@ -46,239 +45,179 @@ def test_the_marketplace_entry_carries_no_version():
     assert "version" not in marketplace["plugins"][0]
 
 
-def test_unknown_command_is_a_usage_error():
-    result = run_deckhand("bogus")
-    assert result.returncode == 2
-    assert "invalid choice" in result.stderr
+def test_unknown_command_exits_2_and_names_it(capsys):
+    assert main(["nope"]) == 2
+    assert "nope" in capsys.readouterr().err
 
 
-def test_handler_error_prints_one_line_to_stderr(registry, capsys):
-    @command("probe", lambda parser: None)
-    def probe(args):
-        """Probe command for tests."""
-        raise ValueError("something broke")
+def test_refusal_prints_rule_and_exits_1(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
 
-    result = cli.main(["probe"])
+        def apply(self, args):
+            raise Refusal("no plan")
 
-    assert result == 1
-    assert capsys.readouterr().err == "deckhand probe: something broke\n"
-
-
-def test_handler_keyboard_interrupt_returns_130(registry):
-    @command("probe", lambda parser: None)
-    def probe(args):
-        """Probe command for tests."""
-        raise KeyboardInterrupt
-
-    assert cli.main(["probe"]) == 130
+    assert main(["probe", "apply"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err == "deckhand: no plan\n"
+    assert captured.out == ""
 
 
-def test_handler_system_exit_propagates(registry):
-    @command("probe", lambda parser: None)
-    def probe(args):
-        """Probe command for tests."""
-        raise SystemExit(7)
+def test_context_never_raises(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise KeyError("missing")
 
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main(["probe"])
-    assert excinfo.value.code == 7
+        def apply(self, args):
+            return None
 
-
-def test_no_arguments_exits_2():
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main([])
-    assert excinfo.value.code == 2
+    assert main(["probe", "context"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert "probe" in lines[0]
 
 
-def test_command_help_is_docstrings_first_line(registry, capsys):
-    @command("probe", lambda parser: None)
-    def probe(args):
-        """First line of help.
+def test_unknown_verb_exits_2_and_names_the_choices(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
 
-        More detail that only shows up in the full description.
-        """
-        return 0
+        def apply(self, args):
+            return None
 
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-    assert "First line of help." in capsys.readouterr().out
-
-
-def test_flooding_stdout_into_head_does_not_error(tmp_path):
-    script = tmp_path / "flood.py"
-    script.write_text(
-        "import sys\n"
-        f"sys.path.insert(0, {str(ROOT)!r})\n"
-        "from deckhand.cli import command, main\n"
-        "\n"
-        "@command('flood', lambda parser: None)\n"
-        "def flood(args):\n"
-        '    """Flood stdout."""\n'
-        "    for i in range(200000):\n"
-        "        print(i)\n"
-        "    return 0\n"
-        "\n"
-        "sys.exit(main(['flood']))\n"
-    )
-    result = subprocess.run(
-        ["bash", "-c", f'"{sys.executable}" "{script}" | head -2'],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert result.stderr == ""
+    assert main(["probe", "bogus"]) == 2
+    assert "context, apply" in capsys.readouterr().err
+    assert main(["probe"]) == 2
+    assert "context, apply" in capsys.readouterr().err
 
 
-def _raising_launcher(tmp_path) -> Path:
-    """A one-command deckhand whose handler raises with its argument in the message."""
-    script = tmp_path / "raiser.py"
-    script.write_text(
-        "import sys\n"
-        f"sys.path.insert(0, {str(ROOT)!r})\n"
-        "from deckhand.cli import command, main\n"
-        "\n"
-        "@command('raise-it', lambda parser: parser.add_argument('text'))\n"
-        "def raise_it(args):\n"
-        '    """Raise with the argument."""\n'
-        "    raise ValueError(f'bad name {args.text}')\n"
-        "\n"
-        "sys.exit(main(sys.argv[1:]))\n",
-        encoding="utf-8",
-    )
-    return script
+def test_apply_success_exits_0_with_its_args(registry):
+    seen = []
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            seen.append(args)
+
+    assert main(["probe", "apply", "7"]) == 0
+    assert seen == [["7"]]
 
 
-def test_handler_error_prints_utf8_to_stderr_under_ascii_encoding(tmp_path):
-    script = _raising_launcher(tmp_path)
+def test_context_success_exits_0_and_passes_stdout_through(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            print("briefing", *args)
 
-    result = subprocess.run(
-        [sys.executable, str(script), "raise-it", "✓✓"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-        env={**os.environ, "PYTHONIOENCODING": "ascii"},
-    )
+        def apply(self, args):
+            return None
 
-    assert result.returncode == 1
-    assert result.stderr == "deckhand raise-it: bad name ✓✓\n"
+    assert main(["probe", "context", "7"]) == 0
+    assert capsys.readouterr().out == "briefing 7\n"
 
 
-def test_handler_error_with_unencodable_argv_is_still_one_line(tmp_path):
-    script = _raising_launcher(tmp_path)
+def test_registering_a_name_twice_raises(registry):
+    @register("probe")
+    class First:
+        pass
 
-    result = subprocess.run(
-        [sys.executable, str(script), "raise-it", os.fsdecode(b"\xff")],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    with pytest.raises(ValueError, match="command registered twice: probe"):
 
-    assert result.returncode == 1
-    assert "Traceback" not in result.stderr
-    assert result.stderr.startswith("deckhand raise-it: bad name ")
+        @register("probe")
+        class Second:
+            pass
 
 
-def _verbs(parser: argparse.ArgumentParser) -> list[str]:
-    """The verbs one command answers to, in name order; none at all for a plain command."""
-    verbs = next((a for a in parser._actions if getattr(a, "choices", None)), None)
-    return sorted(verbs.choices) if verbs is not None else []
+def test_broken_step_module_does_not_stop_other_commands(tmp_path, monkeypatch, capsys, registry):
+    from deckhand import steps
+
+    (tmp_path / "broken.py").write_text("raise RuntimeError('boom')\n")
+    monkeypatch.setattr(steps, "__path__", [*steps.__path__, str(tmp_path)])
+    assert main(["nonesuch"]) == 2
+    err = capsys.readouterr().err
+    assert "cannot load step broken: boom" in err
+    assert "Traceback" not in err
+    assert "setup" in REGISTRY
 
 
-def test_the_command_surface_is_exactly_the_steps_and_their_verbs():
-    """Two verbs for a step that writes what it validated; one for a step whose write is elsewhere."""
-    commands = next(a for a in cli.build_parser()._actions if getattr(a, "choices", None)).choices
-
-    assert {name: _verbs(sub) for name, sub in commands.items()} == {
-        "after": ["apply", "context"],
-        "amend": ["apply", "context"],
-        "captain": ["apply", "context"],
-        "log": [],
-        "commit": ["context"],
-        "document": ["context"],
-        "epic": ["add", "close", "forecast", "list", "open"],
-        "finish": ["apply", "context"],
-        "new": ["apply", "context"],
-        "next": ["context"],
-        "ready": ["apply", "context"],
-        "review": ["apply", "context"],
-        "reviewed": ["apply", "context"],
-        "setup": ["apply", "context"],
-        "start": ["apply", "context"],
-        "update": ["apply", "context"],
-    }
+SECRET = "lin_api_secretvalue"
 
 
-# A step runs from `next` and nowhere else, so the line that ends a command never sends a person to
-# one; the commands they type are the whole of what a `Next:` line may name.
-_STEP_COMMAND = re.compile(r"/deckhand:(amend|finish|ready|review|start)\b")
+def test_context_failure_prints_only_the_type_and_command(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise ValueError(f"Invalid header value b'{SECRET}'")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert captured.out == "deckhand: probe context could not be read: ValueError\n"
 
 
-def test_no_printed_next_line_names_a_step_command():
-    """Every `Next:` line in the package, read the way a person reads it on the screen."""
-    offenders = [
-        f"{path.name}:{number}: {line.strip()}"
-        for path in sorted((ROOT / "deckhand").glob("*.py"))
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
-        if "Next:" in line and _STEP_COMMAND.search(line)
-    ]
+def test_apply_unexpected_error_prints_only_the_type_and_exits_1(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
 
-    assert offenders == []
+        def apply(self, args):
+            raise UnicodeDecodeError("utf-8", SECRET.encode(), 0, 1, "invalid start byte")
 
-
-def test_a_step_run_without_its_verb_names_the_command(fake_gh, repo):
-    result = run_deckhand("next", "4", cwd=repo)
-
-    assert result.returncode == 2
-    assert "deckhand next context 4" in result.stderr
+    assert main(["probe", "apply"]) == 1
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert "Traceback" not in captured.err
+    assert captured.err == "deckhand: probe apply failed: UnicodeDecodeError\n"
 
 
-def test_newer_installed_reports_a_newer_sibling(tmp_path, monkeypatch):
-    plugin = tmp_path / "deckhand"
-    for version in ("3.3.0", "3.5.1", "3.6.0"):
-        (plugin / version / "deckhand").mkdir(parents=True)
-    monkeypatch.setattr(cli, "_package_dir", lambda: plugin / "3.3.0" / "deckhand")
-    monkeypatch.setattr(cli, "__version__", "3.3.0")
+def test_apply_linear_error_prints_code_and_message_and_exits_1(registry, capsys):
+    from deckhand.linear.client import LinearError
 
-    assert cli.newer_installed() == "3.6.0"
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
 
+        def apply(self, args):
+            raise LinearError("network", "could not reach Linear")
 
-def test_newer_installed_reports_nothing_when_this_is_the_newest(tmp_path, monkeypatch):
-    plugin = tmp_path / "deckhand"
-    for version in ("3.3.0", "3.5.1"):
-        (plugin / version / "deckhand").mkdir(parents=True)
-    monkeypatch.setattr(cli, "_package_dir", lambda: plugin / "3.5.1" / "deckhand")
-    monkeypatch.setattr(cli, "__version__", "3.5.1")
-
-    assert cli.newer_installed() == ""
+    assert main(["probe", "apply"]) == 1
+    assert capsys.readouterr().err == "deckhand: network: could not reach Linear\n"
 
 
-def test_newer_installed_reports_nothing_from_a_checkout(tmp_path, monkeypatch):
-    checkout = tmp_path / "deckhand"
-    (checkout / "deckhand").mkdir(parents=True)
-    monkeypatch.setattr(cli, "_package_dir", lambda: checkout / "deckhand")
+def test_apply_header_unfit_token_prints_a_fixed_line_without_it(registry, capsys):
+    import http.client
+    import json
 
-    assert cli.newer_installed() == ""
+    from deckhand.linear.client import LinearClient
 
+    def validating(request):
+        connection = http.client.HTTPConnection("localhost")
+        connection.putrequest("POST", "/graphql")
+        for name, value in request.header_items():
+            connection.putheader(name, value)
+        return json.dumps({"data": {}}).encode()
 
-def test_the_fleet_does_not_import_the_build_order():
-    """order reads the fleet's rows, so the fleet importing it back would close the loop."""
-    source = (ROOT / "deckhand" / "fleet.py").read_text(encoding="utf-8")
-    imports = [line for line in source.splitlines() if line.startswith(("import ", "from "))]
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
 
-    assert not [line for line in imports if "order" in line], imports
+        def apply(self, args):
+            LinearClient(lambda: f"{SECRET}\n{SECRET}", lambda: None, validating).query("q", {})
 
-
-def test_no_module_is_over_the_size_rule():
-    """CLAUDE.md caps a module at 400 lines, and nothing else enforces it."""
-    limit = 400
-    lengths = {
-        path.name: len(path.read_text(encoding="utf-8").splitlines())
-        for path in sorted((ROOT / "deckhand").glob("*.py"))
-    }
-    over = {name: count for name, count in lengths.items() if count > limit}
-
-    assert not over, f"over {limit} lines: {over}"
+    assert main(["probe", "apply"]) == 1
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert captured.err == "deckhand: credentials: the credential cannot be sent as a header\n"
