@@ -6,7 +6,7 @@ from typing import Any
 
 from deckhand.step import Refusal, read_toml
 
-TIER_KEYS = ("0", "1", "2", "3")
+TIER_KEYS = ("0", "1", "2", "3", "4")
 KEYS = frozenset({"repository_label", "tier_tools", "checks", "sensitive_paths", "extra_lenses", "front_end"})
 
 
@@ -54,7 +54,7 @@ def _tier_tools(path: Path, value: Any) -> dict[int, list[str]]:
     tools = {}
     for key, names in value.items():
         if key not in TIER_KEYS:
-            raise Refusal(f"{path}: tier_tools key {key!r} is not a tier from 0 to 3")
+            raise Refusal(f"{path}: tier_tools key {key!r} is not a tier from 0 to 4")
         tools[int(key)] = _strings(path, f"tier_tools.{key}", names)
     return tools
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import features, planning, versions
+from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -41,7 +42,7 @@ def entry(key: str, **over: object) -> dict:
 def setup() -> FakeStore:
     store = FakeStore()
     store.add_repository_label("ACME", "widgets")
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     return store
 

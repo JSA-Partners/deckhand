@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, decisions, features, planning, versions
+from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import content_hash
 from deckhand.step import Refusal
@@ -25,7 +26,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def feature_store() -> FakeStore:
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     store.create_issue("s1", "ACME", "One", "Outcome.", P1, [])
     store.create_issue("s2", "ACME", "Two", "Outcome.", P1, [])

@@ -143,7 +143,7 @@ class FakeStore(Store):
     def relations(self, issue: str) -> list[tuple[str, str]]:
         return [(a, b) for a, b in sorted(self._relations) if issue in (a, b)]
 
-    def create_project(self, id: str, team: str, name: str, description: str) -> str:
+    def create_project(self, id: str, team: str, name: str, description: str, labels: list[str] | None = None) -> str:
         if id in self._projects:
             raise DuplicateId("INPUT_ERROR", f"{CONFLICT_PREFIX} Project")
         self._projects[id] = {
@@ -153,13 +153,18 @@ class FakeStore(Store):
             "description": description,
             "start_date": None,
             "target_date": None,
+            "labels": sorted(labels or []),
         }
         self._wrote("create_project", id)
         return id
 
+    def set_project_labels(self, project: str, labels: list[str]) -> None:
+        self._projects[project]["labels"] = sorted(labels)
+        self._wrote("set_project_labels", project, sorted(labels))
+
     @staticmethod
     def _project(project: dict[str, Any]) -> dict[str, Any]:
-        return {key: value for key, value in project.items() if key != "team"}
+        return {key: copy.deepcopy(value) for key, value in project.items() if key != "team"}
 
     def project(self, id: str) -> dict | None:
         found = self._projects.get(id)

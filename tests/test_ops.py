@@ -184,6 +184,15 @@ def test_ensure_project_tolerates_a_lost_race() -> None:
     assert len(store.team_projects("ACME")) == 1
 
 
+def test_ensure_project_labels_an_existing_unlabeled_project_once() -> None:
+    store = FakeStore()
+    id = ensure_project(store, "feature-1", "project", "ACME", "Feature", "about")
+    ensure_project(store, "feature-1", "project", "ACME", "Feature", "about", ["deckhand"])
+    ensure_project(store, "feature-1", "project", "ACME", "Feature", "about", ["deckhand"])
+    assert store.project(id)["labels"] == ["deckhand"]
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_labels"]
+
+
 def test_ensure_project_dates_writes_only_on_change() -> None:
     store = FakeStore()
     store.create_project("p1", "ACME", "Feature", "")

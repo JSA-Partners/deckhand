@@ -17,9 +17,9 @@ def _missing(error: LinearError) -> bool:
     return "not found" in error.message.lower()
 
 
-def _nodes(connection: dict[str, Any], issue: str, field: str) -> list[dict[str, Any]]:
+def _nodes(connection: dict[str, Any], issue: str, field: str, limit: int = queries.PAGE_SIZE) -> list[dict[str, Any]]:
     if connection["pageInfo"]["hasNextPage"]:
-        raise Refusal(f"{issue} has more than {queries.PAGE_SIZE} {field}; deckhand cannot read them safely")
+        raise Refusal(f"{issue} has more than {limit} {field}; deckhand cannot read them safely")
     return connection["nodes"]
 
 
@@ -30,6 +30,9 @@ def _project(node: dict[str, Any]) -> dict[str, Any]:
         "description": node["description"],
         "start_date": node["startDate"],
         "target_date": node["targetDate"],
+        "labels": sorted(
+            n["name"] for n in _nodes(node["labels"], node["id"], "project labels", queries.PROJECT_LABEL_LIMIT)
+        ),
     }
 
 
@@ -51,6 +54,14 @@ class LinearStore(Store):
         for name in names:
             if name not in by_name:
                 raise Refusal(f"the team has no label named {name}")
+        return [by_name[name] for name in names]
+
+    def _project_label_ids(self, names: list[str]) -> list[str]:
+        found = self._client.query(queries.PROJECT_LABEL_IDS, {"names": names})
+        by_name = {node["name"]: node["id"] for node in found["projectLabels"]["nodes"]}
+        for name in names:
+            if name not in by_name:
+                raise Refusal(f"the workspace has no project label named {name}; run setup")
         return [by_name[name] for name in names]
 
     def _issue_node(self, id: str) -> dict[str, Any] | None:
@@ -202,15 +213,21 @@ class LinearStore(Store):
         pairs += [(r["issue"]["id"], node["id"]) for r in inward if r["type"] == "blocks"]
         return sorted(pairs)
 
-    def create_project(self, id: str, team: str, name: str, description: str) -> str:
+    def create_project(self, id: str, team: str, name: str, description: str, labels: list[str] | None = None) -> str:
         fields = {
             "id": id,
             "name": name,
             "description": description,
             "teamIds": [self._team_id(team)],
         }
+        if labels:
+            fields["labelIds"] = self._project_label_ids(labels)
         self._client.query(queries.PROJECT_CREATE, {"input": fields})
         return id
+
+    def set_project_labels(self, project: str, labels: list[str]) -> None:
+        fields = {"labelIds": self._project_label_ids(labels) if labels else []}
+        self._client.query(queries.PROJECT_UPDATE, {"id": project, "input": fields})
 
     def project(self, id: str) -> dict | None:
         try:

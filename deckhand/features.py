@@ -11,6 +11,7 @@ from deckhand.store import Store
 
 APPROVAL = "feature-approval"
 PURPOSE = "feature"
+FEATURE_LABEL = "deckhand"
 FINISHED = ("Done", "Canceled", "Duplicate")
 DROPPED = ("Canceled", "Duplicate")
 STATE_CHART_TIERS = (2, 3)
@@ -156,12 +157,12 @@ def key(team: str, name: str) -> str:
     return f"{team}:{name}"
 
 
-def is_feature(project: dict, team: str) -> bool:
-    return project["id"] == ops.create_id(key(team, project["name"]), PURPOSE)
+def is_feature(project: dict) -> bool:
+    return FEATURE_LABEL in project["labels"]
 
 
 def team_features(store: Store, team: str) -> list[dict]:
-    return [p for p in store.team_projects(team) if is_feature(p, team)]
+    return [p for p in store.team_projects(team) if is_feature(p)]
 
 
 def open_features(store: Store, team: str) -> list[Feature]:

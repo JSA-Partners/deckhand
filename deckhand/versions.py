@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from deckhand.features import Feature
 
 SECTION_OF = {"contract": "Contract", "invariants": "Invariants"}
-STORY_KINDS = ("tier", "sitting", "state-chart")
+STORY_KINDS = ("tier", "sitting", "state-chart", "lean")
 
 
 def _hash(*parts: str) -> str:

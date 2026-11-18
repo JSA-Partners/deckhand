@@ -95,6 +95,21 @@ def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer:
     assert store.writes == []
 
 
+def test_lean_is_a_choice_of_two_with_none_recommended():
+    question = decisions.make_question("lean", pin())
+    assert question.options == ["Prove it in Lean", "Not needed"]
+    assert "(Recommended)" not in question.text
+
+
+@pytest.mark.parametrize("answer,written", [("Prove it in Lean", True), ("Not needed", False)])
+def test_only_proving_in_lean_records_a_lean_decision(tmp_path: Path, answer: str, written: bool):
+    question, pending = ask(tmp_path, "lean")
+    answered(tmp_path, question, answer)
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path) is written
+    assert [r.kind for r in store.records("s1")] == (["lean"] if written else [])
+
+
 def test_question_text_is_ascii_and_names_kind_and_subject():
     question = decisions.make_question("state-chart", pin())
     assert question.text.isascii()

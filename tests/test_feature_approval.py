@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, features, ops, planning, tiers, versions
-from deckhand.features import Phase
+from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -22,7 +22,7 @@ STATE_CHART = "A flow or an entity with several states"
 
 def setup() -> FakeStore:
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     feature = load(store)
     for name in planning.SECTIONS:
@@ -87,7 +87,7 @@ def test_approval_gaps_lists_each_missing_decision():
 
 def test_approval_gaps_name_each_unsaved_section_first():
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
     planning.save_section(store, load(store), "Shape", "The shape.", False)
@@ -230,7 +230,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_decide_context_refuses_approving_a_missing_section(state: Path):
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
     with pytest.raises(Refusal, match="the Invariants section is not saved"):

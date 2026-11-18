@@ -166,6 +166,7 @@ def test_project_round_trip() -> None:
         "description": "about",
         "start_date": None,
         "target_date": None,
+        "labels": [],
     }
     assert store.project("p1") == expected
     store.set_project_dates("p1", "2026-11-01", "2026-12-01")

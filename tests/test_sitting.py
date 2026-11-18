@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import features, ops, sitting, versions
+from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -60,7 +61,7 @@ def test_each_new_here_item_is_its_own_screen():
 def feature_with(*ids: str) -> tuple[FakeStore, features.Feature]:
     store = FakeStore()
     store.add_repository_label("ACME", "widgets")
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     for id in ids:
         store.create_issue(id, "ACME", id, "Outcome.", P1, [])

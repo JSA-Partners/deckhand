@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from deckhand.records import Record
 from deckhand.step import Refusal
-from deckhand.tiers import NONE, OPTIONS, TIERS, chosen, from_record
+from deckhand.tiers import NONE, OPTIONS, TIERS, chosen, from_record, tools
 
 
 def test_options_ask_from_the_highest_tier_down_and_end_with_none():
@@ -47,3 +48,18 @@ def test_from_record_reads_the_stored_level_and_fact():
 )
 def test_from_record_refuses_a_missing_or_inconsistent_record(data: dict):
     assert from_record(data) is None
+
+
+TOOLS = {1: ["pytest"], 3: ["pytest", "hypothesis"], 4: ["lake build"]}
+
+
+def test_lean_decision_makes_tier_4():
+    lean = [Record("lean", "s1", "v1", "person:s", {"answer": "Prove it in Lean"})]
+    assert tools(TOOLS, 1, lean, "s1") == ["pytest", "lake build"]
+    assert tools(TOOLS, 3, lean, "s1") == ["pytest", "hypothesis", "lake build"]
+
+
+def test_tier_tools_without_a_lean_decision_for_this_story_stay_as_they_are():
+    other = [Record("lean", "s2", "v1", "person:s", {})]
+    assert tools(TOOLS, 1, other, "s1") == ["pytest"]
+    assert tools(TOOLS, 0, [], "s1") == []

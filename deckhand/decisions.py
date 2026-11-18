@@ -12,7 +12,7 @@ from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
 
-KINDS = ("contract", "invariants", "state-chart", "decision-item", "tier", "sitting", "feature-approval")
+KINDS = ("contract", "invariants", "state-chart", "decision-item", "tier", "sitting", "lean", "feature-approval")
 
 _OPTIONS = {
     "contract": ["Approve", "Not yet"],
@@ -22,6 +22,7 @@ _OPTIONS = {
     "decision-item": ["Keep", "Change", "Discuss"],
     "sitting": ["Done", "Not yet"],
     "tier": tiers.OPTIONS,
+    "lean": ["Prove it in Lean", "Not needed"],
 }
 
 _ASKS = {
@@ -32,6 +33,7 @@ _ASKS = {
     "decision-item": "Keep the decision item",
     "sitting": "Is the sitting done for",
     "tier": "Which is the highest that applies to",
+    "lean": "Is a Lean proof needed for",
 }
 
 _POSITIVE = {
@@ -40,6 +42,7 @@ _POSITIVE = {
     "state-chart": "Approve",
     "feature-approval": "Approve",
     "sitting": "Done",
+    "lean": "Prove it in Lean",
 }
 
 PENDING = "pending"

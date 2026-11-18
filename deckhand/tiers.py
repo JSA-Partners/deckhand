@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from deckhand.records import Record
 from deckhand.step import Refusal
 
 
@@ -39,3 +40,13 @@ def from_record(data: dict) -> Tier | None:
     fact = data.get("fact")
     found = _BY_FACT.get(fact) if isinstance(fact, str) else None
     return found if found is not None and data.get("level") == found.level else None
+
+
+LEAN = 4
+
+
+def tools(tier_tools: dict[int, list[str]], level: int, records: list[Record], story: str) -> list[str]:
+    found = list(tier_tools.get(level, []))
+    if any(r.kind == "lean" and r.subject == story for r in records):
+        found += [tool for tool in tier_tools.get(LEAN, []) if tool not in found]
+    return found

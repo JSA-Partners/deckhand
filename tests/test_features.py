@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from deckhand.features import Budget, Feature, Phase, open_feature, phase
+from deckhand.features import FEATURE_LABEL, Budget, Feature, Phase, is_feature, open_feature, phase, team_features
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -37,10 +37,25 @@ def test_open_feature_refuses_two():
     store = FakeStore()
     for name in ("Alpha", "Beta"):
         id = create_id(f"ACME:{name}", "feature")
-        store.create_project(id, "ACME", name, "")
+        store.create_project(id, "ACME", name, "", [FEATURE_LABEL])
         store.set_project_dates(id, "2026-11-16", "2026-11-23")
     with pytest.raises(Refusal, match=r"(?=.*Alpha)(?=.*Beta)"):
         open_feature(store, "ACME")
+
+
+def test_renamed_project_stays_a_feature():
+    store = FakeStore()
+    id = create_id("ACME:Alpha", "feature")
+    store.create_project(id, "ACME", "Alpha", "", [FEATURE_LABEL])
+    store._projects[id]["name"] = "Alpha renamed in Linear"
+    [found] = team_features(store, "ACME")
+    assert found["id"] == id and is_feature(found)
+
+
+def test_unlabeled_project_is_not_a_feature():
+    store = FakeStore()
+    store.create_project(create_id("ACME:Alpha", "feature"), "ACME", "Alpha", "", ["other"])
+    assert team_features(store, "ACME") == []
 
 
 def test_budget_note_after_half_of_one_week():

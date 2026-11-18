@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 
+from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -25,7 +26,7 @@ P2 = create_id("ACME:Beta", "feature")
 
 def parked(store: FakeStore, name: str = "Alpha") -> str:
     id = create_id(f"ACME:{name}", "feature")
-    store.create_project(id, "ACME", name, "Budget: 9 weeks.")
+    store.create_project(id, "ACME", name, "Budget: 9 weeks.", [FEATURE_LABEL])
     return id
 
 
@@ -66,7 +67,16 @@ def test_reference_marked_as_reference_in_description():
     assert made["id"] == create_id("ACME:Alpha", "feature")
     assert "Reference (not a decision):\n- ACME-4" in made["description"]
     assert made["start_date"] is None
+    assert made["labels"] == ["deckhand"]
     assert store.writes == [("create_project", made["id"])]
+
+
+def test_new_labels_a_project_an_older_run_left_unlabeled():
+    store = FakeStore()
+    store.create_project(P1, "ACME", "Alpha", "")
+    step(store).apply(["new", *TEAM, "--name", "Alpha"])
+    assert store.project(P1)["labels"] == ["deckhand"]
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_labels"]
 
 
 def test_park_refuses_with_an_approved_story():
@@ -104,7 +114,7 @@ def test_context_json_has_phase_budget_and_parked(capsys: pytest.CaptureFixture[
 
 def test_context_reads_budget_from_dates_not_description(capsys: pytest.CaptureFixture[str]):
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "Budget: 9 weeks.")
+    store.create_project(P1, "ACME", "Alpha", "Budget: 9 weeks.", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-30")
     step(store).context([*TEAM, "--json"])
     assert json.loads(capsys.readouterr().out)["open"][0]["budget"]["budget_days"] == 14
@@ -113,7 +123,7 @@ def test_context_reads_budget_from_dates_not_description(capsys: pytest.CaptureF
 def test_context_with_two_open_features_reports_both(capsys: pytest.CaptureFixture[str]):
     store = FakeStore()
     for id, name in ((P1, "Alpha"), (P2, "Beta")):
-        store.create_project(id, "ACME", name, "")
+        store.create_project(id, "ACME", name, "", [FEATURE_LABEL])
         store.set_project_dates(id, "2026-11-16", "2026-11-23")
     step(store).context([*TEAM, "--json"])
     facts = json.loads(capsys.readouterr().out)
@@ -125,11 +135,11 @@ def test_context_with_two_open_features_reports_both(capsys: pytest.CaptureFixtu
 
 def test_context_reports_and_pick_refuses_odd_budget_dates(capsys: pytest.CaptureFixture[str]):
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-26")
     step(store).context([*TEAM, "--json"])
     assert json.loads(capsys.readouterr().out)["open"][0]["budget"] is None
-    store.create_project(P2, "ACME", "Beta", "")
+    store.create_project(P2, "ACME", "Beta", "", [FEATURE_LABEL])
     store.writes.clear()
     with pytest.raises(Refusal, match="Alpha"):
         step(store).apply(["pick", *TEAM, "--project", P2, "--weeks", "1"])

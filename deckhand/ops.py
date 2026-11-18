@@ -81,12 +81,19 @@ def ensure_relation(store: Store, blocker: str, blocked: str) -> None:
         store.relate(blocker, blocked)
 
 
-def ensure_project(store: Store, key: str, purpose: str, team: str, name: str, description: str) -> str:
+def ensure_project(
+    store: Store, key: str, purpose: str, team: str, name: str, description: str, labels: list[str] | None = None
+) -> str:
     id = create_id(key, purpose)
-    if store.project(id) is not None:
+    wanted = labels or []
+    found = store.project(id)
+    if found is not None:
+        held = set(found["labels"])
+        if not set(wanted) <= held:
+            store.set_project_labels(id, sorted(held | set(wanted)))
         return id
     try:
-        store.create_project(id, team, name, description)
+        store.create_project(id, team, name, description, wanted)
     except DuplicateId:
         pass
     return id
