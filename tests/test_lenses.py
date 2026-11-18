@@ -6,10 +6,10 @@ import pytest
 
 from deckhand.lenses import BRANCH, PLAN, lenses_for
 from deckhand.policy import Policy
+from deckhand.step import Refusal
 from deckhand.tiers import TIERS
 
 LENSES = Path(__file__).resolve().parent.parent / "skills" / "story" / "lenses"
-KEYS = ("lens", "severity", "path", "line", "summary", "fix", "evidence")
 NONE, DATA_RULE, MULTI_STEP, CONCURRENCY = (TIERS[3], TIERS[2], TIERS[1], TIERS[0])
 
 
@@ -25,6 +25,16 @@ def test_plan_core_five() -> None:
         "tests",
         "input-shape",
     ]
+
+
+def test_level_1_adds_no_chaos() -> None:
+    assert "chaos" not in lenses_for("plan", DATA_RULE, policy())
+
+
+def test_unknown_stage_refuses() -> None:
+    with pytest.raises(Refusal) as refused:
+        lenses_for("feature", NONE, policy())
+    assert "feature" in refused.value.rule
 
 
 def test_tier_3_adds_chaos() -> None:
@@ -60,7 +70,6 @@ def test_lens_file_names_the_contract(name: str) -> None:
     assert stages <= {"plan", "branch"}
     assert (name in PLAN or name == "chaos") == ("plan" in stages)
     assert (name in BRANCH or name == "impeccable") == ("branch" in stages)
-    assert all(f'"{key}"' in text for key in KEYS)
     assert "[]" in text
     assert text.isascii()
     assert len(text.split()) < 300

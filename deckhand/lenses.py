@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from deckhand.policy import Policy
+from deckhand.policy import STAGES, Policy
+from deckhand.step import Refusal
 from deckhand.tiers import Tier
 
 CHAOS_LEVEL = 3
@@ -10,6 +11,8 @@ BRANCH = ("correctness", "tests", "idiomatic", "sibling-form")
 
 
 def lenses_for(stage: str, tier: Tier, policy: Policy) -> list[str]:
+    if stage not in STAGES:
+        raise Refusal(f"the review stage {stage!r} is not plan or branch")
     if stage == "plan":
         found = list(PLAN)
         if tier.level >= CHAOS_LEVEL:

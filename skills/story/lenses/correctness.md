@@ -15,4 +15,4 @@ Evidence is the plan sentence or the `path:line` that shows the fault, with the 
 
 ## Output
 
-Output only a JSON list. Each item: {"lens": "correctness", "severity": "P1"|"P2"|"P3", "path": "file", "line": 0, "summary": "one sentence", "fix": "one sentence", "evidence": "quote or path:line"}. P1 breaks an acceptance criterion or corrupts data, P2 is a gap a reviewer would send back, P3 is worth a sentence. A clean result is []. Write no prose around the list.
+Output only a JSON list. Each item: {"lens": "correctness", "severity": "P1"|"P2"|"P3", "path": "file", "line": 0, "summary": "one sentence", "fix": "one sentence", "evidence": "the plan sentence or a path:line that shows the fault, with the triggering input"}. The path is the repository file the finding is about, or the plan document path when no code file applies. The line is 1-based, 0 when none. P1 breaks an acceptance criterion or corrupts data, P2 is a gap a reviewer would send back, P3 is worth a sentence. A clean result is []. Write no prose around the list.

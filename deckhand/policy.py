@@ -6,6 +6,7 @@ from typing import Any
 
 from deckhand.step import Refusal, read_toml
 
+STAGES = ("plan", "branch")
 TIER_KEYS = ("0", "1", "2", "3", "4")
 KEYS = frozenset({"repository_label", "tier_tools", "checks", "sensitive_paths", "extra_lenses", "front_end"})
 
@@ -62,4 +63,13 @@ def _tier_tools(path: Path, value: Any) -> dict[int, list[str]]:
 def _extra_lenses(path: Path, value: Any) -> dict[str, list[str]]:
     if not isinstance(value, dict):
         raise Refusal(f"{path}: extra_lenses must be a table")
-    return {name: _strings(path, f"extra_lenses.{name}", lenses) for name, lenses in value.items()}
+    found = {}
+    for stage, lenses in value.items():
+        if stage not in STAGES:
+            raise Refusal(f"{path}: extra_lenses key {stage!r} is not a stage, plan or branch")
+        names = _strings(path, f"extra_lenses.{stage}", lenses)
+        for name in names:
+            if not name or "/" in name or name.endswith(".md"):
+                raise Refusal(f"{path}: extra_lenses.{stage} entry {name!r} must be a lens name, not a path")
+        found[stage] = names
+    return found
