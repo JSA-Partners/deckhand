@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 from deckhand.credentials import Credentials
 from deckhand.github import Github
@@ -12,7 +14,10 @@ from deckhand.linear.workspace import AUTOMATION, STATES, Workspace
 from deckhand.step import Refusal, register
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-USAGE = "setup takes --team-key KEY, --repository LABEL=owner/name (repeatable), --enable-auto-merge"
+USAGE = (
+    "setup takes --team-key KEY, --repository LABEL=owner/name (repeatable), --enable-auto-merge,"
+    " and --json on context only"
+)
 
 
 def _config_dir() -> Path:
@@ -54,30 +59,57 @@ class Setup:
             return self._workspace
         return Workspace(connect(Credentials.load(_config_dir()), "person"))
 
-    def context(self, args: list[str]) -> None:
-        key, repositories, _ = _parse(args)
+    def _facts(self, key: str, repositories: dict[str, str]) -> dict[str, Any]:
         workspace = self._workspace_for_run()
         team = workspace.team(key)
         if team is None:
+            return {"team": {"key": key, "found": False}}
+        return {
+            "team": {"key": key, "found": True},
+            "states": [
+                {"name": s["name"], "type": s["type"], "designed": s["name"] in STATES} for s in team["states"]["nodes"]
+            ],
+            "automation": [
+                {"event": row["event"], "state": (row["state"] or {}).get("name")}
+                for row in team["gitAutomationStates"]["nodes"]
+            ],
+            "labels": [label["name"] for label in team["labels"]["nodes"]],
+            "repositories": [
+                {
+                    "label": label,
+                    "repository": repository,
+                    "allow_auto_merge": self._github.auto_merge_allowed(repository),
+                }
+                for label, repository in repositories.items()
+            ],
+            "planned_changes": [change.text for change in workspace.plan(team, list(repositories))],
+        }
+
+    def context(self, args: list[str]) -> None:
+        as_json = "--json" in args
+        key, repositories, _ = _parse([arg for arg in args if arg != "--json"])
+        facts = self._facts(key, repositories)
+        if as_json:
+            print(json.dumps(facts, indent=2))
+            return
+        if not facts["team"]["found"]:
             print(f"team {key}: no team has this key; apply refuses")
             return
         print(f"team {key}: found")
-        designed = set(STATES)
-        for state in team["states"]["nodes"]:
-            note = "" if state["name"] in designed else " (outside the design, kept as is)"
+        for state in facts["states"]:
+            note = "" if state["designed"] else " (outside the design, kept as is)"
             print(f"state {state['name']} ({state['type']}){note}")
-        for event, row in ((r["event"], r) for r in team["gitAutomationStates"]["nodes"]):
-            print(f"automation {event} to {(row['state'] or {}).get('name')}")
-        for label in team["labels"]["nodes"]:
-            print(f"label {label['name']}")
-        for label, repository in repositories.items():
-            allowed = self._github.auto_merge_allowed(repository)
-            print(f"repository {repository} (label {label}): allow_auto_merge {allowed}")
+        for row in facts["automation"]:
+            print(f"automation {row['event']} to {row['state']}")
+        for label in facts["labels"]:
+            print(f"label {label}")
+        for row in facts["repositories"]:
+            print(f"repository {row['repository']} (label {row['label']}): allow_auto_merge {row['allow_auto_merge']}")
         print(f"design automation: {', '.join(f'{e} to {s}' for e, s in AUTOMATION.items())}")
-        changes = workspace.plan(team, list(repositories))
+        changes = facts["planned_changes"]
         print("planned changes:" if changes else "planned changes: none")
         for change in changes:
-            print(f"  {change.text}")
+            print(f"  {change}")
         print("  allow_auto_merge on each repository only with --enable-auto-merge")
 
     def apply(self, args: list[str]) -> None:

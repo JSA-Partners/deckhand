@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import urllib.error
 import urllib.request
@@ -294,3 +295,38 @@ def test_unusable_key_never_reaches_the_output(through_main, capsys: pytest.Capt
     assert requests == []
     assert "lin_api" not in captured.out + captured.err
     assert "Traceback" not in captured.err
+
+
+def test_context_json_prints_the_same_facts(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME", states=[("Triage", "triage"), ("Done", "completed")])
+    linear.teams["ACME"]["automation"] = [{"id": "a-merge", "event": "merge", "state": {"name": "Done"}}]
+    linear.teams["ACME"]["labels"] = [{"id": "l1", "name": "Bug", "isGroup": False, "parent": None}]
+    setup, runner = make(linear, FakeRunner("true"))
+    setup.context([*ARGS, "--json"])
+    facts = json.loads(capsys.readouterr().out)
+    assert linear.writes == []
+    assert not any("PATCH" in call for call in runner.calls)
+    assert facts["team"] == {"key": "ACME", "found": True}
+    assert facts["states"] == [
+        {"name": "Triage", "type": "triage", "designed": False},
+        {"name": "Done", "type": "completed", "designed": True},
+    ]
+    assert facts["automation"] == [{"event": "merge", "state": "Done"}]
+    assert facts["labels"] == ["Bug"]
+    assert facts["repositories"] == [{"label": "widgets", "repository": "acme/widgets", "allow_auto_merge": True}]
+    assert "create state In Progress" in facts["planned_changes"]
+    assert "create label widgets under Repository" in facts["planned_changes"]
+
+
+def test_context_json_for_a_missing_team(capsys: pytest.CaptureFixture[str]):
+    setup, _ = make(FakeLinear("ACME"))
+    setup.context(["--team-key", "NOPE", "--json"])
+    assert json.loads(capsys.readouterr().out) == {"team": {"key": "NOPE", "found": False}}
+
+
+def test_apply_refuses_json():
+    linear = FakeLinear("ACME")
+    setup, _ = make(linear)
+    with pytest.raises(Refusal, match="--json"):
+        setup.apply([*ARGS, "--json"])
+    assert linear.writes == []
