@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -95,7 +96,7 @@ class LinearClient:
                 raise _Unauthorized from None
             try:
                 body = error.read()
-            except OSError:
+            except (OSError, http.client.HTTPException):
                 body = b""
             try:
                 parsed = json.loads(body)
@@ -104,7 +105,7 @@ class LinearClient:
             if isinstance(parsed, dict) and parsed.get("errors"):
                 return body
             raise LinearError("http", f"Linear answered HTTP {error.code}") from None
-        except (urllib.error.URLError, OSError, TimeoutError):
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
             raise LinearError("network", "could not reach Linear") from None
 
 

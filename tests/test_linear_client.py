@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import urllib.error
@@ -159,3 +160,25 @@ def test_fetch_app_token_failure_hides_secret() -> None:
         fetch_app_token("id1", "sec1", Transport(http_error(400, {"error": "invalid_client"})))
     assert raised.value.code == "token"
     assert "sec1" not in str(raised.value)
+
+
+def test_truncated_body_is_network_error() -> None:
+    with pytest.raises(LinearError) as raised:
+        client(Transport(http.client.IncompleteRead(b""))).query("q", {})
+    assert raised.value.code == "network"
+
+
+def test_truncated_error_body_is_linear_error() -> None:
+    class Truncated(io.BytesIO):
+        def read(self, size: int | None = -1) -> bytes:
+            raise http.client.IncompleteRead(b"")
+
+    error = urllib.error.HTTPError("https://api.linear.app/graphql", 500, "x", {}, Truncated())
+    with pytest.raises(LinearError):
+        client(Transport(error)).query("q", {})
+
+
+def test_fetch_app_token_truncated_body_is_network_error() -> None:
+    with pytest.raises(LinearError) as raised:
+        fetch_app_token("id1", "sec1", Transport(http.client.IncompleteRead(b"")))
+    assert raised.value.code == "network"

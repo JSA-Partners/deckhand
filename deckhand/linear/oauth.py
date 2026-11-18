@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.parse
@@ -30,7 +31,7 @@ def fetch_app_token(client_id: str, client_secret: str, transport: Transport = d
         token, expires_in = body["access_token"], int(body["expires_in"])
     except urllib.error.HTTPError as error:
         raise LinearError("token", f"the token request failed with HTTP {error.code}") from None
-    except (urllib.error.URLError, OSError, TimeoutError):
+    except (urllib.error.URLError, OSError, http.client.HTTPException):
         raise LinearError("network", "could not reach Linear") from None
     except (ValueError, KeyError, TypeError):
         raise LinearError("token", "the token response was not usable") from None
