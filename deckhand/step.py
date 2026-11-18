@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 VERBS = ("context", "apply")
 
@@ -21,3 +24,13 @@ def register(name: str) -> Callable[[type], type]:
         return cls
 
     return add
+
+
+def read_toml(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except FileNotFoundError:
+        raise Refusal(f"{path}: file not found") from None
+    except tomllib.TOMLDecodeError:
+        raise Refusal(f"{path}: not valid TOML") from None
