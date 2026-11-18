@@ -6,7 +6,6 @@ from pathlib import Path
 
 from deckhand import features, ops, planning
 from deckhand.credentials import Credentials
-from deckhand.features import Phase
 from deckhand.linear.connect import connect
 from deckhand.records import Record
 from deckhand.step import Refusal, register
@@ -118,7 +117,7 @@ def _story_id(feature: features.Feature, key: str) -> str:
 def _check_discovery(feature: features.Feature, entries: list[dict]) -> None:
     held = {s["id"] for s in feature.stories}
     keys = {e["key"] for e in entries}
-    building = features.phase(feature) is Phase.BUILDING
+    approved = any(feature.approved(s) for s in feature.live)
     for entry in entries:
         key = entry["key"]
         new = _story_id(feature, key) not in held
@@ -131,7 +130,7 @@ def _check_discovery(feature: features.Feature, entries: list[dict]) -> None:
                 raise Refusal(f"{key} cuts {cut}, which is still in the map")
             if _story_id(feature, cut) not in held:
                 raise Refusal(f"{key} cuts {cut}, which is not a story of this feature")
-        if building and new:
+        if approved and new:
             if missed is None:
                 raise Refusal(f"{key} is new after approval; it needs missed_by, one of {', '.join(MISSED_BY)}")
             if cut is None and entry.get("spends_budget") is not True:

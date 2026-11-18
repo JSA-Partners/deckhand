@@ -209,6 +209,23 @@ def test_story_added_after_approval_needs_missed_by_and_a_cut(tmp_path: Path):
     assert any(r.data.get("spends_budget") for r in store.records(story_id("b")))
 
 
+def test_a_voided_approval_keeps_the_rule_for_new_stories(tmp_path: Path):
+    store = setup()
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Contract", "POST /orders.", False)
+    run(store, tmp_path, [entry("a")])
+    approve(store, "a")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Contract", "POST /orders, changed.", False)
+    assert features.phase(features.open_feature(store, "ACME")) is features.Phase.PLANNING
+    store.writes.clear()
+    with pytest.raises(Refusal, match="b is new after approval; it needs missed_by"):
+        run(store, tmp_path, [entry("a"), entry("b")])
+    assert store.writes == []
+
+
 def test_plan_saves_and_prints_a_section(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     store = setup()
     path = tmp_path / "frame.md"
