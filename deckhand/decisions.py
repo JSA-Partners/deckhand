@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, features, ops, planning, review, tiers, versions
+from deckhand import answers, features, ops, planning, quiz, review, tiers, versions
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -23,6 +23,7 @@ KINDS = (
     "feature-approval",
     "finding",
     review.CAP_DECISION,
+    quiz.KIND,
 )
 
 _OPTIONS = {
@@ -49,6 +50,7 @@ _ASKS = {
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
     review.CAP_DECISION: "Three plan review rounds ran and a P1 is open. Proceed to the build or rework the plan for",
+    quiz.KIND: "Quiz on",
 }
 
 _POSITIVE = {
@@ -86,6 +88,7 @@ class Pin:
     detail: str = ""
     label: str = ""
     story_labels: list[str] = field(default_factory=list)
+    options: list[str] = field(default_factory=list)
 
 
 def make_question(kind: str, pin: Pin) -> Question:
@@ -93,7 +96,8 @@ def make_question(kind: str, pin: Pin) -> Question:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
-    return build(kind, pin.label or pin.subject, question_text(kind, pin), _OPTIONS[kind])
+    options = pin.options if kind == quiz.KIND else _OPTIONS[kind]
+    return build(kind, pin.label or pin.subject, question_text(kind, pin), options)
 
 
 def question_text(kind: str, pin: Pin) -> str:
@@ -136,17 +140,48 @@ def _cap_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
     return Pin(story["id"], latest.subject, [story["id"]], detail, _label(story), [_label(story)])
 
 
-def pin(store: Store, feature: features.Feature, kind: str, subject: str, stories: list[str], finding: str = "") -> Pin:
+def _quiz_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    held = quiz.held_set(records, story["id"])
+    if held is None:
+        raise Refusal(f"no quiz is saved for {story['identifier']}")
+    items = quiz.items_of(held)
+    if not 1 <= n <= len(items):
+        raise Refusal(f"the quiz on {story['identifier']} has no item {n}; it has {len(items)}")
+    if quiz.right(records, story["id"], n):
+        raise Refusal(f"item {n} of the quiz on {story['identifier']} is already answered right")
+    item = items[n - 1]
+    detail = f"item {n} of {len(items)}, {item.question}"
+    if quiz.missed(records, story["id"], n):
+        detail += f" (the code is at {item.where})"
+    label = _label(story)
+    return Pin(quiz.subject(story["id"], n), held.version, [story["id"]], detail, label, [label], item.options)
+
+
+def pin(
+    store: Store,
+    feature: features.Feature,
+    kind: str,
+    subject: str,
+    stories: list[str],
+    finding: str = "",
+    item: int | None = None,
+) -> Pin:
     if kind not in KINDS:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
     if (kind == "finding") != bool(finding):
         raise Refusal("finding needs --finding ID, and --finding applies only to finding")
+    if (kind == quiz.KIND) != (item is not None):
+        raise Refusal("quiz needs --item N, and --item applies only to quiz")
     if kind != "decision-item" and stories:
         raise Refusal("--story applies only to decision-item; every other kind finds its own stories")
     if kind == review.CAP_DECISION:
         return _cap_pin(store, feature, subject)
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)
+    if item is not None:
+        return _quiz_pin(store, feature, subject, item)
     if kind == "decision-item":
         if not stories:
             raise Refusal("decision-item needs at least one --story")
@@ -212,7 +247,7 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
-    if pending.kind in ("tier", "decision-item", "finding", review.CAP_DECISION):
+    if pending.kind in ("tier", "decision-item", "finding", review.CAP_DECISION, quiz.KIND):
         return True
     return answer == _POSITIVE[pending.kind]
 
@@ -229,7 +264,10 @@ def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
         raise Refusal(f"no recorded answer for {pending.nonce} in {state / answers.FILE}")
-    pin = Pin(pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels)
+    options = pending.options if pending.kind == quiz.KIND else []
+    pin = Pin(
+        pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels, options
+    )
     asked = question_text(pending.kind, pin)
     if pending.question != asked:
         raise Refusal(f"the pending question for {pending.nonce} differs from the question the person saw")
@@ -239,7 +277,7 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
-    if pending.kind in ("finding", review.CAP_DECISION) and found.answer not in pending.options:
+    if pending.kind in ("finding", review.CAP_DECISION, quiz.KIND) and found.answer not in pending.options:
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
@@ -255,6 +293,10 @@ def decide(store: Store, pending: Pending, state: Path) -> bool:
     found = check(pending, state)
     if not _creates_record(pending, found.answer):
         return False
+    graded = {}
+    if pending.kind == quiz.KIND:
+        records = store.records(pending.stories[0])
+        graded = {"correct": quiz.grade(records, pending.subject, pending.version, pending.options, found.answer)}
     record = Record(
         pending.kind,
         pending.subject,
@@ -262,7 +304,8 @@ def decide(store: Store, pending: Pending, state: Path) -> bool:
         f"person:{found.session_id}",
         {"answer": found.answer, "question": pending.question, "nonce": pending.nonce}
         | ({"item": pending.detail} if pending.kind == "decision-item" else {})
-        | (_tier_data(found.answer) if pending.kind == "tier" else {}),
+        | (_tier_data(found.answer) if pending.kind == "tier" else {})
+        | graded,
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

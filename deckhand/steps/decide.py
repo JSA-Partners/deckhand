@@ -4,17 +4,19 @@ import json
 import os
 from pathlib import Path
 
-from deckhand import answers, decisions, features
+from deckhand import answers, decisions, features, git, quiz, versions
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, register
+from deckhand.steps.build import WORKTREE
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 USAGE = (
     "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
-    " the SUBJECT a feature id, a story or a decision item's text, and finding takes a story and --finding ID;"
+    " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
+    " and quiz takes a story and --item N;"
     " apply NONCE"
 )
 
@@ -29,7 +31,7 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg in ("--story", "--team-key", "--finding"):
+        elif arg in ("--story", "--team-key", "--finding", "--item"):
             value = next(rest, "")
             if arg == "--story":
                 found["stories"].append(value)
@@ -39,13 +41,30 @@ def _parse(args: list[str]) -> dict:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
+    if "item" in found:
+        if not found["item"].isdigit() or int(found["item"]) < 1:
+            raise Refusal(f"--item takes a quiz item number from 1; {USAGE}")
+        found["item"] = int(found["item"])
     return found
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 @register("decide")
 class Decide:
-    def __init__(self, store: Store | None = None) -> None:
+    def __init__(
+        self,
+        store: Store | None = None,
+        runner: git.Runner = git.run,
+        repo: Path | None = None,
+        reader: quiz.Reader = read_text,
+    ) -> None:
         self._store = store
+        self._runner = runner
+        self._repo = repo
+        self._reader = reader
 
     def _store_for_run(self, parsed: dict) -> Store:
         if self._store is not None:
@@ -63,15 +82,38 @@ class Decide:
         feature = features.open_feature(store, parsed.get("team_key", ""))
         if feature is None:
             raise Refusal("no feature is open")
-        pin = decisions.pin(store, feature, kind, subject, parsed["stories"], parsed.get("finding", ""))
+        pin = decisions.pin(
+            store, feature, kind, subject, parsed["stories"], parsed.get("finding", ""), parsed.get("item")
+        )
         question = decisions.make_question(kind, pin)
         decisions.save_pending(question, pin, answers.state_dir())
         tool_input = as_tool_input(question)
+        shown = self._missed_code(feature, pin) if kind == quiz.KIND else {}
         if parsed["json"]:
-            print(json.dumps({"nonce": question.nonce, "tool_input": tool_input}, indent=2))
+            print(json.dumps({"nonce": question.nonce, "tool_input": tool_input} | shown, indent=2))
             return
+        if shown:
+            print(f"where: {shown['where']}")
+            print("\n".join(shown["code"]))
         print(f"nonce: {question.nonce}")
         print(json.dumps(tool_input, indent=2))
+
+    def _missed_code(self, feature: features.Feature, pin: decisions.Pin) -> dict:
+        story, _, n = pin.subject.rpartition(":")
+        records = feature.records.get(story, [])
+        if not quiz.missed(records, story, int(n)):
+            return {}
+        held = quiz.held_set(records, story)
+        where = quiz.items_of(held)[int(n) - 1].where
+        worktree = versions.held(records, WORKTREE, story)
+        try:
+            clone = self._repo or git.clone_root(Path.cwd(), self._runner)
+        except git.GitError:
+            clone = None
+        if worktree is None or clone is None:
+            return {"where": where, "code": ["the worktree is not on this machine"]}
+        path = git.worktree_path(clone, worktree.data["branch"])
+        return {"where": where, "code": quiz.code_at(path, where, self._reader)}
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
@@ -83,6 +125,11 @@ class Decide:
         store = self._store_for_run(parsed)
         if decisions.decide(store, pending, state):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
+            if pending.kind == quiz.KIND:
+                held = versions.held(store.records(pending.stories[0]), quiz.KIND, pending.subject)
+                verdict = "right" if held and held.data.get("correct") else "wrong, the item stays open"
+                print(f"done: recorded quiz answer for {pending.subject}: {verdict}")
+                return
             print(f"done: recorded {pending.kind} for {pending.subject} on {len(pending.stories)} stories")
             return
         decisions.pending_path(nonce, state).unlink(missing_ok=True)

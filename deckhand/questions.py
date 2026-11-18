@@ -7,6 +7,7 @@ from dataclasses import dataclass
 HEADER_PREFIX = "dh "
 MIN_OPTIONS, MAX_OPTIONS = 2, 4
 NONCE = re.compile(r"[0-9a-f]{8}")
+RECOMMENDED = re.compile(r"\brecommended\b", re.IGNORECASE)
 
 
 def valid_nonce(nonce: str) -> bool:

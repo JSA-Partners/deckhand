@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 
 from deckhand import answers, decisions
-from deckhand.questions import HEADER_PREFIX, valid_nonce
+from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
 from deckhand.step import Refusal, register
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 USAGE = "hook apply answer|ask reads one hook event as JSON on stdin"
-RECOMMENDED = re.compile(r"\brecommended\b", re.IGNORECASE)
 
 
 def _read() -> dict:
