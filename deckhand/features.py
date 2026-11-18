@@ -35,7 +35,8 @@ def phase(feature: Feature) -> Phase:
     stories = feature.stories
     if stories and all(s["state"] in FINISHED for s in stories):
         return Phase.RELEASED
-    if stories and all(feature.approved(s) for s in stories):
+    live = [s for s in stories if s["state"] not in ("Canceled", "Duplicate")]
+    if live and all(feature.approved(s) for s in live):
         return Phase.BUILDING
     return Phase.PLANNING
 
@@ -96,5 +97,5 @@ def budget_of(project: dict, today: date) -> Budget | None:
     if not project["start_date"] or not project["target_date"]:
         return None
     start = date.fromisoformat(project["start_date"])
-    weeks = max(1, round((date.fromisoformat(project["target_date"]) - start).days / 7))
-    return Budget(weeks, start, today)
+    days = (date.fromisoformat(project["target_date"]) - start).days
+    return Budget(days // 7, start, today) if days in (7, 14) else None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
@@ -17,9 +16,8 @@ from deckhand.store.linear import LinearStore
 
 USAGE = (
     "feature takes --team-key KEY on both verbs, --json on context only, and on apply one of: new --name N"
-    " --weeks 1|2 [--reference REF ...], pick --project ID, park --project ID"
+    " [--reference REF ...], pick --project ID --weeks 1|2, park --project ID"
 )
-WEEKS = re.compile(r"^Budget: (\d+) weeks?\.", re.MULTILINE)
 
 
 def _config_dir() -> Path:
@@ -47,11 +45,10 @@ def _parse(args: list[str]) -> dict:
     return found
 
 
-def _description(weeks: int, references: list[str]) -> str:
-    lines = [f"Budget: {weeks} {'week' if weeks == 1 else 'weeks'}."]
-    if references:
-        lines += ["", "Reference (not a decision):", *[f"- {r}" for r in references]]
-    return "\n".join(lines)
+def _description(references: list[str]) -> str:
+    if not references:
+        return ""
+    return "\n".join(["Reference (not a decision):", *[f"- {r}" for r in references]])
 
 
 @register("feature")
@@ -67,27 +64,31 @@ class Feature:
 
     def _facts(self, store: Store, team: str) -> dict:
         today = self._today()
-        feature = features.open_feature(store, team)
-        facts: dict = {
-            "open": None,
-            "parked": [{"id": p["id"], "name": p["name"]} for p in features.parked(store, team)],
-        }
-        if feature is not None:
+        found = features.open_features(store, team)
+        parked = [{"id": p["id"], "name": p["name"]} for p in features.parked(store, team)]
+        facts: dict = {"open": [], "parked": parked}
+        for feature in found:
             budget = features.budget_of(feature.project, today)
-            facts["open"] = {
-                "id": feature.project["id"],
-                "name": feature.project["name"],
-                "phase": features.phase(feature).value,
-                "stories": len(feature.stories),
-                "budget": None
-                if budget is None
-                else {
-                    "days_used": budget.days_used,
-                    "budget_days": budget.budget_days,
-                    "planning_note": budget.planning_note and features.phase(feature) is Phase.PLANNING,
-                    "over": budget.over,
-                },
-            }
+            current = features.phase(feature)
+            facts["open"].append(
+                {
+                    "id": feature.project["id"],
+                    "name": feature.project["name"],
+                    "phase": current.value,
+                    "stories": len(feature.stories),
+                    "budget": None
+                    if budget is None
+                    else {
+                        "days_used": budget.days_used,
+                        "budget_days": budget.budget_days,
+                        "planning_note": budget.planning_note and current is Phase.PLANNING,
+                        "over": budget.over,
+                    },
+                }
+            )
+        if len(found) > 1:
+            names = ", ".join(features.describe(f.project) for f in found)
+            facts["anomaly"] = f"more than one feature is open: {names}"
         return facts
 
     def context(self, args: list[str]) -> None:
@@ -96,18 +97,21 @@ class Feature:
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
-        held = facts["open"]
-        if held is None:
+        if not facts["open"]:
             print("no feature is open")
-        else:
+        if "anomaly" in facts:
+            print(f"anomaly: {facts['anomaly']}")
+        for held in facts["open"]:
             print(f"open feature: {held['name']} ({held['id']}), {held['phase']}, {held['stories']} stories")
             budget = held["budget"]
-            if budget:
-                print(f"budget: {budget['days_used']} of {budget['budget_days']} days used")
-                if budget["over"]:
-                    print("over budget")
-                if budget["planning_note"]:
-                    print("planning has passed half of one week")
+            if budget is None:
+                print("budget: the dates are not one or two weeks apart")
+                continue
+            print(f"budget: {budget['days_used']} of {budget['budget_days']} days used")
+            if budget["over"]:
+                print("over budget")
+            if budget["planning_note"]:
+                print("planning has passed half of one week")
         for row in facts["parked"]:
             print(f"parked: {row['name']} ({row['id']})")
 
@@ -125,9 +129,6 @@ class Feature:
         name = parsed.get("name", "").strip()
         if not name:
             raise Refusal(f"--name is required; {USAGE}")
-        if parsed.get("weeks") not in ("1", "2"):
-            raise Refusal(f"--weeks must be 1 or 2, not {parsed.get('weeks', '')!r}")
-        weeks = int(parsed["weeks"])
         team = parsed["team_key"]
         id = ops.ensure_project(
             self._store_for_run(),
@@ -135,11 +136,13 @@ class Feature:
             "feature",
             team,
             name,
-            _description(weeks, parsed["references"]),
+            _description(parsed["references"]),
         )
         print(f"done: parked feature {name} ({id})")
 
     def _move(self, action: str, parsed: dict) -> None:
+        if action == "pick" and parsed.get("weeks") not in ("1", "2"):
+            raise Refusal(f"--weeks must be 1 or 2, not {parsed.get('weeks', '')!r}")
         store = self._store_for_run()
         project = store.project(parsed.get("project", ""))
         if project is None:
@@ -149,14 +152,12 @@ class Feature:
         if action == "pick":
             if current is not Phase.PARKED:
                 raise Refusal(f"{features.describe(project)} is {current.value}, not parked")
-            held = features.open_feature(store, parsed["team_key"])
-            if held is not None:
-                raise Refusal(f"{features.describe(held.project)} is still open; finish or park it first")
-            match = WEEKS.search(project["description"] or "")
-            if not match:
-                raise Refusal(f"{features.describe(project)} has no budget line in its description")
+            held = features.open_features(store, parsed["team_key"])
+            if held:
+                names = ", ".join(features.describe(f.project) for f in held)
+                raise Refusal(f"{names} is still open; finish or park it first")
             today = self._today()
-            target = today + timedelta(days=7 * int(match.group(1)))
+            target = today + timedelta(days=7 * int(parsed["weeks"]))
             ops.ensure_project_dates(store, project["id"], today.isoformat(), target.isoformat())
             print(f"done: picked {project['name']}, target {target.isoformat()}")
             return

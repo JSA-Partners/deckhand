@@ -51,3 +51,10 @@ def test_budget_over_after_target():
     assert not Budget(2, start, date(2026, 11, 30)).over
     assert Budget(2, start, date(2026, 12, 1)).over
     assert Budget(2, start, start).budget_days == 14
+
+
+def test_building_ignores_canceled_and_duplicate_stories():
+    stories = [story("a"), story("b", "Canceled"), story("c", "Duplicate")]
+    assert phase(Feature(project(), stories, {"a": [APPROVAL]})) is Phase.BUILDING
+    assert phase(Feature(project(), [*stories[1:], story("d")], {})) is Phase.PLANNING
+    assert phase(Feature(project(), stories, {})) is Phase.PLANNING
