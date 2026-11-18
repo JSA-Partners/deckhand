@@ -64,6 +64,7 @@ class Shell:
 def labeled(tmp_path: Path, repo: Path) -> FakeStore:
     store = planned(tmp_path, repo)
     store.set_labels("s1", ["widgets"])
+    Build(store, Shell(), repo).apply(["s1", "worktree", *TEAM])
     (repo / ".worktrees" / BRANCH).mkdir(parents=True)
     return store
 
@@ -195,3 +196,25 @@ def test_context_prints_the_briefing(tmp_path: Path, repo: Path, capsys: pytest.
     assert (facts["story"], facts["tier"], facts["tools"], facts["checks"]) == ("ACME-1", 0, ["ruff"], ["make lint"])
     assert facts["worktree"] == str(repo / ".worktrees" / BRANCH)
     assert facts["plan"] == PLAN
+
+
+def test_a_renamed_story_keeps_its_worktree(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    shell = Shell()
+    Build(store, shell, repo).apply(["s1", "worktree", *TEAM])
+    (repo / ".worktrees" / BRANCH).mkdir(parents=True)
+    record_round(Review(store, Git(BASE), repo), tmp_path)
+    store._issues["s1"]["branch_name"] = "acme-1-orders-renamed"
+    push(store, shell, repo)
+    [create] = shell.ran("gh", "pr", "create")
+    assert create[create.index("--head") + 1] == BRANCH
+    assert [r.data for r in store.records("s1") if r.kind == "worktree"] == [{"branch": BRANCH}]
+
+
+def test_push_without_a_worktree_record_refuses(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    record_round(Review(store, Git(BASE), repo), tmp_path)
+    with pytest.raises(Refusal, match="has no worktree"):
+        push(store, Shell(), repo)

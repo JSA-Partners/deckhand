@@ -340,3 +340,20 @@ def test_branch_round_without_a_head_refuses(tmp_path: Path, repo: Path):
     step = Review(store, BranchGit("c2", {"base1...HEAD": "+two\n"}), repo)
     with pytest.raises(Refusal, match="holds no head"):
         step.context(["s1", "--stage", "branch", *TEAM])
+
+
+def test_scoped_round_carries_the_open_p1s(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    p1, p2 = raw(severity="P1"), raw(summary="Minor.", severity="P2")
+    record_round(step, tmp_path, p1, p2)
+    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
+    facts = shown(step, capsys, "s1", "--stage", "plan")
+    assert facts["scoped"] is True
+    assert [(c["id"], c["summary"]) for c in facts["carried"]] == [(finding_id(p1), p1["summary"])]
+    capsys.readouterr()
+    step.context(["s1", "--stage", "plan", *TEAM])
+    out = capsys.readouterr().out
+    assert "re-report" in out and finding_id(p1) in out.split("re-report")[1]
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(p1)], "Decline")
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "clean"

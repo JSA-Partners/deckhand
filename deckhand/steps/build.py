@@ -9,6 +9,7 @@ from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
 from deckhand.policy import Policy
+from deckhand.records import Record
 from deckhand.step import Refusal, register
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
@@ -18,6 +19,7 @@ USAGE = (
     " after the plan review stopped clean"
 )
 ACTIONS = ("worktree", "push")
+WORKTREE = "worktree"
 DEFAULT_BASE = "origin/HEAD"
 
 
@@ -40,6 +42,11 @@ def _parse(args: list[str]) -> dict:
     if not found.get("team_key"):
         raise Refusal(f"--team-key is required; {USAGE}")
     return found
+
+
+def _branch(records: list[Record], story: dict) -> str | None:
+    held = versions.held(records, WORKTREE, story["id"])
+    return held.data.get("branch") if held else None
 
 
 @register("build")
@@ -85,6 +92,7 @@ class Build:
         level = tiers.from_record(held.data) if held else None
         plan = store.document(ops.create_id(story["id"], implplan.PURPOSE))
         sitting = store.document(ops.create_id(story["id"], "sitting"))
+        branch = _branch(records, story) or story["branch_name"]
         facts = {
             "story": story["identifier"],
             "title": story["title"],
@@ -92,8 +100,8 @@ class Build:
             "tier": level.level if level else None,
             "tools": tiers.tools(policy.tier_tools, level.level, records, story["id"]) if level else [],
             "checks": policy.checks,
-            "worktree": str(clone / ".worktrees" / story["branch_name"]),
-            "branch": story["branch_name"],
+            "worktree": str(git.worktree_path(clone, branch)),
+            "branch": branch,
             "plan": plan["body"] if plan else None,
             "sitting": sitting["body"] if sitting else None,
         }
@@ -109,15 +117,22 @@ class Build:
         ref, action = parsed["words"]
         clone = self._clone()
         feature, story, _ = self._story(ref, parsed["team_key"], clone)
-        if not story.get("branch_name"):
-            raise Refusal(f"{story['identifier']} has no branch name in Linear")
         if self._runner(["git", "rev-parse", "--verify", "--quiet", DEFAULT_BASE], clone, None).returncode != 0:
             raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
         if action == "worktree":
-            path = git.worktree_add(clone, story["branch_name"], DEFAULT_BASE, self._runner)
-            print(f"done: worktree for {story['identifier']} at {path}")
+            self._worktree(feature, story, clone)
             return
         self._push(feature, story, clone)
+
+    def _worktree(self, feature: features.Feature, story: dict, clone: Path) -> None:
+        records = feature.records.get(story["id"], [])
+        branch = _branch(records, story) or story["branch_name"]
+        if not branch:
+            raise Refusal(f"{story['identifier']} has no branch name in Linear")
+        path = git.worktree_add(clone, branch, DEFAULT_BASE, self._runner)
+        record = Record(WORKTREE, story["id"], branch, "agent:build", {"branch": branch})
+        ops.ensure_record(self._store_for_run(), story["id"], record)
+        print(f"done: worktree for {story['identifier']} at {path}")
 
     def _push(self, feature: features.Feature, story: dict, clone: Path) -> None:
         records = feature.records.get(story["id"], [])
@@ -126,9 +141,9 @@ class Build:
                 f"the plan review of {story['identifier']} has not stopped clean; finish it,"
                 " or at the cap let the person decide: decide context review-cap"
             )
-        branch = story["branch_name"]
-        path = clone / ".worktrees" / branch
-        if not path.is_dir():
+        branch = _branch(records, story)
+        path = git.worktree_path(clone, branch) if branch else None
+        if branch is None or path is None or not path.is_dir():
             raise Refusal(f"{story['identifier']} has no worktree; run build apply {story['identifier']} worktree")
         if git.merge_base(path, "HEAD", DEFAULT_BASE, self._runner) == git.head(path, self._runner):
             raise Refusal(f"{branch} has no commits beyond {DEFAULT_BASE}; commit the work first")

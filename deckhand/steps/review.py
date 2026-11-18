@@ -202,6 +202,13 @@ class Review:
             if plan.scoped and last is not None:
                 facts["diff"], note = self._scoped_diff(subject, target, last, repo)
                 facts["note"] = note or facts["note"]
+        facts["carried"] = []
+        if not isinstance(plan, review.Stop) and plan.scoped:
+            held = review.last(counted)
+            facts["carried"] = [
+                {k: f[k] for k in ("id", "lens", "path", "line", "summary")}
+                for f in (review.open_p1(held, declined) if held else [])
+            ]
         facts["last_round"] = None
         if last is not None:
             items = [item | {"status": _status(item, declined, accepted)} for item in last.data["findings"]]
@@ -304,6 +311,11 @@ def _print(facts: dict) -> None:
             print(f"- {lens['name']}: {lens['path']}")
         if facts["target"]:
             print(f"target: {facts['target']}")
+    if facts["carried"]:
+        print("open P1s from the last round; re-report each the diff does not fix, with the same lens, path, line")
+        print("and summary so the id is kept:")
+        for item in facts["carried"]:
+            print(f"- {item['id']} {item['lens']} {item['path']}:{item['line']} {item['summary']}")
     if facts["note"]:
         print(f"note: {facts['note']}")
     if facts["diff"] is not None:

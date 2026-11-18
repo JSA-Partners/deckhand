@@ -52,8 +52,12 @@ def call(argv: list[str], cwd: Path | None, runner: Runner, stdin: str | None = 
     return done.stdout
 
 
+def worktree_path(clone: Path, branch: str) -> Path:
+    return clone / ".worktrees" / branch
+
+
 def worktree_add(clone: Path, branch: str, base: str, runner: Runner = run) -> Path:
-    path = clone / ".worktrees" / branch
+    path = worktree_path(clone, branch)
     if path.exists():
         return path
     known = runner(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], clone, None)
