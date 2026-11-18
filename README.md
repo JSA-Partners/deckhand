@@ -53,7 +53,7 @@ your decision. The dashed one happens on its own.
 | Column | Claude | You, to move it on |
 | --- | --- | --- |
 | Draft | Holds a parked feature | Write it into a story |
-| Refinement | Writes the story, then reviewer and skeptic read it | Nothing |
+| Refinement | Writes the story, then reviewer and confidence scorer read it | Nothing |
 | Ready | Waits | Choose the kind and points |
 | Backlog | Puts it in build order and checks the plan against main | Say build |
 | In Progress | Builds in the story's worktree and reviews the branch | Read the branch |
