@@ -228,3 +228,6 @@ class Stories:
                 record = Record("discovered", entry["key"], "1", "agent:stories", _discovery(entry))
                 ops.ensure_record(store, id, record)
         print(f"done: {len(entries)} stories in the map for {feature.project['name']}")
+        for entry in entries:
+            held = store.issue(ids[entry["key"]])
+            print(f"story: {held['identifier'] if held else ids[entry['key']]} {entry['key']}")

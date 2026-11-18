@@ -32,7 +32,7 @@ when the text came from a draft. Stopping is always safe: every answer is alread
 
 Turn the settled plan into stories. `deckhand stories context --team-key "$team_key"` prints the
 fields of the story map; list in each story's decisions the decision items it expects. Save the map
-with `deckhand stories apply --team-key "$team_key" --file MAP.json`.
+with `deckhand stories apply --team-key "$team_key" --file MAP.json`, which names each story's REF.
 
 For every decision, run
 `deckhand decide context KIND SUBJECT --team-key "$team_key"`, pass the JSON it prints unchanged to

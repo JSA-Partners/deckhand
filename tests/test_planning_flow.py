@@ -232,11 +232,12 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
     for entry in stories:
         entry.update(unknowns=[], new_here=[])
     stories[0]["decisions"] = [ITEM]
-    session.skill("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
+    saved = session.skill("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
+    refs = dict(line.removeprefix("story: ").split()[::-1] for line in saved.splitlines() if line.startswith("story: "))
 
     session.ask("contract", alpha, "Approve")
     session.ask("invariants", alpha, "Approve")
-    for ref, answer in (("ACME-1", CONCURRENCY), ("ACME-2", DATA_RULE)):
+    for ref, answer in ((refs["queue"], CONCURRENCY), (refs["owner"], DATA_RULE)):
         session.ask("tier", ref, answer)
         shown = session.skill("sitting", "context", ref, *TEAM)
         tier = int(next(line for line in shown.splitlines() if line.startswith("tier: ")).removeprefix("tier: "))
