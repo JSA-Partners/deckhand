@@ -7,12 +7,15 @@ import pytest
 
 from deckhand import answers, features, ops, planning, tiers, versions
 from deckhand.features import Phase
+from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
 from deckhand.store.fake import FakeStore
 from deckhand.tiers import FACTS
+
+P1 = create_id("ACME:Alpha", "feature")
 
 TEAM = ["--team-key", "ACME"]
 STATE_CHART = next(f.question for f in FACTS if f.key == "multi_step")
@@ -21,13 +24,13 @@ CONTRACT = next(f.question for f in FACTS if f.key == "crosses_repositories")
 
 def setup() -> FakeStore:
     store = FakeStore()
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     feature = load(store)
     for name in planning.SECTIONS:
         planning.save_section(store, feature, name, f"The {name} of Alpha.", False)
-    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", "p1", [])
-    store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", "p1", [])
+    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, [])
+    store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", P1, [])
     return store
 
 
@@ -54,12 +57,12 @@ def sat(store: FakeStore, story: str, tier_answer: str = CONTRACT) -> None:
 
 
 def approve_everything(store: FakeStore) -> None:
-    decided(store, "contract", "p1", "Approve", ["s1", "s2"])
-    decided(store, "invariants", "p1", "Approve", ["s1", "s2"])
+    decided(store, "contract", P1, "Approve", ["s1", "s2"])
+    decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     sat(store, "s1")
     sat(store, "s2")
     assert features.approval_gaps(store, load(store)) == []
-    decided(store, "feature-approval", "p1", "Approve", ["s1", "s2"])
+    decided(store, "feature-approval", P1, "Approve", ["s1", "s2"])
 
 
 def test_approval_gaps_lists_each_missing_decision():
@@ -72,8 +75,8 @@ def test_approval_gaps_lists_each_missing_decision():
         "ACME-2: the tier is not decided",
         "ACME-2: the sitting is not done",
     ]
-    decided(store, "contract", "p1", "Approve", ["s1", "s2"])
-    decided(store, "invariants", "p1", "Approve", ["s1"])
+    decided(store, "contract", P1, "Approve", ["s1", "s2"])
+    decided(store, "invariants", P1, "Approve", ["s1"])
     sat(store, "s1", STATE_CHART)
     assert features.approval_gaps(store, load(store)) == [
         "the Invariants are not approved",
@@ -85,9 +88,9 @@ def test_approval_gaps_lists_each_missing_decision():
 
 def test_approval_gaps_name_each_unsaved_section_first():
     store = FakeStore()
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
-    store.create_issue("s1", "ACME", "Orders", "Outcome.", "p1", [])
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
+    store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
     planning.save_section(store, load(store), "Shape", "The shape.", False)
     planning.save_section(store, load(store), "Contract", "The contract.", False)
     gaps = features.approval_gaps(store, load(store))
@@ -126,11 +129,11 @@ def test_changed_story_voids_feature_approval():
 def test_canceled_story_needs_no_approval():
     store = setup()
     store.set_issue_state("s2", "Canceled")
-    decided(store, "contract", "p1", "Approve", ["s1"])
-    decided(store, "invariants", "p1", "Approve", ["s1"])
+    decided(store, "contract", P1, "Approve", ["s1"])
+    decided(store, "invariants", P1, "Approve", ["s1"])
     sat(store, "s1")
     assert features.approval_gaps(store, load(store)) == []
-    decided(store, "feature-approval", "p1", "Approve", ["s1"])
+    decided(store, "feature-approval", P1, "Approve", ["s1"])
     assert features.phase(load(store)) is Phase.BUILDING
 
 
@@ -172,7 +175,7 @@ def test_decision_item_only_on_a_dropped_story_is_open_whatever_the_order(cancel
     gaps = features.approval_gaps(store, load(store))
     assert not any("decision item" in gap for gap in gaps)
     store.set_issue_state("s1" if canceled == "s2" else "s2", "Duplicate")
-    store.create_issue("s3", "ACME", "Refunds", "Outcome.", "p1", [])
+    store.create_issue("s3", "ACME", "Refunds", "Outcome.", P1, [])
     gaps = features.approval_gaps(store, load(store))
     assert "decision item Keep orders in one table is open" in gaps
 
@@ -219,28 +222,28 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_decide_context_refuses_approving_a_missing_section(state: Path):
     store = FakeStore()
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
-    store.create_issue("s1", "ACME", "Orders", "Outcome.", "p1", [])
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
+    store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
     with pytest.raises(Refusal, match="the Invariants section is not saved"):
-        Decide(store).context(["invariants", "p1", *TEAM])
+        Decide(store).context(["invariants", P1, *TEAM])
     assert store.records("s1") == []
 
 
 def test_decide_context_refuses_feature_approval_with_gaps(state: Path):
     store = setup()
     with pytest.raises(Refusal, match="not ready for approval: the Contract is not approved"):
-        Decide(store).context(["feature-approval", "p1", *TEAM])
+        Decide(store).context(["feature-approval", P1, *TEAM])
 
 
 def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsys: pytest.CaptureFixture[str]):
     store = setup()
-    decided(store, "contract", "p1", "Approve", ["s1", "s2"])
-    decided(store, "invariants", "p1", "Approve", ["s1", "s2"])
+    decided(store, "contract", P1, "Approve", ["s1", "s2"])
+    decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     sat(store, "s1")
     sat(store, "s2")
     step = Decide(store)
-    step.context(["feature-approval", "p1", *TEAM, "--json"])
+    step.context(["feature-approval", P1, *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     asked = shown["tool_input"]["questions"][0]
     answers.record(

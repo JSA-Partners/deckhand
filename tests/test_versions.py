@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from deckhand import features, ops, planning, versions
+from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
 from deckhand.store.fake import FakeStore
 from deckhand.tiers import FACTS
 
+P1 = create_id("ACME:Alpha", "feature")
+
 
 def setup() -> FakeStore:
     store = FakeStore()
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
-    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", "p1", [])
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
+    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, [])
     return store
 
 
@@ -58,11 +61,11 @@ def test_new_tier_answer_voids_the_sitting():
 def test_contract_version_follows_only_its_section():
     store = setup()
     planning.save_section(store, load(store), "Contract", "POST /orders.", False)
-    before = versions.version_for(store, load(store), "contract", "p1")
+    before = versions.version_for(store, load(store), "contract", P1)
     planning.save_section(store, load(store), "Frame", "Why.", False)
-    assert versions.version_for(store, load(store), "contract", "p1") == before
+    assert versions.version_for(store, load(store), "contract", P1) == before
     planning.save_section(store, load(store), "Contract", "POST /orders and GET /orders.", False)
-    assert versions.version_for(store, load(store), "contract", "p1") != before
+    assert versions.version_for(store, load(store), "contract", P1) != before
 
 
 def test_decision_item_version_is_its_text_hash():

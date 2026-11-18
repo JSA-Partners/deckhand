@@ -6,10 +6,13 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, decisions, features, planning, versions
+from deckhand.ops import create_id
 from deckhand.records import content_hash
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.store.fake import FakeStore
+
+P1 = create_id("ACME:Alpha", "feature")
 
 TEAM = ["--team-key", "ACME"]
 
@@ -22,10 +25,10 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def feature_store() -> FakeStore:
     store = FakeStore()
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
-    store.create_issue("s1", "ACME", "One", "Outcome.", "p1", [])
-    store.create_issue("s2", "ACME", "Two", "Outcome.", "p1", [])
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
+    store.create_issue("s1", "ACME", "One", "Outcome.", P1, [])
+    store.create_issue("s2", "ACME", "Two", "Outcome.", P1, [])
     store.create_issue("x1", "ACME", "Elsewhere", "", None, [])
     feature = features.open_feature(store, "ACME")
     assert feature is not None
@@ -50,9 +53,9 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
     store = feature_store()
     feature = features.open_feature(store, "ACME")
     assert feature is not None
-    version = versions.version_for(store, feature, "contract", "p1")
+    version = versions.version_for(store, feature, "contract", P1)
     step = Decide(store)
-    step.context(["contract", "p1", *TEAM, "--json"])
+    step.context(["contract", P1, *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     nonce = shown["nonce"]
     asked = shown["tool_input"]["questions"][0]
@@ -107,10 +110,10 @@ def test_decision_item_shows_its_text_and_records_an_open_answer(state: Path, ca
     "args,match",
     [
         (["contract", "p9"], "p9 is not the open feature"),
-        (["contract", "p1", "--story", "s1"], "--story applies only to decision-item"),
+        (["contract", P1, "--story", "s1"], "--story applies only to decision-item"),
         (["tier", "ACME-3"], "ACME-3 is not a story of Alpha"),
         (["decision-item", "Keep it"], "decision-item needs at least one --story"),
-        (["contract", "p1", "--version", "v1"], "unknown argument --version"),
+        (["contract", P1, "--version", "v1"], "unknown argument --version"),
     ],
 )
 def test_context_refuses_what_it_cannot_pin(state: Path, args: list[str], match: str):
@@ -125,10 +128,10 @@ def test_apply_without_pending_refuses(state: Path):
 
 def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, capsys):
     store = feature_store()
-    Decide(store).context(["contract", "p1", *TEAM, "--json"])
+    Decide(store).context(["contract", P1, *TEAM, "--json"])
     text = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]["question"]
     assert "Alpha" in text and "ACME-1 One, ACME-2 Two" in text
-    assert "p1" not in text and "s1" not in text
+    assert P1 not in text and "s1" not in text
     Decide(store).context(["sitting", "ACME-2", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
     assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]

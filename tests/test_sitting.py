@@ -15,6 +15,8 @@ from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
 from deckhand.tiers import FACTS, tier
 
+P1 = create_id("ACME:Alpha", "feature")
+
 TEAM = ["--team-key", "ACME"]
 STORY = {"id": "s1", "title": "Orders", "description": "Outcome: an order is placed."}
 START = datetime(2026, 11, 18, 9, 0)
@@ -55,10 +57,10 @@ def test_each_new_here_item_is_its_own_screen():
 def feature_with(*ids: str) -> tuple[FakeStore, features.Feature]:
     store = FakeStore()
     store.add_repository_label("ACME", "widgets")
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     for id in ids:
-        store.create_issue(id, "ACME", id, "Outcome.", "p1", [])
+        store.create_issue(id, "ACME", id, "Outcome.", P1, [])
     found = features.open_feature(store, "ACME")
     assert found is not None
     return store, found
@@ -107,7 +109,7 @@ def mapped(tmp_path: Path) -> FakeStore:
 
 def test_context_prints_tier_questions_and_progress(state: Path, tmp_path: Path, capsys: pytest.CaptureFixture):
     store = mapped(tmp_path)
-    id = create_id("p1", "story:api")
+    id = create_id(P1, "story:api")
     feature = features.open_feature(store, "ACME")
     assert feature is not None
     version = versions.version_for(store, feature, "tier", id)
@@ -137,7 +139,7 @@ def test_context_refuses_without_a_current_tier(state: Path, tmp_path: Path):
 
 def test_apply_saves_the_answers_as_the_sitting_document(state: Path, tmp_path: Path):
     store = mapped(tmp_path)
-    id = create_id("p1", "story:api")
+    id = create_id(P1, "story:api")
     path = tmp_path / "answers.md"
     path.write_text("Rate limits: 100 a minute.\n")
     store.writes.clear()

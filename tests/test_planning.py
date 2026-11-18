@@ -3,13 +3,16 @@ from __future__ import annotations
 import pytest
 
 from deckhand import features, planning
+from deckhand.ops import create_id
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
 
+P1 = create_id("ACME:Alpha", "feature")
+
 
 def open_feature(store: FakeStore) -> features.Feature:
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     found = features.open_feature(store, "ACME")
     assert found is not None
     return found
@@ -58,7 +61,7 @@ def test_next_section_follows_order():
     for name in planning.SECTIONS:
         planning.save_section(store, feature, name, "x", drafted=False)
     assert planning.next_section(store, feature) == "story map"
-    store.create_issue("i1", "ACME", "t", "", "p1", [])
+    store.create_issue("i1", "ACME", "t", "", P1, [])
     refreshed = features.open_feature(store, "ACME")
     assert refreshed is not None
     assert planning.next_section(store, refreshed) is None

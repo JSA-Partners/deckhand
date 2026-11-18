@@ -151,8 +151,8 @@ class Feature:
         team = parsed["team_key"]
         id = ops.ensure_project(
             self._store_for_run(),
-            f"{team}:{name}",
-            "feature",
+            features.key(team, name),
+            features.PURPOSE,
             team,
             name,
             _description(parsed["references"]),
@@ -163,15 +163,17 @@ class Feature:
         if action == "pick" and parsed.get("weeks") not in ("1", "2"):
             raise Refusal(f"--weeks must be 1 or 2, not {parsed.get('weeks', '')!r}")
         store = self._store_for_run()
-        project = store.project(parsed.get("project", ""))
+        team = parsed["team_key"]
+        wanted = parsed.get("project", "")
+        project = next((p for p in features.team_features(store, team) if p["id"] == wanted), None)
         if project is None:
-            raise Refusal(f"no feature has the id {parsed.get('project', '')!r}")
+            raise Refusal(f"{wanted!r} is not a feature of team {team}")
         feature = features.load(store, project)
         current = features.phase(feature)
         if action == "pick":
             if current is not Phase.PARKED:
                 raise Refusal(f"{features.describe(project)} is {current.value}, not parked")
-            held = features.open_features(store, parsed["team_key"])
+            held = features.open_features(store, team)
             if held:
                 names = ", ".join(features.describe(f.project) for f in held)
                 raise Refusal(f"{names} is still open; finish or park it first")

@@ -10,6 +10,7 @@ from deckhand.step import Refusal
 from deckhand.store import Store
 
 APPROVAL = "feature-approval"
+PURPOSE = "feature"
 FINISHED = ("Done", "Canceled", "Duplicate")
 DROPPED = ("Canceled", "Duplicate")
 STATE_CHART_TIERS = (2, 3)
@@ -145,8 +146,20 @@ def load(store: Store, project: dict) -> Feature:
     return feature
 
 
+def key(team: str, name: str) -> str:
+    return f"{team}:{name}"
+
+
+def is_feature(project: dict, team: str) -> bool:
+    return project["id"] == ops.create_id(key(team, project["name"]), PURPOSE)
+
+
+def team_features(store: Store, team: str) -> list[dict]:
+    return [p for p in store.team_projects(team) if is_feature(p, team)]
+
+
 def open_features(store: Store, team: str) -> list[Feature]:
-    found = [load(store, p) for p in store.team_projects(team) if p["start_date"]]
+    found = [load(store, p) for p in team_features(store, team) if p["start_date"]]
     return [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
 
 
@@ -158,7 +171,7 @@ def open_feature(store: Store, team: str) -> Feature | None:
 
 
 def parked(store: Store, team: str) -> list[dict]:
-    held = [p for p in store.team_projects(team) if not p["start_date"]]
+    held = [p for p in team_features(store, team) if not p["start_date"]]
     return sorted(held, key=lambda p: (p["name"], p["id"]))
 
 

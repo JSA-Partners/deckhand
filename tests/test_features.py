@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 
 from deckhand.features import Budget, Feature, Phase, open_feature, phase
+from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -34,10 +35,11 @@ def test_phase_parked_planning_building_released():
 
 def test_open_feature_refuses_two():
     store = FakeStore()
-    for id in ("p1", "p2"):
-        store.create_project(id, "ACME", id, "")
+    for name in ("Alpha", "Beta"):
+        id = create_id(f"ACME:{name}", "feature")
+        store.create_project(id, "ACME", name, "")
         store.set_project_dates(id, "2026-11-16", "2026-11-23")
-    with pytest.raises(Refusal, match="p1.*p2"):
+    with pytest.raises(Refusal, match=r"(?=.*Alpha)(?=.*Beta)"):
         open_feature(store, "ACME")
 
 

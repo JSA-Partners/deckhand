@@ -15,11 +15,13 @@ from deckhand.steps.plan import Plan
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
 
+P1 = create_id("ACME:Alpha", "feature")
+
 TEAM = ["--team-key", "ACME"]
 
 
 def story_id(key: str) -> str:
-    return create_id("p1", "story:" + key)
+    return create_id(P1, "story:" + key)
 
 
 def entry(key: str, **over: object) -> dict:
@@ -38,8 +40,8 @@ def entry(key: str, **over: object) -> dict:
 def setup() -> FakeStore:
     store = FakeStore()
     store.add_repository_label("ACME", "widgets")
-    store.create_project("p1", "ACME", "Alpha", "")
-    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
+    store.create_project(P1, "ACME", "Alpha", "")
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     return store
 
 
@@ -61,7 +63,7 @@ def test_map_creates_stubs_with_labels_and_blockers(tmp_path: Path):
     )
     api, ui = store.issue(story_id("api")), store.issue(story_id("ui"))
     assert api is not None and ui is not None
-    assert api["project"] == "p1"
+    assert api["project"] == P1
     assert api["team"] == "ACME"
     assert api["title"] == "Story api"
     assert api["labels"] == ["widgets"]
@@ -169,7 +171,7 @@ def test_map_without_an_open_feature_is_refused(tmp_path: Path):
 def test_map_over_budget_hint_notes_but_does_not_refuse(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     store = setup()
     run(store, tmp_path, [entry(f"s{n}") for n in range(9)])
-    assert len(store.project_issues("p1")) == 9
+    assert len(store.project_issues(P1)) == 9
     capsys.readouterr()
     Feature(store, lambda: date(2026, 11, 17)).context([*TEAM, "--json"])
     held = json.loads(capsys.readouterr().out)["open"][0]
@@ -179,9 +181,9 @@ def test_map_over_budget_hint_notes_but_does_not_refuse(tmp_path: Path, capsys: 
 def approve(store: FakeStore, *keys: str) -> None:
     feature = features.open_feature(store, "ACME")
     assert feature is not None
-    version = versions.version_for(store, feature, features.APPROVAL, "p1")
+    version = versions.version_for(store, feature, features.APPROVAL, P1)
     for key in keys:
-        store.put_record(story_id(key), Record(features.APPROVAL, "p1", version, "person:s", {}))
+        store.put_record(story_id(key), Record(features.APPROVAL, P1, version, "person:s", {}))
 
 
 def test_story_added_after_approval_needs_missed_by_and_a_cut(tmp_path: Path):
