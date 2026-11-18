@@ -5,6 +5,7 @@ import secrets
 from dataclasses import dataclass
 
 HEADER_PREFIX = "dh "
+MIN_OPTIONS, MAX_OPTIONS = 2, 4
 NONCE = re.compile(r"[0-9a-f]{8}")
 
 
@@ -24,6 +25,8 @@ class Question:
 
 
 def build(kind: str, subject: str, text: str, options: list[str], multi: bool = False) -> Question:
+    if not MIN_OPTIONS <= len(options) <= MAX_OPTIONS:
+        raise ValueError(f"the question dialog shows {MIN_OPTIONS} to {MAX_OPTIONS} options, not {len(options)}")
     nonce = secrets.token_hex(4)
     return Question(nonce, f"{HEADER_PREFIX}{nonce}", text, list(options), multi, kind, subject)
 
