@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, features, ops, planning, versions
+from deckhand import answers, features, ops, planning, tiers, versions
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
-from deckhand.tiers import FACTS
 
 KINDS = ("contract", "invariants", "state-chart", "decision-item", "tier", "sitting", "feature-approval")
 
@@ -22,7 +21,7 @@ _OPTIONS = {
     "feature-approval": ["Approve", "Not yet"],
     "decision-item": ["Keep", "Change", "Discuss"],
     "sitting": ["Done", "Not yet"],
-    "tier": [fact.question for fact in FACTS],
+    "tier": tiers.OPTIONS,
 }
 
 _ASKS = {
@@ -40,7 +39,6 @@ _POSITIVE = {
     "invariants": "Approve",
     "state-chart": "Approve",
     "feature-approval": "Approve",
-    "decision-item": "Keep",
     "sitting": "Done",
 }
 
@@ -58,6 +56,8 @@ class Pending:
     options: list[str]
     descriptions: list[str]
     detail: str = ""
+    label: str = ""
+    story_labels: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -66,21 +66,31 @@ class Pin:
     version: str
     stories: list[str]
     detail: str = ""
+    label: str = ""
+    story_labels: list[str] = field(default_factory=list)
 
 
-def make_question(kind: str, subject: str, version: str, stories: list[str], detail: str = "") -> Question:
+def make_question(kind: str, pin: Pin) -> Question:
     if kind not in KINDS:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
-    if not subject.strip():
+    if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
-    text = question_text(kind, subject, version, stories, detail)
-    return build(kind, subject, text, _OPTIONS[kind], multi=kind == "tier")
+    return build(kind, pin.label or pin.subject, question_text(kind, pin), _OPTIONS[kind], multi=kind == "tier")
 
 
-def question_text(kind: str, subject: str, version: str, stories: list[str], detail: str = "") -> str:
-    where = f"version {content_hash(version)[:12]}, stories {', '.join(stories)}"
-    shown = f"{subject}: {detail}" if detail else subject
-    return f"{_ASKS[kind]} {shown} ({where})? (decision kind: {kind})"
+def question_text(kind: str, pin: Pin) -> str:
+    fields = {"kind": kind, **asdict(pin)}
+    check = content_hash(json.dumps(fields, sort_keys=True))[:12]
+    stories = ", ".join(pin.story_labels or pin.stories)
+    where = f"version {content_hash(pin.version)[:12]}, stories {stories}, check {check}"
+    shown = " ".join(part for part in (_ASKS[kind], pin.label) if part)
+    if pin.detail:
+        shown += f": {pin.detail}"
+    return f"{shown} ({where})? (decision kind: {kind})"
+
+
+def _label(story: dict) -> str:
+    return f"{story['identifier']} {story['title']}"
 
 
 def pin(store: Store, feature: features.Feature, kind: str, subject: str, stories: list[str]) -> Pin:
@@ -91,12 +101,14 @@ def pin(store: Store, feature: features.Feature, kind: str, subject: str, storie
     if kind == "decision-item":
         if not stories:
             raise Refusal("decision-item needs at least one --story")
-        ids = [features.story(store, feature, ref)["id"] for ref in stories]
+        held = [features.story(store, feature, ref) for ref in stories]
         version = versions.version_for(store, feature, kind, subject)
-        return Pin(versions.item_subject(subject), version, ids, subject)
+        ids, labels = [s["id"] for s in held], [_label(s) for s in held]
+        return Pin(versions.item_subject(subject), version, ids, subject, "", labels)
     if kind in versions.STORY_KINDS:
-        story = features.story(store, feature, subject)["id"]
-        return Pin(story, versions.version_for(store, feature, kind, story), [story])
+        story = features.story(store, feature, subject)
+        version = versions.version_for(store, feature, kind, story["id"])
+        return Pin(story["id"], version, [story["id"]], "", _label(story), [_label(story)])
     project = feature.project["id"]
     if kind in versions.SECTION_OF and planning.section(store, feature, versions.SECTION_OF[kind]) is None:
         raise Refusal(f"the {versions.SECTION_OF[kind]} section is not saved; save it before approving it")
@@ -106,24 +118,27 @@ def pin(store: Store, feature: features.Feature, kind: str, subject: str, storie
         gaps = features.approval_gaps(store, feature)
         if gaps:
             raise Refusal("the feature is not ready for approval: " + "; ".join(gaps[:3]))
-    live = [s["id"] for s in feature.live]
+    live = feature.live
     if not live:
         raise Refusal(f"{features.describe(feature.project)} has no stories to hold the decision")
-    return Pin(project, versions.version_for(store, feature, kind, project), live)
+    version = versions.version_for(store, feature, kind, project)
+    return Pin(project, version, [s["id"] for s in live], "", feature.project["name"], [_label(s) for s in live])
 
 
-def save_pending(question: Question, version: str, stories: list[str], state: Path, detail: str = "") -> None:
+def save_pending(question: Question, pin: Pin, state: Path) -> None:
     descriptions = [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
     pending = Pending(
         question.nonce,
         question.kind,
-        question.subject,
-        version,
-        stories,
+        pin.subject,
+        pin.version,
+        pin.stories,
         question.text,
         question.options,
         descriptions,
-        detail,
+        pin.detail,
+        pin.label,
+        pin.story_labels,
     )
     folder = state / PENDING
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -160,13 +175,16 @@ def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
         raise Refusal(f"no recorded answer for {pending.nonce}")
-    asked = question_text(pending.kind, pending.subject, pending.version, pending.stories, pending.detail)
+    pin = Pin(pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels)
+    asked = question_text(pending.kind, pin)
     if pending.question != asked:
         raise Refusal(f"the pending question for {pending.nonce} differs from the question the person saw")
     if found.copied:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier" and not _offered(pending, found.answer):
         raise Refusal(f"the answer for {pending.nonce} is not a selection of the offered options")
+    if pending.kind == "tier":
+        tiers.chosen(found.answer)
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
     return found
@@ -182,7 +200,8 @@ def decide(store: Store, pending: Pending, state: Path) -> bool:
         pending.version,
         f"person:{found.session_id}",
         {"answer": found.answer, "question": pending.question, "nonce": pending.nonce}
-        | ({"item": pending.detail} if pending.detail else {}),
+        | ({"item": pending.detail} if pending.detail else {})
+        | ({"facts": sorted(tiers.chosen(found.answer))} if pending.kind == "tier" else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

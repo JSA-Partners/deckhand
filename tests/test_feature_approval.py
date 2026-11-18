@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, ops, planning, versions
+from deckhand import answers, features, ops, planning, tiers, versions
 from deckhand.features import Phase
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -24,8 +24,8 @@ def setup() -> FakeStore:
     store.create_project("p1", "ACME", "Alpha", "")
     store.set_project_dates("p1", "2026-11-16", "2026-11-23")
     feature = load(store)
-    planning.save_section(store, feature, "Contract", "POST /orders returns 201.", False)
-    planning.save_section(store, feature, "Invariants", "A total is never negative.", False)
+    for name in planning.SECTIONS:
+        planning.save_section(store, feature, name, f"The {name} of Alpha.", False)
     store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", "p1", [])
     store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", "p1", [])
     return store
@@ -39,7 +39,9 @@ def load(store: FakeStore) -> features.Feature:
 
 def decided(store: FakeStore, kind: str, subject: str, answer: str, stories: list[str]) -> None:
     version = versions.version_for(store, load(store), kind, subject)
-    data = {"answer": answer}
+    data: dict = {"answer": answer}
+    if kind == "tier":
+        data["facts"] = sorted(tiers.chosen(answer))
     if kind == "decision-item":
         subject, data = versions.item_subject(subject), {**data, "item": subject}
     for story in stories:
@@ -73,13 +75,29 @@ def test_approval_gaps_lists_each_missing_decision():
     decided(store, "contract", "p1", "Approve", ["s1", "s2"])
     decided(store, "invariants", "p1", "Approve", ["s1"])
     sat(store, "s1", STATE_CHART)
-    decided(store, "decision-item", "Keep orders in one table", "Change", ["s1"])
     assert features.approval_gaps(store, load(store)) == [
         "the Invariants are not approved",
         "ACME-1: the state chart is not approved",
         "ACME-2: the tier is not decided",
         "ACME-2: the sitting is not done",
-        "decision item Keep orders in one table is open (Change)",
+    ]
+
+
+def test_approval_gaps_name_each_unsaved_section_first():
+    store = FakeStore()
+    store.create_project("p1", "ACME", "Alpha", "")
+    store.set_project_dates("p1", "2026-11-16", "2026-11-23")
+    store.create_issue("s1", "ACME", "Orders", "Outcome.", "p1", [])
+    planning.save_section(store, load(store), "Shape", "The shape.", False)
+    planning.save_section(store, load(store), "Contract", "The contract.", False)
+    gaps = features.approval_gaps(store, load(store))
+    assert gaps[:6] == [
+        "the Frame section is not saved",
+        "the Examples section is not saved",
+        "the Pre-mortem section is not saved",
+        "the Facts section is not saved",
+        "the Invariants section is not saved",
+        "the Contract is not approved",
     ]
 
 
@@ -116,11 +134,36 @@ def test_canceled_story_needs_no_approval():
     assert features.phase(load(store)) is Phase.BUILDING
 
 
-def test_kept_decision_item_is_closed():
+@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
+def test_any_answer_settles_a_decision_item(answer: str):
     store = setup()
-    decided(store, "decision-item", "Keep orders in one table", "Change", ["s1"])
-    decided(store, "decision-item", "Keep orders in one table", "Keep", ["s1"])
+    decided(store, "decision-item", "Keep orders in one table", answer, ["s1"])
     assert not any("decision item" in gap for gap in features.approval_gaps(store, load(store)))
+
+
+@pytest.mark.parametrize("canceled", ["s1", "s2"])
+def test_decision_item_only_on_a_dropped_story_is_open_whatever_the_order(canceled: str):
+    store = setup()
+    decided(store, "decision-item", "Keep orders in one table", "Change", ["s1", "s2"])
+    decided(store, "decision-item", "Keep orders in one table", "Keep", [canceled])
+    store.set_issue_state(canceled, "Canceled")
+    gaps = features.approval_gaps(store, load(store))
+    assert not any("decision item" in gap for gap in gaps)
+    store.set_issue_state("s1" if canceled == "s2" else "s2", "Duplicate")
+    store.create_issue("s3", "ACME", "Refunds", "Outcome.", "p1", [])
+    gaps = features.approval_gaps(store, load(store))
+    assert "decision item Keep orders in one table is open" in gaps
+
+
+def test_odd_tier_answer_with_valid_facts_does_not_break_context(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+    version = versions.version_for(store, load(store), "tier", "s1")
+    odd = Record("tier", "s1", version, "person:s", {"answer": "something else", "facts": ["multi_step"]})
+    store.put_record("s1", odd)
+    gaps = features.approval_gaps(store, load(store))
+    assert "ACME-1: the state chart is not approved" in gaps
+    Feature(store).context([*TEAM, "--json"])
+    assert "ACME-1: the state chart is not approved" in json.loads(capsys.readouterr().out)["open"][0]["gaps"]
 
 
 def test_feature_context_names_the_gaps(capsys: pytest.CaptureFixture[str]):

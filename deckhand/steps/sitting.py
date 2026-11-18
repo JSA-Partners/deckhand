@@ -72,7 +72,9 @@ class Sitting:
         tier = versions.held(records, "tier", story["id"])
         if tier is None or not versions.current(store, feature, tier):
             raise Refusal(f"the tier of {story['identifier']} is not decided for its current text; decide it first")
-        level = tiers.tier(tiers.chosen(str(tier.data.get("answer", ""))))
+        level = tiers.from_facts(tier.data.get("facts"))
+        if level is None:
+            raise Refusal(f"the tier record of {story['identifier']} holds no facts; decide the tier again")
         stub = next((r.data for r in records if r.kind == "stub"), {})
         questions = sitting.questions_for(
             story, level, stub.get("unknowns", []), stub.get("new_here", []), parsed["contracts"]

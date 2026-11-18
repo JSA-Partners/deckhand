@@ -61,13 +61,25 @@ def tier(chosen: set[str]) -> Tier:
     return Tier(level=level, contract=contract, tools_key=str(level))
 
 
+NONE = "None of these"
+OPTIONS = [*(fact.question for fact in FACTS), NONE]
+
+
 def chosen(answer: str) -> set[str]:
-    found: set[str] = set()
+    labels = []
     rest = answer
     while rest:
-        fact = next((f for f in FACTS if rest == f.question or rest.startswith(f.question + ", ")), None)
-        if fact is None:
+        label = next((o for o in OPTIONS if rest == o or rest.startswith(o + ", ")), None)
+        if label is None:
             raise Refusal(f"the tier answer {answer!r} is not a selection of the fact questions")
-        found.add(fact.key)
-        rest = rest[len(fact.question) + 2 :]
-    return found
+        labels.append(label)
+        rest = rest[len(label) + 2 :]
+    if NONE in labels and len(labels) > 1:
+        raise Refusal(f"{NONE} cannot be chosen with a fact")
+    return {fact.key for fact in FACTS if fact.question in labels}
+
+
+def from_facts(value: object) -> Tier | None:
+    if not isinstance(value, list) or not all(isinstance(key, str) and key in _BY_KEY for key in value):
+        return None
+    return tier(set(value))

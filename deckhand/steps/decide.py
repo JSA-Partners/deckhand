@@ -63,8 +63,8 @@ class Decide:
         if feature is None:
             raise Refusal("no feature is open")
         pin = decisions.pin(store, feature, kind, subject, parsed["stories"])
-        question = decisions.make_question(kind, pin.subject, pin.version, pin.stories, pin.detail)
-        decisions.save_pending(question, pin.version, pin.stories, answers.state_dir(), pin.detail)
+        question = decisions.make_question(kind, pin)
+        decisions.save_pending(question, pin, answers.state_dir())
         tool_input = as_tool_input(question)
         if parsed["json"]:
             print(json.dumps({"nonce": question.nonce, "tool_input": tool_input}, indent=2))

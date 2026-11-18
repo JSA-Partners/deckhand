@@ -112,7 +112,8 @@ def test_context_prints_tier_questions_and_progress(state: Path, tmp_path: Path,
     assert feature is not None
     version = versions.version_for(store, feature, "tier", id)
     answer = next(f.question for f in FACTS if f.key == "concurrency")
-    ops.ensure_record(store, id, Record("tier", id, version, "person:s", {"answer": answer}))
+    data = {"answer": answer + ", odd", "facts": ["concurrency"]}
+    ops.ensure_record(store, id, Record("tier", id, version, "person:s", data))
     clock = iter([START, START + timedelta(minutes=12)])
     step = Sitting(store, lambda: next(clock))
     capsys.readouterr()

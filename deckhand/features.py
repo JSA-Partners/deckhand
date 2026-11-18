@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from deckhand import ops, tiers, versions
+from deckhand import ops, planning, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
@@ -71,10 +71,14 @@ def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, w
 
 
 def approval_gaps(store: Store, feature: Feature) -> list[str]:
+    gaps = [
+        f"the {name} section is not saved"
+        for name in planning.SECTIONS
+        if planning.section(store, feature, name) is None
+    ]
     live = feature.live
     if not live:
-        return ["the feature has no stories"]
-    gaps = []
+        return [*gaps, "the feature has no stories"]
     project = feature.project["id"]
     for kind, words in _SECTION_GAPS.items():
         version = versions.version_for(store, feature, kind, project)
@@ -86,22 +90,26 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
     for story in live:
         kinds = ["tier", "sitting"]
         tier = versions.held(feature.records.get(story["id"], []), "tier", story["id"])
-        if tier and tiers.tier(tiers.chosen(str(tier.data.get("answer", "")))).level in STATE_CHART_TIERS:
+        level = tiers.from_facts(tier.data.get("facts")) if tier else None
+        if tier and level is None:
+            gaps.append(f"{story['identifier']}: the tier record holds no facts; decide the tier again")
+        if level and level.level in STATE_CHART_TIERS:
             kinds.append("state-chart")
         for kind in kinds:
             version = versions.version_for(store, feature, kind, story["id"])
             gap = _gap(feature, story, kind, story["id"], version, _STORY_GAPS[kind])
             if gap:
                 gaps.append(f"{story['identifier']}: {gap}")
-    items: dict[str, Record] = {}
-    for story in live:
+    items: dict[str, str] = {}
+    settled: set[str] = set()
+    for story in sorted(feature.stories, key=lambda s: s["id"]):
         for record in feature.records.get(story["id"], []):
-            if record.kind == "decision-item":
-                items[record.subject] = record
-    for subject in sorted(items):
-        answer = items[subject].data.get("answer")
-        if answer != "Keep":
-            gaps.append(f"decision item {items[subject].data.get('item', subject)} is open ({answer})")
+            if record.kind != "decision-item":
+                continue
+            items.setdefault(record.subject, str(record.data.get("item", record.subject)))
+            if story in live and versions.current(store, feature, record):
+                settled.add(record.subject)
+    gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
     return gaps
 
 

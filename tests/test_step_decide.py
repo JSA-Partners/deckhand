@@ -121,3 +121,15 @@ def test_context_refuses_what_it_cannot_pin(state: Path, args: list[str], match:
 def test_apply_without_pending_refuses(state: Path):
     with pytest.raises(Refusal, match="no pending question"):
         Decide(FakeStore()).apply(["deadbeef", *TEAM])
+
+
+def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, capsys):
+    store = feature_store()
+    Decide(store).context(["contract", "p1", *TEAM, "--json"])
+    text = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]["question"]
+    assert "Alpha" in text and "ACME-1 One, ACME-2 Two" in text
+    assert "p1" not in text and "s1" not in text
+    Decide(store).context(["sitting", "ACME-2", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
+    assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]
+    assert all("s2" not in option["description"] for option in shown["options"])
