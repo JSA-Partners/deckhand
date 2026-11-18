@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 
-from deckhand import features, ops
+from deckhand import features, ops, planning
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
@@ -76,6 +76,14 @@ class Feature:
                     "name": feature.project["name"],
                     "phase": current.value,
                     "stories": len(feature.stories),
+                    "next_planning_step": planning.next_section(store, feature),
+                    "story_hint": None
+                    if budget is None
+                    else {
+                        "stories": len(feature.stories),
+                        "hint": planning.HINT_PER_WEEK * budget.weeks,
+                        "over": len(feature.stories) > planning.HINT_PER_WEEK * budget.weeks,
+                    },
                     "budget": None
                     if budget is None
                     else {
@@ -103,6 +111,11 @@ class Feature:
             print(f"anomaly: {facts['anomaly']}")
         for held in facts["open"]:
             print(f"open feature: {held['name']} ({held['id']}), {held['phase']}, {held['stories']} stories")
+            if held["next_planning_step"]:
+                print(f"next planning step: {held['next_planning_step']}")
+            hint = held["story_hint"]
+            if hint and hint["over"]:
+                print(f"note: {hint['stories']} stories against a hint of {hint['hint']} for the budget")
             budget = held["budget"]
             if budget is None:
                 print("budget: the dates are not one or two weeks apart")

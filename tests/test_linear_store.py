@@ -569,3 +569,22 @@ def test_project_issues_label_overflow_refuses() -> None:
 def test_project_issues_of_a_missing_project_is_empty() -> None:
     client = FakeClient(ProjectIssues=LinearError("INPUT_ERROR", "Entity not found: Project"))
     assert LinearStore(client).project_issues("proj-1") == []
+
+
+def test_set_issue_text_updates_title_and_description() -> None:
+    client = FakeClient(IssueUpdate={"issueUpdate": {"success": True}})
+    LinearStore(client).set_issue_text(UUID, "New", "Body")
+    assert client.calls == [("IssueUpdate", {"id": UUID, "input": {"title": "New", "description": "Body"}})]
+
+
+def test_repository_labels_lists_the_children_of_the_group() -> None:
+    nodes = [
+        {"id": "g", "name": "Repository", "isGroup": True, "parent": None},
+        {"id": "l1", "name": "widgets", "isGroup": False, "parent": {"name": "Repository"}},
+        {"id": "l2", "name": "ready", "isGroup": False, "parent": None},
+    ]
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        TeamLabels={"team": {"labels": {"nodes": nodes, "pageInfo": DONE}}},
+    )
+    assert LinearStore(client).repository_labels("ACME") == ["widgets"]

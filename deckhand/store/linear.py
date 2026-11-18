@@ -4,6 +4,7 @@ from typing import Any
 
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
+from deckhand.linear.workspace import GROUP
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
@@ -121,6 +122,15 @@ class LinearStore(Store):
             raise Refusal(f"no Linear issue {issue}")
         label_ids = self._label_ids(self._team_id(node["team"]["key"]), labels)
         self._client.query(queries.ISSUE_UPDATE, {"id": node["id"], "input": {"labelIds": label_ids}})
+
+    def set_issue_text(self, issue: str, title: str, description: str) -> None:
+        fields = {"title": title, "description": description}
+        self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": fields})
+
+    def repository_labels(self, team: str) -> list[str]:
+        node = self._client.query(queries.TEAM_LABELS, {"id": self._team_id(team)})["team"]
+        found = _nodes(node["labels"], team, "labels")
+        return sorted(n["name"] for n in found if (n.get("parent") or {}).get("name") == GROUP)
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
         node = self._issue_node(parent)

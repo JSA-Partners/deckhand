@@ -36,6 +36,13 @@ def ensure_labels(store: Store, issue: str, labels: list[str]) -> None:
     store.set_labels(issue, sorted(labels))
 
 
+def ensure_issue_text(store: Store, issue: str, title: str, description: str) -> None:
+    found = store.issue(issue)
+    if found is not None and (found["title"], found["description"]) == (title, description):
+        return
+    store.set_issue_text(issue, title, description)
+
+
 def ensure_document(store: Store, key: str, purpose: str, parent: str, title: str, body: str) -> str:
     id = create_id(key, purpose)
     found = store.document(id)

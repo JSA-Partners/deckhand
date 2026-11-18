@@ -23,6 +23,7 @@ class FakeStore(Store):
         self._attachments: dict[str, dict[str, dict[str, Any]]] = {}
         self._relations: list[list[str]] = []
         self._numbers: dict[str, int] = {}
+        self._repositories: dict[str, list[str]] = {}
         self.writes: list[tuple] = []
         self._fail_at: int | None = None
 
@@ -105,6 +106,17 @@ class FakeStore(Store):
     def set_labels(self, issue: str, labels: list[str]) -> None:
         self._issues[issue]["labels"] = list(labels)
         self._wrote("set_labels", issue, list(labels))
+
+    def set_issue_text(self, issue: str, title: str, description: str) -> None:
+        self._issues[issue]["title"] = title
+        self._issues[issue]["description"] = description
+        self._wrote("set_issue_text", issue, title, description)
+
+    def add_repository_label(self, team: str, name: str) -> None:
+        self._repositories.setdefault(team, []).append(name)
+
+    def repository_labels(self, team: str) -> list[str]:
+        return sorted(self._repositories.get(team, []))
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
         self._documents[id] = {"id": id, "parent": parent, "title": title, "body": body}
