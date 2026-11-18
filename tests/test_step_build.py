@@ -32,8 +32,8 @@ BRANCH = "acme-1-orders"
 
 
 class Shell:
-    def __init__(self, head: str = "c2", base: str = "c1", origin: bool = True) -> None:
-        self.head, self.base, self.origin = head, base, origin
+    def __init__(self, head: str = "c2", base: str = "c1", origin: bool = True, dirty: bool = False) -> None:
+        self.head, self.base, self.origin, self.dirty = head, base, origin, dirty
         self.argvs: list[list[str]] = []
         self.created = False
 
@@ -46,6 +46,8 @@ class Shell:
             out = f"{self.head}\n"
         elif argv[:2] == ["git", "merge-base"]:
             out = f"{self.base}\n"
+        elif argv[:2] == ["git", "status"]:
+            out = " M a.py\n" if self.dirty else ""
         elif argv[:2] == ["git", "show-ref"]:
             code = 1
         elif argv[:3] == ["gh", "repo", "view"]:

@@ -78,6 +78,8 @@ class Checks(StoryStep):
 
     def apply(self, args: list[str]) -> None:
         story, _, head, commands, path = self._worktree(args)
+        if git.dirty(path, self._runner):
+            raise Refusal(f"{path} has uncommitted changes; commit them first so the pass is pinned to {head}")
         failed, tail = None, ""
         for command in commands:
             done = self._checker(command, path)

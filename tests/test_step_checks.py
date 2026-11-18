@@ -123,3 +123,13 @@ def test_checks_in_another_repository_refuses(tmp_path: Path, repo: Path):
     with pytest.raises(Refusal, match="another repository"):
         run(store, repo, commands)
     assert commands.ran == []
+
+
+def test_dirty_worktree_refuses_and_records_nothing(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    configured(repo, "make lint")
+    commands = Commands()
+    before = list(store.writes)
+    with pytest.raises(Refusal, match="uncommitted"):
+        Checks(store, Shell(dirty=True), repo, commands).apply(["s1", *TEAM])
+    assert commands.ran == [] and store.writes == before

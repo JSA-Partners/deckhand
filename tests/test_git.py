@@ -32,6 +32,13 @@ def test_head_reads_rev_parse() -> None:
     assert fake.calls == [(["git", "rev-parse", "HEAD"], WT, None)]
 
 
+def test_dirty_reads_porcelain_status() -> None:
+    fake = Fake((0, " M a.py\n", ""), (0, "", ""))
+    assert git.dirty(WT, fake) is True
+    assert git.dirty(WT, fake) is False
+    assert fake.argvs[0] == ["git", "status", "--porcelain"]
+
+
 def test_diff_with_and_without_paths() -> None:
     fake = Fake((0, "d1", ""), (0, "d2", ""))
     assert git.diff(WT, "main", runner=fake) == "d1"

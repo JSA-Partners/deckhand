@@ -77,6 +77,10 @@ def head(worktree: Path, runner: Runner = run) -> str:
     return call(["git", "rev-parse", "HEAD"], worktree, runner).strip()
 
 
+def dirty(worktree: Path, runner: Runner = run) -> bool:
+    return bool(call(["git", "status", "--porcelain"], worktree, runner).strip())
+
+
 def diff(worktree: Path, base: str, paths: list[str] | None = None, runner: Runner = run) -> str:
     argv = ["git", "diff", f"{base}...HEAD"]
     if paths:
