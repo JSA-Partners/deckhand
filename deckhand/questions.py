@@ -19,16 +19,15 @@ class Question:
     header: str
     text: str
     options: list[str]
-    multi: bool
     kind: str = ""
     subject: str = ""
 
 
-def build(kind: str, subject: str, text: str, options: list[str], multi: bool = False) -> Question:
+def build(kind: str, subject: str, text: str, options: list[str]) -> Question:
     if not MIN_OPTIONS <= len(options) <= MAX_OPTIONS:
         raise ValueError(f"the question dialog shows {MIN_OPTIONS} to {MAX_OPTIONS} options, not {len(options)}")
     nonce = secrets.token_hex(4)
-    return Question(nonce, f"{HEADER_PREFIX}{nonce}", text, list(options), multi, kind, subject)
+    return Question(nonce, f"{HEADER_PREFIX}{nonce}", text, list(options), kind, subject)
 
 
 def as_tool_input(q: Question) -> dict:
@@ -39,7 +38,7 @@ def as_tool_input(q: Question) -> dict:
                 "question": q.text,
                 "header": q.header,
                 "options": [{"label": label, "description": description} for label in q.options],
-                "multiSelect": q.multi,
+                "multiSelect": False,
             }
         ]
     }
