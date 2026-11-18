@@ -179,12 +179,16 @@ def _cap_cut(record: Record) -> int:
         return 0
 
 
-def _cap_answers(records: list[Record], story: str, answer: str) -> list[Record]:
+def cap_subject(story: str, stage: str) -> str:
+    return story if stage == "plan" else f"{story}:{stage}"
+
+
+def _cap_answers(records: list[Record], subject: str, answer: str) -> list[Record]:
     return [
         r
         for r in records
         if r.kind == CAP_DECISION
-        and r.subject == story
+        and r.subject == subject
         and r.author.startswith(PERSON)
         and r.data.get("answer") == answer
     ]
@@ -192,9 +196,10 @@ def _cap_answers(records: list[Record], story: str, answer: str) -> list[Record]
 
 def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     rounds = rounds_of(records, prefix)
-    if not prefix.endswith(":plan"):
+    story, _, stage = prefix.rpartition(":")
+    if stage not in ("plan", "branch"):
         return rounds, 0
-    cut = max(map(_cap_cut, _cap_answers(records, prefix.rsplit(":", 1)[0], REWORK)), default=0)
+    cut = max(map(_cap_cut, _cap_answers(records, cap_subject(story, stage), REWORK)), default=0)
     return [r for r in rounds if _n(r) > cut], cut
 
 
@@ -203,14 +208,18 @@ def at_cap(rounds: list[Record], declined: set[str]) -> bool:
     return latest is not None and len(rounds) >= CAP and bool(open_p1(latest, declined))
 
 
-def plan_cleared(records: list[Record], story: str) -> bool:
-    held, _ = counted(records, f"{story}:plan")
+def cleared(records: list[Record], story: str, stage: str) -> bool:
+    held, _ = counted(records, f"{story}:{stage}")
     latest = last(held)
     if latest is None:
         return False
     if not open_p1(latest, declined(records)):
         return True
-    return any(r.version == latest.subject for r in _cap_answers(records, story, PROCEED))
+    return any(r.version == latest.subject for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
+
+
+def plan_cleared(records: list[Record], story: str) -> bool:
+    return cleared(records, story, "plan")
 
 
 def feature_gaps(project: str, records: list[Record]) -> list[str]:

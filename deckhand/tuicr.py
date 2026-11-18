@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -177,3 +178,11 @@ def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, run
 
 def command(base: str, sha: str) -> list[str]:
     return ["tuicr", "-r", f"{base}..{sha}"]
+
+
+def session_for(repo: Path, base: str, sha: str, runner: Runner = run) -> dict | None:
+    for session in json.loads(call(["tuicr", "review", "list", "--repo", str(repo)], None, runner) or "[]"):
+        first, _, last = str(session.get("slug", "")).rpartition("/commits/")[2].partition("..")
+        if first and last and base.startswith(first) and sha.startswith(last):
+            return session
+    return None

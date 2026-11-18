@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from deckhand import answers, decisions, features, git, quiz, versions
+from deckhand import answers, decisions, features, git, quiz, signoff, versions
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.questions import as_tool_input
@@ -16,7 +16,8 @@ from deckhand.store.linear import LinearStore
 USAGE = (
     "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
     " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
-    " and quiz takes a story and --item N;"
+    " quiz takes a story and --item N, review-cap takes a story and --stage plan|branch,"
+    " sign-off takes a story;"
     " apply NONCE"
 )
 
@@ -31,7 +32,7 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg in ("--story", "--team-key", "--finding", "--item"):
+        elif arg in ("--story", "--team-key", "--finding", "--item", "--stage"):
             value = next(rest, "")
             if arg == "--story":
                 found["stories"].append(value)
@@ -82,8 +83,17 @@ class Decide:
         feature = features.open_feature(store, parsed.get("team_key", ""))
         if feature is None:
             raise Refusal("no feature is open")
+        head = self._head(store, feature, subject) if kind == signoff.KIND else ""
         pin = decisions.pin(
-            store, feature, kind, subject, parsed["stories"], parsed.get("finding", ""), parsed.get("item")
+            store,
+            feature,
+            kind,
+            subject,
+            parsed["stories"],
+            parsed.get("finding", ""),
+            parsed.get("item"),
+            parsed.get("stage", ""),
+            head,
         )
         question = decisions.make_question(kind, pin)
         decisions.save_pending(question, pin, answers.state_dir())
@@ -97,6 +107,16 @@ class Decide:
             print("\n".join(shown["code"]))
         print(f"nonce: {question.nonce}")
         print(json.dumps(tool_input, indent=2))
+
+    def _head(self, store: Store, feature: features.Feature, ref: str) -> str:
+        story = features.story(store, feature, ref)
+        held = versions.held(feature.records.get(story["id"], []), WORKTREE, story["id"])
+        name = held.data.get("branch") if held else None
+        clone = self._repo or git.clone_root(Path.cwd(), self._runner)
+        path = git.worktree_path(clone, name) if isinstance(name, str) and name else None
+        if path is None or not path.is_dir():
+            raise Refusal(f"{story['identifier']} has no worktree on this machine to sign off")
+        return git.head(path, self._runner)
 
     def _missed_code(self, feature: features.Feature, pin: decisions.Pin) -> dict:
         story, _, n = pin.subject.rpartition(":")

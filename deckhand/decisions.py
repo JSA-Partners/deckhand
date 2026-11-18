@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, features, ops, planning, quiz, review, tiers, versions
+from deckhand import answers, features, ops, planning, quiz, review, signoff, tiers, versions
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -24,6 +24,7 @@ KINDS = (
     "finding",
     review.CAP_DECISION,
     quiz.KIND,
+    signoff.KIND,
 )
 
 _OPTIONS = {
@@ -37,6 +38,7 @@ _OPTIONS = {
     "lean": ["Prove it in Lean", "Not needed"],
     "finding": [review.DECLINE, review.ACCEPT],
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
+    signoff.KIND: [signoff.SIGN, signoff.NOT_YET],
 }
 
 _ASKS = {
@@ -51,7 +53,11 @@ _ASKS = {
     "finding": "Decline or accept the review finding on",
     review.CAP_DECISION: "Three plan review rounds ran and a P1 is open. Proceed to the build or rework the plan for",
     quiz.KIND: "Quiz on",
+    signoff.KIND: "Sign off",
 }
+_BRANCH_CAP = "Three branch review rounds ran and a P1 is open. Proceed to sign-off or rework the branch for"
+_RECORDED = ("tier", "decision-item", "finding", review.CAP_DECISION, quiz.KIND, signoff.KIND)
+_CHOSEN = ("finding", review.CAP_DECISION, quiz.KIND, signoff.KIND)
 
 _POSITIVE = {
     "contract": "Approve",
@@ -105,7 +111,8 @@ def question_text(kind: str, pin: Pin) -> str:
     check = content_hash(json.dumps(fields, sort_keys=True))[:12]
     stories = ", ".join(pin.story_labels or pin.stories)
     where = f"version {content_hash(pin.version)[:12]}, stories {stories}, check {check}"
-    shown = " ".join(part for part in (_ASKS[kind], pin.label) if part)
+    ask = _BRANCH_CAP if kind == review.CAP_DECISION and pin.subject.endswith(":branch") else _ASKS[kind]
+    shown = " ".join(part for part in (ask, pin.label) if part)
     if pin.detail:
         shown += f": {pin.detail}"
     return f"{shown} ({where})? (decision kind: {kind})"
@@ -129,15 +136,26 @@ def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str
     return Pin(finding, round.version, [story["id"]], detail, _label(story), [_label(story)])
 
 
-def _cap_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
+def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
-    held, _ = review.counted(records, f"{story['id']}:plan")
+    held, _ = review.counted(records, f"{story['id']}:{stage}")
     if not review.at_cap(held, review.declined(records)):
-        raise Refusal(f"the plan review of {story['identifier']} has not reached its cap with a P1 open")
+        raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
     latest = review.last(held)
     detail = f"{len(held)} rounds, {len(review.open_p1(latest, review.declined(records)))} P1 open"
-    return Pin(story["id"], latest.subject, [story["id"]], detail, _label(story), [_label(story)])
+    subject = review.cap_subject(story["id"], stage)
+    return Pin(subject, latest.subject, [story["id"]], detail, _label(story), [_label(story)])
+
+
+def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -> Pin:
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    missing = signoff.gaps(records, story["id"], head)
+    if missing:
+        raise Refusal(f"{story['identifier']} is not ready for sign-off: " + "; ".join(missing))
+    version = signoff.version(records, story["id"], head)
+    return Pin(story["id"], version, [story["id"]], f"head {head}", _label(story), [_label(story)])
 
 
 def _quiz_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
@@ -168,6 +186,8 @@ def pin(
     stories: list[str],
     finding: str = "",
     item: int | None = None,
+    stage: str = "",
+    head: str = "",
 ) -> Pin:
     if kind not in KINDS:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
@@ -177,8 +197,16 @@ def pin(
         raise Refusal("quiz needs --item N, and --item applies only to quiz")
     if kind != "decision-item" and stories:
         raise Refusal("--story applies only to decision-item; every other kind finds its own stories")
+    if stage and kind != review.CAP_DECISION:
+        raise Refusal("--stage applies only to review-cap")
     if kind == review.CAP_DECISION:
-        return _cap_pin(store, feature, subject)
+        if stage not in ("", "plan", "branch"):
+            raise Refusal("--stage takes plan or branch")
+        return _cap_pin(store, feature, subject, stage or "plan")
+    if kind == signoff.KIND:
+        if not head:
+            raise Refusal("sign-off needs the head of the story's worktree")
+        return _signoff_pin(store, feature, subject, head)
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)
     if item is not None:
@@ -248,7 +276,7 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
-    if pending.kind in ("tier", "decision-item", "finding", review.CAP_DECISION, quiz.KIND):
+    if pending.kind in _RECORDED:
         return True
     return answer == _POSITIVE[pending.kind]
 
@@ -278,7 +306,7 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
-    if pending.kind in ("finding", review.CAP_DECISION, quiz.KIND) and found.answer not in pending.options:
+    if pending.kind in _CHOSEN and found.answer not in pending.options:
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
