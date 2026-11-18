@@ -17,6 +17,7 @@ from deckhand.steps.sitting import Sitting
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
 from deckhand.tiers import FACTS, NONE
+from tests.test_skills import named_commands, split
 
 TEAM = ["--team-key", "ACME"]
 TODAY = date(2026, 11, 20)
@@ -160,3 +161,95 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     refusal = session.refuse("feature", "apply", "pick", *TEAM, "--project", beta, "--weeks", "1")
     assert f"Alpha ({alpha}) is still open" in refusal
     assert store.writes == []
+
+
+SKILL = Path(__file__).resolve().parent.parent / "skills" / "feature" / "SKILL.md"
+
+
+def shape(tokens: list[str]) -> tuple[str, str, str]:
+    name, verb, *rest = tokens
+    return name, verb, rest[0] if (name, verb) == ("feature", "apply") and rest else ""
+
+
+class SkillSession(Session):
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.order: list[tuple[str, str, str]] = []
+        self.flags: dict[tuple[str, str, str], set[str]] = {}
+        for tokens in named_commands(split(SKILL)[1]):
+            key = shape(tokens)
+            if key not in self.order:
+                self.order.append(key)
+            self.flags.setdefault(key, set()).update(t for t in tokens if t.startswith("--"))
+        self.used: list[tuple[str, str, str]] = []
+
+    def skill(self, *argv: str) -> str:
+        key = shape(list(argv))
+        assert key in self.order, f"the skill does not name deckhand {' '.join(key)}"
+        unnamed = {t for t in argv if t.startswith("--")} - self.flags[key]
+        assert not unnamed, f"the skill does not name {unnamed} for deckhand {' '.join(key)}"
+        if key not in self.used:
+            self.used.append(key)
+        return self.run(*argv)
+
+    def ask(self, kind: str, subject: str, answer: str, *extra: str) -> None:
+        first, _, rest = self.skill("decide", "context", kind, subject, *extra, *TEAM).partition("\n")
+        nonce, tool_input = first.removeprefix("nonce: "), json.loads(rest)
+        assert self.run("hook", "apply", "ask", stdin=json.dumps({"tool_input": tool_input})) == ""
+        asked = tool_input["questions"][0]
+        hook = {
+            "session_id": "sess",
+            "tool_use_id": "tool",
+            "tool_response": {"questions": [asked], "answers": {asked["question"]: answer}},
+        }
+        self.run("hook", "apply", "answer", stdin=json.dumps(hook))
+        assert self.skill("decide", "apply", nonce, *TEAM).startswith("done: recorded")
+
+    def gaps(self) -> list[str]:
+        shown = self.skill("feature", "context", *TEAM)
+        return [line.removeprefix("gap: ") for line in shown.splitlines() if line.startswith("gap: ")]
+
+
+def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store = FakeStore()
+    store.add_repository_label("ACME", "api")
+    session = SkillSession(store, tmp_path, monkeypatch, capsys)
+
+    session.skill("feature", "apply", "new", *TEAM, "--name", "Alpha")
+    [alpha] = (p["id"] for p in store.team_projects("ACME"))
+    session.skill("feature", "apply", "pick", *TEAM, "--project", alpha, "--weeks", "1")
+    for section in planning.SECTIONS:
+        assert section in session.skill("plan", "context", *TEAM)
+        path = session.write(f"{section}.md", f"The {section} of Alpha.")
+        session.skill("plan", "apply", section, *TEAM, "--file", path)
+
+    assert "decisions: " in session.skill("stories", "context", *TEAM)
+    stories = [
+        {"key": "queue", "title": "Queue orders", "outcome": "Queued once.", "repository": "api", "depends_on": []},
+        {"key": "owner", "title": "Order owner", "outcome": "Owner only.", "repository": "api", "depends_on": []},
+    ]
+    for entry in stories:
+        entry.update(unknowns=[], new_here=[])
+    stories[0]["decisions"] = [ITEM]
+    session.skill("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
+
+    session.ask("contract", alpha, "Approve")
+    session.ask("invariants", alpha, "Approve")
+    for ref, answer in (("ACME-1", CONCURRENCY), ("ACME-2", DATA_RULE)):
+        session.ask("tier", ref, answer)
+        shown = session.skill("sitting", "context", ref, *TEAM)
+        tier = int(next(line for line in shown.splitlines() if line.startswith("tier: ")).removeprefix("tier: "))
+        if tier in (2, 3):
+            session.ask("state-chart", ref, "Approve")
+        session.skill("sitting", "apply", ref, *TEAM, "--file", session.write(f"{ref}.md", f"Answers for {ref}."))
+        session.ask("sitting", ref, "Done")
+
+    [gap] = session.gaps()
+    ref, _, rest = gap.partition(": decision item ")
+    session.ask("decision-item", rest.removesuffix(" is not decided"), "Keep", "--story", ref)
+    assert session.gaps() == []
+    session.ask("feature-approval", alpha, "Approve")
+
+    assert features.phase(features.open_feature(store, "ACME")) is Phase.BUILDING
+    assert session.used == [key for key in session.order if key in session.used]
