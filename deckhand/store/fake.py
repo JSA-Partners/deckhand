@@ -42,7 +42,7 @@ class FakeStore(Store):
                 "issues": self._issues,
                 "documents": self._documents,
                 "attachments": self._attachments,
-                "relations": self._relations,
+                "relations": sorted(self._relations),
                 "numbers": self._numbers,
             }
         )
@@ -65,7 +65,7 @@ class FakeStore(Store):
         labels: list[str],
     ) -> str:
         if id in self._issues:
-            raise DuplicateId("INPUT_ERROR", f"{CONFLICT_PREFIX} {id}")
+            raise DuplicateId("INPUT_ERROR", f"{CONFLICT_PREFIX} Issue")
         number = self._numbers.get(team, 0) + 1
         self._numbers[team] = number
         self._issues[id] = {
@@ -118,4 +118,4 @@ class FakeStore(Store):
         self._wrote("relate", blocker, blocked)
 
     def relations(self, issue: str) -> list[tuple[str, str]]:
-        return [(a, b) for a, b in self._relations if issue in (a, b)]
+        return [(a, b) for a, b in sorted(self._relations) if issue in (a, b)]

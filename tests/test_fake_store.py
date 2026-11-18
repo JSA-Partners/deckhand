@@ -46,7 +46,7 @@ def test_duplicate_create_raises_duplicate() -> None:
     make_issue(store)
     with pytest.raises(DuplicateId) as caught:
         make_issue(store)
-    assert caught.value.entity == "i1"
+    assert caught.value.entity == "Issue"
     assert store.issue("i1")["number"] == 1
     assert len(store.writes) == 1
 
@@ -133,3 +133,20 @@ def test_fail_after_write_counts_from_one() -> None:
     with pytest.raises(WriteFailed):
         store.set_labels("i1", ["x"])
     assert store.issue("i1")["labels"] == ["x"]
+
+
+def test_snapshot_ignores_relation_order() -> None:
+    first, second = FakeStore(), FakeStore()
+    first.relate("i1", "i2")
+    first.relate("i3", "i1")
+    second.relate("i3", "i1")
+    second.relate("i1", "i2")
+    assert first.snapshot() == second.snapshot()
+    assert first.relations("i1") == second.relations("i1")
+
+
+def test_relations_keep_duplicates() -> None:
+    store = FakeStore()
+    store.relate("i1", "i2")
+    store.relate("i1", "i2")
+    assert store.relations("i1") == [("i1", "i2"), ("i1", "i2")]
