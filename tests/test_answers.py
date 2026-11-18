@@ -9,6 +9,22 @@ import pytest
 from deckhand import answers
 from deckhand.step import Refusal
 
+SPIKE_RESPONSE = {
+    "questions": [
+        {
+            "question": "Spike 1, second question: type anything in Other.",
+            "header": "Spike 1",
+            "options": [
+                {"label": "Gamma", "description": "Option Gamma."},
+                {"label": "Delta", "description": "Option Delta."},
+            ],
+            "multiSelect": False,
+        }
+    ],
+    "answers": {"Spike 1, second question: type anything in Other.": "Omicron"},
+    "annotations": {},
+}
+
 
 def hook_input(*pairs: tuple[str, str, str]) -> dict:
     return {
@@ -40,15 +56,15 @@ def test_record_creates_owner_only_file(tmp_path: Path):
 
 def test_find_returns_typed_other_answer(tmp_path: Path):
     answers.record(hook_input(("dh abcd1234", "Pick?", "Omicron")), tmp_path)
-    found = answers.find("abcd1234", tmp_path)
+    found = answers.find("abcd1234", "Pick?", tmp_path)
     assert found is not None
     assert found.answer == "Omicron" and found.question == "Pick?"
 
 
 def test_find_returns_none_without_match(tmp_path: Path):
-    assert answers.find("abcd1234", tmp_path) is None
+    assert answers.find("abcd1234", "Pick?", tmp_path) is None
     answers.record(hook_input(("dh 11111111", "Pick?", "A")), tmp_path)
-    assert answers.find("abcd1234", tmp_path) is None
+    assert answers.find("abcd1234", "Pick?", tmp_path) is None
 
 
 def test_find_refuses_world_readable_file(tmp_path: Path):
@@ -56,4 +72,31 @@ def test_find_refuses_world_readable_file(tmp_path: Path):
     path = tmp_path / answers.FILE
     path.chmod(0o644)
     with pytest.raises(Refusal, match=str(path)):
-        answers.find("abcd1234", tmp_path)
+        answers.find("abcd1234", "Pick?", tmp_path)
+
+
+def test_find_uses_only_the_first_row_for_a_nonce(tmp_path: Path):
+    answers.record(hook_input(("dh abcd1234", "Pick?", "Alpha")), tmp_path)
+    answers.record(hook_input(("dh abcd1234", "Pick?", "Beta")), tmp_path)
+    assert answers.find("abcd1234", "Pick?", tmp_path).answer == "Alpha"
+
+
+def test_find_refuses_when_the_recorded_question_differs(tmp_path: Path):
+    answers.record(hook_input(("dh abcd1234", "Reworded?", "Alpha")), tmp_path)
+    with pytest.raises(Refusal, match="abcd1234"):
+        answers.find("abcd1234", "Pick?", tmp_path)
+
+
+def test_record_skips_a_question_without_an_answer(tmp_path: Path):
+    payload = hook_input(("dh abcd1234", "Pick?", "x"))
+    payload["tool_response"]["answers"] = {}
+    answers.record(payload, tmp_path)
+    assert answers.find("abcd1234", "Pick?", tmp_path) is None
+
+
+def test_captured_spike_response_round_trips(tmp_path: Path):
+    response = json.loads(json.dumps(SPIKE_RESPONSE))
+    response["questions"][0]["header"] = "dh 0a1b2c3d"
+    answers.record({"session_id": "s", "tool_use_id": "t", "tool_response": response}, tmp_path)
+    found = answers.find("0a1b2c3d", SPIKE_RESPONSE["questions"][0]["question"], tmp_path)
+    assert found.answer == "Omicron"

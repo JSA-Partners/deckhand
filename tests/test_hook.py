@@ -30,7 +30,7 @@ def test_hook_answer_records(monkeypatch, tmp_path: Path):
         "tool_response": {"questions": [{"question": "Q?", "header": "dh abcd1234"}], "answers": {"Q?": "A"}},
     }
     assert run(monkeypatch, ["answer"], payload) == 0
-    assert answers.find("abcd1234", tmp_path).answer == "A"
+    assert answers.find("abcd1234", "Q?", tmp_path).answer == "A"
 
 
 def test_hook_answer_never_fails_the_session(monkeypatch, tmp_path: Path, capsys):

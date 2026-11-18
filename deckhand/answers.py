@@ -34,6 +34,8 @@ def record(hook_input: dict, state: Path) -> None:
         if not header.startswith(HEADER_PREFIX):
             continue
         question = item.get("question", "")
+        if question not in given:
+            continue
         rows.append(
             {
                 "at": time.time(),
@@ -41,7 +43,7 @@ def record(hook_input: dict, state: Path) -> None:
                 "tool_use_id": hook_input.get("tool_use_id", ""),
                 "header": header,
                 "question": question,
-                "answer": given.get(question, ""),
+                "answer": given[question],
             }
         )
     if not rows:
@@ -55,7 +57,7 @@ def record(hook_input: dict, state: Path) -> None:
             handle.write(json.dumps(row) + "\n")
 
 
-def find(nonce: str, state: Path) -> Answer | None:
+def find(nonce: str, question: str, state: Path) -> Answer | None:
     path = state / FILE
     try:
         if stat.S_IMODE(path.stat().st_mode) & 0o077:
@@ -65,12 +67,13 @@ def find(nonce: str, state: Path) -> Answer | None:
         return None
     except OSError as error:
         raise Refusal(f"cannot read {path}: {error.strerror}") from None
-    found = None
     for line in text.splitlines():
         try:
             row = json.loads(line)
         except ValueError:
             continue
         if row.get("header") == f"{HEADER_PREFIX}{nonce}":
-            found = Answer(nonce, row.get("question", ""), row.get("answer", ""), row.get("at", 0.0))
-    return found
+            if row.get("question") != question:
+                raise Refusal(f"the recorded question for {nonce} differs from the one asked")
+            return Answer(nonce, question, row.get("answer", ""), row.get("at", 0.0))
+    return None
