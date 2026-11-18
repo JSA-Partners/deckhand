@@ -14,7 +14,8 @@ from deckhand.store.linear import LinearStore
 
 USAGE = (
     "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
-    " the SUBJECT a feature id, a story or a decision item's text; apply NONCE"
+    " the SUBJECT a feature id, a story or a decision item's text, and finding takes a story and --finding ID;"
+    " apply NONCE"
 )
 
 
@@ -28,7 +29,7 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg in ("--story", "--team-key"):
+        elif arg in ("--story", "--team-key", "--finding"):
             value = next(rest, "")
             if arg == "--story":
                 found["stories"].append(value)
@@ -62,7 +63,7 @@ class Decide:
         feature = features.open_feature(store, parsed.get("team_key", ""))
         if feature is None:
             raise Refusal("no feature is open")
-        pin = decisions.pin(store, feature, kind, subject, parsed["stories"])
+        pin = decisions.pin(store, feature, kind, subject, parsed["stories"], parsed.get("finding", ""))
         question = decisions.make_question(kind, pin)
         decisions.save_pending(question, pin, answers.state_dir())
         tool_input = as_tool_input(question)

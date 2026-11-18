@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import difflib
 import json
+import os
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 
 KIND = "review-round"
+DECISION = "finding"
+DECLINE, ACCEPT = "Decline", "Accept"
+PERSON = "person:"
+TEXTS = "plans"
 CAP = 3
 DOUBTFUL = 0.5
 SEVERITIES = ("P1", "P2", "P3")
@@ -24,6 +31,7 @@ class Finding:
     evidence: str
     confidence: float
     reason: str = ""
+    changes_delivery: bool = False
 
     @property
     def id(self) -> str:
@@ -63,12 +71,16 @@ def _finding(index: int, item: object) -> Finding:
     reason = item.get("reason", "")
     if not isinstance(reason, str):
         raise bad("reason", "must be a string")
+    changes_delivery = item.get("changes_delivery", False)
+    if not isinstance(changes_delivery, bool):
+        raise bad("changes_delivery", "must be true or false")
     return Finding(
         **{field: item[field] for field in _TEXT},
         severity=item["severity"],
         line=line,
         confidence=float(confidence),
         reason=reason,
+        changes_delivery=changes_delivery,
     )
 
 
@@ -86,28 +98,103 @@ def ordered(findings: list[Finding]) -> list[Finding]:
     return sorted(findings, key=lambda f: (f.confidence < DOUBTFUL, -f.confidence))
 
 
-def round_record(story: str, stage: str, plan: RoundPlan, target_hash: str, findings: list[Finding]) -> Record:
+def round_record(
+    story: str, stage: str, plan: RoundPlan, target_hash: str, findings: list[Finding], head: str = ""
+) -> Record:
     data = {
         "target_hash": target_hash,
         "findings": [asdict(f) | {"id": f.id} for f in findings],
         "scoped": plan.scoped,
         "base_hash": plan.base_hash,
     }
+    if head:
+        data["head"] = head
     return Record(KIND, f"{story}:{stage}:{plan.n}", target_hash, "agent:review", data)
 
 
-def _accepted_p1(record: Record, declined: set[str]) -> bool:
-    return any(f["severity"] == "P1" and f["id"] not in declined for f in record.data["findings"])
+def _n(record: Record) -> int:
+    return int(record.subject.rsplit(":", 1)[1])
+
+
+def rounds_of(records: list[Record], prefix: str) -> list[Record]:
+    found = {r.subject: r for r in records if r.kind == KIND and r.subject.rsplit(":", 1)[0] == prefix}
+    return sorted(found.values(), key=_n)
+
+
+def last(rounds: list[Record]) -> Record | None:
+    return max(rounds, key=_n) if rounds else None
+
+
+def declined(records: list[Record]) -> set[str]:
+    answers = {r.subject: r.data.get("answer") for r in records if r.kind == DECISION and r.author.startswith(PERSON)}
+    return {id for id, answer in answers.items() if answer == DECLINE}
+
+
+def accepted(records: list[Record]) -> set[str]:
+    return {r.subject for r in records if r.kind == DECISION and r.data.get("answer") == ACCEPT}
+
+
+def accept_record(finding: str, version: str) -> Record:
+    return Record(DECISION, finding, version, "agent:review", {"answer": ACCEPT})
+
+
+def locate(records: list[Record], finding: str) -> tuple[Record, dict] | None:
+    prefixes = sorted({r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND})
+    for prefix in prefixes:
+        latest = last(rounds_of(records, prefix))
+        for item in latest.data["findings"] if latest else []:
+            if item["id"] == finding:
+                return latest, item
+    return None
+
+
+def open_p1(record: Record, declined: set[str]) -> list[dict]:
+    return [f for f in record.data["findings"] if f["severity"] == "P1" and f["id"] not in declined]
 
 
 def next_round(rounds: list[Record], target_hash: str, declined: set[str]) -> RoundPlan | Stop:
-    if not rounds:
+    latest = last(rounds)
+    if latest is None:
         return RoundPlan(1, scoped=False, base_hash="")
-    last = max(rounds, key=lambda r: int(r.subject.rsplit(":", 1)[1]))
-    if last.data["target_hash"] == target_hash:
+    if latest.data["target_hash"] == target_hash:
         return Stop("unchanged")
-    if not _accepted_p1(last, declined):
+    if not open_p1(latest, declined):
         return Stop("clean")
     if len(rounds) >= CAP:
         return Stop("cap")
-    return RoundPlan(len(rounds) + 1, scoped=True, base_hash=last.data["target_hash"])
+    return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
+
+
+def feature_gaps(project: str, records: list[Record]) -> list[str]:
+    latest = last(rounds_of(records, f"{project}:feature"))
+    if latest is None:
+        return []
+    found = open_p1(latest, declined(records))
+    return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]
+
+
+def text_path(state: Path, subject: str, version: str) -> Path:
+    return state / TEXTS / subject / f"{version}.md"
+
+
+def save_text(state: Path, subject: str, version: str, text: str) -> Path:
+    path = text_path(state, subject, version)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for folder in (state, state / TEXTS, path.parent):
+        folder.chmod(0o700)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(text.encode())
+    return path
+
+
+def saved_text(state: Path, subject: str, version: str) -> str | None:
+    try:
+        return text_path(state, subject, version).read_bytes().decode()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def text_diff(old: str, new: str) -> str:
+    lines = difflib.unified_diff(old.splitlines(True), new.splitlines(True), "reviewed", "revised")
+    return "".join(lines)

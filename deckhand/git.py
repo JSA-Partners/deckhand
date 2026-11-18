@@ -75,6 +75,10 @@ def diff(worktree: Path, base: str, paths: list[str] | None = None, runner: Runn
     return call(argv, worktree, runner)
 
 
+def diff_since(worktree: Path, commit: str, runner: Runner = run) -> str:
+    return call(["git", "diff", f"{commit}..HEAD"], worktree, runner)
+
+
 def changed_files(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     out = call(["git", "diff", "--name-only", f"{base}...HEAD"], worktree, runner)
     return out.splitlines()

@@ -5,14 +5,24 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, features, ops, planning, tiers, versions
+from deckhand import answers, features, ops, planning, review, tiers, versions
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
 
-KINDS = ("contract", "invariants", "state-chart", "decision-item", "tier", "sitting", "lean", "feature-approval")
+KINDS = (
+    "contract",
+    "invariants",
+    "state-chart",
+    "decision-item",
+    "tier",
+    "sitting",
+    "lean",
+    "feature-approval",
+    "finding",
+)
 
 _OPTIONS = {
     "contract": ["Approve", "Not yet"],
@@ -23,6 +33,7 @@ _OPTIONS = {
     "sitting": ["Done", "Not yet"],
     "tier": tiers.OPTIONS,
     "lean": ["Prove it in Lean", "Not needed"],
+    "finding": [review.DECLINE, review.ACCEPT],
 }
 
 _ASKS = {
@@ -34,6 +45,7 @@ _ASKS = {
     "sitting": "Is the sitting done for",
     "tier": "Which is the highest that applies to",
     "lean": "Is a Lean proof needed for",
+    "finding": "Decline or accept the review finding on",
 }
 
 _POSITIVE = {
@@ -96,11 +108,29 @@ def _label(story: dict) -> str:
     return f"{story['identifier']} {story['title']}"
 
 
-def pin(store: Store, feature: features.Feature, kind: str, subject: str, stories: list[str]) -> Pin:
+def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str) -> Pin:
+    story = features.story(store, feature, ref)
+    found = review.locate(feature.records.get(story["id"], []), finding)
+    if found is None:
+        raise Refusal(f"{finding} is not a finding of the last review round on {story['identifier']}")
+    round, item = found
+    detail = f"{item['severity']} {item['lens']} {item['path']}:{item['line']} {item['summary']}"
+    if round.subject.startswith(f"{feature.project['id']}:feature:"):
+        live = feature.live
+        labels = [_label(s) for s in live]
+        return Pin(finding, round.version, [s["id"] for s in live], detail, feature.project["name"], labels)
+    return Pin(finding, round.version, [story["id"]], detail, _label(story), [_label(story)])
+
+
+def pin(store: Store, feature: features.Feature, kind: str, subject: str, stories: list[str], finding: str = "") -> Pin:
     if kind not in KINDS:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
+    if (kind == "finding") != bool(finding):
+        raise Refusal("finding needs --finding ID, and --finding applies only to finding")
     if kind != "decision-item" and stories:
         raise Refusal("--story applies only to decision-item; every other kind finds its own stories")
+    if kind == "finding":
+        return _finding_pin(store, feature, subject, finding)
     if kind == "decision-item":
         if not stories:
             raise Refusal("decision-item needs at least one --story")
@@ -166,7 +196,7 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
-    if pending.kind in ("tier", "decision-item"):
+    if pending.kind in ("tier", "decision-item", "finding"):
         return True
     return answer == _POSITIVE[pending.kind]
 
@@ -193,6 +223,8 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
+    if pending.kind == "finding" and found.answer not in pending.options:
+        raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
     return found
@@ -213,7 +245,7 @@ def decide(store: Store, pending: Pending, state: Path) -> bool:
         pending.version,
         f"person:{found.session_id}",
         {"answer": found.answer, "question": pending.question, "nonce": pending.nonce}
-        | ({"item": pending.detail} if pending.detail else {})
+        | ({"item": pending.detail} if pending.kind == "decision-item" else {})
         | (_tier_data(found.answer) if pending.kind == "tier" else {}),
     )
     for story in pending.stories:

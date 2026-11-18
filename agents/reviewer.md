@@ -15,3 +15,6 @@ story belongs to, so open the files the lens asks about.
 Output the JSON list the lens file's Output section describes, and nothing else. The `lens` field is
 the lens name. Report every finding that would change the work, most important first. A clean result
 is `[]`.
+
+Add `"changes_delivery": true` to a finding whose fix would change what the story delivers: an
+acceptance criterion, the Contract, or behavior a person would notice. The person decides those.

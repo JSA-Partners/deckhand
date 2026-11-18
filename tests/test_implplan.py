@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import implplan
+from deckhand import implplan, review
 from deckhand.step import Refusal
 from deckhand.steps.implplan import ImplPlan
 from deckhand.store.fake import FakeStore
@@ -14,6 +14,12 @@ from tests.test_feature_approval import approve_everything, setup
 
 TEAM = ["--team-key", "ACME"]
 BASE = {"src/a.py", "src/b.py", "docs/guide.md"}
+
+
+@pytest.fixture(autouse=True)
+def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    return tmp_path / "state"
 
 
 def manifest(**over: object) -> dict:
@@ -96,6 +102,7 @@ def test_plan_saved_with_manifest_record(tmp_path: Path):
     assert record.subject == "s1"
     assert record.data == manifest(after_merge=["drop the old queue"])
     assert record.version == implplan.version((tmp_path / "plan.md").read_bytes(), record.data)
+    assert review.saved_text(tmp_path / "state", "s1", record.version) == "# Plan\n\n- [ ] one\n"
     assert ["git", "merge-base", "HEAD", "origin/HEAD"] in git.argvs
     assert ["git", "ls-tree", "-r", "--name-only", "base1"] in git.argvs
 

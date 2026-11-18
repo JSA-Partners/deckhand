@@ -5,6 +5,7 @@ import json
 
 from deckhand.step import Refusal
 
+PURPOSE = "implplan"
 CHANGES = ("create", "modify")
 SHAPE = {
     "files": 'a list of {"path", "change"}, change is create or modify',

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from deckhand import ops, planning, tiers, versions
+from deckhand import ops, planning, review, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
@@ -128,7 +128,8 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
             if story in live and versions.current(store, feature, record):
                 settled.add(record.subject)
     gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
-    return gaps
+    held = [record for story in live for record in feature.records.get(story["id"], [])]
+    return gaps + review.feature_gaps(project, held)
 
 
 def story(store: Store, feature: Feature, ref: str) -> dict:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from deckhand import features, git, implplan, ops
+from deckhand import answers, features, git, implplan, ops, review
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
@@ -14,7 +14,6 @@ from deckhand.store.linear import LinearStore
 
 USAGE = "implplan takes REF and --team-key KEY on both verbs, and on apply --plan PLAN.md --manifest MANIFEST.json"
 TITLE = "Implementation plan"
-PURPOSE = "implplan"
 
 
 def _config_dir() -> Path:
@@ -87,7 +86,8 @@ class ImplPlan:
         failures = implplan.plan_checks(manifest, set(git.ls_files(repo, base, self._runner)))
         if failures:
             raise Refusal("the plan fails its checks: " + "; ".join(failures))
-        ops.ensure_document(store, story["id"], PURPOSE, story["id"], TITLE, plan_text)
-        record = Record(PURPOSE, story["id"], implplan.version(plan, manifest), "agent:implplan", manifest)
+        ops.ensure_document(store, story["id"], implplan.PURPOSE, story["id"], TITLE, plan_text)
+        record = Record(implplan.PURPOSE, story["id"], implplan.version(plan, manifest), "agent:implplan", manifest)
         ops.ensure_record(store, story["id"], record)
+        review.save_text(answers.state_dir(), story["id"], record.version, plan_text)
         print(f"done: saved the implementation plan for {story['identifier']}")
