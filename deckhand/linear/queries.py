@@ -27,6 +27,7 @@ query Issue($id: String!) {{
     id
     identifier
     number
+    branchName
     title
     description
     team {{ key }}
@@ -76,6 +77,7 @@ query ProjectIssues($id: String!) {{
         id
         identifier
         number
+        branchName
         title
         description
         team {{ key }}

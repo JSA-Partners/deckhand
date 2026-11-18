@@ -32,6 +32,14 @@ def test_create_then_read() -> None:
     assert store.issue("missing") is None
 
 
+def test_branch_name_follows_the_team_number_and_title() -> None:
+    store = FakeStore()
+    make_issue(store, "i1", "Queue the order, then send!")
+    assert store.issue("i1")["branch_name"] == "acme-1-queue-the-order-then-send"
+    store.set_issue_text("i1", "Receipts", "body")
+    assert store.issue("i1")["branch_name"] == "acme-1-receipts"
+
+
 def test_numbers_count_within_a_team() -> None:
     store = FakeStore()
     make_issue(store, "i1")

@@ -64,6 +64,11 @@ def worktree_add(clone: Path, branch: str, base: str, runner: Runner = run) -> P
     return path
 
 
+def clone_root(cwd: Path, runner: Runner = run) -> Path:
+    common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()
+    return Path(common).parent
+
+
 def head(worktree: Path, runner: Runner = run) -> str:
     return call(["git", "rev-parse", "HEAD"], worktree, runner).strip()
 

@@ -12,6 +12,8 @@ from deckhand.step import Refusal
 KIND = "review-round"
 DECISION = "finding"
 HAND_ACCEPT = "finding-accept"
+CAP_DECISION = "review-cap"
+PROCEED, REWORK = "Proceed", "Rework the plan"
 DECLINE, ACCEPT = "Decline", "Accept"
 PERSON = "person:"
 TEXTS = "plans"
@@ -168,6 +170,47 @@ def next_round(rounds: list[Record], target_hash: str, declined: set[str]) -> Ro
     if len(rounds) >= CAP:
         return Stop("cap")
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
+
+
+def _cap_cut(record: Record) -> int:
+    try:
+        return int(record.version.rsplit(":", 1)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def _cap_answers(records: list[Record], story: str, answer: str) -> list[Record]:
+    return [
+        r
+        for r in records
+        if r.kind == CAP_DECISION
+        and r.subject == story
+        and r.author.startswith(PERSON)
+        and r.data.get("answer") == answer
+    ]
+
+
+def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
+    rounds = rounds_of(records, prefix)
+    if not prefix.endswith(":plan"):
+        return rounds, 0
+    cut = max(map(_cap_cut, _cap_answers(records, prefix.rsplit(":", 1)[0], REWORK)), default=0)
+    return [r for r in rounds if _n(r) > cut], cut
+
+
+def at_cap(rounds: list[Record], declined: set[str]) -> bool:
+    latest = last(rounds)
+    return latest is not None and len(rounds) >= CAP and bool(open_p1(latest, declined))
+
+
+def plan_cleared(records: list[Record], story: str) -> bool:
+    held, _ = counted(records, f"{story}:plan")
+    latest = last(held)
+    if latest is None:
+        return False
+    if not open_p1(latest, declined(records)):
+        return True
+    return any(r.version == latest.subject for r in _cap_answers(records, story, PROCEED))
 
 
 def feature_gaps(project: str, records: list[Record]) -> list[str]:

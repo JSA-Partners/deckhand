@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,11 @@ from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.store import Store
+
+
+def _branch_name(team: str, number: int, title: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return f"{team.lower()}-{number}-{slug}"
 
 
 class WriteFailed(Exception):
@@ -77,6 +83,7 @@ class FakeStore(Store):
             "team": team,
             "number": number,
             "identifier": str(Ref(team, number)),
+            "branch_name": _branch_name(team, number, title),
             "title": title,
             "description": description,
             "project": project,
@@ -108,8 +115,10 @@ class FakeStore(Store):
         self._wrote("set_labels", issue, list(labels))
 
     def set_issue_text(self, issue: str, title: str, description: str) -> None:
-        self._issues[issue]["title"] = title
-        self._issues[issue]["description"] = description
+        held = self._issues[issue]
+        held["title"] = title
+        held["branch_name"] = _branch_name(held["team"], held["number"], title)
+        held["description"] = description
         self._wrote("set_issue_text", issue, title, description)
 
     def add_repository_label(self, team: str, name: str) -> None:

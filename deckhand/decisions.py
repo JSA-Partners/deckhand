@@ -22,6 +22,7 @@ KINDS = (
     "lean",
     "feature-approval",
     "finding",
+    review.CAP_DECISION,
 )
 
 _OPTIONS = {
@@ -34,6 +35,7 @@ _OPTIONS = {
     "tier": tiers.OPTIONS,
     "lean": ["Prove it in Lean", "Not needed"],
     "finding": [review.DECLINE, review.ACCEPT],
+    review.CAP_DECISION: [review.PROCEED, review.REWORK],
 }
 
 _ASKS = {
@@ -46,6 +48,7 @@ _ASKS = {
     "tier": "Which is the highest that applies to",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
+    review.CAP_DECISION: "Three plan review rounds ran and a P1 is open. Proceed to the build or rework the plan for",
 }
 
 _POSITIVE = {
@@ -122,6 +125,17 @@ def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str
     return Pin(finding, round.version, [story["id"]], detail, _label(story), [_label(story)])
 
 
+def _cap_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    held, _ = review.counted(records, f"{story['id']}:plan")
+    if not review.at_cap(held, review.declined(records)):
+        raise Refusal(f"the plan review of {story['identifier']} has not reached its cap with a P1 open")
+    latest = review.last(held)
+    detail = f"{len(held)} rounds, {len(review.open_p1(latest, review.declined(records)))} P1 open"
+    return Pin(story["id"], latest.subject, [story["id"]], detail, _label(story), [_label(story)])
+
+
 def pin(store: Store, feature: features.Feature, kind: str, subject: str, stories: list[str], finding: str = "") -> Pin:
     if kind not in KINDS:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
@@ -129,6 +143,8 @@ def pin(store: Store, feature: features.Feature, kind: str, subject: str, storie
         raise Refusal("finding needs --finding ID, and --finding applies only to finding")
     if kind != "decision-item" and stories:
         raise Refusal("--story applies only to decision-item; every other kind finds its own stories")
+    if kind == review.CAP_DECISION:
+        return _cap_pin(store, feature, subject)
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)
     if kind == "decision-item":
@@ -196,7 +212,7 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
-    if pending.kind in ("tier", "decision-item", "finding"):
+    if pending.kind in ("tier", "decision-item", "finding", review.CAP_DECISION):
         return True
     return answer == _POSITIVE[pending.kind]
 
@@ -223,7 +239,7 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
-    if pending.kind == "finding" and found.answer not in pending.options:
+    if pending.kind in ("finding", review.CAP_DECISION) and found.answer not in pending.options:
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")

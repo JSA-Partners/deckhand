@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deckhand import answers, features, git, implplan, lenses, ops, planning, review, tiers, versions
@@ -179,16 +179,18 @@ class Review:
         subject = self._subject(parsed)
         store, repo = self._store_for_run(), self._repo or Path.cwd()
         rounds = review.rounds_of(subject.records, subject.prefix)
+        counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
         last = review.last(rounds)
         target = self._target(store, subject, repo)
-        plan = review.next_round(rounds, target.hash, declined)
+        plan = review.next_round(counted, target.hash, declined)
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts["note"] = target.note
         if isinstance(plan, review.Stop):
             facts["stop"] = plan.reason
         else:
+            plan = replace(plan, n=plan.n + cut)
             facts |= {"round": plan.n, "scoped": plan.scoped}
             names = self._lenses(subject, repo)
             facts["lenses"] = [{"name": n, "path": str(lenses.path_of(n, repo))} for n in names]
@@ -223,13 +225,14 @@ class Review:
             raise Refusal(f"--target is required; {USAGE}")
         subject = self._subject(parsed)
         store, repo = self._store_for_run(), self._repo or Path.cwd()
-        rounds = review.rounds_of(subject.records, subject.prefix)
+        counted, cut = review.counted(subject.records, subject.prefix)
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
-        plan = review.next_round(rounds, target.hash, review.declined(subject.records))
+        plan = review.next_round(counted, target.hash, review.declined(subject.records))
         if isinstance(plan, review.Stop):
             raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
+        plan = replace(plan, n=plan.n + cut)
         owner = subject.prefix.split(":")[0]
         record = review.round_record(owner, subject.stage, plan, target.hash, review.ordered(found), target.head)
         for story in subject.stories:
