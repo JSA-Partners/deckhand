@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,44 @@ class Answer:
     answer: str
     at: float
     session_id: str = ""
+    copied: bool = False
+
+
+MIN_COPIED = 20
+RECENT = 5
+
+
+def _recent_assistant_text(path: str) -> str:
+    texts = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("type") != "assistant":
+                continue
+            content = (row.get("message") or {}).get("content") or []
+            texts.append("\n".join(b.get("text", "") for b in content if b.get("type") == "text"))
+    return "\n".join(texts[-RECENT:])
+
+
+def only_labels(answer: str, labels: list[str]) -> bool:
+    return any(
+        answer == label or (answer.startswith(label + ", ") and only_labels(answer[len(label) + 2 :], labels))
+        for label in labels
+    )
+
+
+def _is_copied(item: dict, answer: str, hook_input: dict) -> bool:
+    labels = [str(o.get("label", "")) for o in item.get("options") or []]
+    if len(answer) < MIN_COPIED or only_labels(answer, labels):
+        return False
+    try:
+        return answer in _recent_assistant_text(hook_input.get("transcript_path") or "")
+    except (OSError, TypeError, AttributeError):
+        print("deckhand: hook answer could not read the transcript, copied check skipped", file=sys.stderr)
+        return False
 
 
 def record(hook_input: dict, state: Path) -> None:
@@ -45,6 +84,7 @@ def record(hook_input: dict, state: Path) -> None:
                 "header": header,
                 "question": question,
                 "answer": given[question],
+                "copied": _is_copied(item, str(given[question]), hook_input),
             }
         )
     if not rows:
@@ -76,5 +116,12 @@ def find(nonce: str, question: str, state: Path) -> Answer | None:
         if row.get("header") == f"{HEADER_PREFIX}{nonce}":
             if row.get("question") != question:
                 raise Refusal(f"the recorded question for {nonce} differs from the one asked")
-            return Answer(nonce, question, row.get("answer", ""), row.get("at", 0.0), row.get("session_id", ""))
+            return Answer(
+                nonce,
+                question,
+                row.get("answer", ""),
+                row.get("at", 0.0),
+                row.get("session_id", ""),
+                bool(row.get("copied", False)),
+            )
     return None

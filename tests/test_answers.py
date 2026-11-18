@@ -100,3 +100,56 @@ def test_captured_spike_response_round_trips(tmp_path: Path):
     answers.record({"session_id": "s", "tool_use_id": "t", "tool_response": response}, tmp_path)
     found = answers.find("0a1b2c3d", SPIKE_RESPONSE["questions"][0]["question"], tmp_path)
     assert found.answer == "Omicron"
+
+
+def transcript(tmp_path: Path, texts: list[str]) -> Path:
+    path = tmp_path / "t.jsonl"
+    lines = [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": text}, {"type": "tool_use"}]}}
+        for text in texts
+    ]
+    lines.insert(0, {"type": "user", "message": {"content": "hello"}})
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+    return path
+
+
+def copied_of(state: Path) -> bool:
+    return json.loads((state / answers.FILE).read_text().splitlines()[0])["copied"]
+
+
+LONG = "a long free text answer that is copied"
+
+
+def test_free_text_found_in_recent_assistant_text_is_marked_copied(tmp_path: Path):
+    state = tmp_path / "state"
+    payload = hook_input(("dh abcd1234", "Pick?", LONG))
+    payload["transcript_path"] = str(transcript(tmp_path, ["before " + LONG + " after"]))
+    answers.record(payload, state)
+    assert copied_of(state) is True
+    assert answers.find("abcd1234", "Pick?", state).copied is True
+
+
+def test_free_text_only_in_an_older_assistant_message_is_not_copied(tmp_path: Path):
+    state = tmp_path / "state"
+    payload = hook_input(("dh abcd1234", "Pick?", LONG))
+    payload["transcript_path"] = str(transcript(tmp_path, [LONG, "a", "b", "c", "d", "e"]))
+    answers.record(payload, state)
+    assert copied_of(state) is False
+
+
+def test_short_or_offered_answers_are_not_copied(tmp_path: Path):
+    state = tmp_path / "state"
+    payload = hook_input(("dh abcd1234", "Pick?", "Approve"))
+    payload["tool_response"]["questions"][0]["options"] = [{"label": "Approve"}]
+    payload["transcript_path"] = str(transcript(tmp_path, ["Approve Approve Approve Approve"]))
+    answers.record(payload, state)
+    assert copied_of(state) is False
+
+
+def test_unreadable_transcript_stores_not_copied_and_one_stderr_line(tmp_path: Path, capsys):
+    state = tmp_path / "state"
+    payload = hook_input(("dh abcd1234", "Pick?", LONG))
+    payload["transcript_path"] = str(tmp_path / "missing.jsonl")
+    answers.record(payload, state)
+    assert copied_of(state) is False
+    assert len(capsys.readouterr().err.splitlines()) == 1

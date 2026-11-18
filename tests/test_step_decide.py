@@ -47,28 +47,3 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
 def test_apply_without_pending_refuses(state: Path):
     with pytest.raises(Refusal, match="no pending question"):
         Decide(FakeStore()).apply(["deadbeef", *TEAM])
-
-
-def test_apply_reads_agent_text_file(state: Path, tmp_path: Path, capsys):
-    store = FakeStore()
-    store.create_issue("s1", "ACME", "One", "", None, [])
-    step = Decide(store)
-    step.context(["decision-item", "Plan", "--version", "v1", "--story", "s1", "--json"])
-    shown = json.loads(capsys.readouterr().out)
-    asked = shown["tool_input"]["questions"][0]
-    answers.record(
-        {
-            "session_id": "sess",
-            "tool_response": {
-                "questions": [{"question": asked["question"], "header": asked["header"]}],
-                "answers": {asked["question"]: "my own words"},
-            },
-        },
-        state,
-    )
-    text = tmp_path / "agent.txt"
-    text.write_text("they said my own words")
-    store.writes.clear()
-    with pytest.raises(Refusal, match="copied"):
-        step.apply([shown["nonce"], *TEAM, "--agent-text-file", str(text)])
-    assert store.writes == []

@@ -8,7 +8,7 @@ from pathlib import Path
 from deckhand import answers, ops
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
-from deckhand.records import Record
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
 from deckhand.tiers import FACTS
@@ -59,13 +59,17 @@ class Pending:
     descriptions: list[str]
 
 
-def make_question(kind: str, subject: str) -> Question:
+def make_question(kind: str, subject: str, version: str, stories: list[str]) -> Question:
     if kind not in KINDS:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
     if not subject.strip():
         raise Refusal("a decision needs a subject")
-    text = f"{_ASKS[kind]} {subject}? (decision kind: {kind})"
-    return build(kind, subject, text, _OPTIONS[kind], multi=kind == "tier")
+    return build(kind, subject, question_text(kind, subject, version, stories), _OPTIONS[kind], multi=kind == "tier")
+
+
+def question_text(kind: str, subject: str, version: str, stories: list[str]) -> str:
+    where = f"version {content_hash(version)[:12]}, stories {', '.join(stories)}"
+    return f"{_ASKS[kind]} {subject} ({where})? (decision kind: {kind})"
 
 
 def save_pending(question: Question, version: str, stories: list[str], state: Path) -> None:
@@ -102,29 +106,32 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _offered(pending: Pending, answer: str) -> bool:
-    given = [part for part in answer.split(", ")] if pending.kind == "tier" else [answer]
-    return all(part in pending.options for part in given)
+    return answers.only_labels(answer, pending.options)
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
     if pending.kind == "tier":
-        return bool(answer.strip())
+        return True
     return answer == _POSITIVE[pending.kind]
 
 
-def check(pending: Pending, state: Path, agent_text: str = "") -> Answer:
+def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
         raise Refusal(f"no recorded answer for {pending.nonce}")
+    if pending.question != question_text(pending.kind, pending.subject, pending.version, pending.stories):
+        raise Refusal(f"the pending question for {pending.nonce} differs from the question the person saw")
+    if found.copied:
+        raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
+    if pending.kind == "tier" and not _offered(pending, found.answer):
+        raise Refusal(f"the answer for {pending.nonce} is not a selection of the offered options")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
-    if agent_text and found.answer and not _offered(pending, found.answer) and found.answer in agent_text:
-        raise Refusal(f"the answer for {pending.nonce} is copied from the agent text")
     return found
 
 
-def decide(store: Store, pending: Pending, state: Path, agent_text: str = "") -> bool:
-    found = check(pending, state, agent_text)
+def decide(store: Store, pending: Pending, state: Path) -> bool:
+    found = check(pending, state)
     if not _creates_record(pending, found.answer):
         return False
     record = Record(

@@ -13,8 +13,7 @@ from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "decide context KIND SUBJECT --version V --story ID [--story ID ...] [--json];"
-    " decide apply NONCE --team-key KEY [--agent-text-file PATH]"
+    "decide context KIND SUBJECT --version V --story ID [--story ID ...] [--json]; decide apply NONCE --team-key KEY"
 )
 
 
@@ -28,7 +27,7 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg in ("--version", "--story", "--team-key", "--agent-text-file"):
+        elif arg in ("--version", "--story", "--team-key"):
             value = next(rest, "")
             if arg == "--story":
                 found["stories"].append(value)
@@ -60,7 +59,7 @@ class Decide:
         kind, subject = parsed["words"]
         if not parsed.get("version") or not parsed["stories"]:
             raise Refusal(f"--version and at least one --story are required; {USAGE}")
-        question = decisions.make_question(kind, subject)
+        question = decisions.make_question(kind, subject, parsed["version"], parsed["stories"])
         decisions.save_pending(question, parsed["version"], parsed["stories"], answers.state_dir())
         tool_input = as_tool_input(question)
         if parsed["json"]:
@@ -75,15 +74,9 @@ class Decide:
             raise Refusal(f"apply takes NONCE; {USAGE}")
         nonce = parsed["words"][0]
         state = answers.state_dir()
-        agent_text = ""
-        if parsed.get("agent_text_file"):
-            try:
-                agent_text = Path(parsed["agent_text_file"]).read_text(encoding="utf-8")
-            except OSError as error:
-                raise Refusal(f"cannot read {parsed['agent_text_file']}: {error.strerror}") from None
         pending = decisions.load_pending(nonce, state)
         store = self._store_for_run(parsed)
-        if decisions.decide(store, pending, state, agent_text):
+        if decisions.decide(store, pending, state):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             print(f"done: recorded {pending.kind} for {pending.subject} on {len(pending.stories)} stories")
             return

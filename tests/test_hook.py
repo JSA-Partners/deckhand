@@ -58,11 +58,53 @@ def test_hook_ask_denies_recommended_in_deckhand_questions(monkeypatch, capsys):
     assert out["permissionDecisionReason"]
 
 
-def test_hook_ask_allows_clean_deckhand_question(monkeypatch, capsys):
+def test_hook_ask_allows_clean_deckhand_question(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    pending_for(tmp_path, "abcd1234", "Q?", ["Wide", "Narrow"])
     assert run(monkeypatch, ["ask"], asked("dh abcd1234", ["Wide", "Narrow"])) == 0
     assert capsys.readouterr().out == ""
 
 
 def test_hook_ask_ignores_other_questions(monkeypatch, capsys):
     assert run(monkeypatch, ["ask"], asked("Scope", ["Wide (Recommended)"])) == 0
+    assert capsys.readouterr().out == ""
+
+
+def pending_for(state: Path, nonce: str, question: str, options: list[str]) -> None:
+    folder = state / "pending"
+    folder.mkdir(parents=True)
+    (folder / f"{nonce}.json").write_text(
+        json.dumps(
+            {
+                "nonce": nonce,
+                "kind": "contract",
+                "subject": "s",
+                "version": "v",
+                "stories": ["s1"],
+                "question": question,
+                "options": options,
+                "descriptions": [],
+            }
+        )
+    )
+
+
+def test_hook_ask_denies_deckhand_question_without_pending(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    assert run(monkeypatch, ["ask"], asked("dh abcd1234", ["Wide", "Narrow"])) == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("question,labels", [("Other?", ["Wide", "Narrow"]), ("Q?", ["Wide", "Wider"])])
+def test_hook_ask_denies_a_question_that_differs_from_pending(monkeypatch, tmp_path: Path, capsys, question, labels):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    pending_for(tmp_path, "abcd1234", question, ["Wide", "Narrow"])
+    assert run(monkeypatch, ["ask"], asked("dh abcd1234", labels)) == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_hook_ask_allows_the_pending_question(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    pending_for(tmp_path, "abcd1234", "Q?", ["Wide", "Narrow"])
+    assert run(monkeypatch, ["ask"], asked("dh abcd1234", ["Wide", "Narrow"])) == 0
     assert capsys.readouterr().out == ""
