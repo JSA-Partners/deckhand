@@ -23,6 +23,7 @@ class Answer:
     question: str
     answer: str
     at: float
+    session_id: str = ""
 
 
 def record(hook_input: dict, state: Path) -> None:
@@ -75,5 +76,5 @@ def find(nonce: str, question: str, state: Path) -> Answer | None:
         if row.get("header") == f"{HEADER_PREFIX}{nonce}":
             if row.get("question") != question:
                 raise Refusal(f"the recorded question for {nonce} differs from the one asked")
-            return Answer(nonce, question, row.get("answer", ""), row.get("at", 0.0))
+            return Answer(nonce, question, row.get("answer", ""), row.get("at", 0.0), row.get("session_id", ""))
     return None
