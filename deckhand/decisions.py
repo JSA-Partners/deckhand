@@ -153,6 +153,7 @@ def pending_path(nonce: str, state: Path) -> Path:
 
 
 def load_pending(nonce: str, state: Path) -> Pending:
+    answers.check_nonce(nonce)
     try:
         return Pending(**json.loads(pending_path(nonce, state).read_text(encoding="utf-8")))
     except FileNotFoundError:

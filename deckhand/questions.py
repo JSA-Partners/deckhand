@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import re
 import secrets
 from dataclasses import dataclass
 
 HEADER_PREFIX = "dh "
+NONCE = re.compile(r"[0-9a-f]{8}")
+
+
+def valid_nonce(nonce: str) -> bool:
+    return NONCE.fullmatch(nonce) is not None
 
 
 @dataclass(frozen=True)

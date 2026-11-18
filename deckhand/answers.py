@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand.questions import HEADER_PREFIX
+from deckhand.questions import HEADER_PREFIX, valid_nonce
 from deckhand.step import Refusal
 
 FILE = "answers.jsonl"
@@ -75,6 +75,9 @@ def record(hook_input: dict, state: Path) -> None:
         header = item.get("header", "")
         if not header.startswith(HEADER_PREFIX):
             continue
+        if not valid_nonce(header[len(HEADER_PREFIX) :]):
+            print("deckhand: hook answer ignored a deckhand header with a malformed nonce", file=sys.stderr)
+            continue
         question = item.get("question", "")
         if question not in given:
             continue
@@ -100,7 +103,13 @@ def record(hook_input: dict, state: Path) -> None:
             handle.write(json.dumps(row) + "\n")
 
 
+def check_nonce(nonce: str) -> None:
+    if not valid_nonce(nonce):
+        raise Refusal(f"{nonce!r} is not a deckhand nonce, eight lowercase hexadecimal digits")
+
+
 def find(nonce: str, question: str, state: Path) -> Answer | None:
+    check_nonce(nonce)
     path = state / FILE
     try:
         if stat.S_IMODE(path.stat().st_mode) & 0o077:

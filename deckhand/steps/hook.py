@@ -4,7 +4,7 @@ import json
 import sys
 
 from deckhand import answers, decisions
-from deckhand.questions import HEADER_PREFIX
+from deckhand.questions import HEADER_PREFIX, valid_nonce
 from deckhand.step import Refusal, register
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
@@ -18,29 +18,41 @@ def _read() -> dict:
     return data
 
 
-def _recommended(hook_input: dict) -> bool:
+def _deckhand_items(hook_input: dict) -> list[dict]:
+    found = []
     for item in (hook_input.get("tool_input") or {}).get("questions") or []:
-        if not str(item.get("header", "")).startswith(HEADER_PREFIX):
+        header = str(item.get("header", ""))
+        if not header.startswith(HEADER_PREFIX):
             continue
+        if not valid_nonce(header[len(HEADER_PREFIX) :]):
+            print("deckhand: hook ask ignored a deckhand header with a malformed nonce", file=sys.stderr)
+            continue
+        found.append(item)
+    return found
+
+
+def _recommended(items: list[dict]) -> bool:
+    for item in items:
         if any("recommended" in str(o.get("label", "")).lower() for o in item.get("options") or []):
             return True
     return False
 
 
-def _unpending(hook_input: dict) -> bool:
+def _unpending(items: list[dict]) -> bool:
     state = answers.state_dir()
-    for item in (hook_input.get("tool_input") or {}).get("questions") or []:
-        header = str(item.get("header", ""))
-        if not header.startswith(HEADER_PREFIX):
-            continue
+    for item in items:
         try:
-            pending = decisions.load_pending(header[len(HEADER_PREFIX) :], state)
+            pending = decisions.load_pending(str(item["header"])[len(HEADER_PREFIX) :], state)
         except Refusal:
             return True
         labels = [o.get("label") for o in item.get("options") or []]
         if item.get("question") != pending.question or labels != pending.options:
             return True
     return False
+
+
+def _denied(items: list[dict]) -> bool:
+    return _recommended(items) or _unpending(items)
 
 
 @register("hook")
@@ -54,7 +66,7 @@ class Hook:
             hook_input = _read()
             if action == "answer":
                 answers.record(hook_input, answers.state_dir())
-            elif action == "ask" and (_recommended(hook_input) or _unpending(hook_input)):
+            elif action == "ask" and _denied(_deckhand_items(hook_input)):
                 print(
                     json.dumps(
                         {

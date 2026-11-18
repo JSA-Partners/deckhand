@@ -244,3 +244,11 @@ def test_every_decision_item_answer_is_recorded(tmp_path: Path, answer: str):
     assert decisions.decide(store, pending, tmp_path) is True
     [record] = store.records("s1")
     assert record.data["answer"] == answer
+
+
+def test_load_pending_refuses_a_nonce_outside_the_pending_folder(tmp_path: Path):
+    question, _ = ask(tmp_path)
+    escaped = tmp_path / "x.json"
+    escaped.write_text(decisions.pending_path(question.nonce, tmp_path).read_text())
+    with pytest.raises(Refusal, match="not a deckhand nonce"):
+        decisions.load_pending("../x", tmp_path)

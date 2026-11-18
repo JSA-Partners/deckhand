@@ -185,3 +185,18 @@ def test_tool_use_only_rows_do_not_use_up_the_window(tmp_path: Path):
     payload["transcript_path"] = str(path)
     answers.record(payload, state)
     assert copied_of(state) is True
+
+
+@pytest.mark.parametrize("header", ["dh ../x", "dh ABCD1234", "dh abcd12345", "dh abcd1234\n"])
+def test_record_ignores_a_malformed_nonce_with_one_stderr_line(tmp_path: Path, capsys, header: str):
+    answers.record(hook_input((header, "Pick?", "Alpha")), tmp_path)
+    assert not (tmp_path / answers.FILE).exists()
+    err = capsys.readouterr().err
+    assert len(err.splitlines()) == 1
+    assert "Pick?" not in err and "Alpha" not in err
+
+
+def test_find_refuses_a_malformed_nonce(tmp_path: Path):
+    answers.record(hook_input(("dh abcd1234", "Pick?", "Alpha")), tmp_path)
+    with pytest.raises(Refusal, match="not a deckhand nonce"):
+        answers.find("../x", "Pick?", tmp_path)

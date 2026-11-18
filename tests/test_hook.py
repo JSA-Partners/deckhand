@@ -108,3 +108,12 @@ def test_hook_ask_allows_the_pending_question(monkeypatch, tmp_path: Path, capsy
     pending_for(tmp_path, "abcd1234", "Q?", ["Wide", "Narrow"])
     assert run(monkeypatch, ["ask"], asked("dh abcd1234", ["Wide", "Narrow"])) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_hook_ask_ignores_a_malformed_nonce_with_one_stderr_line(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    (tmp_path / "x.json").write_text("{}")
+    assert run(monkeypatch, ["ask"], asked("dh ../x", ["Wide", "Narrow"])) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert len(captured.err.splitlines()) == 1
