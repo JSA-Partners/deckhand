@@ -3,27 +3,47 @@ from __future__ import annotations
 import pytest
 
 from deckhand.step import Refusal
-from deckhand.tiers import FACTS, Tier, chosen, tier
+from deckhand.tiers import NONE, OPTIONS, TIERS, chosen, from_record
 
 
-def test_no_facts_is_tier_0():
-    assert tier(set()) == Tier(level=0, data_rule=False, tools_key="0")
+def test_options_ask_from_the_highest_tier_down_and_end_with_none():
+    assert OPTIONS == [
+        "Jobs, retries, webhooks, queues or two writers",
+        "A flow or an entity with several states",
+        "A data rule: ownership, permissions, uniqueness or money",
+        "None of these",
+    ]
+    assert [t.level for t in TIERS] == [3, 2, 1, 0]
+    assert OPTIONS[-1] == NONE
 
 
-def test_highest_fact_wins():
-    assert tier({"data_rule", "concurrency"}).level == 3
+@pytest.mark.parametrize("answer", ["Jobs, retries, webhooks, queues or two writers", NONE])
+def test_chosen_reads_one_option_even_when_its_label_holds_commas(answer: str):
+    assert chosen(answer).label == answer
 
 
-def test_unknown_fact_refuses():
-    with pytest.raises(Refusal) as refused:
-        tier({"data_rule", "nope"})
+@pytest.mark.parametrize(
+    "answer", [", ".join(OPTIONS[:2]), "A flow or an entity with several states, free text", "anything"]
+)
+def test_chosen_refuses_anything_but_one_option(answer: str):
+    with pytest.raises(Refusal, match="not one of the offered options"):
+        chosen(answer)
 
-    assert "nope" in refused.value.rule
+
+def test_from_record_reads_the_stored_level_and_fact():
+    for tier in TIERS:
+        assert from_record({"level": tier.level, "fact": tier.fact}) == tier
 
 
-def test_chosen_reads_a_multi_select_answer_whose_labels_hold_commas():
-    answer = ", ".join(f.question for f in FACTS[:2])
-    assert chosen(answer) == {FACTS[0].key, FACTS[1].key}
-    assert tier(chosen(answer)).level == 2
-    with pytest.raises(Refusal, match="not a selection"):
-        chosen(FACTS[0].question + ", free text")
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"facts": ["concurrency"]},
+        {"level": 2, "fact": "concurrency"},
+        {"level": 4, "fact": "pure_algorithm"},
+        {"level": 1, "fact": ["data_rule"]},
+    ],
+)
+def test_from_record_refuses_a_missing_or_inconsistent_record(data: dict):
+    assert from_record(data) is None

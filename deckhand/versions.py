@@ -34,8 +34,8 @@ def story_text_version(issue: dict) -> str:
 
 def story_version(issue: dict, records: list[Record]) -> str:
     tier = held(records, "tier", issue["id"])
-    answer = str(tier.data.get("answer", "")) if tier else ""
-    return _hash(story_text_version(issue), tier.version if tier else "", answer)
+    fact = str(tier.data.get("fact", "")) if tier else ""
+    return _hash(story_text_version(issue), tier.version if tier else "", fact)
 
 
 def expected_items(records: list[Record]) -> object:

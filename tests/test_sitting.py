@@ -13,44 +13,45 @@ from deckhand.step import Refusal
 from deckhand.steps.sitting import Sitting
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
-from deckhand.tiers import FACTS, tier
+from deckhand.tiers import TIERS
 
 P1 = create_id("ACME:Alpha", "feature")
 
 TEAM = ["--team-key", "ACME"]
+CONCURRENCY, MULTI_STEP, DATA_RULE, NONE = TIERS
 STORY = {"id": "s1", "title": "Orders", "description": "Outcome: an order is placed."}
 START = datetime(2026, 11, 18, 9, 0)
 
 
 def test_tier_0_story_with_nothing_new_gets_no_questions():
-    assert sitting.questions_for(STORY, tier(set()), False, [], [], []) == []
+    assert sitting.questions_for(STORY, NONE, False, [], [], []) == []
 
 
 def test_tier_3_story_gets_failure_questions():
-    asked = sitting.questions_for(STORY, tier({"concurrency"}), False, [], [], [])
+    asked = sitting.questions_for(STORY, CONCURRENCY, False, [], [], [])
     assert asked == [sitting.FAILURE, sitting.RETRY]
 
 
 def test_a_story_with_a_data_rule_gets_the_data_rule_question():
-    assert sitting.questions_for(STORY, tier({"data_rule"}), False, [], [], []) == [sitting.DATA_RULE]
-    assert sitting.DATA_RULE in sitting.questions_for(STORY, tier({"data_rule", "concurrency"}), False, [], [], [])
-    assert sitting.DATA_RULE not in sitting.questions_for(STORY, tier({"concurrency"}), False, [], [], [])
+    assert sitting.questions_for(STORY, DATA_RULE, False, [], [], []) == [sitting.DATA_RULE]
+    for tier in (CONCURRENCY, MULTI_STEP, NONE):
+        assert sitting.DATA_RULE not in sitting.questions_for(STORY, tier, False, [], [], [])
 
 
 def test_story_touching_a_contract_gets_the_contract_question():
-    assert sitting.questions_for(STORY, tier(set()), False, [], [], ["orders"]) == [sitting.CONTRACT]
-    assert sitting.questions_for(STORY, tier(set()), True, [], [], []) == [sitting.CONTRACT]
-    assert sitting.questions_for(STORY, tier(set()), False, [], [], ["refunds"]) == []
+    assert sitting.questions_for(STORY, NONE, False, [], [], ["orders"]) == [sitting.CONTRACT]
+    assert sitting.questions_for(STORY, NONE, True, [], [], []) == [sitting.CONTRACT]
+    assert sitting.questions_for(STORY, NONE, False, [], [], ["refunds"]) == []
 
 
 def test_each_unknown_adds_a_question():
-    asked = sitting.questions_for(STORY, tier(set()), False, ["rate limits", "retention"], [], [])
+    asked = sitting.questions_for(STORY, NONE, False, ["rate limits", "retention"], [], [])
     assert len(asked) == 2
     assert ["rate limits" in q for q in asked] == [True, False]
 
 
 def test_each_new_here_item_is_its_own_screen():
-    asked = sitting.questions_for(STORY, tier(set()), False, [], ["queue", "cron"], [])
+    asked = sitting.questions_for(STORY, NONE, False, [], ["queue", "cron"], [])
     assert len(asked) == 2
     assert ["queue" in q for q in asked] == [True, False]
     assert ["cron" in q for q in asked] == [False, True]
@@ -115,8 +116,7 @@ def test_context_prints_tier_questions_and_progress(state: Path, tmp_path: Path,
     feature = features.open_feature(store, "ACME")
     assert feature is not None
     version = versions.version_for(store, feature, "tier", id)
-    answer = next(f.question for f in FACTS if f.key == "concurrency")
-    data = {"answer": answer + ", odd", "facts": ["concurrency"]}
+    data = {"answer": "odd", "level": 3, "fact": "concurrency"}
     ops.ensure_record(store, id, Record("tier", id, version, "person:s", data))
     clock = iter([START, START + timedelta(minutes=12)])
     step = Sitting(store, lambda: next(clock))

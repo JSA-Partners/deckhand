@@ -16,14 +16,13 @@ from deckhand.steps.plan import Plan
 from deckhand.steps.sitting import Sitting
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
-from deckhand.tiers import FACTS, NONE
+from deckhand.tiers import NONE, OPTIONS
 from tests.test_skills import named_commands, split
 
 TEAM = ["--team-key", "ACME"]
 TODAY = date(2026, 11, 20)
 ITEM = "Keep orders in one table"
-DATA_RULE = next(f.question for f in FACTS if f.key == "data_rule")
-CONCURRENCY = next(f.question for f in FACTS if f.key == "concurrency")
+CONCURRENCY, _, DATA_RULE, _ = OPTIONS
 
 
 class Session:

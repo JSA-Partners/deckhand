@@ -4,7 +4,7 @@ from deckhand import features, ops, planning, versions
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
 from deckhand.store.fake import FakeStore
-from deckhand.tiers import FACTS
+from deckhand.tiers import TIERS
 
 P1 = create_id("ACME:Alpha", "feature")
 
@@ -23,15 +23,20 @@ def load(store: FakeStore) -> features.Feature:
     return found
 
 
-def record(store: FakeStore, kind: str, answer: str) -> None:
+def record(store: FakeStore, kind: str, answer: str, **data: object) -> None:
     version = versions.version_for(store, load(store), kind, "s1")
-    ops.ensure_record(store, "s1", Record(kind, "s1", version, "person:s", {"answer": answer}))
+    ops.ensure_record(store, "s1", Record(kind, "s1", version, "person:s", {"answer": answer, **data}))
+
+
+def tiered(store: FakeStore, index: int) -> None:
+    tier = TIERS[index]
+    record(store, "tier", tier.label, level=tier.level, fact=tier.fact)
 
 
 def test_tier_version_depends_only_on_the_story_text():
     store = setup()
     before = versions.version_for(store, load(store), "tier", "s1")
-    record(store, "tier", FACTS[0].question)
+    tiered(store, 0)
     assert versions.version_for(store, load(store), "tier", "s1") == before
     store.set_issue_text("s1", "Orders", "Outcome: an order is placed twice.")
     assert versions.version_for(store, load(store), "tier", "s1") != before
@@ -39,7 +44,7 @@ def test_tier_version_depends_only_on_the_story_text():
 
 def test_changed_story_voids_its_sitting():
     store = setup()
-    record(store, "tier", FACTS[0].question)
+    tiered(store, 0)
     record(store, "sitting", "Done")
     assert versions.current(store, load(store), store.records("s1")[0])
     store.set_issue_text("s1", "Orders and refunds", "Outcome: an order is placed.")
@@ -51,9 +56,9 @@ def test_changed_story_voids_its_sitting():
 
 def test_new_tier_answer_voids_the_sitting():
     store = setup()
-    record(store, "tier", FACTS[0].question)
+    tiered(store, 0)
     record(store, "sitting", "Done")
-    record(store, "tier", FACTS[2].question)
+    tiered(store, 2)
     sitting = next(r for r in store.records("s1") if r.kind == "sitting")
     assert not versions.current(store, load(store), sitting)
 
@@ -73,3 +78,12 @@ def test_decision_item_version_is_its_text_hash():
     text = "Keep orders in one table"
     assert versions.version_for(store, load(store), "decision-item", text) == content_hash(text)
     assert versions.item_subject(text) == content_hash(text)[:12]
+
+
+def test_a_tier_record_of_the_same_fact_keeps_the_sitting():
+    store = setup()
+    tiered(store, 1)
+    record(store, "sitting", "Done")
+    record(store, "tier", "reworded", level=TIERS[1].level, fact=TIERS[1].fact)
+    sitting = next(r for r in store.records("s1") if r.kind == "sitting")
+    assert versions.current(store, load(store), sitting)

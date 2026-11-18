@@ -31,7 +31,7 @@ _ASKS = {
     "feature-approval": "Approve the feature",
     "decision-item": "Keep the decision item",
     "sitting": "Is the sitting done for",
-    "tier": "Which of these apply to",
+    "tier": "Which is the highest that applies to",
 }
 
 _POSITIVE = {
@@ -75,7 +75,7 @@ def make_question(kind: str, pin: Pin) -> Question:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
-    return build(kind, pin.label or pin.subject, question_text(kind, pin), _OPTIONS[kind], multi=kind == "tier")
+    return build(kind, pin.label or pin.subject, question_text(kind, pin), _OPTIONS[kind])
 
 
 def question_text(kind: str, pin: Pin) -> str:
@@ -162,10 +162,6 @@ def load_pending(nonce: str, state: Path) -> Pending:
         raise Refusal(f"the pending question for {nonce} is unreadable") from None
 
 
-def _offered(pending: Pending, answer: str) -> bool:
-    return answers.only_labels(answer, pending.options)
-
-
 def _creates_record(pending: Pending, answer: str) -> bool:
     if pending.kind in ("tier", "decision-item"):
         return True
@@ -177,7 +173,7 @@ def _saw_the_options(pending: Pending, found: Answer) -> bool:
     if not isinstance(shown, list) or not all(isinstance(o, dict) for o in shown):
         return False
     labels, texts = [o.get("label") for o in shown], [o.get("description") for o in shown]
-    return (labels, texts, found.multi) == (pending.options, pending.descriptions, pending.kind == "tier")
+    return (labels, texts, found.multi) == (pending.options, pending.descriptions, False)
 
 
 def check(pending: Pending, state: Path) -> Answer:
@@ -192,13 +188,16 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the options the person saw for {pending.nonce} differ from the pending question")
     if found.copied:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
-    if pending.kind == "tier" and not _offered(pending, found.answer):
-        raise Refusal(f"the answer for {pending.nonce} is not a selection of the offered options")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
     return found
+
+
+def _tier_data(answer: str) -> dict:
+    tier = tiers.chosen(answer)
+    return {"level": tier.level, "fact": tier.fact}
 
 
 def decide(store: Store, pending: Pending, state: Path) -> bool:
@@ -212,7 +211,7 @@ def decide(store: Store, pending: Pending, state: Path) -> bool:
         f"person:{found.session_id}",
         {"answer": found.answer, "question": pending.question, "nonce": pending.nonce}
         | ({"item": pending.detail} if pending.detail else {})
-        | ({"facts": sorted(tiers.chosen(found.answer))} if pending.kind == "tier" else {}),
+        | (_tier_data(found.answer) if pending.kind == "tier" else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

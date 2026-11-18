@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions
+from deckhand import answers, decisions, tiers
 from deckhand.questions import as_tool_input
 from deckhand.records import content_hash
 from deckhand.step import Refusal
@@ -95,16 +95,6 @@ def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer:
     assert store.writes == []
 
 
-def test_tier_selection_creates_a_record(tmp_path: Path):
-    question, pending = ask(tmp_path, "tier")
-    assert question.multi
-    assert len(question.options) == 5
-    answered(tmp_path, question, question.options[0])
-    store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path) is True
-    assert store.records("s1")[0].kind == "tier"
-
-
 def test_question_text_is_ascii_and_names_kind_and_subject():
     question = decisions.make_question("state-chart", pin())
     assert question.text.isascii()
@@ -171,55 +161,33 @@ def test_question_text_states_version_and_story_labels_not_ids():
     )
 
 
-def test_tier_offers_none_of_these_last():
+def test_tier_is_one_choice_of_four_ending_with_none_of_these():
     question = decisions.make_question("tier", pin())
-    assert question.options[-1] == "None of these"
-    assert len(question.options) == 5
+    assert question.options == tiers.OPTIONS
+    assert len(question.options) == 4 and question.options[-1] == "None of these"
+    assert as_tool_input(question)["questions"][0]["multiSelect"] is False
+    assert "highest" in question.text
 
 
-def test_tier_none_of_these_records_tier_0(tmp_path: Path):
+@pytest.mark.parametrize("index,level,fact", [(0, 3, "concurrency"), (2, 1, "data_rule"), (3, 0, "none")])
+def test_tier_record_holds_the_chosen_level_and_fact(tmp_path: Path, index: int, level: int, fact: str):
     question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, "None of these")
+    answered(tmp_path, question, question.options[index])
     store = store_with("s1")
     assert decisions.decide(store, pending, tmp_path) is True
     [record] = store.records("s1")
-    assert record.data["facts"] == []
+    assert (record.data["level"], record.data["fact"]) == (level, fact)
+    assert "facts" not in record.data
 
 
-def test_tier_record_holds_the_chosen_fact_keys(tmp_path: Path):
+@pytest.mark.parametrize("answer", ["anything at all", "None of these, Jobs, retries, webhooks, queues or two writers"])
+def test_tier_answer_other_than_one_option_refuses(tmp_path: Path, answer: str):
     question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, ", ".join(question.options[:2]))
+    answered(tmp_path, question, answer)
     store = store_with("s1")
-    decisions.decide(store, pending, tmp_path)
-    [record] = store.records("s1")
-    assert record.data["facts"] == sorted(["data_rule", "multi_step"])
-
-
-@pytest.mark.parametrize("first", [True, False])
-def test_tier_none_of_these_with_a_fact_refuses(tmp_path: Path, first: bool):
-    question, pending = ask(tmp_path, "tier")
-    parts = ["None of these", question.options[0]]
-    answered(tmp_path, question, ", ".join(parts if first else parts[::-1]))
-    store = store_with("s1")
-    with pytest.raises(Refusal, match="None of these"):
+    with pytest.raises(Refusal, match="not one of the offered options"):
         decisions.decide(store, pending, tmp_path)
     assert store.writes == []
-
-
-def test_tier_free_text_refuses(tmp_path: Path):
-    question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, "anything at all")
-    store = store_with("s1")
-    with pytest.raises(Refusal, match="not a selection"):
-        decisions.decide(store, pending, tmp_path)
-    assert store.writes == []
-
-
-def test_tier_selection_of_several_labels_creates_a_record(tmp_path: Path):
-    question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, ", ".join(question.options[:2]))
-    store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path) is True
 
 
 def test_answer_marked_copied_refuses(tmp_path: Path):

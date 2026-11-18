@@ -13,12 +13,11 @@ from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
 from deckhand.store.fake import FakeStore
-from deckhand.tiers import FACTS
 
 P1 = create_id("ACME:Alpha", "feature")
 
 TEAM = ["--team-key", "ACME"]
-STATE_CHART = next(f.question for f in FACTS if f.key == "multi_step")
+STATE_CHART = "A flow or an entity with several states"
 
 
 def setup() -> FakeStore:
@@ -43,7 +42,8 @@ def decided(store: FakeStore, kind: str, subject: str, answer: str, stories: lis
     version = versions.version_for(store, load(store), kind, subject)
     data: dict = {"answer": answer}
     if kind == "tier":
-        data["facts"] = sorted(tiers.chosen(answer))
+        tier = tiers.chosen(answer)
+        data |= {"level": tier.level, "fact": tier.fact}
     if kind == "decision-item":
         subject, data = versions.item_subject(subject), {**data, "item": subject}
     for story in stories:
@@ -179,10 +179,19 @@ def test_decision_item_only_on_a_dropped_story_is_open_whatever_the_order(cancel
     assert "decision item Keep orders in one table is open" in gaps
 
 
-def test_odd_tier_answer_with_valid_facts_does_not_break_context(capsys: pytest.CaptureFixture[str]):
+def test_old_tier_record_of_fact_keys_asks_for_the_tier_again():
     store = setup()
     version = versions.version_for(store, load(store), "tier", "s1")
-    odd = Record("tier", "s1", version, "person:s", {"answer": "something else", "facts": ["multi_step"]})
+    old = Record("tier", "s1", version, "person:s", {"answer": "x", "facts": ["multi_step"]})
+    store.put_record("s1", old)
+    gaps = features.approval_gaps(store, load(store))
+    assert "ACME-1: the tier record holds no level; decide the tier again" in gaps
+
+
+def test_odd_tier_answer_with_a_valid_level_does_not_break_context(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+    version = versions.version_for(store, load(store), "tier", "s1")
+    odd = Record("tier", "s1", version, "person:s", {"answer": "something else", "level": 2, "fact": "multi_step"})
     store.put_record("s1", odd)
     gaps = features.approval_gaps(store, load(store))
     assert "ACME-1: the state chart is not approved" in gaps

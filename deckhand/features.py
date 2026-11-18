@@ -104,9 +104,9 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
     for story in live:
         kinds = ["tier", "sitting"]
         tier = versions.held(feature.records.get(story["id"], []), "tier", story["id"])
-        level = tiers.from_facts(tier.data.get("facts")) if tier else None
+        level = tiers.from_record(tier.data) if tier else None
         if tier and level is None:
-            gaps.append(f"{story['identifier']}: the tier record holds no facts; decide the tier again")
+            gaps.append(f"{story['identifier']}: the tier record holds no level; decide the tier again")
         if level and level.level in STATE_CHART_TIERS:
             kinds.append("state-chart")
         for kind in kinds:
