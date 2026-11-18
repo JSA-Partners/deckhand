@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
 import re
+import urllib.error
+import urllib.request
 
 import pytest
 
+from deckhand.cli import main
 from deckhand.github import Github
 from deckhand.linear.client import LinearError
 from deckhand.linear.workspace import Workspace
@@ -243,3 +247,50 @@ def test_team_past_one_page_refuses():
     with pytest.raises(Refusal, match="more than"):
         setup.apply(ARGS)
     assert linear.writes == []
+
+
+KEY = "lin_api_personalvalue"
+
+
+@pytest.fixture
+def through_main(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    from deckhand.step import REGISTRY
+
+    config = tmp_path / "deckhand"
+    config.mkdir()
+    (config / "linear-app.json").write_text('{"client_id": "cid", "client_secret": "csecret"}')
+    (config / "linear-personal.key").write_text(KEY)
+    for path in config.iterdir():
+        path.chmod(0o600)
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config))
+    monkeypatch.setitem(REGISTRY, "setup", Setup())
+    requests: list[urllib.request.Request] = []
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> object:
+        requests.append(request)
+        raise urllib.error.HTTPError(request.full_url, 401, "x", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return config, requests
+
+
+def test_revoked_key_refuses_through_main_naming_the_key_file(through_main, capsys: pytest.CaptureFixture[str]):
+    config, requests = through_main
+    assert main(["setup", "apply", "--team-key", "ACME"]) == 1
+    captured = capsys.readouterr()
+    assert len(requests) == 2
+    assert captured.err == f"deckhand: unauthorized: check {config / 'linear-personal.key'}\n"
+    assert KEY not in captured.out + captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("verb", ["context", "apply"])
+@pytest.mark.parametrize("raw", [KEY.encode() + b"\xff", KEY.encode() + b"\nlin_api_second"])
+def test_unusable_key_never_reaches_the_output(through_main, capsys: pytest.CaptureFixture[str], verb, raw):
+    config, requests = through_main
+    (config / "linear-personal.key").write_bytes(raw)
+    main(["setup", verb, "--team-key", "ACME"])
+    captured = capsys.readouterr()
+    assert requests == []
+    assert "lin_api" not in captured.out + captured.err
+    assert "Traceback" not in captured.err

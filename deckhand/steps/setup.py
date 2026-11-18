@@ -7,7 +7,7 @@ from pathlib import Path
 
 from deckhand.credentials import Credentials
 from deckhand.github import Github
-from deckhand.linear.client import LinearClient
+from deckhand.linear.connect import connect
 from deckhand.linear.workspace import AUTOMATION, STATES, Workspace
 from deckhand.step import Refusal, register
 
@@ -50,10 +50,9 @@ class Setup:
         self._github = github or Github()
 
     def _workspace_for_run(self) -> Workspace:
-        if self._workspace is None:
-            credentials = Credentials.load(_config_dir())
-            self._workspace = Workspace(LinearClient(credentials.personal_key, lambda: None))
-        return self._workspace
+        if self._workspace is not None:
+            return self._workspace
+        return Workspace(connect(Credentials.load(_config_dir()), "person"))
 
     def context(self, args: list[str]) -> None:
         key, repositories, _ = _parse(args)

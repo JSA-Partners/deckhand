@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 
+from deckhand.step import Refusal
+
 URL = "https://api.linear.app/graphql"
 TIMEOUT_SECONDS = 30
 CONFLICT_PREFIX = "conflict on insert of"
@@ -59,10 +61,12 @@ class LinearClient:
         token: Callable[[], str],
         on_unauthorized: Callable[[], None],
         transport: Transport = default_transport,
+        source: str = "the Linear credentials",
     ) -> None:
         self._token = token
         self._on_unauthorized = on_unauthorized
         self._transport = transport
+        self._source = source
 
     def query(self, document: str, variables: dict) -> dict:
         payload = json.dumps({"query": document, "variables": variables}).encode()
@@ -73,7 +77,7 @@ class LinearClient:
             try:
                 raw = self._send(payload)
             except _Unauthorized:
-                raise LinearError("unauthorized", "Linear refused the credentials") from None
+                raise Refusal(f"unauthorized: check {self._source}") from None
         body = _parse(raw)
         errors = body.get("errors")
         if errors:
@@ -84,12 +88,12 @@ class LinearClient:
         return data
 
     def _send(self, payload: bytes) -> bytes:
-        request = urllib.request.Request(
-            URL,
-            data=payload,
-            headers={"Content-Type": "application/json", "Authorization": self._token()},
-        )
         try:
+            request = urllib.request.Request(
+                URL,
+                data=payload,
+                headers={"Content-Type": "application/json", "Authorization": self._token()},
+            )
             return self._transport(request)
         except urllib.error.HTTPError as error:
             if error.code == 401:
@@ -107,6 +111,8 @@ class LinearClient:
             raise LinearError("http", f"Linear answered HTTP {error.code}") from None
         except (urllib.error.URLError, OSError, http.client.HTTPException):
             raise LinearError("network", "could not reach Linear") from None
+        except ValueError:
+            raise LinearError("credentials", "the credential cannot be sent as a header") from None
 
 
 class _Unauthorized(Exception):

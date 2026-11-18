@@ -151,3 +151,55 @@ def test_secret_never_in_repr(config: Path) -> None:
         assert SECRET not in text
         assert KEY not in text
         assert token not in text
+
+
+@pytest.mark.parametrize("raw", [b"lin_api_\xffpersonal", b"lin_api_first\nlin_api_second", b"   \n"])
+def test_unusable_personal_key_refuses_naming_the_file_only(config: Path, raw: bytes) -> None:
+    (config / "linear-personal.key").write_bytes(raw)
+    with pytest.raises(Refusal) as caught:
+        Credentials.load(config)
+    assert "linear-personal.key" in caught.value.rule
+    assert "lin_api" not in caught.value.rule
+    assert caught.value.__context__ is None or caught.value.__suppress_context__
+
+
+@pytest.mark.parametrize(
+    "app",
+    [
+        {"client_id": "", "client_secret": SECRET},
+        {"client_id": "cid", "client_secret": SECRET + "\n" + SECRET},
+        {"client_id": "cidé", "client_secret": SECRET},
+    ],
+)
+def test_unusable_client_credentials_refuse_naming_the_file_only(config: Path, app: dict) -> None:
+    write_private(config / "linear-app.json", json.dumps(app))
+    with pytest.raises(Refusal) as caught:
+        Credentials.load(config)
+    assert "linear-app.json" in caught.value.rule
+    assert SECRET not in caught.value.rule
+
+
+def test_non_utf8_app_file_refuses_naming_the_file(config: Path) -> None:
+    (config / "linear-app.json").write_bytes(b'{"client_id": "cid", "client_secret": "s3cr3t\xff"}')
+    with pytest.raises(Refusal) as caught:
+        Credentials.load(config)
+    assert "linear-app.json" in caught.value.rule
+    assert "s3cr3t" not in caught.value.rule
+
+
+@pytest.mark.parametrize("token", ["", "old\nvalue", "oldé"])
+def test_unusable_cached_token_is_discarded_and_refetched(config: Path, token: str) -> None:
+    clock = Clock()
+    write_private(config / "app-token.json", json.dumps({"access_token": token, "expires_at": clock.now + 4000}))
+    fetch = Fetch()
+    assert Credentials.load(config, now=clock).app_token(fetch) == "t1"
+    assert len(fetch.calls) == 1
+
+
+def test_unreadable_credentials_file_refuses_naming_it(config: Path) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root reads any file")
+    (config / "linear-personal.key").chmod(0o000)
+    with pytest.raises(Refusal) as caught:
+        Credentials.load(config)
+    assert "linear-personal.key" in caught.value.rule

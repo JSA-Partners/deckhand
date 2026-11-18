@@ -11,6 +11,7 @@ import pytest
 
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
 from deckhand.linear.oauth import fetch_app_token
+from deckhand.step import Refusal
 
 BEARER = "Bearer app-token-value"
 
@@ -115,17 +116,17 @@ def test_401_calls_on_unauthorized_once_then_retries_once() -> None:
     assert len(transport.requests) == 2
 
 
-def test_second_401_raises() -> None:
+def test_second_401_refuses_naming_the_source_without_the_token() -> None:
     unauthorized = Unauthorized()
-    with pytest.raises(LinearError) as raised:
-        client(Transport(http_error(401), http_error(401)), unauthorized).query("q", {})
-    assert raised.value.code == "unauthorized"
+    transport = Transport(http_error(401), http_error(401))
+    with pytest.raises(Refusal) as raised:
+        LinearClient(lambda: BEARER, unauthorized, transport, "the key file").query("q", {})
+    assert raised.value.rule == "unauthorized: check the key file"
     assert unauthorized.calls == 1
 
 
 def test_token_not_in_error_text() -> None:
     cases = [
-        Transport(http_error(401), http_error(401)),
         Transport(urllib.error.URLError(f"failed {BEARER}")),
         Transport(http_error(500, {"errors": []})),
     ]
@@ -182,3 +183,18 @@ def test_fetch_app_token_truncated_body_is_network_error() -> None:
     with pytest.raises(LinearError) as raised:
         fetch_app_token("id1", "sec1", Transport(http.client.IncompleteRead(b"")))
     assert raised.value.code == "network"
+
+
+def test_token_unfit_for_a_header_is_linear_error_without_the_token() -> None:
+    def validating(request: urllib.request.Request) -> bytes:
+        connection = http.client.HTTPConnection("localhost")
+        connection.putrequest("POST", "/graphql")
+        for name, value in request.header_items():
+            connection.putheader(name, value)
+        return ok({})
+
+    leaky = LinearClient(lambda: "lin_api_first\nlin_api_second", Unauthorized(), validating)
+    with pytest.raises(LinearError) as raised:
+        leaky.query("q", {})
+    assert "lin_api" not in str(raised.value)
+    assert raised.value.__context__ is None or raised.value.__suppress_context__

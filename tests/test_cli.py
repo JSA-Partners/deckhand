@@ -145,3 +145,52 @@ def test_broken_step_module_does_not_stop_other_commands(tmp_path, monkeypatch, 
     assert "cannot load step broken: boom" in err
     assert "Traceback" not in err
     assert "setup" in REGISTRY
+
+
+SECRET = "lin_api_secretvalue"
+
+
+def test_context_failure_prints_only_the_type_and_command(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise ValueError(f"Invalid header value b'{SECRET}'")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert captured.out == "deckhand: probe context could not be read: ValueError\n"
+
+
+def test_apply_unexpected_error_prints_only_the_type_and_exits_1(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            raise UnicodeDecodeError("utf-8", SECRET.encode(), 0, 1, "invalid start byte")
+
+    assert main(["probe", "apply"]) == 1
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert "Traceback" not in captured.err
+    assert captured.err == "deckhand: probe apply failed: UnicodeDecodeError\n"
+
+
+def test_apply_linear_error_prints_code_and_message_and_exits_1(registry, capsys):
+    from deckhand.linear.client import LinearError
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            raise LinearError("network", "could not reach Linear")
+
+    assert main(["probe", "apply"]) == 1
+    assert capsys.readouterr().err == "deckhand: network: could not reach Linear\n"

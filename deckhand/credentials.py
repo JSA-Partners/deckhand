@@ -15,16 +15,22 @@ TOKEN_FILE = "app-token.json"
 REFRESH_MARGIN_SECONDS = 300
 
 
+def _usable(value: object) -> bool:
+    return isinstance(value, str) and value != "" and value.isascii() and value.isprintable()
+
+
 def _read_private(path: Path) -> str:
     try:
         mode = stat.S_IMODE(path.stat().st_mode)
         if mode & 0o077:
             raise Refusal(f"{path} is readable by others, run: chmod 600 {path}")
-        return path.read_text()
+        return path.read_bytes().decode("utf-8")
     except FileNotFoundError:
         raise Refusal(f"missing credentials file: {path}") from None
     except OSError as error:
         raise Refusal(f"cannot read {path}: {error.strerror}") from None
+    except UnicodeDecodeError:
+        raise Refusal(f"{path} is not UTF-8 text") from None
 
 
 class Credentials:
@@ -46,15 +52,26 @@ class Credentials:
         try:
             app = json.loads(_read_private(app_path))
             client_id, client_secret = app["client_id"], app["client_secret"]
-            if not isinstance(client_id, str) or not isinstance(client_secret, str):
-                raise TypeError
         except (ValueError, KeyError, TypeError):
-            raise Refusal(f"{app_path} must hold a client_id and a client_secret") from None
-        key = _read_private(config_dir / KEY_FILE).strip()
+            client_id = client_secret = None
+        if not _usable(client_id) or not _usable(client_secret):
+            raise Refusal(f"{app_path} must hold a client_id and a client_secret, each one line of printable ASCII")
+        key_path = config_dir / KEY_FILE
+        key = _read_private(key_path).strip()
+        if not _usable(key):
+            raise Refusal(f"{key_path} must hold one line of printable ASCII")
         return cls(config_dir, client_id, client_secret, key, now)
 
     def __repr__(self) -> str:
         return f"Credentials({str(self._dir)!r})"
+
+    @property
+    def app_path(self) -> Path:
+        return self._dir / APP_FILE
+
+    @property
+    def key_path(self) -> Path:
+        return self._dir / KEY_FILE
 
     def personal_key(self) -> str:
         return self._key
@@ -82,7 +99,7 @@ class Credentials:
             token, expires_at = cached["access_token"], float(cached["expires_at"])
         except (OSError, ValueError, KeyError, TypeError):
             return
-        if isinstance(token, str):
+        if _usable(token):
             self._token, self._expires_at = token, expires_at
 
     def _write_cache(self) -> None:
