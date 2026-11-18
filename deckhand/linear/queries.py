@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+PAGE_SIZE = 250
+PAGE = f"(first: {PAGE_SIZE})"
+MORE = "pageInfo { hasNextPage }"
+
 TEAM_ID = """
 query TeamId($key: String!) {
   teams(filter: { key: { eq: $key } }) { nodes { id } }
@@ -14,35 +18,35 @@ query LabelIds($names: [String!]!, $teamId: ID!) {
 }
 """
 
-ISSUE = """
-query Issue($id: String!) {
-  issue(id: $id) {
+ISSUE = f"""
+query Issue($id: String!) {{
+  issue(id: $id) {{
     id
     identifier
     number
     title
     description
-    team { key }
-    project { id }
-    labels { nodes { id name } }
-  }
-}
+    team {{ key }}
+    project {{ id }}
+    labels{PAGE} {{ nodes {{ id name }} {MORE} }}
+  }}
+}}
 """
 
-ISSUE_ATTACHMENTS = """
-query IssueAttachments($id: String!) {
-  issue(id: $id) { attachments { nodes { url metadata } } }
-}
+ISSUE_ATTACHMENTS = f"""
+query IssueAttachments($id: String!) {{
+  issue(id: $id) {{ attachments{PAGE} {{ nodes {{ url metadata }} {MORE} }} }}
+}}
 """
 
-ISSUE_RELATIONS = """
-query IssueRelations($id: String!) {
-  issue(id: $id) {
+ISSUE_RELATIONS = f"""
+query IssueRelations($id: String!) {{
+  issue(id: $id) {{
     id
-    relations { nodes { type relatedIssue { id } } }
-    inverseRelations { nodes { type issue { id } } }
-  }
-}
+    relations{PAGE} {{ nodes {{ type relatedIssue {{ id }} }} {MORE} }}
+    inverseRelations{PAGE} {{ nodes {{ type issue {{ id }} }} {MORE} }}
+  }}
+}}
 """
 
 ISSUE_CREATE = """
@@ -95,28 +99,28 @@ query TeamByKey($key: String!) {
 }
 """
 
-TEAM_STATES = """
-query TeamStates($id: String!) {
-  team(id: $id) {
-    states(first: 250) { nodes { id name type } pageInfo { hasNextPage } }
-  }
-}
+TEAM_STATES = f"""
+query TeamStates($id: String!) {{
+  team(id: $id) {{
+    states{PAGE} {{ nodes {{ id name type }} {MORE} }}
+  }}
+}}
 """
 
-TEAM_LABELS = """
-query TeamLabels($id: String!) {
-  team(id: $id) {
-    labels(first: 250) { nodes { id name isGroup parent { name } } pageInfo { hasNextPage } }
-  }
-}
+TEAM_LABELS = f"""
+query TeamLabels($id: String!) {{
+  team(id: $id) {{
+    labels{PAGE} {{ nodes {{ id name isGroup parent {{ name }} }} {MORE} }}
+  }}
+}}
 """
 
-TEAM_AUTOMATION = """
-query TeamAutomation($id: String!) {
-  team(id: $id) {
-    gitAutomationStates(first: 250) { nodes { id event state { name } } pageInfo { hasNextPage } }
-  }
-}
+TEAM_AUTOMATION = f"""
+query TeamAutomation($id: String!) {{
+  team(id: $id) {{
+    gitAutomationStates{PAGE} {{ nodes {{ id event state {{ name }} }} {MORE} }}
+  }}
+}}
 """
 
 WORKFLOW_STATE_CREATE = """

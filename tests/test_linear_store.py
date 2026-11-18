@@ -4,6 +4,7 @@ import re
 
 import pytest
 
+from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearError
 from deckhand.records import Record
 from deckhand.ref import Ref
@@ -12,6 +13,8 @@ from deckhand.store.linear import LinearStore
 
 UUID = "3f2b8c9e-7a41-4d55-9c1e-0a1b2c3d4e5f"
 TEAM_ID = "team-1"
+MORE = {"hasNextPage": True}
+DONE = {"hasNextPage": False}
 
 
 class FakeClient:
@@ -46,7 +49,7 @@ ISSUE_NODE = {
     "description": "body",
     "team": {"key": "ACME"},
     "project": {"id": "proj-1"},
-    "labels": {"nodes": [{"id": "l1", "name": "deckhand"}]},
+    "labels": {"nodes": [{"id": "l1", "name": "deckhand"}], "pageInfo": {"hasNextPage": False}},
 }
 
 
@@ -280,21 +283,21 @@ def test_records_decodes_only_deckhand_urls_sorted_by_url() -> None:
         {"url": "https://github.com/acme/widgets/pull/1", "metadata": {}},
         attachment(record("plan")),
     ]
-    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": nodes}}})
+    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": nodes, "pageInfo": DONE}}})
     assert LinearStore(client).records(UUID) == [record("plan"), record("review")]
     assert client.calls == [("IssueAttachments", {"id": UUID})]
 
 
 def test_records_refuses_a_malformed_record_naming_issue_and_url() -> None:
     bad = {"url": "https://deckhand.invalid/record/approval/plan", "metadata": {"record": "{nope"}}
-    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [bad]}}})
+    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [bad], "pageInfo": DONE}}})
     with pytest.raises(Refusal, match=rf"{UUID}.*approval/plan"):
         LinearStore(client).records(UUID)
 
 
 def test_records_refuses_metadata_without_a_record() -> None:
     bad = {"url": "https://deckhand.invalid/record/approval/plan", "metadata": {}}
-    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [bad]}}})
+    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [bad], "pageInfo": DONE}}})
     with pytest.raises(Refusal, match="approval/plan"):
         LinearStore(client).records(UUID)
 
@@ -314,13 +317,15 @@ def test_relations_reads_both_directions_blocks_only_sorted() -> None:
             "nodes": [
                 {"type": "blocks", "relatedIssue": {"id": "z"}},
                 {"type": "related", "relatedIssue": {"id": "q"}},
-            ]
+            ],
+            "pageInfo": DONE,
         },
         "inverseRelations": {
             "nodes": [
                 {"type": "blocks", "issue": {"id": "a"}},
                 {"type": "duplicate", "issue": {"id": "p"}},
-            ]
+            ],
+            "pageInfo": DONE,
         },
     }
     client = FakeClient(IssueRelations={"issue": node})
@@ -336,3 +341,26 @@ def test_relations_of_a_missing_issue_is_empty() -> None:
 def test_records_of_a_missing_issue_is_empty() -> None:
     client = FakeClient(IssueAttachments=LinearError("INPUT_ERROR", "Entity not found: Issue"))
     assert LinearStore(client).records(UUID) == []
+
+
+def relations_node(relations: dict = DONE, inverse: dict = DONE) -> dict:
+    return {
+        "id": "m",
+        "relations": {"nodes": [], "pageInfo": relations},
+        "inverseRelations": {"nodes": [], "pageInfo": inverse},
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "response", "read"),
+    [
+        ("Issue", {"issue": {**ISSUE_NODE, "labels": {"nodes": [], "pageInfo": MORE}}}, "issue"),
+        ("IssueAttachments", {"issue": {"attachments": {"nodes": [], "pageInfo": MORE}}}, "records"),
+        ("IssueRelations", {"issue": relations_node(relations=MORE)}, "relations"),
+        ("IssueRelations", {"issue": relations_node(inverse=MORE)}, "relations"),
+    ],
+)
+def test_a_page_overflow_refuses_naming_the_issue(name: str, response: dict, read: str) -> None:
+    client = FakeClient(**{name: response})
+    with pytest.raises(Refusal, match=rf"{UUID}.*more than {queries.PAGE_SIZE}"):
+        getattr(LinearStore(client), read)(UUID)

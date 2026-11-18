@@ -28,7 +28,6 @@ STATES = {
 }
 AUTOMATION = {"draft": "In Progress", "start": "In Review", "merge": "Done"}
 ARCHIVE_MONTHS = 1
-PAGE_SIZE = 250
 
 
 @dataclass(frozen=True)
@@ -54,7 +53,7 @@ class Workspace:
     def _page(self, document: str, team_id: str, field: str) -> dict[str, Any]:
         connection = self._client.query(document, {"id": team_id})["team"][field]
         if connection["pageInfo"]["hasNextPage"]:
-            raise Refusal(f"the team has more than {PAGE_SIZE} {field}; setup cannot plan safely")
+            raise Refusal(f"the team has more than {queries.PAGE_SIZE} {field}; setup cannot plan safely")
         return connection
 
     def plan(self, team: dict[str, Any], labels: list[str]) -> list[Change]:

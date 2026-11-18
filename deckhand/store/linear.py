@@ -16,6 +16,12 @@ def _missing(error: LinearError) -> bool:
     return "not found" in error.message.lower()
 
 
+def _nodes(connection: dict[str, Any], issue: str, field: str) -> list[dict[str, Any]]:
+    if connection["pageInfo"]["hasNextPage"]:
+        raise Refusal(f"{issue} has more than {queries.PAGE_SIZE} {field}; deckhand cannot read them safely")
+    return connection["nodes"]
+
+
 class LinearStore(Store):
     def __init__(self, client: LinearClient) -> None:
         self._client = client
@@ -80,7 +86,7 @@ class LinearStore(Store):
             "title": node["title"],
             "description": node["description"],
             "project": node["project"]["id"] if node["project"] else None,
-            "labels": [label["name"] for label in node["labels"]["nodes"]],
+            "labels": [label["name"] for label in _nodes(node["labels"], id, "labels")],
         }
 
     def issue_by_ref(self, ref: Ref) -> dict | None:
@@ -137,7 +143,8 @@ class LinearStore(Store):
             if _missing(error):
                 return []
             raise
-        held = [n for n in data["issue"]["attachments"]["nodes"] if n["url"].startswith(RECORD_URL)]
+        attachments = _nodes(data["issue"]["attachments"], issue, "attachments")
+        held = [n for n in attachments if n["url"].startswith(RECORD_URL)]
         found = []
         for node in sorted(held, key=lambda n: n["url"]):
             try:
@@ -157,6 +164,8 @@ class LinearStore(Store):
             if _missing(error):
                 return []
             raise
-        pairs = [(node["id"], r["relatedIssue"]["id"]) for r in node["relations"]["nodes"] if r["type"] == "blocks"]
-        pairs += [(r["issue"]["id"], node["id"]) for r in node["inverseRelations"]["nodes"] if r["type"] == "blocks"]
+        outward = _nodes(node["relations"], issue, "relations")
+        inward = _nodes(node["inverseRelations"], issue, "inverse relations")
+        pairs = [(node["id"], r["relatedIssue"]["id"]) for r in outward if r["type"] == "blocks"]
+        pairs += [(r["issue"]["id"], node["id"]) for r in inward if r["type"] == "blocks"]
         return sorted(pairs)
