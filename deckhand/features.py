@@ -4,12 +4,15 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
+from deckhand import ops, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
 APPROVAL = "feature-approval"
 FINISHED = ("Done", "Canceled", "Duplicate")
+DROPPED = ("Canceled", "Duplicate")
+STATE_CHART_TIERS = (2, 3)
 
 
 class Phase(Enum):
@@ -24,9 +27,17 @@ class Feature:
     project: dict
     stories: list[dict] = field(default_factory=list)
     records: dict[str, list[Record]] = field(default_factory=dict)
+    version: str | None = None
+
+    @property
+    def live(self) -> list[dict]:
+        return [s for s in self.stories if s["state"] not in DROPPED]
 
     def approved(self, story: dict) -> bool:
         return any(r.kind == APPROVAL for r in self.records.get(story["id"], []))
+
+    def approval_current(self, story: dict) -> bool:
+        return any(r.kind == APPROVAL and r.version == self.version for r in self.records.get(story["id"], []))
 
 
 def phase(feature: Feature) -> Phase:
@@ -35,15 +46,78 @@ def phase(feature: Feature) -> Phase:
     stories = feature.stories
     if stories and all(s["state"] in FINISHED for s in stories):
         return Phase.RELEASED
-    live = [s for s in stories if s["state"] not in ("Canceled", "Duplicate")]
-    if live and all(feature.approved(s) for s in live):
+    live = feature.live
+    if live and all(feature.approval_current(s) for s in live):
         return Phase.BUILDING
     return Phase.PLANNING
 
 
+_SECTION_GAPS = {
+    "contract": ("the Contract is not approved", "the Contract changed after it was approved"),
+    "invariants": ("the Invariants are not approved", "the Invariants changed after they were approved"),
+}
+_STORY_GAPS = {
+    "tier": ("the tier is not decided", "the tier changed after it was decided"),
+    "sitting": ("the sitting is not done", "the sitting changed after it was done"),
+    "state-chart": ("the state chart is not approved", "the state chart changed after it was approved"),
+}
+
+
+def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, words: tuple[str, str]) -> str | None:
+    record = versions.held(feature.records.get(story["id"], []), kind, subject)
+    if record is None:
+        return words[0]
+    return None if record.version == version else words[1]
+
+
+def approval_gaps(store: Store, feature: Feature) -> list[str]:
+    live = feature.live
+    if not live:
+        return ["the feature has no stories"]
+    gaps = []
+    project = feature.project["id"]
+    for kind, words in _SECTION_GAPS.items():
+        version = versions.version_for(store, feature, kind, project)
+        found = {_gap(feature, s, kind, project, version, words) for s in live}
+        if words[1] in found:
+            gaps.append(words[1])
+        elif words[0] in found:
+            gaps.append(words[0])
+    for story in live:
+        kinds = ["tier", "sitting"]
+        tier = versions.held(feature.records.get(story["id"], []), "tier", story["id"])
+        if tier and tiers.tier(tiers.chosen(str(tier.data.get("answer", "")))).level in STATE_CHART_TIERS:
+            kinds.append("state-chart")
+        for kind in kinds:
+            version = versions.version_for(store, feature, kind, story["id"])
+            gap = _gap(feature, story, kind, story["id"], version, _STORY_GAPS[kind])
+            if gap:
+                gaps.append(f"{story['identifier']}: {gap}")
+    items: dict[str, Record] = {}
+    for story in live:
+        for record in feature.records.get(story["id"], []):
+            if record.kind == "decision-item":
+                items[record.subject] = record
+    for subject in sorted(items):
+        answer = items[subject].data.get("answer")
+        if answer != "Keep":
+            gaps.append(f"decision item {items[subject].data.get('item', subject)} is open ({answer})")
+    return gaps
+
+
+def story(store: Store, feature: Feature, ref: str) -> dict:
+    found = ops.issue_id_or_none(store, ref)
+    held = next((s for s in feature.live if s["id"] == found), None)
+    if held is None:
+        raise Refusal(f"{ref} is not a story of {feature.project['name']}")
+    return held
+
+
 def load(store: Store, project: dict) -> Feature:
     stories = store.project_issues(project["id"])
-    return Feature(project, stories, {s["id"]: store.records(s["id"]) for s in stories})
+    feature = Feature(project, stories, {s["id"]: store.records(s["id"]) for s in stories})
+    feature.version = versions.feature_version(store, feature)
+    return feature
 
 
 def open_features(store: Store, team: str) -> list[Feature]:

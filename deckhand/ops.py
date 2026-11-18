@@ -57,15 +57,20 @@ def ensure_record(store: Store, issue: str, record: Record) -> None:
     store.put_record(issue, record)
 
 
-def _issue_id(store: Store, issue: str) -> str:
+def issue_id_or_none(store: Store, issue: str) -> str | None:
     try:
         ref = Ref.parse(issue)
     except ValueError:
         return issue
     found = store.issue_by_ref(ref)
+    return found["id"] if found else None
+
+
+def _issue_id(store: Store, issue: str) -> str:
+    found = issue_id_or_none(store, issue)
     if found is None:
         raise Refusal(f"no issue {issue}")
-    return found["id"]
+    return found
 
 
 def ensure_relation(store: Store, blocker: str, blocked: str) -> None:

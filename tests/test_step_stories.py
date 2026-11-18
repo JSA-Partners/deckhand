@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import features, planning
+from deckhand import features, planning, versions
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -69,6 +69,9 @@ def test_map_creates_stubs_with_labels_and_blockers(tmp_path: Path):
     assert "- rate limits" in api["description"]
     assert "- queue" in api["description"]
     assert store.relations(story_id("api")) == [(story_id("api"), story_id("ui"))]
+    [stub] = store.records(story_id("api"))
+    assert (stub.kind, stub.subject) == ("stub", "api")
+    assert stub.data == {"unknowns": ["rate limits"], "new_here": ["queue"]}
 
 
 def test_map_twice_writes_once(tmp_path: Path):
@@ -154,8 +157,11 @@ def test_map_over_budget_hint_notes_but_does_not_refuse(tmp_path: Path, capsys: 
 
 
 def approve(store: FakeStore, *keys: str) -> None:
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    version = versions.version_for(store, feature, features.APPROVAL, "p1")
     for key in keys:
-        store.put_record(story_id(key), Record(features.APPROVAL, story_id(key), "1", "person:s", {}))
+        store.put_record(story_id(key), Record(features.APPROVAL, "p1", version, "person:s", {}))
 
 
 def test_story_added_after_approval_needs_missed_by_and_a_cut(tmp_path: Path):
@@ -175,8 +181,7 @@ def test_story_added_after_approval_needs_missed_by_and_a_cut(tmp_path: Path):
             run(store, tmp_path, [kept, bad])
     assert store.writes == []
     run(store, tmp_path, [kept, entry("b", missed_by="rule", cuts="c")])
-    [record] = store.records(story_id("b"))
-    assert record.kind == "discovered"
+    [record] = [r for r in store.records(story_id("b")) if r.kind == "discovered"]
     assert record.data == {"missed_by": "rule", "cuts": "c"}
     run(store, tmp_path, [kept, entry("b", missed_by="spike", spends_budget=True)])
     assert any(r.data.get("spends_budget") for r in store.records(story_id("b")))

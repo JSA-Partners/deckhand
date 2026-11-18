@@ -59,3 +59,15 @@ def tier(chosen: set[str]) -> Tier:
     level = max((fact.tier for fact in facts), default=0)
     contract = any(fact.key == "crosses_repositories" for fact in facts)
     return Tier(level=level, contract=contract, tools_key=str(level))
+
+
+def chosen(answer: str) -> set[str]:
+    found: set[str] = set()
+    rest = answer
+    while rest:
+        fact = next((f for f in FACTS if rest == f.question or rest.startswith(f.question + ", ")), None)
+        if fact is None:
+            raise Refusal(f"the tier answer {answer!r} is not a selection of the fact questions")
+        found.add(fact.key)
+        rest = rest[len(fact.question) + 2 :]
+    return found

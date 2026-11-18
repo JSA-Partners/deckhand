@@ -196,6 +196,8 @@ class Stories:
             ops.ensure_labels(store, id, [entry["repository"]])
             for dep in entry["depends_on"]:
                 ops.ensure_relation(store, ids[dep], id)
+            stub = {"unknowns": entry["unknowns"], "new_here": entry["new_here"]}
+            ops.ensure_record(store, id, Record("stub", entry["key"], "1", "agent:stories", stub))
             if "missed_by" in entry:
                 record = Record("discovered", entry["key"], "1", "agent:stories", _discovery(entry))
                 ops.ensure_record(store, id, record)

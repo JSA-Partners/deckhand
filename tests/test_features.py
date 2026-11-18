@@ -25,7 +25,8 @@ def test_phase_parked_planning_building_released():
     assert phase(Feature(project(), [story("a")])) is Phase.PLANNING
     assert phase(Feature(project())) is Phase.PLANNING
     approved = {"a": [APPROVAL], "b": [APPROVAL]}
-    assert phase(Feature(project(), [story("a"), story("b")], approved)) is Phase.BUILDING
+    assert phase(Feature(project(), [story("a"), story("b")], approved, "1")) is Phase.BUILDING
+    assert phase(Feature(project(), [story("a"), story("b")], approved, "2")) is Phase.PLANNING
     assert phase(Feature(project(), [story("a"), story("b")], {"a": [APPROVAL]})) is Phase.PLANNING
     done = [story("a", "Done"), story("b", "Canceled"), story("c", "Duplicate")]
     assert phase(Feature(project(), done)) is Phase.RELEASED
@@ -55,6 +56,6 @@ def test_budget_over_after_target():
 
 def test_building_ignores_canceled_and_duplicate_stories():
     stories = [story("a"), story("b", "Canceled"), story("c", "Duplicate")]
-    assert phase(Feature(project(), stories, {"a": [APPROVAL]})) is Phase.BUILDING
+    assert phase(Feature(project(), stories, {"a": [APPROVAL]}, "1")) is Phase.BUILDING
     assert phase(Feature(project(), [*stories[1:], story("d")], {})) is Phase.PLANNING
     assert phase(Feature(project(), stories, {})) is Phase.PLANNING

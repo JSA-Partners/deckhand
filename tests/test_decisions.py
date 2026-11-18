@@ -78,9 +78,7 @@ def test_decide_twice_writes_once(tmp_path: Path):
     assert [w[0] for w in store.writes] == ["put_record"]
 
 
-@pytest.mark.parametrize(
-    "kind,answer", [("contract", "Not yet"), ("decision-item", "Change"), ("decision-item", "Discuss")]
-)
+@pytest.mark.parametrize("kind,answer", [("contract", "Not yet"), ("sitting", "Not yet")])
 def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer: str):
     question, pending = ask(tmp_path, kind)
     answered(tmp_path, question, answer)
@@ -177,3 +175,13 @@ def test_answer_marked_copied_refuses(tmp_path: Path):
     with pytest.raises(Refusal, match="copied from recent agent output"):
         decisions.decide(store, pending, tmp_path)
     assert store.writes == []
+
+
+@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
+def test_every_decision_item_answer_is_recorded(tmp_path: Path, answer: str):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, answer)
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path) is True
+    [record] = store.records("s1")
+    assert record.data["answer"] == answer

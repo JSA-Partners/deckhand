@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from deckhand.step import Refusal
-from deckhand.tiers import Tier, tier
+from deckhand.tiers import FACTS, Tier, chosen, tier
 
 
 def test_no_facts_is_tier_0():
@@ -23,3 +23,11 @@ def test_unknown_fact_refuses():
         tier({"data_rule", "nope"})
 
     assert "nope" in refused.value.rule
+
+
+def test_chosen_reads_a_multi_select_answer_whose_labels_hold_commas():
+    answer = ", ".join(f.question for f in FACTS[:2])
+    assert chosen(answer) == {FACTS[0].key, FACTS[1].key}
+    assert tier(chosen(answer)).level == 2
+    with pytest.raises(Refusal, match="not a selection"):
+        chosen(FACTS[0].question + ", free text")

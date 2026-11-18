@@ -77,6 +77,8 @@ class Feature:
                     "phase": current.value,
                     "stories": len(feature.stories),
                     "next_planning_step": planning.next_section(store, feature),
+                    "gaps": features.approval_gaps(store, feature) if current is Phase.PLANNING else [],
+                    "approval_void": current is Phase.PLANNING and any(feature.approved(s) for s in feature.live),
                     "story_hint": None
                     if budget is None
                     else {
@@ -113,6 +115,10 @@ class Feature:
             print(f"open feature: {held['name']} ({held['id']}), {held['phase']}, {held['stories']} stories")
             if held["next_planning_step"]:
                 print(f"next planning step: {held['next_planning_step']}")
+            if held["approval_void"]:
+                print("approval: the feature changed after it was approved; approve it again")
+            for gap in held["gaps"]:
+                print(f"gap: {gap}")
             hint = held["story_hint"]
             if hint and hint["over"]:
                 print(f"note: {hint['stories']} stories against a hint of {hint['hint']} for the budget")

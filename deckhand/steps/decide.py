@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from deckhand import answers, decisions
+from deckhand import answers, decisions, features
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.questions import as_tool_input
@@ -13,7 +13,8 @@ from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "decide context KIND SUBJECT --version V --story ID [--story ID ...] [--json]; decide apply NONCE --team-key KEY"
+    "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
+    " the SUBJECT a feature id, a story or a decision item's text; apply NONCE"
 )
 
 
@@ -27,7 +28,7 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg in ("--version", "--story", "--team-key"):
+        elif arg in ("--story", "--team-key"):
             value = next(rest, "")
             if arg == "--story":
                 found["stories"].append(value)
@@ -57,10 +58,13 @@ class Decide:
         if len(parsed["words"]) != 2:
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
-        if not parsed.get("version") or not parsed["stories"]:
-            raise Refusal(f"--version and at least one --story are required; {USAGE}")
-        question = decisions.make_question(kind, subject, parsed["version"], parsed["stories"])
-        decisions.save_pending(question, parsed["version"], parsed["stories"], answers.state_dir())
+        store = self._store_for_run(parsed)
+        feature = features.open_feature(store, parsed.get("team_key", ""))
+        if feature is None:
+            raise Refusal("no feature is open")
+        pin = decisions.pin(store, feature, kind, subject, parsed["stories"])
+        question = decisions.make_question(kind, pin.subject, pin.version, pin.stories, pin.detail)
+        decisions.save_pending(question, pin.version, pin.stories, answers.state_dir(), pin.detail)
         tool_input = as_tool_input(question)
         if parsed["json"]:
             print(json.dumps({"nonce": question.nonce, "tool_input": tool_input}, indent=2))
