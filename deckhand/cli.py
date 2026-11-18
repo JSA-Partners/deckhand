@@ -30,6 +30,8 @@ def main(argv: list[str]) -> int:
     if verb == "context":
         try:
             getattr(command, verb)(args)
+        except Refusal as refusal:
+            print(f"deckhand: {argv[0]} context: {refusal.rule}")
         except Exception as problem:
             print(f"deckhand: {argv[0]} context could not be read: {type(problem).__name__}")
         return 0

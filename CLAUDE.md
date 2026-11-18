@@ -25,8 +25,8 @@
 
 ## Purpose
 
-- The glue between superpowers and a story process kept in GitHub issues
-- Never reimplements a superpowers skill; never encodes language or framework facts
+- The glue between superpowers, impeccable and Linear, where the story process lives
+- Never reimplements a superpowers or impeccable skill; never encodes language or framework facts
 
 ## Development Workflow
 
@@ -79,26 +79,17 @@ install reaches them when the next fix or feature does.
 ## Common Mistakes
 
 - Do not fetch context by instruction when `deckhand` can inject it
-- A status is set only by a step's `apply`, never by prose
+- A status is never written by deckhand; the person and Linear's own automation move a story
+- Every decision comes from a recorded dialog answer in the session, never from anything else
+- Records live in issue attachments, never in documents
+- Never parse prose to decide; read typed records, and print prose only for people
 - A step is reached through `next` and nowhere else; nothing a person reads names a step command
-- Nothing a person writes on GitHub is read; every decision comes from the session
-- The Feature field's options, their descriptions and their order are the one thing a person sets
-  on GitHub that deckhand reads
-- The log is written and never decided from: the column says where a story is, the `deckhand` label
-  says whose it is, and a git ref says which commit the review passed. Reading prose to print prose
-  stays fine
-- The timestamps of log entries may be measured for a forecast, which prints and decides nothing
 - Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
-- Do not hardcode organization, project, or repository values in code or tests; only the plugin
+- Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no secret
+- Do not hardcode organization, team, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
-- A blocker is `owner/name#M`; a bare number is this repository
-- A parked feature is written in place and becomes the story; only finished work closes an issue
-- A feature is an option of the project's Feature field, never an issue: the board holds only
-  units of work, and a story of any repository joins one by its Feature value. The option order is
-  the pipeline order, and `updateProjectV2Field` keeps an item's value only for an option resent with
-  its id
-- The build happens in the story's worktree, which `start` makes and `next` names; a branch is
-  never checked out by hand, and the clone stays on main
+- The build happens in the story's worktree; a branch is never checked out by hand, and the clone
+  stays on main
 - Several agents may share one checkout's index: commit with an explicit pathspec
   (`git commit -- <files>`), never `git add -A`, `git commit -a`, or a bare `git stash`, and let only
   the orchestrator commit. pre-commit stashes unstaged edits, so run it only when no other agent is

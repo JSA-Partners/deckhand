@@ -165,6 +165,33 @@ def test_context_failure_prints_only_the_type_and_command(registry, capsys):
     assert captured.out == "deckhand: probe context could not be read: ValueError\n"
 
 
+def test_context_prints_refusal_rule(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise Refusal("no team ACME")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    assert capsys.readouterr().out == "deckhand: probe context: no team ACME\n"
+
+
+def test_context_hides_other_exceptions(registry, capsys):
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise ValueError("secret-text")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    captured = capsys.readouterr()
+    assert "secret-text" not in captured.out + captured.err
+
+
 def test_apply_unexpected_error_prints_only_the_type_and_exits_1(registry, capsys):
     @register("probe")
     class Probe:

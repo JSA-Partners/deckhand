@@ -6,7 +6,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from deckhand.credentials import APP_FILE
 from deckhand.linear.client import LinearError, Transport, default_transport
+from deckhand.step import Refusal
 
 TOKEN_URL = "https://api.linear.app/oauth/token"
 SCOPE = "read,write"
@@ -30,6 +32,8 @@ def fetch_app_token(client_id: str, client_secret: str, transport: Transport = d
         body = json.loads(transport(request))
         token, expires_in = body["access_token"], int(body["expires_in"])
     except urllib.error.HTTPError as error:
+        if error.code in (400, 401):
+            raise Refusal(f"Linear rejected the app credentials, check {APP_FILE}") from None
         raise LinearError("token", f"the token request failed with HTTP {error.code}") from None
     except (urllib.error.URLError, OSError, http.client.HTTPException):
         raise LinearError("network", "could not reach Linear") from None
