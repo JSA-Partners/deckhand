@@ -86,3 +86,49 @@ mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
   issueRelationCreate(input: $input) { success }
 }
 """
+
+TEAM_SETUP = """
+query TeamSetup($key: String!) {
+  teams(filter: { key: { eq: $key } }) {
+    nodes {
+      id
+      key
+      states { nodes { id name type } }
+      gitAutomationStates { nodes { id event state { name } } }
+      labels { nodes { id name isGroup parent { name } } }
+      autoArchivePeriod
+      autoCloseParentIssues
+    }
+  }
+}
+"""
+
+WORKFLOW_STATE_CREATE = """
+mutation WorkflowStateCreate($input: WorkflowStateCreateInput!) {
+  workflowStateCreate(input: $input) { success }
+}
+"""
+
+GIT_AUTOMATION_STATE_CREATE = """
+mutation GitAutomationStateCreate($input: GitAutomationStateCreateInput!) {
+  gitAutomationStateCreate(input: $input) { success }
+}
+"""
+
+GIT_AUTOMATION_STATE_UPDATE = """
+mutation GitAutomationStateUpdate($id: String!, $input: GitAutomationStateUpdateInput!) {
+  gitAutomationStateUpdate(id: $id, input: $input) { success }
+}
+"""
+
+ISSUE_LABEL_CREATE = """
+mutation IssueLabelCreate($input: IssueLabelCreateInput!) {
+  issueLabelCreate(input: $input) { success }
+}
+"""
+
+TEAM_UPDATE = """
+mutation TeamUpdate($id: String!, $input: TeamUpdateInput!) {
+  teamUpdate(id: $id, input: $input) { success }
+}
+"""

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import importlib
+import pkgutil
 import sys
 
+from deckhand import steps
 from deckhand.step import REGISTRY, VERBS, Refusal
 
 
+def _load_steps() -> None:
+    for module in pkgutil.iter_modules(steps.__path__):
+        importlib.import_module(f"{steps.__name__}.{module.name}")
+
+
 def main(argv: list[str]) -> int:
+    _load_steps()
     if not argv or argv[0] not in REGISTRY:
         name = argv[0] if argv else ""
         print(f"deckhand: unknown command {name!r}", file=sys.stderr)
