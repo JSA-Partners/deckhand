@@ -22,12 +22,14 @@ class FakeClient:
     def __init__(self, **responses: object) -> None:
         self.responses = {name: list(v) if isinstance(v, list) else [v] for name, v in responses.items()}
         self.calls: list[tuple[str, dict]] = []
+        self.documents: list[str] = []
 
     def query(self, document: str, variables: dict) -> dict:
         match = re.search(r"(?:query|mutation) (\w+)", document)
         assert match is not None
         name = match.group(1)
         self.calls.append((name, variables))
+        self.documents.append(document)
         response = self.responses[name].pop(0) if len(self.responses[name]) > 1 else self.responses[name][0]
         if isinstance(response, Exception):
             raise response
@@ -411,3 +413,18 @@ def test_an_unknown_identifier_refuses_before_any_write() -> None:
     with pytest.raises(Refusal, match="ACME-99"):
         LinearStore(client).relate("ACME-99", UUID)
     assert client.names == ["Issue"]
+
+
+def test_issue_reads_ask_linear_for_a_full_page() -> None:
+    client = FakeClient(
+        Issue={"issue": ISSUE_NODE},
+        IssueAttachments={"issue": {"attachments": {"nodes": [], "pageInfo": DONE}}},
+        IssueRelations={"issue": relations_node()},
+    )
+    store = LinearStore(client)
+    store.issue(UUID)
+    store.records(UUID)
+    store.relations(UUID)
+    for document in client.documents:
+        assert f"(first: {queries.PAGE_SIZE})" in document
+    assert client.documents[2].count(f"(first: {queries.PAGE_SIZE})") == 2

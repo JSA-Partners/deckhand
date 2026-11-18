@@ -194,3 +194,30 @@ def test_apply_linear_error_prints_code_and_message_and_exits_1(registry, capsys
 
     assert main(["probe", "apply"]) == 1
     assert capsys.readouterr().err == "deckhand: network: could not reach Linear\n"
+
+
+def test_apply_header_unfit_token_prints_a_fixed_line_without_it(registry, capsys):
+    import http.client
+    import json
+
+    from deckhand.linear.client import LinearClient
+
+    def validating(request):
+        connection = http.client.HTTPConnection("localhost")
+        connection.putrequest("POST", "/graphql")
+        for name, value in request.header_items():
+            connection.putheader(name, value)
+        return json.dumps({"data": {}}).encode()
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            LinearClient(lambda: f"{SECRET}\n{SECRET}", lambda: None, validating).query("q", {})
+
+    assert main(["probe", "apply"]) == 1
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert captured.err == "deckhand: credentials: the credential cannot be sent as a header\n"

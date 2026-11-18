@@ -88,12 +88,12 @@ class LinearClient:
         return data
 
     def _send(self, payload: bytes) -> bytes:
+        request = urllib.request.Request(
+            URL,
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": self._token()},
+        )
         try:
-            request = urllib.request.Request(
-                URL,
-                data=payload,
-                headers={"Content-Type": "application/json", "Authorization": self._token()},
-            )
             return self._transport(request)
         except urllib.error.HTTPError as error:
             if error.code == 401:
