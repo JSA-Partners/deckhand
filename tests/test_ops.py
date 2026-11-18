@@ -105,15 +105,13 @@ def test_ensure_relation_writes_the_edge_once() -> None:
 KEYS = ["one", "two", "three"]
 LABELS = ["deckhand", "review", "blocked"]
 
+DESIRED_LABELS = {"one": ["deckhand"], "two": ["review", "deckhand"], "three": []}
+
 operation = st.one_of(
     st.tuples(st.just("issue"), st.sampled_from(KEYS)),
-    st.tuples(
-        st.just("labels"),
-        st.sampled_from(KEYS),
-        st.lists(st.sampled_from(LABELS), unique=True, max_size=3),
-    ),
-    st.tuples(st.just("document"), st.sampled_from(KEYS), st.sampled_from(["x", "y"]), st.text(max_size=3)),
-    st.tuples(st.just("record"), st.sampled_from(KEYS), st.sampled_from(["1", "2"])),
+    st.tuples(st.just("labels"), st.sampled_from(KEYS)),
+    st.tuples(st.just("document"), st.sampled_from(KEYS)),
+    st.tuples(st.just("record"), st.sampled_from(KEYS)),
     st.tuples(st.just("relation"), st.sampled_from(KEYS), st.sampled_from(KEYS)),
 )
 
@@ -126,11 +124,11 @@ def run(store: FakeStore, operations: list[tuple]) -> None:
         if name == "issue":
             ensure_issue(store, key, "issue", **FIELDS)
         elif name == "labels":
-            ensure_labels(store, issue, rest[0])
+            ensure_labels(store, issue, DESIRED_LABELS[key])
         elif name == "document":
-            ensure_document(store, key, "doc", issue, rest[0], rest[1])
+            ensure_document(store, key, "doc", issue, f"Doc {key}", f"body {key}")
         elif name == "record":
-            ensure_record(store, issue, Record("approval", "plan", rest[0], "captain", {}))
+            ensure_record(store, issue, Record("approval", "plan", key, "captain", {}))
         elif name == "relation":
             ensure_relation(store, issue, create_id(rest[0], "issue"))
 
@@ -148,6 +146,11 @@ def test_rerun_converges(operations: list[tuple], k: int) -> None:
     except WriteFailed:
         pass
     run(broken, operations)
+
+    for store in (broken, clean):
+        settled = len(store.writes)
+        run(store, operations)
+        assert len(store.writes) == settled
 
     assert broken.snapshot() == clean.snapshot()
     relations = broken.snapshot()["relations"]
