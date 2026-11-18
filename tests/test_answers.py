@@ -153,3 +153,35 @@ def test_unreadable_transcript_stores_not_copied_and_one_stderr_line(tmp_path: P
     answers.record(payload, state)
     assert copied_of(state) is False
     assert len(capsys.readouterr().err.splitlines()) == 1
+
+
+def test_invalid_utf8_in_the_transcript_still_records_the_answer(tmp_path: Path):
+    state = tmp_path / "state"
+    path = tmp_path / "bad.jsonl"
+    path.write_bytes(b"\xff\xfe not json\n")
+    payload = hook_input(("dh abcd1234", "Pick?", LONG))
+    payload["transcript_path"] = str(path)
+    answers.record(payload, state)
+    assert answers.find("abcd1234", "Pick?", state).copied is False
+
+
+def test_deeply_nested_transcript_still_records_the_answer(tmp_path: Path):
+    state = tmp_path / "state"
+    path = tmp_path / "deep.jsonl"
+    path.write_text("[" * 100000 + "]" * 100000 + "\n")
+    payload = hook_input(("dh abcd1234", "Pick?", LONG))
+    payload["transcript_path"] = str(path)
+    answers.record(payload, state)
+    assert answers.find("abcd1234", "Pick?", state).copied is False
+
+
+def test_tool_use_only_rows_do_not_use_up_the_window(tmp_path: Path):
+    state = tmp_path / "state"
+    path = tmp_path / "t.jsonl"
+    rows = [{"type": "assistant", "message": {"content": [{"type": "text", "text": LONG}]}}]
+    rows += [{"type": "assistant", "message": {"content": [{"type": "tool_use"}]}}] * 6
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    payload = hook_input(("dh abcd1234", "Pick?", LONG))
+    payload["transcript_path"] = str(path)
+    answers.record(payload, state)
+    assert copied_of(state) is True

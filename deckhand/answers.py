@@ -34,7 +34,7 @@ RECENT = 5
 
 def _recent_assistant_text(path: str) -> str:
     texts = []
-    with open(path, encoding="utf-8") as handle:
+    with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             try:
                 row = json.loads(line)
@@ -43,7 +43,9 @@ def _recent_assistant_text(path: str) -> str:
             if row.get("type") != "assistant":
                 continue
             content = (row.get("message") or {}).get("content") or []
-            texts.append("\n".join(b.get("text", "") for b in content if b.get("type") == "text"))
+            text = "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
+            if text:
+                texts.append(text)
     return "\n".join(texts[-RECENT:])
 
 
@@ -60,7 +62,7 @@ def _is_copied(item: dict, answer: str, hook_input: dict) -> bool:
         return False
     try:
         return answer in _recent_assistant_text(hook_input.get("transcript_path") or "")
-    except (OSError, TypeError, AttributeError):
+    except (OSError, ValueError, RecursionError, TypeError, AttributeError):
         print("deckhand: hook answer could not read the transcript, copied check skipped", file=sys.stderr)
         return False
 
