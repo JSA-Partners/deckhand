@@ -9,7 +9,16 @@ from deckhand.step import Refusal, read_toml
 STAGES = ("plan", "branch")
 TIER_KEYS = ("0", "1", "2", "3", "4")
 KEYS = frozenset(
-    {"repository_label", "tier_tools", "checks", "sensitive_paths", "extra_lenses", "front_end", "second_signoff"}
+    {
+        "repository_label",
+        "tier_tools",
+        "checks",
+        "sensitive_paths",
+        "extra_lenses",
+        "front_end",
+        "second_signoff",
+        "sandbox",
+    }
 )
 
 
@@ -22,6 +31,7 @@ class Policy:
     extra_lenses: dict[str, list[str]] = field(default_factory=dict)
     front_end: bool = False
     second_signoff: bool = False
+    sandbox_domains: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, repo_root: Path) -> Policy:
@@ -42,6 +52,7 @@ class Policy:
             extra_lenses=_extra_lenses(path, table.get("extra_lenses", {})),
             front_end=front_end,
             second_signoff=_flag(path, table, "second_signoff"),
+            sandbox_domains=_sandbox_domains(path, table.get("sandbox", {})),
         )
 
 
@@ -82,3 +93,12 @@ def _extra_lenses(path: Path, value: Any) -> dict[str, list[str]]:
                 raise Refusal(f"{path}: extra_lenses.{stage} entry {name!r} must be a lens name, not a path")
         found[stage] = names
     return found
+
+
+def _sandbox_domains(path: Path, value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        raise Refusal(f"{path}: sandbox must be a table")
+    for key in value:
+        if key != "domains":
+            raise Refusal(f"{path}: unknown key sandbox.{key}")
+    return _strings(path, "sandbox.domains", value.get("domains", []))

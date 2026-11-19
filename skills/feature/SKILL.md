@@ -3,12 +3,12 @@ name: feature
 description: "Plan one feature a screen at a time, from its frame to its approval, saving each answer as it is given."
 effort: high
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(deckhand *) Read Write Edit Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(impeccable:*)
+allowed-tools: Bash(deckhand *) Read Write Edit Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(impeccable:*)
 ---
 
 # Feature
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" feature context`
+!`deckhand feature context`
 
 Above: the open feature, its phase and next step. Work one feature and one screen at a time: show
 one thing, get one answer, move on. Each step offers writing it yourself or taking a draft,

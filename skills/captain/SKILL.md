@@ -2,12 +2,12 @@
 name: captain
 description: "Watch every session working the board, say what to run next and where, and put right anything the board holds that no step wrote."
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) AskUserQuestion
+allowed-tools: Bash(deckhand *) AskUserQuestion
 ---
 
 # Captain
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context`
+!`deckhand captain context`
 
 The blocks above are the whole picture. Anomalies is the whole board check, every column, blocker
 and cycle; checking the board needs no hand reads, and auditing blockers reads
@@ -18,7 +18,7 @@ say what moved since they last looked and where the work stands, leading with wh
 and where. Then stop. An anomaly under Standing has been seen
 before; mention it only when asked.
 
-Rerun `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context` for every later question. Asking about one session is `captain context --session <id>`.
+Rerun `deckhand captain context` for every later question. Asking about one session is `captain context --session <id>`.
 
 When an anomaly's fix is `captain apply --repair`, offer it and run it if the person agrees. When
 they ask for the backlog to be put in order, offer `captain apply --order`. Both write only the
@@ -32,12 +32,12 @@ When asked what to merge or in which order, answer from the Merge block, first r
 which sessions must then bring their branch up to date.
 
 When the person states a priority or asks how many sessions to open, run
-`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context --only candidates` and answer with lanes, one
+`deckhand captain context --only candidates` and answer with lanes, one
 per session, each naming its repository and its `/deckhand:story REF KEY` commands in order. Two stories
 whose files overlap never run in parallel lanes. Judge a "named, no edge" pair from its `Named:` line,
 asking only when the line leaves it open.
 
 For the board, run `captain context --only forecast`. For one feature, run
-`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" epic forecast "<feature>" --json`, which names its stories;
+`deckhand epic forecast "<feature>" --json`, which names its stories;
 `epic list` names the features.
 Give its likely and early dates, never a date between.

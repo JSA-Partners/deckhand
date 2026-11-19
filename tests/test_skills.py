@@ -36,7 +36,7 @@ def test_frontmatter_and_one_injection(path: Path) -> None:
     assert len(INJECTION.findall(body)) == 1
 
 
-INJECTED = re.compile(r'^!`"\$\{CLAUDE_PLUGIN_ROOT\}/bin/deckhand" ([^\s`]+) ([^\s`]+)', re.MULTILINE)
+INJECTED = re.compile(r"^!`deckhand ([^\s`]+) ([^\s`]+)", re.MULTILINE)
 UNPORTED = {"captain"}
 
 
@@ -61,7 +61,8 @@ def test_step_skill_exists_and_stays_short(name: str) -> None:
 
 
 def named_commands(body: str) -> list[list[str]]:
-    spans = re.findall(r"`(deckhand [^`]*)`", " ".join(body.split()))
+    prose = re.sub(r"^!`.*$", "", body, flags=re.MULTILINE)
+    spans = re.findall(r"`(deckhand [^`]*)`", " ".join(prose.split()))
     return [shlex.split(re.sub(r"[\[\]]|\.\.\.", "", span))[1:] for span in spans]
 
 

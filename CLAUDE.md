@@ -22,7 +22,7 @@
   store, with deterministic ids
 - `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
   a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
-  person's machine
+  person's machine; `launch.py` the sandboxed settings a hand or the captain runs under
 - Skills: `skills/<name>/SKILL.md` with YAML frontmatter, one for a hand's work and one for each
   session of the person's; review lenses in `skills/story/lenses/`, a project's own in its
   `.claude/deckhand/lenses/`; agents `agents/<name>.md`
@@ -94,8 +94,8 @@ install reaches them when the next fix or feature does.
   else; a hand never asks, it leaves the decision for that session
 - Records live in issue attachments; documents hold only text a person reads
 - Never parse prose to decide; read typed records, and print prose only for people
-- A skill's injection line calls `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; everywhere else a skill
-  names the bare `deckhand`, which the plugin puts on the path
+- Every skill calls the bare `deckhand`, its injection line included, which the plugin puts on the
+  path, so each call matches the sandbox's exempt `deckhand *` pattern
 - Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no secret
 - Do not hardcode organization, team, or repository values in code or tests; only the plugin
   manifests and the install commands carry them

@@ -2,38 +2,96 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
+from pathlib import Path
 from typing import Any
 
-from deckhand import config
+from deckhand import answers, config, launch
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.linear.workspace import AUTOMATION, STATES, Workspace
 from deckhand.step import Refusal, register
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-USAGE = "setup takes --team-key KEY, --repository LABEL=owner/name (repeatable), and --json on context only"
+CAPTAIN_SETTINGS = "captain-settings.json"
+USAGE = (
+    "setup takes --team-key KEY, --repository LABEL=owner/name (repeatable), --clone LABEL=PATH (repeatable), "
+    "--slot-cap N, and --json on context only"
+)
 
 
-def _parse(args: list[str]) -> tuple[str, dict[str, str]]:
-    key = ""
-    repositories: dict[str, str] = {}
+def _clone(value: str) -> tuple[str, Path]:
+    label, _, raw = value.partition("=")
+    path = Path(raw).expanduser().absolute()
+    if not label or not raw or not path.is_dir():
+        raise Refusal(f"--clone LABEL=PATH needs a directory, not {value!r}")
+    return label, path
+
+
+def _slot_cap(value: str) -> int:
+    if not value.isdigit() or int(value) < 1:
+        raise Refusal(f"--slot-cap takes a positive integer, not {value!r}")
+    return int(value)
+
+
+def _parse(args: list[str]) -> dict[str, Any]:
+    parsed: dict[str, Any] = {"team_key": "", "repositories": {}, "clones": {}, "slot_cap": None}
     rest = iter(args)
     for arg in rest:
-        if arg in ("--team-key", "--repository"):
-            value = next(rest, "")
-            if arg == "--team-key":
-                key = value
-            else:
-                label, _, repository = value.partition("=")
-                if not label or not REPOSITORY.match(repository):
-                    raise Refusal(f"--repository takes LABEL=owner/name, not {value!r}")
-                repositories[label] = repository
-        else:
+        if arg not in ("--team-key", "--repository", "--clone", "--slot-cap"):
             raise Refusal(f"unknown argument {arg}; {USAGE}")
-    if not key:
+        value = next(rest, "")
+        if arg == "--team-key":
+            parsed["team_key"] = value
+        elif arg == "--repository":
+            label, _, repository = value.partition("=")
+            if not label or not REPOSITORY.match(repository):
+                raise Refusal(f"--repository takes LABEL=owner/name, not {value!r}")
+            parsed["repositories"][label] = repository
+        elif arg == "--clone":
+            label, path = _clone(value)
+            parsed["clones"][label] = path
+        else:
+            parsed["slot_cap"] = _slot_cap(value)
+    if not parsed["team_key"]:
         raise Refusal(f"--team-key is required; {USAGE}")
-    return key, repositories
+    return parsed
+
+
+def _config_text(team_key: str, slot_cap: int, sandbox_write: list[str], clones: dict[str, Path]) -> str:
+    lines = [f"team_key = {json.dumps(team_key)}", f"slot_cap = {slot_cap}"]
+    if sandbox_write:
+        lines.append(f"sandbox_write = {json.dumps(sandbox_write)}")
+    if clones:
+        lines += ["", "[clones]"]
+        lines += [f"{json.dumps(label)} = {json.dumps(str(path))}" for label, path in sorted(clones.items())]
+    return "\n".join(lines) + "\n"
+
+
+def _local_files(parsed: dict[str, Any]) -> dict[Path, str]:
+    directory = config.config_dir()
+    current = config.local()
+    text = _config_text(
+        parsed["team_key"],
+        parsed["slot_cap"] or current.slot_cap,
+        current.sandbox_write,
+        {**current.clones, **parsed["clones"]},
+    )
+    captain = launch.captain_settings(launch.protected(directory, answers.state_dir()))
+    return {directory / config.FILE: text, directory / CAPTAIN_SETTINGS: json.dumps(captain, indent=2) + "\n"}
+
+
+def _differs(path: Path, text: str) -> bool:
+    try:
+        return path.read_text(encoding="utf-8") != text
+    except FileNotFoundError:
+        return True
+
+
+def _launch_line() -> str:
+    settings = shlex.quote(str(config.config_dir() / CAPTAIN_SETTINGS))
+    return f'claude --settings {settings} --name captain "/deckhand:captain"'
 
 
 @register("setup")
@@ -67,8 +125,12 @@ class Setup:
 
     def context(self, args: list[str]) -> None:
         as_json = "--json" in args
-        key, repositories = _parse([arg for arg in args if arg != "--json"])
-        facts = self._facts(key, repositories)
+        parsed = _parse([arg for arg in args if arg != "--json"])
+        key = parsed["team_key"]
+        facts = self._facts(key, parsed["repositories"])
+        if facts["team"]["found"]:
+            local = _local_files(parsed)
+            facts["local_changes"] = [str(path) for path, text in local.items() if _differs(path, text)]
         if as_json:
             print(json.dumps(facts, indent=2))
             return
@@ -90,17 +152,28 @@ class Setup:
         print("planned changes:" if changes else "planned changes: none")
         for change in changes:
             print(f"  {change}")
+        for path in facts["local_changes"]:
+            print(f"would write {path}")
+        print(f"then launch: {_launch_line()}")
 
     def apply(self, args: list[str]) -> None:
-        key, repositories = _parse(args)
+        parsed = _parse(args)
+        key = parsed["team_key"]
+        files = _local_files(parsed)
         workspace = self._workspace_for_run()
         team = workspace.team(key)
         if team is None:
             raise Refusal(f"no Linear team has the key {key}")
-        changes = workspace.plan(team, list(repositories))
+        changes = workspace.plan(team, list(parsed["repositories"]))
         workspace.apply(team, changes)
         for change in changes:
             print(f"done: {change.text}")
         if not changes:
             print("no changes")
+        for path, text in files.items():
+            if _differs(path, text):
+                path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                print(f"wrote {path}")
+        print(_launch_line())
         sys.stdout.flush()

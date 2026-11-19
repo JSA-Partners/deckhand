@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
+from deckhand import answers, launch
 from deckhand.cli import main
+from deckhand.config import LocalConfig
 from deckhand.linear.client import LinearError
 from deckhand.linear.workspace import Workspace
 from deckhand.step import Refusal
+from deckhand.steps import setup as setup_step
 from deckhand.steps.setup import Setup
 
 
@@ -154,6 +159,9 @@ def test_context_lists_planned_changes_without_writing(capsys: pytest.CaptureFix
     assert "create state In Progress" in out
     assert "create label group Repository" in out
     assert "acme/widgets" in out and "auto_merge" not in out
+    config_dir = Path(os.environ["DECKHAND_CONFIG_DIR"])
+    assert f"would write {config_dir / 'config.toml'}" in out
+    assert not config_dir.exists()
 
 
 def test_refuses_without_team_key():
@@ -325,3 +333,62 @@ def test_apply_refuses_json():
     with pytest.raises(Refusal, match="--json"):
         setup.apply([*ARGS, "--json"])
     assert linear.writes == []
+
+
+def local_files(config_dir: Path) -> dict[str, tuple[int, str]]:
+    return {
+        name: ((config_dir / name).stat().st_mtime_ns, (config_dir / name).read_text())
+        for name in ("config.toml", "captain-settings.json")
+    }
+
+
+def test_setup_writes_config_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    config_dir = Path(os.environ["DECKHAND_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text('sandbox_write = ["~/.cache/uv"]\n\n[clones]\ngadgets = "/elsewhere"\n')
+    clone = tmp_path / "widgets"
+    clone.mkdir()
+    setup = make(FakeLinear("ACME"))
+    args = [*ARGS, "--clone", f"widgets={clone}", "--slot-cap", "3"]
+    setup.apply(args)
+    out = capsys.readouterr().out
+    assert LocalConfig.load(config_dir / "config.toml") == LocalConfig(
+        clones={"gadgets": Path("/elsewhere"), "widgets": clone},
+        slot_cap=3,
+        team_key="ACME",
+        sandbox_write=["~/.cache/uv"],
+    )
+    captain = json.loads((config_dir / "captain-settings.json").read_text())
+    assert captain == launch.captain_settings(launch.protected(config_dir, answers.state_dir()))
+    launch_line = f'claude --settings {config_dir / "captain-settings.json"} --name captain "/deckhand:captain"'
+    assert out.splitlines()[-1] == launch_line
+    assert f"wrote {config_dir / 'config.toml'}" in out
+    first = local_files(config_dir)
+    setup.apply(args)
+    out = capsys.readouterr().out
+    assert local_files(config_dir) == first
+    assert "wrote" not in out
+    assert out.splitlines()[-1] == launch_line
+
+
+@pytest.mark.parametrize(
+    ("extra", "rule"),
+    [
+        (["--clone", "widgets=/no/such/clone"], "--clone LABEL=PATH needs a directory"),
+        (["--clone", "widgets"], "--clone LABEL=PATH needs a directory"),
+        (["--slot-cap", "0"], "--slot-cap takes a positive integer"),
+        (["--slot-cap", "two"], "--slot-cap takes a positive integer"),
+    ],
+)
+def test_setup_refuses_bad_local_flags_before_any_write(extra: list[str], rule: str):
+    linear = FakeLinear("ACME")
+    setup = make(linear)
+    with pytest.raises(Refusal, match=rule):
+        setup.apply([*ARGS, *extra])
+    assert linear.writes == []
+    assert not Path(os.environ["DECKHAND_CONFIG_DIR"]).exists()
+
+
+def test_parse_returns_every_flag(tmp_path: Path):
+    parsed = setup_step._parse(["--team-key", "ACME", "--clone", f"widgets={tmp_path}", "--slot-cap", "2"])
+    assert parsed == {"team_key": "ACME", "repositories": {}, "clones": {"widgets": tmp_path}, "slot_cap": 2}

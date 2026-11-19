@@ -5,12 +5,12 @@ arguments: story
 argument-hint: "<story>"
 effort: high
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(deckhand *) Read Grep Glob AskUserQuestion
+allowed-tools: Bash(deckhand *) Read Grep Glob AskUserQuestion
 ---
 
 # Sign-off $story
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" signoff context $story`
+!`deckhand signoff context $story`
 
 Above: the five screens of the sign-off and what is still missing. REF is $story. Talk to the
 person plainly, one screen at a time: show it, wait for them, move on. Never mark an option

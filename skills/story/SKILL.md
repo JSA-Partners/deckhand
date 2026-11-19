@@ -10,7 +10,7 @@ allowed-tools: Bash Read Write Edit Grep Glob Agent Skill(superpowers:*) Skill(i
 
 # Story $story
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" build context $story`
+!`deckhand build context $story`
 
 Above: the story and its worktree. You are its hand and never ask the person: a decision of theirs
 waits for their session, so name it and stop. REF is $story. On a rerun, carry on from the first
