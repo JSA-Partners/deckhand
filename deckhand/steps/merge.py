@@ -7,12 +7,13 @@ from pathlib import Path
 from deckhand import gh, git, ops, signoff
 from deckhand.records import Record
 from deckhand.step import Refusal, register
-from deckhand.steps.build import StoryStep, branch_of, parse
+from deckhand.steps.build import Located, StoryStep, branch_of, parse
 from deckhand.store import Store
 
 USAGE = "merge takes REF and --team-key KEY on both verbs"
 WAIT = 100
 INTERVAL = 15
+STILL_READY = "; the pull request may still be ready, run merge apply again to return it to draft"
 
 
 def _parse(args: list[str]) -> dict:
@@ -57,11 +58,17 @@ class Merge(StoryStep):
         head = signoff.signed_head(held) if held else ""
         if held is None or not signoff.current(at.records, sid, head):
             reason = signoff.standing(at.records, sid, head) if held else "the person has not signed off"
-            raise Refusal(f"{ref} has no current sign-off: {reason}")
+            raise Refusal(f"{ref} has no current sign-off: {reason}{self._redraft(at, held)}")
+        moved = at.head is not None and at.head != head
         branch = branch_of(at.records, at.story)
-        repo = gh.repo_name(at.clone, self._runner)
-        pr = gh.pr_for(branch, repo, self._runner) if branch else None
-        if at.head is not None and at.head != head:
+        try:
+            repo = gh.repo_name(at.clone, self._runner)
+            pr = gh.pr_for(branch, repo, self._runner) if branch else None
+        except gh.GhError:
+            if not moved:
+                raise
+            repo, pr = "", None
+        if moved:
             self._void(at.story, held, f"head moved: the worktree is at {at.head}", pr, repo)
         if pr is None:
             raise Refusal(f"{ref} has no open pull request")
@@ -91,7 +98,26 @@ class Merge(StoryStep):
 
     def _void(self, story: dict, sign: Record, reason: str, pr: dict | None, repo: str) -> None:
         ops.ensure_record(self._store_for_run(), story["id"], signoff.void_record(story["id"], sign, reason))
-        if pr is not None:
-            gh.mark_draft(pr["number"], repo, self._runner)
         head = signoff.signed_head(sign)
-        raise Refusal(f"the sign-off at {head} is void, {reason}; {story['identifier']} needs a new sign-off")
+        note = "" if pr is not None or repo else STILL_READY
+        if pr is not None:
+            note = self._draft(pr["number"], repo)
+        raise Refusal(f"the sign-off at {head} is void, {reason}; {story['identifier']} needs a new sign-off{note}")
+
+    def _draft(self, number: int, repo: str) -> str:
+        try:
+            gh.mark_draft(number, repo, self._runner)
+        except gh.GhError:
+            return STILL_READY
+        return ""
+
+    def _redraft(self, at: Located, held: Record | None) -> str:
+        if held is None or signoff.voided(at.records, at.story["id"], held) is None:
+            return ""
+        branch = branch_of(at.records, at.story)
+        try:
+            repo = gh.repo_name(at.clone, self._runner)
+            pr = gh.pr_for(branch, repo, self._runner) if branch else None
+        except gh.GhError:
+            return STILL_READY
+        return self._draft(pr["number"], repo) if pr is not None and not pr["isDraft"] else ""

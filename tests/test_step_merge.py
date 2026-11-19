@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -197,3 +198,42 @@ def test_merge_context_after_worktree_moved(
     Merge(store, Shell(head="c3"), repo).context(["s1", *TEAM])
     out = capsys.readouterr().out
     assert "head moved: the worktree is at c3, signed at c2" in out and "ready" not in out
+
+
+class Failing(Gh):
+    def __init__(self, fails: tuple[str, ...], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fails = fails
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        if any(part in argv for part in self.fails):
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 1, "", "boom")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_a_void_whose_draft_call_failed_is_drafted_on_the_next_merge(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    with pytest.raises(Refusal, match="void, checks failed.*may still be ready"):
+        merge(store, repo, Failing(("--undo",), buckets=[["fail"]], draft=False))
+    assert len(voids(store)) == 1
+    gh = Gh(draft=False)
+    with pytest.raises(Refusal, match="no current sign-off"):
+        merge(store, repo, gh)
+    assert gh.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"]]
+
+
+def test_a_local_head_move_is_voided_when_github_cannot_be_reached(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    clock = Clock()
+    unreachable = Failing(("view",))
+    unreachable.head = "c3"
+    with pytest.raises(Refusal, match="void, head moved: the worktree is at c3.*may still be ready"):
+        Merge(store, unreachable, repo, clock.sleep, clock).apply(["s1", *TEAM])
+    assert [v.data["head"] for v in voids(store)] == ["c2"]

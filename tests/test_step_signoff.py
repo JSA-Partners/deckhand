@@ -27,10 +27,15 @@ __all__ = ["repo", "state"]
 
 class Gh(Shell):
     def __init__(
-        self, pr_head: str = "c2", buckets: list[list[str]] | None = None, moved: bool = False, behind: bool = False
+        self,
+        pr_head: str = "c2",
+        buckets: list[list[str]] | None = None,
+        moved: bool = False,
+        behind: bool = False,
+        draft: bool = True,
     ) -> None:
         super().__init__()
-        self.pr_head, self.moved, self.behind = pr_head, moved, behind
+        self.pr_head, self.moved, self.behind, self.draft = pr_head, moved, behind, draft
         self.buckets = buckets if buckets is not None else [["pass"]]
 
     def __call__(self, argv, cwd=None, stdin=None):
@@ -39,7 +44,9 @@ class Gh(Shell):
             return subprocess.CompletedProcess(argv, 0 if self.behind else 1, "", "")
         if argv[:3] == ["gh", "pr", "list"]:
             self.argvs.append(argv)
-            found = [{"number": 7, "url": "https://example.test/pull/7", "isDraft": True, "headRefOid": self.pr_head}]
+            found = [
+                {"number": 7, "url": "https://example.test/pull/7", "isDraft": self.draft, "headRefOid": self.pr_head}
+            ]
             return subprocess.CompletedProcess(argv, 0, json.dumps(found), "")
         if argv[:3] == ["gh", "pr", "checks"]:
             self.argvs.append(argv)
