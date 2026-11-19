@@ -406,3 +406,16 @@ def test_branch_review_without_a_worktree_refuses(tmp_path: Path, repo: Path):
     checked(store, "c1")
     with pytest.raises(Refusal, match="has no worktree"):
         Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo).context(["s1", "--stage", "branch", *TEAM])
+
+
+def test_proceed_at_the_cap_ends_the_review(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    for n in (1, 2, 3):
+        record_round(step, tmp_path, raw(severity="P1", summary=f"Gap {n}."))
+        submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap"
+    answer(state, Decide(store), capsys, ["review-cap", "ACME-1", "--stage", "plan"], "Proceed")
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "proceeded"

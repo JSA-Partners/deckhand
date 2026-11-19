@@ -28,6 +28,7 @@ STOPS = {
     "unchanged": "the target is unchanged since the last round; nothing to review",
     "clean": "the last round holds no accepted P1; the review is done",
     "cap": "three rounds ran and a P1 is open or the target changed; the person decides with review-cap",
+    "proceeded": "the person chose Proceed at the cap; the review is done",
     "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
     " carries the last round forward without reviewers",
 }
@@ -209,7 +210,10 @@ class Review:
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts["note"] = target.note
         if isinstance(plan, review.Stop):
-            facts["stop"] = plan.reason
+            proceeded = plan.reason == "cap" and review.cleared(
+                subject.records, subject.stories[0], subject.stage, target.hash
+            )
+            facts["stop"] = "proceeded" if proceeded else plan.reason
         elif plan.carry:
             facts |= {"stop": "carry", "round": plan.n + cut}
         else:

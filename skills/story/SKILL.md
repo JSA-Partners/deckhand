@@ -32,7 +32,7 @@ and save its output with
 HASH the target_hash line. Record each finding you fix with
 `deckhand review apply REF resolve --stage plan --team-key "$team_key" --accept ID`. Declining one,
 or one that changes what the story delivers, is the person's. Rerun the context after
-fixing: a clean stop carries on; a cap is the person's.
+fixing: clean or proceeded carries on; a cap is the person's.
 
 Build with superpowers:test-driven-development, and impeccable:impeccable when a person sees the
 change. Commit with deckhand:commit `--yes`. Then run
