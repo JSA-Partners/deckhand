@@ -51,11 +51,11 @@ _ASKS = {
     "tier": "Which is the highest that applies to",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
-    review.CAP_DECISION: "Three plan review rounds ran and a P1 is open. Proceed to the build or rework the plan for",
+    review.CAP_DECISION: "Three plan review rounds ran, none clean. Proceed to the build or rework the plan for",
     quiz.KIND: "Quiz on",
     signoff.KIND: "Sign off",
 }
-_BRANCH_CAP = "Three branch review rounds ran and a P1 is open. Proceed to sign-off or rework the branch for"
+_BRANCH_CAP = "Three branch review rounds ran, none clean. Proceed to sign-off or rework the branch for"
 _RECORDED = ("tier", "decision-item", "finding", review.CAP_DECISION, quiz.KIND, signoff.KIND)
 _CHOSEN = ("finding", review.CAP_DECISION, quiz.KIND, signoff.KIND)
 
