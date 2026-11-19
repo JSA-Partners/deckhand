@@ -207,6 +207,8 @@ class Signoff(_Located):
             added = tuicr.seed_comments(session["slug"], hunks, at.path, self._runner, present)
             note = "seeded the missing reasons as comments" if added else "the reasons are seeded"
         print(f"done: {_shown_command(at.path, held.data['base'], sha)}; {note}")
+        for hunk in held.data.get("hunks", []):
+            print(f"- {hunk['path']}: {hunk['reason']}")
 
 
 def _last_branch(records: list[Record], story: str) -> dict:
@@ -216,7 +218,10 @@ def _last_branch(records: list[Record], story: str) -> dict:
 
 def _open_plan(records: list[Record], story: str) -> list[str]:
     latest = review.last(review.counted(records, f"{story}:plan")[0])
-    found = review.open_findings(latest, review.declined(records)) if latest else []
+    fixed = review.accepted(records)
+    found = (
+        [f for f in review.open_findings(latest, review.declined(records)) if f["id"] not in fixed] if latest else []
+    )
     if not found:
         return []
     lines = [f"plan round {latest.subject.rsplit(':', 1)[1]}, open:"]

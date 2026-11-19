@@ -510,7 +510,7 @@ def test_a_session_holding_every_reason_is_left_alone_and_shows_none_as_the_pers
     capsys.readouterr()
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     assert shell.ran("tuicr", "review", "add") == []
-    assert capsys.readouterr().out.rstrip().endswith("the reasons are seeded")
+    assert capsys.readouterr().out.splitlines()[0].endswith("the reasons are seeded")
     Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
     assert json.loads(capsys.readouterr().out)["comments"] == [said("p1", "Why?")]
 
@@ -606,3 +606,24 @@ def test_findings_screen_shows_the_plan_round_before_any_branch_round(
     lines = screen(store, repo, capsys, 3)
     assert lines[1:3] == ["the branch review has not run", "plan round 2, open:"]
     assert len(lines) == 4 and "Kept open." in lines[3]
+
+
+def test_findings_screen_leaves_out_plan_findings_the_hand_fixed(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    current = versions.held(store.records("s1"), implplan.PURPOSE, "s1")
+    [fixed] = plan_round(store, current.version, raw(summary="Fixed by the hand."))
+    store.put_record("s1", review.accept_record(review.finding_id(fixed, "plan"), "v"))
+    assert not any(line.startswith("plan round") for line in screen(store, repo, capsys, 3))
+
+
+def test_review_apply_prints_each_selected_hunk_and_its_reason(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    capsys.readouterr()
+    Signoff(store, Diffing(), repo).apply(["s1", "review", *TEAM])
+    held = versions.held(store.records("s1"), signoff.TUICR, "s1")
+    out = capsys.readouterr().out.splitlines()
+    assert out[1:] == [f"- {h['path']}: {h['reason']}" for h in held.data["hunks"]] and len(out) > 1
