@@ -278,3 +278,9 @@ def test_options_the_person_saw_must_match_the_pending_question(tmp_path: Path, 
     with pytest.raises(Refusal, match="options the person saw"):
         decisions.decide(store, pending, tmp_path)
     assert store.writes == []
+
+
+def test_question_text_ending_in_a_question_mark_gets_no_second_one():
+    label = "ACME-9 Dialog check story"
+    shown = decisions.Pin("s9", "v1", ["s9"], "item 1 of 1, What happens?", label, [label])
+    assert "??" not in decisions.make_question("quiz", replace(shown, options=["a", "b"])).text

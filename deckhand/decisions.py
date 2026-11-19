@@ -116,7 +116,7 @@ def question_text(kind: str, pin: Pin) -> str:
     stories = pin.story_labels or pin.stories
     if stories != [pin.label]:
         shown += f" (stories {', '.join(stories)})"
-    return f"{shown}? [{check}]"
+    return f"{shown.rstrip('?')}? [{check}]"
 
 
 def _label(story: dict) -> str:
