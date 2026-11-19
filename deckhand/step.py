@@ -34,3 +34,12 @@ def read_toml(path: Path) -> dict[str, Any]:
         raise Refusal(f"{path}: file not found") from None
     except tomllib.TOMLDecodeError:
         raise Refusal(f"{path}: not valid TOML") from None
+
+
+def team_key(parsed: dict) -> str:
+    from deckhand import config
+
+    key = parsed.get("team_key") or config.local().team_key
+    if not key:
+        raise Refusal(f"no team key: pass --team-key or set team_key in {config.config_dir() / config.FILE}")
+    return key

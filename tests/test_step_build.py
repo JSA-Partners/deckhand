@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import review
+from deckhand import review, step
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
@@ -306,3 +306,36 @@ def test_a_plan_is_checked_at_the_story_worktree(tmp_path: Path, repo: Path):
     ImplPlan(store, git, repo).apply(["s1", *TEAM, "--plan", str(plan), "--manifest", str(found)])
     [base] = [cwd for argv, cwd in git.calls if argv[:2] == ["git", "merge-base"]]
     assert base == repo / ".worktrees" / BRANCH
+
+
+def test_team_key_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "config.toml").write_text('team_key = "ACME"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
+    assert step.team_key({"words": []}) == "ACME"
+
+
+def test_flag_overrides_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "config.toml").write_text('team_key = "ACME"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
+    assert step.team_key({"team_key": "OTHER"}) == "OTHER"
+
+
+def test_missing_key_names_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
+    with pytest.raises(Refusal) as refused:
+        step.team_key({"words": []})
+    assert refused.value.rule == f"no team key: pass --team-key or set team_key in {tmp_path / 'config.toml'}"
+
+
+def test_locate_story_of_second_repository(tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch):
+    store = labeled(tmp_path, repo)
+    second = tmp_path / "gadgets"
+    (second / ".claude").mkdir(parents=True)
+    (second / ".claude" / "deckhand.toml").write_text('repository_label = "gadgets"\n', encoding="utf-8")
+    store.set_labels("s1", ["gadgets"])
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(f'[clones]\ngadgets = "{second}"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config_dir))
+    found = Build(store, Shell(), repo).locate("s1", "ACME")
+    assert (found.clone, found.policy.repository_label, found.path) == (second, "gadgets", None)

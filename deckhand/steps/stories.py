@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
-from deckhand import features, ops, planning
+from deckhand import config, features, ops, planning
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
-USAGE = "stories takes --team-key KEY on both verbs, --json on context only, and --file MAP.json on apply"
+USAGE = "stories takes [--team-key KEY] on both verbs, --json on context only, and --file MAP.json on apply"
 MISSED_BY = ("rule", "example", "invariant", "spike", "external")
 _LISTS = ("depends_on", "unknowns", "new_here")
 _REQUIRED = ("key", "title", "outcome", "repository")
@@ -32,10 +31,6 @@ SHAPE = {
 }
 
 
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
-
-
 def _parse(args: list[str]) -> dict:
     found: dict = {"json": False}
     rest = iter(args)
@@ -46,8 +41,6 @@ def _parse(args: list[str]) -> dict:
             found[arg[2:].replace("-", "_")] = next(rest, "")
         else:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     return found
 
 
@@ -166,11 +159,11 @@ class Stories:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        feature = features.open_feature(self._store_for_run(), parsed["team_key"])
+        feature = features.open_feature(self._store_for_run(), team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         facts = {
@@ -192,7 +185,7 @@ class Stories:
         entries = _read_map(parsed.get("file", ""))
         _check_graph(entries)
         store = self._store_for_run()
-        team = parsed["team_key"]
+        team = team_key(parsed)
         feature = features.open_feature(store, team)
         if feature is None:
             raise Refusal("no feature is open")

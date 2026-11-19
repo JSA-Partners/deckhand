@@ -9,12 +9,12 @@ from deckhand.checks import passing
 from deckhand.features import Phase
 from deckhand.policy import STAGES, Policy
 from deckhand.records import Record, content_hash
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import Located, StoryStep
 from deckhand.store import Store
 
 USAGE = (
-    "review takes REF, --stage plan|branch and --team-key KEY, feature-review --team-key KEY alone; context takes"
+    "review takes REF, --stage plan|branch and [--team-key KEY], feature-review [--team-key KEY] alone; context takes"
     " --json; apply takes round --findings FINDINGS.json --target HASH (the target_hash context printed),"
     " round --target HASH alone when context stops at carry, or resolve --accept ID (repeat for each)"
 )
@@ -37,15 +37,13 @@ def _parse(args: list[str]) -> dict:
         if arg == "--json":
             found["json"] = True
         elif arg in ("--team-key", "--stage", "--findings", "--target"):
-            found[arg[2:]] = next(rest, "")
+            found[arg[2:].replace("-", "_")] = next(rest, "")
         elif arg in ("--accept", "--decline"):
             found[arg[2:]].append(next(rest, ""))
         elif arg.startswith("--"):
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
-    if not found.get("team-key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     return found
 
 
@@ -82,7 +80,7 @@ class Review(StoryStep):
     def _subject(self, parsed: dict) -> Subject:
         if self.stage_fixed != FEATURE:
             return self._story_subject(parsed)
-        feature = features.open_feature(self._store_for_run(), parsed["team-key"])
+        feature = features.open_feature(self._store_for_run(), team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         current = features.phase(feature)
@@ -103,7 +101,7 @@ class Review(StoryStep):
             raise Refusal(f"--stage must be plan or branch; {USAGE}")
         if len(parsed["words"]) != 1:
             raise Refusal(f"review takes one story REF; {USAGE}")
-        at = self.locate(parsed["words"][0], parsed["team-key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         story = at.story
         return Subject(
             f"{story['id']}:{stage}", stage, story["identifier"], [story["id"]], at.records, story, at.feature, at

@@ -4,10 +4,10 @@ from pathlib import Path
 
 from deckhand import answers, git, implplan, ops, review
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
 
-USAGE = "implplan takes REF and --team-key KEY on both verbs, and on apply --plan PLAN.md --manifest MANIFEST.json"
+USAGE = "implplan takes REF and [--team-key KEY] on both verbs, and on apply --plan PLAN.md --manifest MANIFEST.json"
 TITLE = "Implementation plan"
 
 
@@ -21,8 +21,6 @@ def _parse(args: list[str]) -> dict:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     if len(found["words"]) != 1:
         raise Refusal(f"implplan takes one story REF; {USAGE}")
     return found
@@ -52,7 +50,7 @@ class ImplPlan(StoryStep):
         parsed = _parse(args)
         plan, plan_text = _read(parsed.get("plan", ""), "--plan")
         manifest = implplan.parse_manifest(_read(parsed.get("manifest", ""), "--manifest")[1])
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         story, store, repo = at.story, self._store_for_run(), at.path or at.clone
         if self._runner(["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"], repo, None).returncode != 0:
             raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")

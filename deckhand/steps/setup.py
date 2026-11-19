@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
-from pathlib import Path
 from typing import Any
 
+from deckhand import config
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.linear.workspace import AUTOMATION, STATES, Workspace
@@ -14,10 +13,6 @@ from deckhand.step import Refusal, register
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 USAGE = "setup takes --team-key KEY, --repository LABEL=owner/name (repeatable), and --json on context only"
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def _parse(args: list[str]) -> tuple[str, dict[str, str]]:
@@ -49,7 +44,7 @@ class Setup:
     def _workspace_for_run(self) -> Workspace:
         if self._workspace is not None:
             return self._workspace
-        return Workspace(connect(Credentials.load(_config_dir()), "person"))
+        return Workspace(connect(Credentials.load(config.config_dir()), "person"))
 
     def _facts(self, key: str, repositories: dict[str, str]) -> dict[str, Any]:
         workspace = self._workspace_for_run()

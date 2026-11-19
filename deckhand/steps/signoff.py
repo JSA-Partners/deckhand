@@ -8,12 +8,12 @@ from deckhand import answers, git, implplan, ops, quiz, review, signoff, tuicr, 
 from deckhand.checks import KIND as CHECKS
 from deckhand.checks import passing
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep
 from deckhand.summary import parse_summary
 
 USAGE = (
-    "signoff takes REF and --team-key KEY on both verbs; context [--screen 1-5] [--json],"
+    "signoff takes REF and [--team-key KEY] on both verbs; context [--screen 1-5] [--json],"
     " apply summary --summary SUMMARY.json or apply review"
 )
 SCREENS = ("what changed", "evidence", "findings", "tuicr", "quiz")
@@ -33,8 +33,6 @@ def _parse(args: list[str], usage: str) -> dict:
             raise Refusal(f"unknown argument {arg}; {usage}")
         else:
             found["words"].append(arg)
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {usage}")
     if not found["words"]:
         raise Refusal(f"a story REF is required; {usage}")
     return found
@@ -68,7 +66,7 @@ def _finding(item: dict) -> str:
 class Signoff(StoryStep):
     def context(self, args: list[str]) -> None:
         parsed = _parse(args, USAGE)
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         screen = parsed.get("screen", "")
         if screen and screen not in ("1", "2", "3", "4", "5"):
             raise Refusal(f"--screen takes 1 to 5; {USAGE}")
@@ -128,7 +126,7 @@ class Signoff(StoryStep):
         parsed = _parse(args, USAGE)
         if len(parsed["words"]) != 2 or parsed["words"][1] not in ACTIONS:
             raise Refusal(f"apply takes REF and summary or review; {USAGE}")
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         if at.path is None or at.head is None:
             ref = at.story["identifier"]
             raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")

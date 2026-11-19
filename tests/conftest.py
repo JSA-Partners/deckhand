@@ -17,6 +17,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clean_env: None) -> None:
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path / "isolated-config"))
+
+
+@pytest.fixture(autouse=True)
 def isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     for name in list(os.environ):

@@ -8,11 +8,11 @@ from pathlib import Path
 from deckhand import git, versions
 from deckhand.checks import KIND, passing
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep, parse
 from deckhand.store import Store
 
-USAGE = "checks takes REF and --team-key KEY on both verbs; context [--json], apply runs the commands"
+USAGE = "checks takes REF and [--team-key KEY] on both verbs; context [--json], apply runs the commands"
 TAIL_LINES = 20
 TIMEOUT = 600
 
@@ -41,7 +41,7 @@ class Checks(StoryStep):
         parsed = parse(args, USAGE)
         if len(parsed["words"]) != 1:
             raise Refusal(f"checks takes one story REF; {USAGE}")
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         if at.path is None or at.head is None:
             ref = at.story["identifier"]
             raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")

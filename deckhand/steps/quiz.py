@@ -5,12 +5,12 @@ from pathlib import Path
 
 from deckhand import git, ops, quiz, summary, tiers, versions
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
 from deckhand.summary import digest, parse_summary
 
 USAGE = (
-    "quiz takes REF and --team-key KEY on both verbs; context [--json], apply --quiz QUIZ.json --summary SUMMARY.json"
+    "quiz takes REF and [--team-key KEY] on both verbs; context [--json], apply --quiz QUIZ.json --summary SUMMARY.json"
 )
 SHAPE = 'a JSON list of {"question", "options": [2 to 4 strings], "correct": index, "where": "path:line"}'
 
@@ -27,8 +27,6 @@ def _parse(args: list[str]) -> dict:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     if len(found["words"]) != 1:
         raise Refusal(f"quiz takes one story REF; {USAGE}")
     return found
@@ -47,7 +45,7 @@ def _read(path: str, flag: str) -> str:
 
 class Quiz(StoryStep):
     def _worktree(self, parsed: dict) -> tuple[dict, list[Record], tiers.Tier | None, str, Path]:
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         if at.path is None or at.head is None:
             ref = at.story["identifier"]
             raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")

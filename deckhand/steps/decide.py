@@ -5,12 +5,12 @@ from pathlib import Path
 
 from deckhand import answers, decisions, features, git, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
 from deckhand.store import Store
 
 USAGE = (
-    "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
+    "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
     " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
     " quiz takes a story and --item N, review-cap takes a story and --stage plan|branch,"
     " sign-off takes a story;"
@@ -57,22 +57,17 @@ class Decide(StoryStep):
         super().__init__(store, runner, repo)
         self._reader = reader
 
-    def _store_of(self, parsed: dict) -> Store:
-        if self._store is None and not parsed.get("team_key"):
-            raise Refusal(f"--team-key is required; {USAGE}")
-        return self._store_for_run()
-
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
         if len(parsed["words"]) != 2:
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
-        store = self._store_of(parsed)
-        feature = features.open_feature(store, parsed.get("team_key", ""))
+        store = self._store_for_run()
+        feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
-        head = self._head(subject, parsed.get("team_key", "")) if wants_head else ""
+        head = self._head(subject, team_key(parsed)) if wants_head else ""
         pin = decisions.pin(
             store,
             feature,
@@ -111,8 +106,9 @@ class Decide(StoryStep):
         held = quiz.held_set(records, story)
         where = quiz.items_of(held)[int(n) - 1].where
         worktree = versions.held(records, WORKTREE, story)
+        labels = next((other["labels"] for other in feature.live if other["id"] == story), [])
         try:
-            clone = self._clone()
+            clone = self._clone(labels)
         except git.GitError:
             clone = None
         branch = worktree.data.get("branch") if worktree else None
@@ -128,7 +124,7 @@ class Decide(StoryStep):
         nonce = parsed["words"][0]
         state = answers.state_dir()
         pending = decisions.load_pending(nonce, state)
-        store = self._store_of(parsed)
+        store = self._store_for_run()
         if decisions.decide(store, pending, state):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == quiz.KIND:

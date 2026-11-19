@@ -1,31 +1,26 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import features, gh, git, implplan, ops, review, tiers, versions
+from deckhand import config, features, gh, git, implplan, ops, review, tiers, versions
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "build takes REF and --team-key KEY on both verbs; context [--json], apply worktree or apply push"
+    "build takes REF and [--team-key KEY] on both verbs; context [--json], apply worktree or apply push"
     " after the plan review stopped clean"
 )
 ACTIONS = ("worktree", "push")
 WORKTREE = "worktree"
 DEFAULT_BASE = "origin/HEAD"
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def parse(args: list[str], usage: str) -> dict:
@@ -40,8 +35,6 @@ def parse(args: list[str], usage: str) -> dict:
             raise Refusal(f"unknown argument {arg}; {usage}")
         else:
             found["words"].append(arg)
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {usage}")
     return found
 
 
@@ -70,12 +63,14 @@ class StoryStep:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
 
-    def _clone(self) -> Path:
-        return self._repo or git.clone_root(Path.cwd(), self._runner)
+    def _clone(self, labels: list[str]) -> Path:
+        clones = config.local().clones
+        configured = next((clones[label] for label in labels if label in clones), None)
+        return configured or self._repo or git.clone_root(Path.cwd(), self._runner)
 
-    def _story(self, ref: str, team_key: str, clone: Path) -> tuple[features.Feature, dict, Policy]:
+    def _story(self, ref: str, team_key: str) -> tuple[features.Feature, dict, Policy, Path]:
         store = self._store_for_run()
         feature = features.open_feature(store, team_key)
         if feature is None:
@@ -84,16 +79,16 @@ class StoryStep:
         if current is not Phase.BUILDING:
             raise Refusal(f"{features.describe(feature.project)} is {current.value}, not building; approve it first")
         story = features.story(store, feature, ref)
+        clone = self._clone(story["labels"])
         policy = Policy.load(clone)
         if policy.repository_label not in story["labels"]:
             raise Refusal(
                 f"{story['identifier']} belongs to another repository; this clone is {policy.repository_label}"
             )
-        return feature, story, policy
+        return feature, story, policy, clone
 
     def locate(self, ref: str, team_key: str) -> Located:
-        clone = self._clone()
-        feature, story, policy = self._story(ref, team_key, clone)
+        feature, story, policy, clone = self._story(ref, team_key)
         records = feature.records.get(story["id"], [])
         branch = branch_of(records, story)
         path = git.worktree_path(clone, branch) if branch else None
@@ -109,7 +104,7 @@ class Build(StoryStep):
         if len(parsed["words"]) != 1:
             raise Refusal(f"build takes one story REF; {USAGE}")
         store = self._store_for_run()
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         story, policy, clone, records = at.story, at.policy, at.clone, at.records
         held = versions.held(records, "tier", story["id"])
         level = tiers.from_record(held.data) if held else None
@@ -138,7 +133,7 @@ class Build(StoryStep):
         if len(parsed["words"]) != 2 or parsed["words"][1] not in ACTIONS:
             raise Refusal(f"apply takes REF and worktree or push; {USAGE}")
         ref, action = parsed["words"]
-        at = self.locate(ref, parsed["team_key"])
+        at = self.locate(ref, team_key(parsed))
         feature, story, clone = at.feature, at.story, at.clone
         if self._runner(["git", "rev-parse", "--verify", "--quiet", DEFAULT_BASE], clone, None).returncode != 0:
             raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")

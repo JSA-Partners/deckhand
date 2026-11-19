@@ -6,11 +6,11 @@ from pathlib import Path
 
 from deckhand import gh, git, ops, signoff
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import Located, StoryStep, branch_of, parse
 from deckhand.store import Store
 
-USAGE = "merge takes REF and --team-key KEY on both verbs"
+USAGE = "merge takes REF and [--team-key KEY] on both verbs"
 WAIT = 100
 INTERVAL = 15
 STILL_READY = "; the pull request may still be ready, run merge apply again to return it to draft"
@@ -38,7 +38,7 @@ class Merge(StoryStep):
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         held = signoff.signed(at.records, at.story["id"])
         if held is None:
             print(f"{at.story['identifier']}: the person has not signed off")
@@ -52,7 +52,7 @@ class Merge(StoryStep):
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
-        at = self.locate(parsed["words"][0], parsed["team_key"])
+        at = self.locate(parsed["words"][0], team_key(parsed))
         sid, ref = at.story["id"], at.story["identifier"]
         held = signoff.signed(at.records, sid)
         head = signoff.signed_head(held) if held else ""
