@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from deckhand import asks, claims, features, ops
+from deckhand import asks, claims, features, inputs, ops
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep, parse
 
@@ -13,14 +12,7 @@ USAGE = (
 
 
 def _read(path: str) -> str:
-    if not path:
-        raise Refusal(f"--file is required; {USAGE}")
-    try:
-        return Path(path).read_text(encoding="utf-8")
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
-    except UnicodeDecodeError:
-        raise Refusal(f"{path}: not valid UTF-8") from None
+    return inputs.read(path, "--file", USAGE)
 
 
 def _arguments(args: list[str]) -> dict:

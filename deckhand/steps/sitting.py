@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
 
-from deckhand import answers, config, features, ops, sitting, tiers, versions
+from deckhand import answers, config, features, inputs, ops, sitting, tiers, versions
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.step import Refusal, register, team_key
@@ -99,10 +98,7 @@ class Sitting:
             raise Refusal(f"--file is required; {USAGE}")
         store = self._store_for_run()
         _, story = self._story(store, parsed)
-        try:
-            body = Path(parsed["file"]).read_text().strip()
-        except OSError:
-            raise Refusal(f"{parsed['file']}: cannot be read") from None
+        body = inputs.read(parsed["file"], "--file", USAGE).strip()
         if not body:
             raise Refusal(f"{parsed['file']} is empty")
         ops.ensure_document(store, story["id"], "sitting", story["id"], TITLE, body)

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from deckhand import config, features, planning
+from deckhand import config, features, inputs, planning
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.step import Refusal, register, team_key
@@ -75,10 +74,7 @@ class Plan:
         if len(parsed["words"]) != 1 or not parsed.get("file"):
             raise Refusal(f"apply takes SECTION and --file; {USAGE}")
         name = parsed["words"][0]
-        try:
-            body = Path(parsed["file"]).read_text()
-        except OSError:
-            raise Refusal(f"{parsed['file']}: cannot be read") from None
+        body = inputs.read(parsed["file"], "--file", USAGE)
         store = self._store_for_run()
         planning.save_section(store, self._feature(store, parsed), name, body, parsed["drafted"])
         print(f"done: saved {name}")

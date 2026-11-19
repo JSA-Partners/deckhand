@@ -102,3 +102,15 @@ def test_a_hand_reads_git_only_in_a_listed_worktree(repo: Path, monkeypatch, cap
     monkeypatch.chdir(worktree)
     Commit().context([])
     assert capsys.readouterr().out.startswith("Nothing is staged.")
+
+
+def test_a_hand_context_never_echoes_a_config_file(repo: Path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    worktree, _ = nested_in_a_hand_worktree(repo, monkeypatch)
+    secret = repo.parent / "hand-config" / "credentials"
+    secret.write_text("commit lin_api_secretvalue\n")
+    (worktree / "CLAUDE.md").symlink_to(secret)
+    (worktree / "internal" / "auth" / "a.go").write_text("b\n")
+    git(worktree, "add", "internal/auth/a.go")
+    monkeypatch.chdir(worktree)
+    Commit().context([])
+    assert "lin_api_secretvalue" not in capsys.readouterr().out

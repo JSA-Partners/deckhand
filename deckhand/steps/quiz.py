@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from deckhand import claims, git, ops, quiz, summary, tiers, versions
+from deckhand import claims, git, inputs, ops, quiz, summary, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
@@ -33,14 +33,7 @@ def _parse(args: list[str]) -> dict:
 
 
 def _read(path: str, flag: str) -> str:
-    if not path:
-        raise Refusal(f"{flag} is required; {USAGE}")
-    try:
-        return Path(path).read_text(encoding="utf-8")
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
-    except UnicodeDecodeError:
-        raise Refusal(f"{path}: not valid UTF-8") from None
+    return inputs.read(path, flag, USAGE)
 
 
 class Quiz(StoryStep):

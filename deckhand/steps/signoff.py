@@ -5,7 +5,7 @@ import shlex
 from dataclasses import replace
 from pathlib import Path
 
-from deckhand import answers, gh, git, implplan, ops, quiz, review, signoff, tuicr, versions
+from deckhand import answers, gh, git, implplan, inputs, ops, quiz, review, signoff, tuicr, versions
 from deckhand.checks import KIND as CHECKS
 from deckhand.checks import passing
 from deckhand.records import Record
@@ -40,14 +40,7 @@ def _parse(args: list[str], usage: str) -> dict:
 
 
 def _read(path: str) -> str:
-    if not path:
-        raise Refusal(f"--summary is required; {USAGE}")
-    try:
-        return Path(path).read_text(encoding="utf-8")
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
-    except UnicodeDecodeError:
-        raise Refusal(f"{path}: not valid UTF-8") from None
+    return inputs.read(path, "--summary", USAGE)
 
 
 def _declined(records: list[Record]) -> list[dict]:

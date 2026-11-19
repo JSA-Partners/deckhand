@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from deckhand import answers, asks, features, git, implplan, lenses, ops, review, tiers, versions
+from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, tiers, versions
 from deckhand.checks import passing
 from deckhand.features import Phase
 from deckhand.policy import STAGES, Policy
@@ -319,14 +319,7 @@ class FeatureReview(Review):
 
 
 def _read(path: str) -> str:
-    if not path:
-        raise Refusal(f"--findings is required; {USAGE}")
-    try:
-        return Path(path).read_text(encoding="utf-8")
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
-    except UnicodeDecodeError:
-        raise Refusal(f"{path}: not valid UTF-8") from None
+    return inputs.read(path, "--findings", USAGE)
 
 
 def _line(item: dict) -> str:

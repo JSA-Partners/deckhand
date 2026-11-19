@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from deckhand import answers, git, implplan, ops, review
+from deckhand import answers, git, implplan, inputs, ops, review
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
@@ -27,15 +25,8 @@ def _parse(args: list[str]) -> dict:
 
 
 def _read(path: str, flag: str) -> tuple[bytes, str]:
-    if not path:
-        raise Refusal(f"{flag} is required; {USAGE}")
-    try:
-        data = Path(path).read_bytes()
-        return data, data.decode()
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
-    except UnicodeDecodeError:
-        raise Refusal(f"{path}: not valid UTF-8") from None
+    text = inputs.read(path, flag, USAGE)
+    return text.encode(), text
 
 
 @register("implplan")

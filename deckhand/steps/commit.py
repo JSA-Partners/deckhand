@@ -5,7 +5,7 @@ import re
 import shlex
 from pathlib import Path
 
-from deckhand import git
+from deckhand import git, inputs
 from deckhand.step import Refusal, register
 
 USAGE = "commit context prints the staged diff, recent history and the convention; git writes the commit"
@@ -57,14 +57,15 @@ def _rules(text: str) -> list[str]:
 def commitlint(cwd: Path) -> list[str]:
     for name in COMMITLINT_FILES:
         path = cwd / name
-        if path.is_file():
-            return [f"- commitlint: {name}", *_rules(path.read_text(encoding="utf-8", errors="replace"))]
-    package = cwd / "package.json"
-    if not package.is_file():
+        text = inputs.read_or_none(path) if path.is_file() else None
+        if text is not None:
+            return [f"- commitlint: {name}", *_rules(text)]
+    package = inputs.read_or_none(cwd / "package.json")
+    if package is None:
         return []
     try:
-        data = json.loads(package.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(package)
+    except ValueError:
         return []
     if isinstance(data, dict) and "commitlint" in data:
         return ["- commitlint: package.json", *_rules(json.dumps(data["commitlint"]))]
@@ -87,11 +88,8 @@ def grep_context(lines: list[str], keyword: str, before: int, after: int) -> lis
 
 
 def claude_md(cwd: Path) -> list[str]:
-    path = cwd / "CLAUDE.md"
-    if not path.is_file():
-        return []
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if "commit" not in text.lower():
+    text = inputs.read_or_none(cwd / "CLAUDE.md")
+    if text is None or "commit" not in text.lower():
         return []
     shown = grep_context(text.splitlines(), "commit", 1, 3)[:20]
     return ["- CLAUDE.md mentions commits:", *(f"  > {line}" for line in shown)]

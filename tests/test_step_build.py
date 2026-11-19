@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -513,3 +514,49 @@ def test_commit_refuses_a_gitlink(tmp_path: Path, repo: Path, monkeypatch):
     assert "160000" not in sh(worktree, "ls-files", "-s")
     assert sh(worktree, "rev-parse", "HEAD") == sh(worktree, "rev-parse", BRANCH)
     assert sh(worktree, "log", "-1", "--format=%s") == "chore: base"
+
+
+def as_hand(tmp_path: Path, repo: Path, worktree: Path, monkeypatch) -> tuple[Path, Path]:
+    config, scratch = tmp_path / "hand-config", tmp_path / "scratch"
+    config.mkdir()
+    scratch.mkdir()
+    (config / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config))
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    monkeypatch.chdir(worktree)
+    return config, scratch
+
+
+def hand_commit(store: FakeStore, repo: Path, path: Path) -> None:
+    Build(store, git.run, repo).apply(["s1", "commit", "--message", str(path), *TEAM])
+
+
+def test_a_hand_cannot_read_a_config_file_through_a_temporary_symlink(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    config, scratch = as_hand(tmp_path, repo, worktree, monkeypatch)
+    (config / "secret").write_text("feat: lin_api_secretvalue\n")
+    (scratch / "message").symlink_to(config / "secret")
+    (worktree / "a.txt").write_text("two\n")
+    with pytest.raises(Refusal, match="a hand reads files only from its worktree or the temporary directory"):
+        hand_commit(store, repo, scratch / "message")
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(scratch / "state"))
+    (scratch / "state").mkdir()
+    (scratch / "state" / "message").write_text("feat: from the state dir\n")
+    with pytest.raises(Refusal, match="a hand reads files only from its worktree or the temporary directory"):
+        hand_commit(store, repo, scratch / "state" / "message")
+    assert sh(worktree, "log", "-1", "--format=%s") == "chore: base"
+
+
+def test_a_hand_reads_its_temporary_and_worktree_files(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    _, scratch = as_hand(tmp_path, repo, worktree, monkeypatch)
+    (scratch / "message").write_text("feat: from the temporary directory\n")
+    (worktree / "a.txt").write_text("two\n")
+    hand_commit(store, repo, scratch / "message")
+    (worktree / "message").write_text("feat: from the worktree\n")
+    hand_commit(store, repo, worktree / "message")
+    assert sh(worktree, "log", "-2", "--format=%s").splitlines() == [
+        "feat: from the worktree",
+        "feat: from the temporary directory",
+    ]

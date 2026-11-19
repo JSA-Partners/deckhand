@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import claims, config, features, gh, git, implplan, ops, review, tiers, versions
+from deckhand import claims, config, features, gh, git, implplan, inputs, ops, review, tiers, versions
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
@@ -46,12 +46,7 @@ def parse(args: list[str], usage: str) -> dict:
 
 
 def message_of(path: str) -> str:
-    if not path:
-        raise Refusal(f"commit takes --message FILE; {USAGE}")
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        raise Refusal(f"{path}: cannot be read as UTF-8 text") from None
+    text = inputs.read(path, "--message", USAGE)
     lines = text.strip().splitlines()
     subject = lines[0] if lines else ""
     last = "\n".join(lines[1:]).split("\n\n")[-1].splitlines()

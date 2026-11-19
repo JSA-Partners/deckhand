@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from deckhand import config, features, ops, planning
+from deckhand import config, features, inputs, ops, planning
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.records import Record
@@ -45,12 +44,8 @@ def _parse(args: list[str]) -> dict:
 
 
 def _read_map(path: str) -> list[dict]:
-    if not path:
-        raise Refusal(f"--file is required; {USAGE}")
     try:
-        entries = json.loads(Path(path).read_text())
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
+        entries = json.loads(inputs.read(path, "--file", USAGE))
     except ValueError:
         raise Refusal(f"{path}: not valid JSON") from None
     if not isinstance(entries, list):
