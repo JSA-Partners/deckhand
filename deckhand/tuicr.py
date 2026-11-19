@@ -160,8 +160,9 @@ def _anchor(hunk: Hunk, shift: int) -> tuple[int, str]:
     return first_removed or old_start, "old"
 
 
-def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run) -> None:
+def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run) -> list[str]:
     shifts: dict[str, int] = {}
+    ids: list[str] = []
     for hunk in hunks:
         argv = ["tuicr", "review", "add", "--session", session]
         if repo is not None:
@@ -173,16 +174,36 @@ def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, run
             _, old_count, _, new_count = _counts(hunk.lines[0])
             shifts[hunk.path] = shift + new_count - old_count
             argv += ["--line", str(line), "--side", side]
-        call([*argv, "--username", USERNAME, hunk.reason], None, runner)
+        ids.append(_comment_id(call([*argv, "--username", USERNAME, hunk.reason], None, runner)))
+    return ids
+
+
+def _comment_id(out: str) -> str:
+    try:
+        found = json.loads(out)
+    except ValueError:
+        found = None
+    if not isinstance(found, dict) or not found.get("id"):
+        raise Refusal("tuicr review add printed no comment id")
+    return str(found["id"])
 
 
 def command(base: str, sha: str) -> list[str]:
     return ["tuicr", "-r", f"{base}..{sha}"]
 
 
-def session_for(repo: Path, base: str, sha: str, runner: Runner = run) -> dict | None:
-    for session in json.loads(call(["tuicr", "review", "list", "--repo", str(repo)], None, runner) or "[]"):
-        first, _, last = str(session.get("slug", "")).rpartition("/commits/")[2].partition("..")
-        if first and last and base.startswith(first) and sha.startswith(last):
+def session_for(repo: Path, sha: str, runner: Runner = run) -> dict | None:
+    for session in _listed(call(["tuicr", "review", "list", "--repo", str(repo)], None, runner)):
+        last = str(session.get("slug", "")).rpartition("/commits/")[2].partition("..")[2]
+        if last and sha.startswith(last):
             return session
     return None
+
+
+def comments(repo: Path, session: str, runner: Runner = run) -> list[dict]:
+    return _listed(call(["tuicr", "review", "comments", "--session", session, "--repo", str(repo)], None, runner))
+
+
+def _listed(out: str) -> list[dict]:
+    found = json.loads(out or "[]")
+    return [item for item in found if isinstance(item, dict)] if isinstance(found, list) else []

@@ -156,8 +156,12 @@ def locate(records: list[Record], finding: str) -> tuple[Record, dict] | None:
     return None
 
 
+def open_findings(record: Record, declined: set[str]) -> list[dict]:
+    return [f for f in record.data["findings"] if f["id"] not in declined]
+
+
 def open_p1(record: Record, declined: set[str]) -> list[dict]:
-    return [f for f in record.data["findings"] if f["severity"] == "P1" and f["id"] not in declined]
+    return [f for f in open_findings(record, declined) if f["severity"] == "P1"]
 
 
 def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: str) -> Record:

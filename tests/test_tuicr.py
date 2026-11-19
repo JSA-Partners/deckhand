@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -26,6 +27,25 @@ class Fake:
     def __call__(self, argv, cwd=None, stdin=None):
         self.calls.append((argv, cwd, stdin))
         return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+SLUG = "acme/widgets@acme-1-orders/commits/e024343..e024343"
+
+
+class Tuicr(Fake):
+    def __init__(self, sessions: list[dict] | None = None, comments: list[dict] | None = None) -> None:
+        super().__init__()
+        self.sessions = sessions if sessions is not None else [{"slug": SLUG, "comment_count": 0}]
+        self.comments = comments or []
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        self.calls.append((argv, cwd, stdin))
+        out = {
+            "list": self.sessions,
+            "add": {"id": f"c{len(self.calls)}", "content": argv[-1]},
+            "comments": self.comments,
+        }[argv[2]]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(out), "")
 
 
 def policy(*sensitive: str) -> Policy:
@@ -182,10 +202,10 @@ def test_one_hunk_of_a_file_applies_alone(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def test_seed_comments_argv() -> None:
-    fake = Fake()
+    fake = Tuicr()
     added = tuicr.Hunk("src/a.py", "H", ["@@ -3,2 +3,3 @@", " x", "+y", " z"], "sensitive path src/*.py")
     removed = tuicr.Hunk("old.txt", "H", ["@@ -1 +0,0 @@", "-bye"], "doubtful finding")
-    tuicr.seed_comments("slug", [added, removed], Path("/clone"), fake)
+    assert tuicr.seed_comments("slug", [added, removed], Path("/clone"), fake) == ["c1", "c2"]
     assert fake.calls[0][0] == [
         "tuicr", "review", "add", "--session", "slug", "--repo", "/clone",
         "--target-file", "src/a.py", "--line", "4", "--side", "new",
@@ -195,7 +215,7 @@ def test_seed_comments_argv() -> None:
 
 
 def test_seed_comments_numbers_lines_in_the_trimmed_commit() -> None:
-    fake = Fake()
+    fake = Tuicr()
     first = tuicr.Hunk("f", "H", ["@@ -1,1 +1,3 @@", " a", "+b", "+c"], "r1")
     second = tuicr.Hunk("f", "H", ["@@ -10,1 +12,2 @@", " j", "+k"], "r2")
     tuicr.seed_comments("s", [second], None, fake)
@@ -203,6 +223,21 @@ def test_seed_comments_numbers_lines_in_the_trimmed_commit() -> None:
     fake.calls.clear()
     tuicr.seed_comments("s", [first, second], None, fake)
     assert fake.calls[1][0][fake.calls[1][0].index("--line") + 1] == "13"
+
+
+def test_session_is_found_by_the_last_commit_of_the_range() -> None:
+    fake = Tuicr(sessions=[{"slug": "acme/widgets@other/commits/aaaaaaa..bbbbbbb"}, {"slug": SLUG}])
+    found = tuicr.session_for(Path("/work"), "e024343" + "1" * 33, fake)
+    assert found == {"slug": SLUG}
+    assert fake.calls[0][0] == ["tuicr", "review", "list", "--repo", "/work"]
+    assert tuicr.session_for(Path("/work"), "f" * 40, fake) is None
+
+
+def test_comments_reads_the_session_comments() -> None:
+    said = {"id": "x1", "location": "hello.txt:1", "path": "hello.txt", "content": "Why this name?"}
+    fake = Tuicr(comments=[said])
+    assert tuicr.comments(Path("/work"), SLUG, fake) == [said]
+    assert fake.calls[0][0] == ["tuicr", "review", "comments", "--session", SLUG, "--repo", "/work"]
 
 
 def test_command_is_the_range_argv() -> None:
@@ -270,7 +305,7 @@ def test_mode_change_is_selected_and_seeded_at_file_level(tmp_path: Path, monkey
     assert [h.path for h in hunks] == ["auth/secret.py"]
     sha = tuicr.review_commit(work, "main", hunks)
     assert "100755" in sh("git", "ls-tree", sha, "auth/secret.py", cwd=clone)
-    fake = Fake()
+    fake = Tuicr()
     tuicr.seed_comments("s", hunks, None, fake)
     assert fake.calls[0][0] == [
         "tuicr", "review", "add", "--session", "s", "--target-file", "auth/secret.py",

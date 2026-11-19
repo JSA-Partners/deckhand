@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
+from itertools import takewhile
 from pathlib import Path
 
 import pytest
@@ -383,7 +385,15 @@ def test_review_commit_is_built_once_per_head(
     assert "tuicr -r c1..c2" in out and "src/a.py: contract site" in out
 
 
+SLUG = "acme/widgets@acme-1-orders/commits/c2..c2"
+
+
 class Diffing(Shell):
+    def __init__(self, sessions: list[dict] | None = None, comments: list[dict] | None = None) -> None:
+        super().__init__()
+        self.sessions, self.comments = sessions or [], comments or []
+        self.broken = ""
+
     def __call__(self, argv, cwd=None, stdin=None):
         if argv[:2] == ["git", "diff"]:
             self.argvs.append(argv)
@@ -392,9 +402,14 @@ class Diffing(Shell):
         if argv[:3] == ["git", "branch", "--show-current"]:
             self.argvs.append(argv)
             return subprocess.CompletedProcess(argv, 0, "acme-1-orders\n", "")
+        if argv[:2] == ["tuicr", "review"] and self.broken:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 1 if self.broken == "fails" else 0, self.broken, "")
         if argv[:2] == ["tuicr", "review"]:
             self.argvs.append(argv)
-            return subprocess.CompletedProcess(argv, 0, "[]", "")
+            added = len(self.ran("tuicr", "review", "add"))
+            out = {"list": self.sessions, "add": {"id": f"seed{added}"}, "comments": self.comments}[argv[2]]
+            return subprocess.CompletedProcess(argv, 0, json.dumps(out), "")
         return super().__call__(argv, cwd, stdin)
 
 
@@ -439,3 +454,94 @@ def test_sign_off_needs_the_review_commit_at_the_head(
     Signoff(store, Diffing(), repo).apply(["s1", "review", *TEAM])
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
+
+
+def tuicr_held(store: FakeStore) -> Record:
+    [held] = [r for r in store.records("s1") if r.kind == signoff.TUICR]
+    return held
+
+
+def test_reasons_are_seeded_once_per_session_after_the_person_comments_first(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing(sessions=[{"slug": SLUG, "comment_count": 1}])
+    for _ in range(2):
+        Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    assert len(shell.ran("tuicr", "review", "add")) == 1
+    assert tuicr_held(store).data["seeded"] == {"session": SLUG, "ids": ["seed1"]}
+
+
+def said(id: str, content: str) -> dict:
+    return {"id": id, "location": "src/a.py:1", "path": "src/a.py", "start_line": 1, "side": "new", "content": content}
+
+
+def test_the_persons_tuicr_comments_are_shown_apart_from_the_seeded_reasons(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing(sessions=[{"slug": SLUG}], comments=[said("seed1", "contract site"), said("p1", "Rename this.")])
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    capsys.readouterr()
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["comments"] == [said("p1", "Rename this.")]
+    assert shown["lines"][-2:] == ["your comments:", "- src/a.py:1: Rename this."]
+    assert overview(store, repo, capsys)["screens"]["tuicr"] == "built"
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["screens"]["tuicr"] == "built, 1 comments from you"
+    assert shown["comments"] == [said("p1", "Rename this.")]
+
+
+@pytest.mark.parametrize("broken", ["fails", "not json"])
+def test_the_tuicr_screen_prints_when_tuicr_cannot_be_read(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], broken: str
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing()
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    shell.broken = broken
+    capsys.readouterr()
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["comments"] == [] and "- src/a.py: contract site" in shown["lines"]
+
+
+def test_the_tuicr_command_is_printed_from_the_story_worktree(
+    tmp_path: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    spaced = tmp_path / "my repo"
+    (spaced / ".claude").mkdir(parents=True)
+    (spaced / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\n')
+    store = ready(tmp_path, spaced, state, capsys, tuicr=False)
+    worktree = shlex.quote(str(spaced / ".worktrees" / BRANCH))
+    capsys.readouterr()
+    Signoff(store, Diffing(), spaced).apply(["s1", "review", *TEAM])
+    assert capsys.readouterr().out.startswith(f"done: cd {worktree} && tuicr -r c1..c2; ")
+    Signoff(store, Diffing(), spaced).context(["s1", *TEAM, "--screen", "4"])
+    assert capsys.readouterr().out.splitlines()[1] == f"cd {worktree} && tuicr -r c1..c2"
+
+
+def screen(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str], n: int) -> list[str]:
+    capsys.readouterr()
+    Signoff(store, Shell(), repo).context(["s1", *TEAM, "--screen", str(n)])
+    return capsys.readouterr().out.splitlines()
+
+
+def test_findings_screen_lists_the_open_findings_of_the_last_plan_round(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    assert not any(line.startswith("plan round") for line in screen(store, repo, capsys, 3))
+    kept, declined = raw(summary="Kept open."), raw(summary="Declined plan.", line=5)
+    found = review.parse_findings(json.dumps([kept, declined]))
+    plan = review.RoundPlan(2, scoped=True, base_hash="")
+    store.put_record("s1", review.round_record("s1", "plan", plan, "planhash", found))
+    gone = review.finding_id(found[1], "plan")
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", gone], "Decline")
+    lines = screen(store, repo, capsys, 3)
+    start = lines.index("plan round 2, open:")
+    assert start > lines.index("branch round 1") + 1
+    section = list(takewhile(lambda line: line.startswith("- "), lines[start + 1 :]))
+    assert len(section) == 1 and "Kept open." in section[0]
