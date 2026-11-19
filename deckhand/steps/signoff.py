@@ -4,7 +4,7 @@ import json
 import shlex
 from pathlib import Path
 
-from deckhand import git, implplan, ops, quiz, review, signoff, tuicr, versions
+from deckhand import answers, git, implplan, ops, quiz, review, signoff, tuicr, versions
 from deckhand.checks import KIND as CHECKS
 from deckhand.checks import passing
 from deckhand.records import Record
@@ -18,6 +18,7 @@ USAGE = (
 )
 SCREENS = ("what changed", "evidence", "findings", "tuicr", "quiz")
 ACTIONS = ("summary", "review")
+PLAN_FILE = "PLAN.md"
 
 
 def _parse(args: list[str], usage: str) -> dict:
@@ -198,7 +199,12 @@ def _open_plan(records: list[Record], story: str) -> list[str]:
     plan = versions.held(records, implplan.PURPOSE, story)
     if plan is None or review.reviewed(latest) != plan.version:
         lines.append(f"reviewed plan version {review.reviewed(latest)[:12]}, not the current one")
-    return lines + _folded(found)
+    return lines + _folded([_manifest_path(f) for f in found])
+
+
+def _manifest_path(item: dict) -> dict:
+    local = str(answers.state_dir() / review.TEXTS)
+    return item | {"path": PLAN_FILE} if str(item["path"]).startswith(local) else item
 
 
 def _folded(found: list[dict]) -> list[str]:

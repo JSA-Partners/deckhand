@@ -149,7 +149,7 @@ def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str, head
         )
     latest = review.last(held)
     open_count = len(review.open_p1(latest, review.declined(records)))
-    detail = f"{len(held)} rounds, {open_count} P1 open, at {at[:12]}"
+    detail = f"{review.reviewed_count(held)} rounds, {open_count} P1 open, at {at[:12]}"
     subject, version = review.cap_subject(story["id"], stage), review.cap_version(latest, at)
     return Pin(subject, version, [story["id"]], detail, _label(story), [_label(story)])
 

@@ -81,8 +81,7 @@ class Checks(StoryStep):
         data = {"head": head, "passed": failed is None, "command": failed, "tail": tail if failed else None}
         self._store_for_run().put_record(story["id"], Record(KIND, story["id"], head, "agent:checks", data))
         if failed:
-            # The failure is recorded first so the record exists, then refused so the hand sees it.
-            raise Refusal(f"{failed} failed at {head}; fix it and run checks again:\n{tail}")
+            raise Refusal(f"{failed} failed at {head}; the failure is recorded. Fix it and run checks again:\n{tail}")
         print(f"done: {len(commands) or 'no'} checks passed for {story['identifier']} at {head}")
 
 

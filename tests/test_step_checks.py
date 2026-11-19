@@ -57,7 +57,9 @@ def test_failing_check_is_recorded_then_refused_and_stops(tmp_path: Path, repo: 
     configured(repo, "make lint", "make types")
     output = "\n".join(f"line {n}" for n in range(30)) + "\ntoken ghp_abc123secret\n"
     commands = Commands(failing="make lint", output=output)
-    with pytest.raises(Refusal, match="make lint failed"):
+    with pytest.raises(
+        Refusal, match=r"make lint failed at \S+; the failure is recorded\. Fix it and run checks again"
+    ):
         run(store, repo, commands)
     assert [c for c, _ in commands.ran] == ["make lint"]
     data = held(store).data

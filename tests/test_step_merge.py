@@ -54,7 +54,9 @@ def test_merge_refuses_when_head_moved(tmp_path: Path, repo: Path, state: Path, 
     gh = Gh(pr_head="c3")
     with pytest.raises(Refusal, match="void, head moved"):
         merge(store, repo, gh)
-    assert gh.ran("gh", "pr", "merge") == [] and gh.ran("gh", "pr", "ready") == []
+    assert gh.ran("gh", "pr", "merge") == [] and gh.ran("gh", "pr", "ready") == [
+        ["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"]
+    ]
     [void] = voids(store)
     nonce = signoff.signed(store.records("s1"), "s1").data["nonce"]
     assert (void.subject, void.data["head"]) == (f"s1:{nonce}", "c2")
@@ -171,3 +173,27 @@ def test_proceed_does_not_cover_later_commits(
     assert "at c2" in question["question"]
     sign(store, repo, state, capsys)
     merge(store, repo, Gh())
+
+
+def test_void_returns_pr_to_draft(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    gh = Gh(buckets=[["fail"]])
+    with pytest.raises(Refusal, match="void, checks failed"):
+        merge(store, repo, gh)
+    assert gh.ran("gh", "pr", "ready") == [
+        ["gh", "pr", "ready", "7", "--repo", "acme/widgets"],
+        ["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"],
+    ]
+    assert len(voids(store)) == 1
+
+
+def test_merge_context_after_worktree_moved(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    capsys.readouterr()
+    Merge(store, Shell(head="c3"), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    assert "head moved: the worktree is at c3, signed at c2" in out and "ready" not in out

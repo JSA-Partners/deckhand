@@ -159,7 +159,8 @@ def test_a_head_that_moves_after_sign_off_voids_it(
     hand.world.pr_head = "c3"
     with pytest.raises(Refusal, match="void, head moved"):
         hand.merge()
-    assert hand.world.ran("gh", "pr", "merge") == [] and hand.world.ran("gh", "pr", "ready") == []
+    assert hand.world.ran("gh", "pr", "merge") == []
+    assert hand.world.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"]]
     [void] = voids(hand.store)
     assert void.data["head"] == "c2"
     assert not signoff.current(hand.store.records("s1"), "s1", "c2")
@@ -178,7 +179,8 @@ def test_a_local_commit_after_sign_off_voids_it(
     hand.world.head = "c3"
     with pytest.raises(Refusal, match="void, head moved: the worktree is at c3"):
         hand.merge()
-    assert hand.world.ran("gh", "pr", "merge") == [] and hand.world.ran("gh", "pr", "ready") == []
+    assert hand.world.ran("gh", "pr", "merge") == []
+    assert hand.world.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"]]
     [void] = voids(hand.store)
     assert void.data["head"] == "c2"
     assert not signoff.current(hand.store.records("s1"), "s1", "c2")

@@ -128,5 +128,5 @@ def standing(records: list[Record], story: str, head: str) -> str | None:
     if void is not None:
         return f"the sign-off at {at} is void: {void.data.get('reason')}"
     if at != head:
-        return f"the sign-off is for {at}, not the head {head}"
+        return f"the head moved to {head}"
     return "the sign-off no longer matches the change summary or the quiz"

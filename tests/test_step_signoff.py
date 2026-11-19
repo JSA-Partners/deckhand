@@ -12,6 +12,7 @@ from deckhand.git import GitError
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
+from deckhand.steps.merge import Merge
 from deckhand.steps.review import Review
 from deckhand.steps.signoff import Signoff
 from deckhand.store.fake import FakeStore
@@ -183,7 +184,7 @@ def test_a_new_local_commit_leaves_the_sign_off_behind(
     capsys.readouterr()
     Signoff(store, Shell(head="c3"), repo).context(["s1", *TEAM, "--json"])
     missing = json.loads(capsys.readouterr().out)["missing"]
-    assert "the sign-off is for c2, not the head c3" in missing and "checks are not passing at c3" in missing
+    assert "the head moved to c3" in missing and "checks are not passing at c3" in missing
 
 
 def test_branch_cap_proceed_clears_the_branch_review(
@@ -200,6 +201,29 @@ def test_branch_cap_proceed_clears_the_branch_review(
     assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch"]
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_standing_names_void_reason(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    assert signoff.standing(store.records("s1"), "s1", "c3") == "the head moved to c3"
+    with pytest.raises(Refusal, match="checks failed"):
+        Merge(store, Gh(buckets=[["fail"]]), repo, Clock().sleep, Clock()).apply(["s1", *TEAM])
+    voided = "the sign-off at c2 is void: checks failed: check 0"
+    assert signoff.standing(store.records("s1"), "s1", "c3") == voided
+
+
+def test_cap_question_skips_carry_rounds(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
+    for n in (1, 2, 3):
+        branch_round(store, raw(severity="P1"), n=n)
+    last = review.last(review.rounds_of(store.records("s1"), "s1:branch"))
+    carry = review.RoundPlan(4, scoped=True, base_hash="hash3", carry=True)
+    store.put_record("s1", review.carry_record("s1", "branch", carry, last, "c2"))
+    question = answer(
+        state, Decide(store, Shell(), repo), capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed"
+    )
+    assert "3 rounds, 1 P1 open" in question["question"]
 
 
 def test_findings_screen_folds_doubtful_and_shows_declines(
@@ -449,6 +473,15 @@ def test_findings_screen_lists_the_open_findings_of_the_last_plan_round(
     assert section[0] == "reviewed plan version planhash, not the current one"
     assert "Kept open." in section[1] and section[2] == "doubtful:" and "Unsure plan." in section[3]
     assert len(section) == 4
+
+
+def test_screen_3_prints_manifest_path(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
+    saved = review.text_path(state, "s1", "planhash")
+    plan_round(store, "planhash", raw(path=str(saved), summary="Kept open."))
+    lines = screen(store, repo, capsys, 3)
+    [shown] = [line for line in lines if "Kept open." in line]
+    assert "PLAN.md:3" in shown and str(state) not in "\n".join(lines)
 
 
 def test_findings_screen_shows_the_plan_round_before_any_branch_round(
