@@ -236,6 +236,15 @@ def test_the_default_clock_writes_linears_form() -> None:
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", store.records("i1")[0].at)
 
 
+def test_the_default_clock_orders_writes_made_in_one_millisecond() -> None:
+    store = FakeStore()
+    make_issue(store)
+    for n in range(50):
+        store.put_record("i1", Record("approval", f"i1:{n}", "1", "person:p", {}))
+    times = [r.at for r in sorted(store.records("i1"), key=lambda r: int(r.subject.split(":")[1]))]
+    assert times == sorted(set(times))
+
+
 def test_assign_round_trip() -> None:
     store = FakeStore()
     make_issue(store)

@@ -27,13 +27,19 @@ class WriteFailed(Exception):
     pass
 
 
-def _clock() -> str:
-    return iso(time.time_ns() // 1_000_000)
+class _Clock:
+    def __init__(self) -> None:
+        self._last = 0
+
+    # Linear stamps sequential writes in order; the wall clock repeats within one millisecond.
+    def __call__(self) -> str:
+        self._last = max(self._last + 1, time.time_ns() // 1_000_000)
+        return iso(self._last)
 
 
 class FakeStore(Store):
-    def __init__(self, now: Callable[[], str] = _clock, viewer: str = "viewer-1") -> None:
-        self._now = now
+    def __init__(self, now: Callable[[], str] | None = None, viewer: str = "viewer-1") -> None:
+        self._now = now or _Clock()
         self._viewer = viewer
         self._issues: dict[str, dict[str, Any]] = {}
         self._projects: dict[str, dict[str, Any]] = {}
