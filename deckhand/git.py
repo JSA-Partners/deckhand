@@ -105,6 +105,10 @@ def merge_base(repo: Path, a: str, b: str, runner: Runner = run) -> str:
     return call(["git", "merge-base", a, b], repo, runner).strip()
 
 
+def is_ancestor(repo: Path, ancestor: str, descendant: str, runner: Runner = run) -> bool:
+    return runner(["git", "merge-base", "--is-ancestor", ancestor, descendant], repo, None).returncode == 0
+
+
 def push(worktree: Path, branch: str, runner: Runner = run) -> None:
     call(["git", "push", "--set-upstream", "origin", branch], worktree, runner)
 

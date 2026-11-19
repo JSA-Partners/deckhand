@@ -6,13 +6,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deckhand import answers, features, git, implplan, lenses, ops, planning, review, tiers, versions
+from deckhand.checks import passing
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
 from deckhand.policy import STAGES, Policy
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register
-from deckhand.steps.checks import passing
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
@@ -26,7 +26,7 @@ ACTIONS = ("round", "resolve")
 STOPS = {
     "unchanged": "the target is unchanged since the last round; nothing to review",
     "clean": "the last round holds no accepted P1; the review is done",
-    "cap": "three rounds ran and a P1 is still open; the person decides each open P1",
+    "cap": "three rounds ran and a P1 is open or the target changed; the person decides with review-cap",
 }
 
 

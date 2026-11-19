@@ -13,7 +13,7 @@ KIND = "review-round"
 DECISION = "finding"
 HAND_ACCEPT = "finding-accept"
 CAP_DECISION = "review-cap"
-PROCEED, REWORK = "Proceed", "Rework the plan"
+PROCEED, REWORK = "Proceed", "Rework"
 DECLINE, ACCEPT = "Decline", "Accept"
 PERSON = "person:"
 TEXTS = "plans"
@@ -164,12 +164,14 @@ def next_round(rounds: list[Record], target_hash: str, declined: set[str]) -> Ro
     if latest is None:
         return RoundPlan(1, scoped=False, base_hash="")
     if latest.data["target_hash"] == target_hash:
-        return Stop("unchanged")
-    if not open_p1(latest, declined):
-        return Stop("clean")
+        return Stop("unchanged") if open_p1(latest, declined) else Stop("clean")
     if len(rounds) >= CAP:
         return Stop("cap")
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
+
+
+def reviewed(record: Record) -> str:
+    return record.data.get("head") or record.data["target_hash"]
 
 
 def _cap_cut(record: Record) -> int:
@@ -203,23 +205,21 @@ def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     return [r for r in rounds if _n(r) > cut], cut
 
 
-def at_cap(rounds: list[Record], declined: set[str]) -> bool:
+def at_cap(rounds: list[Record], declined: set[str], at: str) -> bool:
     latest = last(rounds)
-    return latest is not None and len(rounds) >= CAP and bool(open_p1(latest, declined))
+    if latest is None or len(rounds) < CAP:
+        return False
+    return bool(open_p1(latest, declined)) or reviewed(latest) != at
 
 
-def cleared(records: list[Record], story: str, stage: str) -> bool:
+def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
     held, _ = counted(records, f"{story}:{stage}")
     latest = last(held)
     if latest is None:
         return False
-    if not open_p1(latest, declined(records)):
+    if reviewed(latest) == at and not open_p1(latest, declined(records)):
         return True
     return any(r.version == latest.subject for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
-
-
-def plan_cleared(records: list[Record], story: str) -> bool:
-    return cleared(records, story, "plan")
 
 
 def feature_gaps(project: str, records: list[Record]) -> list[str]:

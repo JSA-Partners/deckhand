@@ -6,13 +6,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from deckhand import git, versions
+from deckhand.checks import KIND, passing
 from deckhand.records import Record
 from deckhand.step import Refusal, register
 from deckhand.steps.build import StoryStep, branch_of, parse
 from deckhand.store import Store
 
 USAGE = "checks takes REF and --team-key KEY on both verbs; context [--json], apply runs the commands"
-KIND = "checks"
 TAIL_LINES = 20
 TIMEOUT = 600
 
@@ -24,11 +24,6 @@ def run_command(command: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(command, -1, "", f"timed out after {TIMEOUT} seconds")
-
-
-def passing(records: list[Record], story: str, head: str) -> bool:
-    held = versions.held(records, KIND, story)
-    return held is not None and held.version == head and bool(held.data.get("passed"))
 
 
 class Checks(StoryStep):

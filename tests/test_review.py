@@ -49,15 +49,28 @@ def test_first_round_is_not_scoped():
 
 def test_no_accepted_p1_stops():
     rounds = [done(1, "h1", raw(severity="P2"), raw(severity="P3", summary="other"))]
-    assert review.next_round(rounds, "h2", set()) == Stop("clean")
+    assert review.next_round(rounds, "h1", set()) == Stop("clean")
+
+
+def test_revision_after_a_clean_round_is_scoped():
+    rounds = [done(1, "h1", raw(severity="P2"))]
+    assert review.next_round(rounds, "h2", set()) == RoundPlan(2, scoped=True, base_hash="h1")
+
+
+def test_revision_after_a_clean_third_round_goes_to_the_person():
+    rounds = [done(1, "h1", raw(severity="P1")), done(2, "h2", raw(severity="P1")), done(3, "h3")]
+    assert review.next_round(rounds, "h3", set()) == Stop("clean")
+    assert review.next_round(rounds, "h4", set()) == Stop("cap")
+    assert review.at_cap(rounds, set(), "h4") and not review.at_cap(rounds, set(), "h3")
 
 
 def test_declined_p1_is_not_accepted():
     p1 = raw(severity="P1")
     rounds = [done(1, "h1", p1)]
     declined = {findings(p1)[0].id}
-    assert review.next_round(rounds, "h2", declined) == Stop("clean")
-    assert review.next_round(rounds, "h2", {"other"}) == RoundPlan(2, scoped=True, base_hash="h1")
+    assert review.next_round(rounds, "h1", declined) == Stop("clean")
+    assert review.next_round(rounds, "h1", {"other"}) == Stop("unchanged")
+    assert review.next_round(rounds, "h2", declined) == RoundPlan(2, scoped=True, base_hash="h1")
 
 
 def test_cap_after_three():

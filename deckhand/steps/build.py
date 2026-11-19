@@ -138,7 +138,8 @@ class Build(StoryStep):
 
     def _push(self, feature: features.Feature, story: dict, clone: Path) -> None:
         records = feature.records.get(story["id"], [])
-        if not review.plan_cleared(records, story["id"]):
+        plan = versions.held(records, implplan.PURPOSE, story["id"])
+        if plan is None or not review.cleared(records, story["id"], "plan", plan.version):
             raise Refusal(
                 f"the plan review of {story['identifier']} has not stopped clean; finish it,"
                 " or at the cap let the person decide: decide context review-cap"

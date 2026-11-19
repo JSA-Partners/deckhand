@@ -12,19 +12,24 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.signoff import Merge, Signoff
 from deckhand.store.fake import FakeStore
 from tests.test_quiz import ask, decide, item, reply, submit, summary
-from tests.test_step_build import Shell, labeled, repo, state
+from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import TEAM, answer, checked, raw
 
 __all__ = ["repo", "state"]
 
 
 class Gh(Shell):
-    def __init__(self, pr_head: str = "c2", buckets: list[list[str]] | None = None, moved: bool = False) -> None:
+    def __init__(
+        self, pr_head: str = "c2", buckets: list[list[str]] | None = None, moved: bool = False, behind: bool = False
+    ) -> None:
         super().__init__()
-        self.pr_head, self.moved = pr_head, moved
+        self.pr_head, self.moved, self.behind = pr_head, moved, behind
         self.buckets = buckets if buckets is not None else [["pass"]]
 
     def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:3] == ["git", "merge-base", "--is-ancestor"]:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0 if self.behind else 1, "", "")
         if argv[:3] == ["gh", "pr", "list"]:
             self.argvs.append(argv)
             found = [{"number": 7, "url": "https://example.test/pull/7", "isDraft": True, "headRefOid": self.pr_head}]
@@ -119,10 +124,76 @@ def test_merge_refuses_when_head_moved(tmp_path: Path, repo: Path, state: Path, 
         merge(store, repo, gh)
     assert gh.ran("gh", "pr", "merge") == [] and gh.ran("gh", "pr", "ready") == []
     [void] = voids(store)
-    assert (void.subject, void.data["head"]) == ("s1:c2", "c2")
+    nonce = signoff.signed(store.records("s1"), "s1").data["nonce"]
+    assert (void.subject, void.data["head"]) == (f"s1:{nonce}", "c2")
     assert overview(store, repo, capsys)["missing"] == ["the sign-off at c2 is void: " + void.data["reason"]]
     with pytest.raises(Refusal, match="no current sign-off"):
         merge(store, repo, Gh())
+
+
+def test_a_fresh_sign_off_after_a_void_is_current(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    with pytest.raises(Refusal, match="checks failed"):
+        merge(store, repo, Gh(buckets=[["fail"]]))
+    assert not signoff.current(store.records("s1"), "s1", "c2")
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")
+    gh = Gh()
+    merge(store, repo, gh)
+    assert len(gh.ran("gh", "pr", "merge")) == 1
+
+
+def test_unpushed_signed_head_refuses_without_a_void(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    before = list(store.writes)
+    gh = Gh(pr_head="c1", behind=True)
+    with pytest.raises(Refusal, match="push the signed head first"):
+        merge(store, repo, gh)
+    assert store.writes == before and gh.ran("gh", "pr", "ready") == [] and gh.ran("gh", "pr", "merge") == []
+    assert ["git", "merge-base", "--is-ancestor", "c1", "c2"] in gh.argvs
+
+
+def test_checks_failing_after_pending_void_the_sign_off(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    gh, clock = Gh(buckets=[["pending"], ["fail"]]), Clock()
+    with pytest.raises(Refusal, match="checks failed: check 0"):
+        merge(store, repo, gh, clock)
+    assert clock.slept == [15] and gh.ran("gh", "pr", "merge") == []
+    assert [v.data["reason"] for v in voids(store)] == ["checks failed: check 0"]
+
+
+def test_overview_without_a_worktree_lists_it_as_missing(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    (repo / ".worktrees" / BRANCH).rmdir()
+    assert overview(store, repo, capsys)["missing"] == ["ACME-1 has no worktree on this machine"]
+
+
+def test_commits_after_the_last_branch_round_need_a_review(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "The idempotency key")
+    branch_round(store, raw(), head="c1")
+    checked(store, "c2")
+    with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
+        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    branch_round(store, raw(), n=2)
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")
 
 
 def test_merge_refuses_when_github_finds_the_head_moved(
@@ -253,7 +324,7 @@ def test_findings_screen_folds_doubtful_and_shows_declines(
     assert lines.index("doubtful:") > next(i for i, line in enumerate(lines) if "Sure thing." in line)
     assert "Maybe." in lines[lines.index("doubtful:") + 1]
     assert "Declined." in lines[lines.index("declined by the person:") + 1]
-    assert any(line.startswith("reviewed at c1") for line in lines)
+    assert "reviewed at c1, not this head" in lines
 
 
 def test_review_commit_is_built_once_per_head(

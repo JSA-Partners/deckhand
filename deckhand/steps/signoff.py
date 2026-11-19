@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from deckhand import gh, git, implplan, ops, quiz, review, signoff, tuicr, versions
+from deckhand.checks import KIND as CHECKS
+from deckhand.checks import passing
 from deckhand.policy import Policy
 from deckhand.records import Record
 from deckhand.step import Refusal, register
 from deckhand.steps.build import DEFAULT_BASE, StoryStep, branch_of
-from deckhand.steps.checks import KIND as CHECKS
-from deckhand.steps.checks import passing
 from deckhand.store import Store
 from deckhand.summary import parse_summary
 
@@ -117,7 +117,7 @@ class Signoff(_Located):
         status = {
             "what changed": "saved" if summary else "no change summary at this head",
             "evidence": "checks pass" if passing(at.records, sid, head) else "checks are not passing",
-            "findings": f"{len(_last_branch(at.records).get('findings', []))} in the last branch round",
+            "findings": f"{len(_last_branch(at.records, at.story['id']).get('findings', []))} in the last branch round",
             "tuicr": "built" if tuicr_record and tuicr_record.data.get("head") == head else "not built at this head",
             "quiz": "passed" if quiz.passed(at.records, sid, head) else "not passed",
         }
@@ -176,7 +176,9 @@ class Signoff(_Located):
             raise Refusal(f"{at.story['identifier']} needs its plan and a change summary at {head} first")
         base = git.merge_base(at.path, "HEAD", DEFAULT_BASE, self._runner)
         doubtful = {
-            f["path"] for f in _last_branch(at.records).get("findings", []) if f["confidence"] < review.DOUBTFUL
+            f["path"]
+            for f in _last_branch(at.records, at.story["id"]).get("findings", [])
+            if f["confidence"] < review.DOUBTFUL
         }
         diff = git.diff(at.path, base, runner=self._runner)
         hunks = tuicr.select_hunks(diff, at.policy, doubtful, plan.data, summary)
@@ -199,10 +201,8 @@ class Signoff(_Located):
         print(f"done: {' '.join(tuicr.command(base, sha))}; {note}")
 
 
-def _last_branch(records: list[Record]) -> dict:
-    prefixes = {r.subject.rsplit(":", 1)[0] for r in records if r.kind == review.KIND}
-    branch = next((p for p in prefixes if p.endswith(":branch")), None)
-    latest = review.last(review.rounds_of(records, branch)) if branch else None
+def _last_branch(records: list[Record], story: str) -> dict:
+    latest = review.last(review.counted(records, f"{story}:branch")[0])
     return latest.data | {"n": latest.subject.rsplit(":", 1)[1]} if latest else {}
 
 
@@ -235,12 +235,12 @@ def _evidence(at: Story) -> list[str]:
 
 
 def _findings(at: Story) -> list[str]:
-    last = _last_branch(at.records)
+    last = _last_branch(at.records, at.story["id"])
     if not last:
         return ["the branch review has not run"]
     lines = [f"branch round {last['n']}"]
     if last.get("head") and last["head"] != at.head:
-        lines.append(f"reviewed at {last['head']}; commits since then are covered by tuicr and the quiz")
+        lines.append(f"reviewed at {last['head']}, not this head")
     found = last.get("findings", [])
     sure = [f for f in found if f["confidence"] >= review.DOUBTFUL]
     doubtful = [f for f in found if f["confidence"] < review.DOUBTFUL]
@@ -300,14 +300,16 @@ class Merge(_Located):
         if pr is None:
             raise Refusal(f"{ref} has no open pull request")
         if pr["headRefOid"] != head:
-            self._void(sid, head, f"head moved: the pull request is at {pr['headRefOid']}")
+            if git.is_ancestor(at.clone, pr["headRefOid"], head, self._runner):
+                raise Refusal(f"the pull request is at {pr['headRefOid']}, behind {head}; push the signed head first")
+            self._void(at.story, held, f"head moved: the pull request is at {pr['headRefOid']}")
         if pr["isDraft"]:
             gh.mark_ready(pr["number"], repo, self._runner)
         start = self._clock()
         while True:
             found = gh.checks(pr["number"], repo, self._runner)
             if found.state == "fail":
-                self._void(sid, head, "checks failed: " + ", ".join(found.failing))
+                self._void(at.story, held, "checks failed: " + ", ".join(found.failing))
             if found.state == "pass":
                 break
             if self._clock() - start >= WAIT:
@@ -317,10 +319,10 @@ class Merge(_Located):
         try:
             gh.merge_pinned(pr["number"], repo, head, self._runner)
         except gh.HeadMoved:
-            self._void(sid, head, "head moved: GitHub refused the merge pinned to the signed head")
+            self._void(at.story, held, "head moved: GitHub refused the merge pinned to the signed head")
         print(f"done: merged {ref} at {head}")
 
-    def _void(self, story: str, head: str, reason: str) -> None:
-        ops.ensure_record(self._store_for_run(), story, signoff.void_record(story, head, reason))
-        # The void is recorded first so the sign-off stops being current, then refused so the hand sees it.
-        raise Refusal(f"the sign-off at {head} is void, {reason}; the story needs a new sign-off")
+    def _void(self, story: dict, sign: Record, reason: str) -> None:
+        ops.ensure_record(self._store_for_run(), story["id"], signoff.void_record(story["id"], sign, reason))
+        head = signoff.signed_head(sign)
+        raise Refusal(f"the sign-off at {head} is void, {reason}; {story['identifier']} needs a new sign-off")

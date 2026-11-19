@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, features, ops, planning, quiz, review, signoff, tiers, versions
+from deckhand import answers, features, implplan, ops, planning, quiz, review, signoff, tiers, versions
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -136,12 +136,16 @@ def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str
     return Pin(finding, round.version, [story["id"]], detail, _label(story), [_label(story)])
 
 
-def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> Pin:
+def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str, head: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
     held, _ = review.counted(records, f"{story['id']}:{stage}")
-    if not review.at_cap(held, review.declined(records)):
-        raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
+    plan = versions.held(records, implplan.PURPOSE, story["id"])
+    at = head if stage == "branch" else plan.version if plan else ""
+    if not review.at_cap(held, review.declined(records), at):
+        raise Refusal(
+            f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open or a later revision"
+        )
     latest = review.last(held)
     detail = f"{len(held)} rounds, {len(review.open_p1(latest, review.declined(records)))} P1 open"
     subject = review.cap_subject(story["id"], stage)
@@ -202,7 +206,7 @@ def pin(
     if kind == review.CAP_DECISION:
         if stage not in ("", "plan", "branch"):
             raise Refusal("--stage takes plan or branch")
-        return _cap_pin(store, feature, subject, stage or "plan")
+        return _cap_pin(store, feature, subject, stage or "plan", head)
     if kind == signoff.KIND:
         if not head:
             raise Refusal("sign-off needs the head of the story's worktree")

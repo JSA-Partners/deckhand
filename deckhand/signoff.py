@@ -4,9 +4,9 @@ import json
 from dataclasses import asdict
 
 from deckhand import quiz, review, versions
+from deckhand.checks import passing
 from deckhand.records import Record
 from deckhand.step import Refusal
-from deckhand.steps.checks import passing
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
 KIND = "sign-off"
@@ -43,12 +43,20 @@ def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSumma
     return found
 
 
+def _branch_gap(records: list[Record], story: str, head: str) -> list[str]:
+    if review.cleared(records, story, "branch", head):
+        return []
+    latest = review.last(review.counted(records, f"{story}:branch")[0])
+    if latest is not None and review.reviewed(latest) != head:
+        return [f"the branch review has not reviewed the signed head {head}; run a branch round"]
+    return ["the branch review has not stopped clean, and the person has not decided Proceed at its cap"]
+
+
 def gaps(records: list[Record], story: str, head: str) -> list[str]:
     summary = held_summary(records, story, head)
     found = [] if summary else [f"no change summary is saved at {head}"]
     found += _quiz_gap(records, story, head, summary)
-    if not review.cleared(records, story, "branch"):
-        found.append("the branch review has not stopped clean, and the person has not decided Proceed at its cap")
+    found += _branch_gap(records, story, head)
     if not passing(records, story, head):
         found.append(f"checks are not passing at {head}")
     return found
@@ -71,12 +79,13 @@ def signed_head(record: Record) -> str:
     return record.version.split(":", 1)[0]
 
 
-def void_record(story: str, head: str, reason: str) -> Record:
-    return Record(VOID, f"{story}:{head}", head, "agent:merge", {"head": head, "reason": reason})
+def void_record(story: str, sign: Record, reason: str) -> Record:
+    nonce, head = sign.data.get("nonce", ""), signed_head(sign)
+    return Record(VOID, f"{story}:{nonce}", head, "agent:merge", {"head": head, "nonce": nonce, "reason": reason})
 
 
-def voided(records: list[Record], story: str, head: str) -> Record | None:
-    return versions.held(records, VOID, f"{story}:{head}")
+def voided(records: list[Record], story: str, sign: Record) -> Record | None:
+    return versions.held(records, VOID, f"{story}:{sign.data.get('nonce', '')}")
 
 
 def current(records: list[Record], story: str, head: str) -> bool:
@@ -86,7 +95,7 @@ def current(records: list[Record], story: str, head: str) -> bool:
         and held.data.get("answer") == SIGN
         and held.version == version(records, story, head)
         and not gaps(records, story, head)
-        and voided(records, story, head) is None
+        and voided(records, story, held) is None
     )
 
 
@@ -99,7 +108,7 @@ def standing(records: list[Record], story: str, head: str) -> str | None:
     if held.data.get("answer") != SIGN:
         return f"the person answered {held.data.get('answer')}"
     at = signed_head(held)
-    void = voided(records, story, at)
+    void = voided(records, story, held)
     if void is not None:
         return f"the sign-off at {at} is void: {void.data.get('reason')}"
     if at != head:

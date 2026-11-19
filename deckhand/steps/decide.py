@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from deckhand import answers, decisions, features, git, quiz, signoff, versions
+from deckhand import answers, decisions, features, git, quiz, review, signoff, versions
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.questions import as_tool_input
@@ -83,7 +83,8 @@ class Decide:
         feature = features.open_feature(store, parsed.get("team_key", ""))
         if feature is None:
             raise Refusal("no feature is open")
-        head = self._head(store, feature, subject) if kind == signoff.KIND else ""
+        wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
+        head = self._head(store, feature, subject) if wants_head else ""
         pin = decisions.pin(
             store,
             feature,

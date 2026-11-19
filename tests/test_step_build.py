@@ -113,6 +113,17 @@ def test_push_opens_one_draft_pr(tmp_path: Path, repo: Path, capsys: pytest.Capt
     assert "https://example.test/pull/7" in capsys.readouterr().out
 
 
+def test_plan_revised_after_a_clean_round_needs_a_review(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    record_round(step, tmp_path)
+    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
+    with pytest.raises(Refusal, match="has not stopped clean"):
+        push(store, Shell(), repo)
+    record_round(step, tmp_path)
+    push(store, Shell(), repo)
+
+
 def test_push_without_commits_refuses(tmp_path: Path, repo: Path):
     store = labeled(tmp_path, repo)
     record_round(Review(store, Git(BASE), repo), tmp_path)
@@ -128,7 +139,7 @@ def test_proceed_at_the_cap_opens_the_gate(tmp_path: Path, repo: Path, state: Pa
     with pytest.raises(Refusal, match="has not stopped clean"):
         push(store, Shell(), repo)
     question = answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
-    assert [o["label"] for o in question["options"]] == ["Proceed", "Rework the plan"]
+    assert [o["label"] for o in question["options"]] == ["Proceed", "Rework"]
     assert "recommended" not in json.dumps(question).lower()
     shell = Shell()
     push(store, shell, repo)
@@ -145,7 +156,7 @@ def test_cap_decision_refuses_before_the_cap(tmp_path: Path, repo: Path):
 def test_rework_restarts_the_round_count(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
     store = labeled(tmp_path, repo)
     step = to_cap(store, tmp_path, repo)
-    answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Rework the plan")
+    answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Rework")
     submit(store, tmp_path, repo, PLAN + "- [ ] reworked\n")
     facts = shown(step, capsys, "s1", "--stage", "plan")
     assert (facts["stop"], facts["round"], facts["scoped"]) == (None, 4, False)
@@ -154,7 +165,7 @@ def test_rework_restarts_the_round_count(tmp_path: Path, repo: Path, state: Path
     with pytest.raises(Refusal, match="has not stopped clean"):
         push(store, Shell(), repo)
     round_of(step, tmp_path, 5)
-    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "unchanged"
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "clean"
     push(store, Shell(), repo)
 
 

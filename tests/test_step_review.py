@@ -153,8 +153,10 @@ def test_person_decline_through_decide(tmp_path: Path, repo: Path, state: Path, 
     assert "A step contradicts a criterion." in question["question"]
     [decision] = [r for r in store.records("s1") if r.kind == review.DECISION]
     assert (decision.subject, decision.author, decision.data["answer"]) == (finding_id(p1), "person:sess", "Decline")
-    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "clean"
+    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
+    facts = shown(step, capsys, "s1", "--stage", "plan")
+    assert (facts["stop"], facts["round"], facts["scoped"]) == (None, 2, True)
 
 
 def test_round_recorded_in_confidence_order(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
@@ -215,7 +217,6 @@ def test_clean_round_says_nothing_found(tmp_path: Path, repo: Path, capsys: pyte
     store = planned(tmp_path, repo)
     step = Review(store, Git(BASE), repo)
     record_round(step, tmp_path)
-    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
     step.context(["s1", "--stage", "plan", *TEAM])
     out = capsys.readouterr().out
     assert "Nothing found." in out
@@ -366,4 +367,5 @@ def test_scoped_round_carries_the_open_p1s(tmp_path: Path, repo: Path, state: Pa
     out = capsys.readouterr().out
     assert "re-report" in out and finding_id(p1) in out.split("re-report")[1]
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(p1)], "Decline")
-    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "clean"
+    facts = shown(step, capsys, "s1", "--stage", "plan")
+    assert (facts["round"], facts["scoped"], facts["carried"]) == (2, True, [])
