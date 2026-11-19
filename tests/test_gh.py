@@ -71,6 +71,7 @@ def rows(*pairs: tuple[str, str]) -> tuple[int, str, str]:
         (rows(("a", "fail"), ("b", "pending"), ("c", "cancel")), "fail", ["a", "c"]),
         ((8, json.dumps([{"name": "a", "bucket": "pending"}]), ""), "pending", []),
         ((1, "", "no required checks reported on the 'b' branch"), "pass", []),
+        ((1, "", "no checks reported on the 'b' branch"), "pass", []),
         ((0, "[]", ""), "pass", []),
     ],
 )

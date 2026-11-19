@@ -65,7 +65,7 @@ def checks(number: int, repo: str, runner: Runner = run) -> Checks:
         raise GhError(error.command, error.code, error.stderr_tail) from None
     rows = _rows(done.stdout)
     if rows is None:
-        if "no required checks" in done.stderr.lower():
+        if any(none in done.stderr.lower() for none in ("no required checks", "no checks reported")):
             return Checks("pass")
         raise GhError("gh pr", done.returncode, stderr_tail(done.stderr))
     failing = [r["name"] for r in rows if r["bucket"] in ("fail", "cancel")]
