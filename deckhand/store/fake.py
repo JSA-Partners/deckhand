@@ -3,11 +3,14 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
-from deckhand.records import Record
+from deckhand.records import Record, iso
 from deckhand.ref import Ref
 from deckhand.store import Store
 
@@ -21,8 +24,14 @@ class WriteFailed(Exception):
     pass
 
 
+def _clock() -> str:
+    return iso(time.time_ns() // 1_000_000)
+
+
 class FakeStore(Store):
-    def __init__(self) -> None:
+    def __init__(self, now: Callable[[], str] = _clock, viewer: str = "viewer-1") -> None:
+        self._now = now
+        self._viewer = viewer
         self._issues: dict[str, dict[str, Any]] = {}
         self._projects: dict[str, dict[str, Any]] = {}
         self._documents: dict[str, dict[str, Any]] = {}
@@ -88,6 +97,8 @@ class FakeStore(Store):
             "description": description,
             "project": project,
             "labels": list(labels),
+            "assignee": None,
+            "assignee_name": None,
             "state": "Backlog",
         }
         self._wrote("create_issue", id)
@@ -128,22 +139,37 @@ class FakeStore(Store):
         return sorted(self._repositories.get(team, []))
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
-        self._documents[id] = {"id": id, "parent": parent, "title": title, "body": body}
+        self._documents[id] = {"id": id, "parent": parent, "title": title, "body": body, "at": self._now()}
         self._wrote("put_document", id)
 
     def document(self, id: str) -> dict | None:
         found = self._documents.get(id)
-        return dict(found) if found else None
+        return {key: value for key, value in found.items() if key != "at"} if found else None
+
+    def project_documents(self, project: str) -> list[dict]:
+        held = [d for d in self._documents.values() if d["parent"] == project]
+        return [{"id": d["id"], "title": d["title"], "at": d["at"]} for d in sorted(held, key=lambda d: d["id"])]
 
     def put_record(self, issue: str, record: Record) -> None:
         url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"
-        attachment = {"url": url, "metadata": {"record": record.to_json()}}
+        attachment = {"url": url, "metadata": {"record": record.to_json()}, "updatedAt": self._now()}
         self._attachments.setdefault(issue, {})[url] = attachment
         self._wrote("put_record", issue, record.kind, record.subject)
 
     def records(self, issue: str) -> list[Record]:
         held = self._attachments.get(issue, {})
-        return [Record.from_json(held[url]["metadata"]["record"]) for url in sorted(held)]
+        return [
+            replace(Record.from_json(held[url]["metadata"]["record"]), at=held[url]["updatedAt"])
+            for url in sorted(held)
+        ]
+
+    def assign(self, issue: str, user: str) -> None:
+        self._issues[issue]["assignee"] = user
+        self._issues[issue]["assignee_name"] = user
+        self._wrote("assign", issue, user)
+
+    def viewer(self) -> dict:
+        return {"id": self._viewer, "name": self._viewer}
 
     def relate(self, blocker: str, blocked: str) -> None:
         self._relations.append([blocker, blocked])

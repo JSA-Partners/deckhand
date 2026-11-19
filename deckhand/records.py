@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 RECORD_SCHEMA = 1
@@ -17,6 +18,7 @@ class Record:
     version: str
     author: str
     data: dict[str, Any]
+    at: str = field(default="", compare=False)
 
     def to_json(self) -> str:
         payload = {"schema": RECORD_SCHEMA, **{name: getattr(self, name) for name in _FIELDS}}
@@ -40,3 +42,8 @@ class Record:
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def iso(ms: int) -> str:
+    moment = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(milliseconds=ms)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"

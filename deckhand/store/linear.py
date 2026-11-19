@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from deckhand.linear import queries
@@ -36,9 +37,25 @@ def _project(node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _assignee(node: dict[str, Any]) -> dict[str, Any]:
+    owner = node["assignee"]
+    return {"assignee": owner["id"] if owner else None, "assignee_name": owner["name"] if owner else None}
+
+
 class LinearStore(Store):
     def __init__(self, client: LinearClient) -> None:
         self._client = client
+
+    def _paged(self, query: str, variables: dict[str, Any], path: tuple[str, str]) -> list[dict[str, Any]]:
+        entity, connection = path
+        nodes: list[dict[str, Any]] = []
+        after = None
+        while True:
+            page = self._client.query(query, {**variables, "after": after})[entity][connection]
+            nodes += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                return nodes
+            after = page["pageInfo"]["endCursor"]
 
     def _team_id(self, key: str) -> str:
         nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
@@ -120,6 +137,7 @@ class LinearStore(Store):
             "description": node["description"],
             "project": node["project"]["id"] if node["project"] else None,
             "labels": [label["name"] for label in _nodes(node["labels"], id, "labels")],
+            **_assignee(node),
         }
 
     def issue_by_ref(self, ref: Ref) -> dict | None:
@@ -182,17 +200,16 @@ class LinearStore(Store):
 
     def records(self, issue: str) -> list[Record]:
         try:
-            data = self._client.query(queries.ISSUE_ATTACHMENTS, {"id": issue})
+            attachments = self._paged(queries.ISSUE_ATTACHMENTS, {"id": issue}, ("issue", "attachments"))
         except LinearError as error:
             if _missing(error):
                 return []
             raise
-        attachments = _nodes(data["issue"]["attachments"], issue, "attachments")
         held = [n for n in attachments if n["url"].startswith(RECORD_URL)]
         found = []
         for node in sorted(held, key=lambda n: n["url"]):
             try:
-                found.append(Record.from_json(node["metadata"]["record"]))
+                found.append(replace(Record.from_json(node["metadata"]["record"]), at=node["updatedAt"]))
             except (KeyError, TypeError, ValueError) as error:
                 raise Refusal(f"{issue} holds a malformed record at {node['url']}: {error}") from None
         return found
@@ -249,7 +266,7 @@ class LinearStore(Store):
 
     def project_issues(self, project: str) -> list[dict]:
         try:
-            node = self._client.query(queries.PROJECT_ISSUES, {"id": project})["project"]
+            nodes = self._paged(queries.PROJECT_ISSUES, {"id": project}, ("project", "issues"))
         except LinearError as error:
             if _missing(error):
                 return []
@@ -265,7 +282,24 @@ class LinearStore(Store):
                 "description": n["description"],
                 "project": project,
                 "labels": [label["name"] for label in _nodes(n["labels"], n["id"], "labels")],
+                **_assignee(n),
                 "state": n["state"]["name"],
             }
-            for n in _nodes(node["issues"], project, "issues")
+            for n in nodes
         ]
+
+    def project_documents(self, project: str) -> list[dict]:
+        try:
+            nodes = self._paged(queries.PROJECT_DOCUMENTS, {"id": project}, ("project", "documents"))
+        except LinearError as error:
+            if _missing(error):
+                return []
+            raise
+        return [{"id": n["id"], "title": n["title"], "at": n["updatedAt"]} for n in nodes]
+
+    def assign(self, issue: str, user: str) -> None:
+        self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": {"assigneeId": user}})
+
+    def viewer(self) -> dict:
+        node = self._client.query(queries.VIEWER, {})["viewer"]
+        return {"id": node["id"], "name": node["name"]}

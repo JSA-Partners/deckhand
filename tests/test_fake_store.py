@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -216,3 +217,54 @@ def test_project_issues_lists_members_with_state() -> None:
     assert {k: v for k, v in members[1].items() if k != "state"} == store.issue("i2")
     assert "state" not in store.issue("i2")
     assert store.project_issues("none") == []
+
+
+def test_records_carry_the_time_of_the_write() -> None:
+    clock = iter(["2026-11-19T10:00:00.000Z", "2026-11-19T10:05:00.000Z"])
+    store = FakeStore(now=lambda: next(clock))
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    assert store.records("i1")[0].at == "2026-11-19T10:00:00.000Z"
+    store.put_record("i1", approval("2"))
+    assert store.records("i1")[0].at == "2026-11-19T10:05:00.000Z"
+
+
+def test_the_default_clock_writes_linears_form() -> None:
+    store = FakeStore()
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", store.records("i1")[0].at)
+
+
+def test_assign_round_trip() -> None:
+    store = FakeStore()
+    make_issue(store)
+    assert store.issue("i1")["assignee"] is None
+    assert store.issue("i1")["assignee_name"] is None
+    store.assign("i1", "user-2")
+    assert store.issue("i1")["assignee"] == "user-2"
+    assert store.writes[-1] == ("assign", "i1", "user-2")
+
+
+def test_assigned_issue_shows_in_project_issues() -> None:
+    store = FakeStore()
+    store.create_issue("i1", "ACME", "T", "", "p1", [])
+    store.assign("i1", "user-2")
+    assert store.project_issues("p1")[0]["assignee"] == "user-2"
+
+
+def test_viewer() -> None:
+    assert FakeStore(viewer="user-9").viewer()["id"] == "user-9"
+
+
+def test_project_documents_listed() -> None:
+    clock = iter(["2026-11-19T10:00:00.000Z", "2026-11-19T11:00:00.000Z", "2026-11-19T12:00:00.000Z"])
+    store = FakeStore(now=lambda: next(clock))
+    store.put_document("d2", "p1", "Two", "b")
+    store.put_document("d1", "p1", "One", "b")
+    store.put_document("d3", "i1", "Other", "b")
+    assert store.project_documents("p1") == [
+        {"id": "d1", "title": "One", "at": "2026-11-19T11:00:00.000Z"},
+        {"id": "d2", "title": "Two", "at": "2026-11-19T10:00:00.000Z"},
+    ]
+    assert "at" not in store.document("d1")
