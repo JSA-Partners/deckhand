@@ -464,35 +464,88 @@ def test_hand_role_ignores_working_directory_clone(tmp_path: Path, repo: Path, m
     assert Build(store, Shell(), tmp_path / "elsewhere").locate("s1", "ACME").clone == repo
 
 
-def nested(worktree: Path, tmp_path: Path) -> Path:
+def nested(worktree: Path, tmp_path: Path, name: str = "n", tracked: bool = False) -> Path:
     marker = tmp_path / "marker"
-    (worktree / "hidden").mkdir()
-    sh(worktree, "init", "-q", "--separate-git-dir", str(worktree / "hidden" / "store"), "n")
-    inner = worktree / "n"
+    sh(worktree, "init", "-q", "--separate-git-dir", str(tmp_path / "store"), name)
+    inner = worktree / name
     (inner / "f").write_text("a\n")
     sh(inner, "add", "f")
     sh(inner, "commit", "-qm", "chore: inner")
     sh(inner, "config", "filter.x.clean", f"touch {marker}; cat")
     (inner / ".gitattributes").write_text("* filter=x\n")
-    (worktree / ".gitmodules").write_text('[submodule "n"]\n\tpath = n\n\tignore = none\n')
+    if tracked:
+        (worktree / ".gitmodules").write_text(f'[submodule "{name}"]\n\tpath = {name}\n\tignore = none\n')
+        sh(worktree, "add", name, ".gitmodules")
+        sh(worktree, "commit", "-qm", "chore: track n")
+    marker.unlink(missing_ok=True)
+    (inner / "f").write_text("b\n")
     return marker
+
+
+def swapping(moved: Path, aside: Path, stand_in: bool) -> git.Runner:
+    def hide() -> None:
+        if not aside.exists():
+            moved.rename(aside)
+            if stand_in:
+                moved.write_text("stand-in\n")
+
+    def show() -> None:
+        if aside.exists():
+            if stand_in:
+                moved.unlink()
+            aside.rename(moved)
+
+    def runner(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+        # The hand reshapes its worktree between git calls: harmless for every look, armed for git add.
+        (show if argv[:2] == ["git", "add"] else hide)()
+        return git.run(argv, cwd, stdin)
+
+    return runner
 
 
 def test_a_nested_repository_runs_nothing(tmp_path: Path, repo: Path, monkeypatch):
     store, worktree = real(tmp_path, repo, monkeypatch)
-    marker = nested(worktree, tmp_path)
-    sh(worktree, "add", "n", ".gitmodules")
-    sh(worktree, "commit", "-qm", "chore: track n")
-    marker.unlink(missing_ok=True)
-    (worktree / "n" / "f").write_text("b\n")
+    marker = nested(worktree, tmp_path, tracked=True)
     (worktree / "a.txt").write_text("two\n")
-    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
-        commit(store, repo, tmp_path, "feat: change a\n")
+    commit(store, repo, tmp_path, "feat: change a\n")
+    (worktree / "a.txt").write_text("three\n")
     with pytest.raises(Refusal, match="uncommitted"):
         Build(store, git.run, repo).apply(["s1", "sync", *TEAM])
     Commit(cwd=worktree).context([])
     assert git.unmerged(worktree) == []
     assert not marker.exists()
+    assert sh(worktree, "show", "--name-only", "--format=", "HEAD").splitlines() == ["a.txt"]
+
+
+@pytest.mark.parametrize(
+    ("name", "tracked", "moved", "stand_in"),
+    [
+        ("n", True, "n/.git", False),
+        ("n", False, "n/.git", False),
+        ("n", True, "n", True),
+        ("d/n", True, "d", True),
+    ],
+    ids=["gitfile-hidden", "untracked-gitfile-hidden", "gitlink-as-file", "parent-as-file"],
+)
+def test_a_nested_repository_reshaped_between_git_calls_runs_nothing(
+    tmp_path: Path, repo: Path, monkeypatch, name: str, tracked: bool, moved: str, stand_in: bool
+):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    marker = nested(worktree, tmp_path, name, tracked)
+    (worktree / "a.txt").write_text("two\n")
+    commit(store, repo, tmp_path, "feat: change a\n", swapping(worktree / moved, tmp_path / "aside", stand_in))
+    assert not marker.exists()
+    assert sh(worktree, "show", "--name-only", "--format=", "HEAD").splitlines() == ["a.txt"]
+
+
+def test_a_file_swapped_for_a_repository_is_never_staged(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    nested(worktree, tmp_path)
+    (worktree / "a.txt").write_text("two\n")
+    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
+        commit(store, repo, tmp_path, "feat: change a\n", swapping(worktree / "n", tmp_path / "aside", True))
+    assert "160000" not in sh(worktree, "ls-files", "-s")
+    assert sh(worktree, "log", "-1", "--format=%s") == "chore: base"
 
 
 def test_a_submodule_the_clone_holds_still_commits(tmp_path: Path, repo: Path, monkeypatch):
@@ -502,6 +555,7 @@ def test_a_submodule_the_clone_holds_still_commits(tmp_path: Path, repo: Path, m
     (worktree / "a.txt").write_text("two\n")
     commit(store, repo, tmp_path, "feat: change a\n")
     assert sh(worktree, "log", "-1", "--format=%s") == "feat: change a"
+    assert sh(worktree, "show", "--name-only", "--format=", "HEAD").splitlines() == ["a.txt"]
 
 
 def test_commit_refuses_a_gitlink(tmp_path: Path, repo: Path, monkeypatch):

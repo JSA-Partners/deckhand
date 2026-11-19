@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import fcntl
 import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from deckhand import config
@@ -18,6 +20,7 @@ UNHOOKED = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
 # Without it, status and worktree diffs run git inside a nested repository a hand configured.
 UNNESTED = "--ignore-submodules=all"
 GITLINK = "160000"
+NESTED = "a commit takes no nested repository: {}; remove it or list it in .gitignore"
 
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
@@ -146,32 +149,71 @@ def merging(worktree: Path, runner: Runner = run) -> bool:
     return runner(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], worktree, None).returncode == 0
 
 
-def nested_repositories(worktree: Path, runner: Runner = run) -> list[str]:
-    common = Path(call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], worktree, runner).strip())
-    untracked = call(["git", "ls-files", "--others", "--exclude-standard", "-z"], worktree, runner).split("\0")
-    found = [path.rstrip("/") for path in untracked if path.endswith("/")]
-    for entry in call(["git", "ls-files", "-s", "-z"], worktree, runner).split("\0"):
-        meta, _, path = entry.partition("\t")
-        if meta.startswith(f"{GITLINK} ") and not _owned_by(worktree / path, common.resolve()):
-            found.append(path)
-    return found
-
-
-def _owned_by(submodule: Path, common: Path) -> bool:
-    gitfile = submodule / ".git"
-    if submodule.is_symlink() or gitfile.is_symlink():
-        return False
-    if not gitfile.exists():
-        return True
-    if not gitfile.is_file():
-        return False
-    text = gitfile.read_text(encoding="utf-8", errors="replace").strip()
-    return text.startswith("gitdir: ") and (submodule / text[len("gitdir: ") :]).resolve().is_relative_to(common)
-
-
 def commit_all(worktree: Path, message: str, runner: Runner = run) -> None:
-    call(["git", "add", "-A"], worktree, runner)
-    call(["git", "commit", "-F", "-"], worktree, runner, stdin=message)
+    # A second commit must never stage while the first holds a gitlink it is about to refuse.
+    with _locked(worktree, runner):
+        before = _index(worktree, runner)
+        _stage(worktree, [path for path, entries in before.items() if _links(entries)], runner)
+        after = _index(worktree, runner)
+        added = sorted(path for path, entries in after.items() if _links(entries) and entries != before.get(path))
+        if added:
+            _restore(worktree, added, before, after, runner)
+            raise Refusal(NESTED.format(", ".join(added)))
+        call(["git", "commit", "-F", "-"], worktree, runner, stdin=message)
+
+
+def _stage(worktree: Path, links: list[str], runner: Runner) -> None:
+    argv = ["git", "status", "--porcelain=v2", "-z", "--no-renames", "--untracked-files=all", UNNESTED]
+    paths, nested = [], []
+    for record in call(argv, worktree, runner).split("\0"):
+        if record.startswith("1 "):
+            paths.append(record.split(" ", 8)[8])
+        elif record.startswith("u "):
+            paths.append(record.split(" ", 10)[10])
+        elif record.startswith("? "):
+            (nested if record.endswith("/") else paths).append(record[2:].rstrip("/"))
+    if nested:
+        raise Refusal(NESTED.format(", ".join(nested)))
+    # A pathspec that reaches an index gitlink makes git add run status inside that repository.
+    chosen = [path for path in paths if not any(_overlaps(path, link) for link in links)]
+    if chosen:
+        pathspecs = "".join(f":(literal){path}\0" for path in chosen)
+        call(["git", "add", "--pathspec-from-file=-", "--pathspec-file-nul"], worktree, runner, stdin=pathspecs)
+
+
+def _overlaps(path: str, link: str) -> bool:
+    return path == link or path.startswith(f"{link}/") or link.startswith(f"{path}/")
+
+
+def _index(worktree: Path, runner: Runner) -> dict[str, list[str]]:
+    entries: dict[str, list[str]] = {}
+    for record in call(["git", "ls-files", "-s", "-z"], worktree, runner).split("\0"):
+        meta, _, path = record.partition("\t")
+        if path:
+            entries.setdefault(path, []).append(meta)
+    return entries
+
+
+def _links(entries: list[str]) -> bool:
+    return any(meta.startswith(f"{GITLINK} ") for meta in entries)
+
+
+def _restore(
+    worktree: Path, paths: list[str], before: dict[str, list[str]], after: dict[str, list[str]], runner: Runner
+) -> None:
+    lines = []
+    for path in paths:
+        zero = "0" * len(after[path][0].split()[1])
+        lines += [f"0 {zero}\t{path}", *(f"{meta}\t{path}" for meta in before.get(path, []))]
+    call(["git", "update-index", "-z", "--index-info"], worktree, runner, stdin="".join(f"{line}\0" for line in lines))
+
+
+@contextmanager
+def _locked(worktree: Path, runner: Runner) -> Iterator[None]:
+    gitdir = Path(call(["git", "rev-parse", "--path-format=absolute", "--git-dir"], worktree, runner).strip())
+    with (gitdir / "deckhand-commit.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def merge_from(worktree: Path, base: str, runner: Runner = run) -> list[str]:

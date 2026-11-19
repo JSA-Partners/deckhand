@@ -206,11 +206,6 @@ class Build(StoryStep):
         marked = [name for name in git.unmerged(path, self._runner) if conflicted(path, name)]
         if marked:
             raise Refusal(f"conflict markers remain in {', '.join(marked)}; resolve them, then commit again")
-        nested = git.nested_repositories(path, self._runner)
-        if nested:
-            raise Refusal(
-                f"a commit takes no nested repository: {', '.join(nested)}; remove it or list it in .gitignore"
-            )
         git.commit_all(path, message, self._runner)
         print(f"done: committed {git.head(path, self._runner)} on {at.story['identifier']}")
 
