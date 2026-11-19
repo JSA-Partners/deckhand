@@ -263,3 +263,22 @@ def test_apply_header_unfit_token_prints_a_fixed_line_without_it(registry, capsy
     captured = capsys.readouterr()
     assert SECRET not in captured.out + captured.err
     assert captured.err == "deckhand: credentials: the credential cannot be sent as a header\n"
+
+
+def test_context_git_error_prints_its_reason_at_exit_0(registry, capsys):
+    from deckhand.git import GitError, stderr_tail
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise GitError("git diff", 128, stderr_tail(f"fatal: bad revision\nremote: {SECRET}"))
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert (
+        captured.out == "deckhand: probe context: git diff failed (exit 128): fatal: bad revision\nremote: [redacted]\n"
+    )

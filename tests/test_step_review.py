@@ -63,8 +63,8 @@ def checked(store: FakeStore, head: str, story: str = "s1") -> None:
     store.put_record(story, Record("checks", story, head, "agent:checks", {"head": head, "passed": True}))
 
 
-def finding_id(item: dict) -> str:
-    return review.parse_findings(json.dumps([item]))[0].id
+def finding_id(item: dict, stage: str = "plan") -> str:
+    return review.finding_id(review.parse_findings(json.dumps([item]))[0], stage)
 
 
 def submit(store: FakeStore, tmp_path: Path, repo: Path, text: str = PLAN) -> None:
@@ -258,7 +258,8 @@ def test_branch_revision_is_scoped_to_the_new_commits(tmp_path: Path, repo: Path
     git = BranchGit("c2", {"base1...HEAD": "+one\n+two\n", "c1..HEAD": "+two\n"})
     checked(store, "c2")
     found = shown(Review(store, git, repo), capsys, "s1", "--stage", "branch")
-    assert (found["round"], found["scoped"], found["diff"]) == (2, True, "+two\n")
+    assert (found["round"], found["scoped"], found["diff"]) == (2, True, None)
+    assert Path(found["target"]).read_text() == "+two\n"
     assert ["git", "diff", "c1..HEAD"] in git.argvs
 
 
@@ -280,11 +281,11 @@ def test_feature_review_p1_is_an_approval_gap(tmp_path: Path, state: Path, capsy
     p1 = raw(lens="contract", severity="P1", summary="Receipts read a field orders never write.")
     record_round(step, tmp_path, p1)
     assert [r.subject for r in rounds(store, "s2", P1)] == [f"{P1}:feature:1"]
-    gap = f"the feature review holds an open P1 {finding_id(p1)}: Receipts read a field orders never write."
+    gap = f"the feature review holds an open P1 {finding_id(p1, 'feature')}: Receipts read a field orders never write."
     assert features.approval_gaps(store, load(store)) == [gap]
     with pytest.raises(Refusal, match="not ready for approval"):
         Decide(store).context(["feature-approval", P1, *TEAM])
-    answer(state, Decide(store), capsys, ["finding", "ACME-2", "--finding", finding_id(p1)], "Decline")
+    answer(state, Decide(store), capsys, ["finding", "ACME-2", "--finding", finding_id(p1, "feature")], "Decline")
     assert features.approval_gaps(store, load(store)) == []
 
 
@@ -342,6 +343,10 @@ def test_feature_review_is_mandatory_until_a_round_runs(tmp_path: Path):
     assert features.approval_gaps(store, load(store)) == []
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
+    assert features.approval_gaps(store, load(store)) == [
+        "the feature review has not reviewed the current contract and stories; run a feature round"
+    ]
+    record_round(FeatureReview(store), tmp_path)
     assert features.approval_gaps(store, load(store)) == []
 
 
@@ -392,7 +397,7 @@ def test_branch_review_runs_from_the_clone_in_the_story_worktree(
     checked(store, "c1")
     git = BranchGit("c1", {"base1...HEAD": "+one\n"})
     found = shown(Review(store, git, repo), capsys, "s1", "--stage", "branch")
-    assert (found["round"], found["diff"]) == (1, "+one\n")
+    assert (found["round"], found["diff"], Path(found["target"]).read_text()) == (1, None, "+one\n")
     assert {cwd for _, cwd in git.calls} == {path}
 
 

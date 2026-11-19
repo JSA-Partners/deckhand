@@ -17,6 +17,7 @@ from tests.test_step_review import (
     PLAN,
     TEAM,
     answer,
+    finding_id,
     planned,
     raw,
     record_round,
@@ -246,3 +247,18 @@ def test_push_without_a_worktree_record_refuses(tmp_path: Path, repo: Path):
     record_round(Review(store, Git(BASE), repo), tmp_path)
     with pytest.raises(Refusal, match="has no worktree"):
         push(store, Shell(), repo)
+
+
+def test_push_waits_for_the_person_on_a_delivery_finding(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    delivery = raw(changes_delivery=True)
+    record_round(Review(store, Git(BASE), repo), tmp_path, delivery)
+    shell = Shell()
+    with pytest.raises(Refusal, match=f"{finding_id(delivery)} changes what the story delivers"):
+        push(store, shell, repo)
+    assert shell.ran("git", "push") == []
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(delivery)], "Accept")
+    push(store, shell, repo)
+    assert len(shell.ran("git", "push")) == 1

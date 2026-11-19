@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from deckhand import versions
+from deckhand import review, versions
 from deckhand.questions import MAX_OPTIONS, MIN_OPTIONS, RECOMMENDED
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
@@ -118,7 +118,7 @@ def _graded(records: list[Record], story: str, n: int) -> bool | None:
     if found is None or not 1 <= n <= len(found.data.get("items", [])):
         return None
     answer = versions.held(records, KIND, subject(story, n))
-    if answer is None or answer.version != found.version:
+    if answer is None or answer.version != found.version or not answer.author.startswith(review.PERSON):
         return None
     return answer.data.get("correct") is True
 

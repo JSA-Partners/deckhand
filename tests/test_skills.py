@@ -96,3 +96,12 @@ def test_step_skill_commands_parse_as_written(name: str) -> None:
         if known is not None:
             for word in (w for w in words if w.islower()):
                 assert word in known, f"deckhand {' '.join(tokens)}: {word}"
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.parent.name)
+def test_a_skill_that_names_deckhand_commands_may_run_them(path: Path) -> None:
+    fields, body = split(path)
+    if not named_commands(body):
+        return
+    allowed = fields["allowed-tools"].split()
+    assert "Bash" in allowed or "Bash(deckhand *)" in fields["allowed-tools"]

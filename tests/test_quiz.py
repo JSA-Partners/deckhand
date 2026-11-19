@@ -269,3 +269,11 @@ def test_context_lists_the_size_and_open_items(tmp_path: Path, repo: Path, capsy
     assert (facts["head"], facts["base"], facts["open"], facts["quiz_head"]) == ("c2", 0, [1], "c2")
     assert facts["worktree"] == str(repo / ".worktrees" / BRANCH)
     assert facts["summary_shape"] == SUMMARY_SHAPE
+
+
+def test_only_a_person_answer_grades_an_item():
+    held = quiz.set_record("s1", "c2", [quiz.Item(**item())], "digest", 1)
+    by_agent = Record(quiz.KIND, quiz.subject("s1", 1), held.version, "agent:quiz", {"correct": True})
+    assert quiz.open_items([held, by_agent], "s1") == [1]
+    by_person = Record(quiz.KIND, quiz.subject("s1", 1), held.version, "person:pat", {"correct": True})
+    assert quiz.open_items([held, by_person], "s1") == []

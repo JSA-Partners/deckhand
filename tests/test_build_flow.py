@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import features, quiz, signoff
+from deckhand import features, quiz, review, signoff
 from deckhand.features import Phase
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
@@ -76,14 +76,14 @@ class Hand:
         [create] = self.world.ran("gh", "pr", "create")
         assert "--draft" in create and create[create.index("--head") + 1] == BRANCH
 
-    def check_and_review_branch(self) -> None:
+    def check_and_review_branch(self, *items: dict) -> None:
         commands = Commands()
         Checks(self.store, self.world, self.repo, commands).apply(["s1", *TEAM])
         assert commands.ran == []
         step = self.review()
         facts = shown(step, self.capsys, "s1", "--stage", "branch")
         assert (facts["round"], facts["scoped"], facts["stop"]) == (1, False, None)
-        record_round(step, self.tmp, stage="branch")
+        record_round(step, self.tmp, *items, stage="branch")
         assert shown(step, self.capsys, "s1", "--stage", "branch")["stop"] == "clean"
 
     def summarize_and_quiz(self) -> None:
@@ -93,7 +93,7 @@ class Hand:
         self.capsys.readouterr()
         Quiz(self.store, self.world, self.repo).context(["s1", *TEAM, "--json"])
         sized = json.loads(self.capsys.readouterr().out)
-        assert (sized["tier"], sized["base"], sized["head"]) == (0, 0, "c2")
+        assert (sized["tier"], sized["base"], sized["head"]) == (0, 0, self.world.head)
         written = self.tmp / "quiz.json"
         written.write_text(json.dumps([item(), item(question="Another?")]))
         with pytest.raises(Refusal, match="its size by tier and new_here is 1"):
@@ -110,22 +110,25 @@ class Hand:
         again = ask(step, self.capsys)
         assert again["where"] == "src/queue.py:12" and again["code"]
         reply(self.state, step, again, "The idempotency key")
-        assert quiz.passed(self.store.records("s1"), "s1", "c2")
+        assert quiz.passed(self.store.records("s1"), "s1", self.world.head)
 
     def sign_off(self) -> None:
         Signoff(self.store, self.world, self.repo).apply(["s1", "review", *TEAM])
         assert len(self.world.ran("git", "commit")) == 1
         question = answer(self.state, self.decide(), self.capsys, ["sign-off", "ACME-1"], "Sign off")
         assert [o["label"] for o in question["options"]] == ["Sign off", "Not yet"]
-        assert signoff.current(self.store.records("s1"), "s1", "c2")
+        assert signoff.current(self.store.records("s1"), "s1", self.world.head)
+
+    def signed_at_head(self) -> None:
+        self.summarize_and_quiz()
+        self.pass_quiz()
+        self.sign_off()
 
     def through_sign_off(self) -> None:
         assert features.phase(load(self.store)) is Phase.BUILDING
         self.plan_and_push()
         self.check_and_review_branch()
-        self.summarize_and_quiz()
-        self.pass_quiz()
-        self.sign_off()
+        self.signed_at_head()
 
     def merge(self, clock: Clock | None = None) -> None:
         clock = clock or Clock()
@@ -164,3 +167,51 @@ def test_a_head_that_moves_after_sign_off_voids_it(
     with pytest.raises(Refusal, match="no current sign-off"):
         hand.merge()
     assert hand.world.ran("gh", "pr", "merge") == []
+
+
+def test_a_local_commit_after_sign_off_voids_it(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    hand = Hand(tmp_path, repo, state, capsys)
+    hand.through_sign_off()
+    hand.world.head = "c3"
+    with pytest.raises(Refusal, match="void, head moved: the worktree is at c3"):
+        hand.merge()
+    assert hand.world.ran("gh", "pr", "merge") == [] and hand.world.ran("gh", "pr", "ready") == []
+    [void] = voids(hand.store)
+    assert void.data["head"] == "c2"
+    assert not signoff.current(hand.store.records("s1"), "s1", "c2")
+
+
+def test_an_identical_diff_at_a_new_head_carries_the_review_forward(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    hand = Hand(tmp_path, repo, state, capsys)
+    hand.plan_and_push()
+    hand.check_and_review_branch(raw(severity="P2"))
+    hand.world.head = "c3"
+    Checks(hand.store, hand.world, hand.repo, Commands()).apply(["s1", *TEAM])
+    step = hand.review()
+    facts = shown(step, capsys, "s1", "--stage", "branch")
+    assert (facts["stop"], facts["round"], facts["lenses"]) == ("carry", 2, [])
+    capsys.readouterr()
+    step.context(["s1", "--stage", "branch", *TEAM])
+    text = capsys.readouterr().out
+    assert f"target_hash: {facts['target_hash']}" in text and "no --findings" in text
+    with pytest.raises(Refusal, match="carries the last round forward"):
+        record_round(step, tmp_path, raw(severity="P1"), stage="branch")
+    step.apply(["s1", "round", "--stage", "branch", *TEAM, "--target", facts["target_hash"]])
+    first, carried = branch_rounds(hand.store)
+    assert (carried.subject, carried.data["head"], carried.data["carry"]) == ("s1:branch:2", "c3", True)
+    assert carried.data["findings"] == first.data["findings"] and len(first.data["findings"]) == 1
+    assert shown(step, capsys, "s1", "--stage", "branch")["stop"] == "clean"
+    hand.signed_at_head()
+    hand.world.pr_head = "c3"
+    hand.merge()
+    [merged] = hand.world.ran("gh", "pr", "merge")
+    assert merged[-2:] == ["--match-head-commit", "c3"]
+
+
+def branch_rounds(store) -> list:
+    found = [r for r in store.records("s1") if r.kind == review.KIND and r.subject.startswith("s1:branch:")]
+    return sorted(found, key=lambda r: r.subject)

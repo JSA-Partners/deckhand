@@ -126,7 +126,7 @@ def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str
     story = features.story(store, feature, ref)
     found = review.locate(feature.records.get(story["id"], []), finding)
     if found is None:
-        raise Refusal(f"{finding} is not a finding of the last review round on {story['identifier']}")
+        raise Refusal(f"{finding} is not a finding of any review round on {story['identifier']}")
     round, item = found
     detail = f"{item['severity']} {item['lens']} {item['path']}:{item['line']} {item['summary']}"
     if round.subject.startswith(f"{feature.project['id']}:feature:"):

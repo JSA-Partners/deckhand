@@ -22,9 +22,8 @@ way, a decision and the alternative rejected, a recipe for a recurring task, a r
 
 Destination, by reach: `docs/claude/<topic>.md` for this repository, one file per topic, integrated
 rather than appended as a dated entry, a new topic file only when none fits; memory for something
-true across repositories; `CLAUDE.md` only for the rare rule that must load every session. If
-`docs/claude/` is missing, confirm where to write before creating it.
+true across repositories; `CLAUDE.md` only for the rare rule that must load every session.
 
-When unsure where a learning belongs, ask. A story's hand has no one to ask: it writes to
+When unsure where a learning belongs, or `docs/claude/` is missing, ask. A story's hand has no one to ask: it writes to
 `docs/claude/` and lists each doubt as a line of a Docs intent in the change summary. List the
 files touched and stop.

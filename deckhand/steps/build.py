@@ -144,6 +144,9 @@ class Build(StoryStep):
                 f"the plan review of {story['identifier']} has not stopped clean; finish it,"
                 " or at the cap let the person decide: decide context review-cap"
             )
+        undecided = review.delivery_gaps(records, story["id"], "plan", story["identifier"])
+        if undecided:
+            raise Refusal("; ".join(undecided))
         branch = branch_of(records, story)
         path = git.worktree_path(clone, branch) if branch else None
         if branch is None or path is None or not path.is_dir():

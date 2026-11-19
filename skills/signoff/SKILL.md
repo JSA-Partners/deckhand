@@ -5,7 +5,7 @@ arguments: story team_key
 argument-hint: "<story> <team-key>"
 effort: high
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Read Grep Glob AskUserQuestion
+allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(deckhand *) Read Grep Glob AskUserQuestion
 ---
 
 # Sign-off $story

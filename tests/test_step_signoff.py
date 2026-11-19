@@ -7,13 +7,17 @@ from pathlib import Path
 import pytest
 
 from deckhand import review, signoff
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
+from deckhand.steps.review import Review
 from deckhand.steps.signoff import Merge, Signoff
 from deckhand.store.fake import FakeStore
+from tests.test_implplan import BASE, Git
 from tests.test_quiz import ask, decide, item, reply, submit, summary
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
-from tests.test_step_review import TEAM, answer, checked, raw
+from tests.test_step_review import PLAN, TEAM, answer, checked, raw, record_round
+from tests.test_step_review import submit as submit_plan
 
 __all__ = ["repo", "state"]
 
@@ -70,8 +74,21 @@ def save_summary(store: FakeStore, tmp_path: Path, repo: Path, made: dict | None
     Signoff(store, Shell(), repo).apply(["s1", "summary", "--summary", str(path), *TEAM])
 
 
-def ready(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> FakeStore:
+def built(store: FakeStore, head: str = "c2") -> None:
+    data = {"head": head, "base": "c1", "sha": None, "hunks": []}
+    store.put_record("s1", Record(signoff.TUICR, "s1", head, "agent:signoff", data))
+
+
+def signable(tmp_path: Path, repo: Path, tuicr: bool = True) -> FakeStore:
     store = labeled(tmp_path, repo)
+    record_round(Review(store, Git(BASE), repo), tmp_path)
+    if tuicr:
+        built(store)
+    return store
+
+
+def ready(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], tuicr: bool = True) -> FakeStore:
+    store = signable(tmp_path, repo, tuicr)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     step = decide(store, repo)
@@ -182,7 +199,7 @@ def test_overview_without_a_worktree_lists_it_as_missing(
 def test_commits_after_the_last_branch_round_need_a_review(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
-    store = labeled(tmp_path, repo)
+    store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     step = decide(store, repo)
@@ -217,7 +234,7 @@ def test_merge_refuses_on_failed_checks(tmp_path: Path, repo: Path, state: Path,
     assert "void" in overview(store, repo, capsys)["missing"][0]
 
 
-def test_pending_checks_stop_after_five_minutes_without_a_record(
+def test_pending_checks_stop_after_a_hundred_seconds_without_a_record(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys)
@@ -227,11 +244,11 @@ def test_pending_checks_stop_after_five_minutes_without_a_record(
     capsys.readouterr()
     merge(store, repo, gh, clock)
     assert "checks pending, run merge apply ACME-1 again" in capsys.readouterr().out
-    assert clock.now == 300 and gh.ran("gh", "pr", "merge") == [] and store.writes == before
+    assert clock.now == 100 and gh.ran("gh", "pr", "merge") == [] and store.writes == before
 
 
 def test_sign_off_refuses_with_open_quiz(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
-    store = labeled(tmp_path, repo)
+    store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     branch_round(store, raw())
@@ -249,7 +266,7 @@ def test_sign_off_refuses_with_open_quiz(tmp_path: Path, repo: Path, state: Path
 
 
 def test_sign_off_lists_everything_missing(tmp_path: Path, repo: Path):
-    store = labeled(tmp_path, repo)
+    store = signable(tmp_path, repo)
     branch_round(store, raw(severity="P1"))
     with pytest.raises(Refusal) as refused:
         Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
@@ -307,7 +324,7 @@ def test_branch_cap_proceed_clears_the_branch_review(
 def test_proceed_does_not_cover_later_commits(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
-    store = labeled(tmp_path, repo)
+    store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     quizzer = decide(store, repo)
@@ -355,7 +372,7 @@ def test_findings_screen_folds_doubtful_and_shows_declines(
 def test_review_commit_is_built_once_per_head(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
-    store = ready(tmp_path, repo, state, capsys)
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
     shell = Diffing()
     for _ in range(2):
         Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
@@ -382,4 +399,43 @@ class Diffing(Shell):
 
 
 def _id(found: dict) -> str:
-    return review.parse_findings(json.dumps([found]))[0].id
+    return review.finding_id(review.parse_findings(json.dumps([found]))[0], "branch")
+
+
+def sign_off_refusal(store: FakeStore, repo: Path) -> str:
+    with pytest.raises(Refusal) as refused:
+        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    return refused.value.rule
+
+
+def test_sign_off_waits_for_the_person_on_a_delivery_finding(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    delivery = raw(changes_delivery=True)
+    branch_round(store, delivery, n=2)
+    assert f"{_id(delivery)} changes what the story delivers" in sign_off_refusal(store, repo)
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", _id(delivery)], "Decline")
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_sign_off_rechecks_the_plan_review_at_the_current_plan(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    submit_plan(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
+    assert "the plan review has not stopped clean at the current plan" in sign_off_refusal(store, repo)
+    record_round(Review(store, Git(BASE), repo), tmp_path)
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_sign_off_needs_the_review_commit_at_the_head(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    assert "no tuicr review is built at c2" in sign_off_refusal(store, repo)
+    Signoff(store, Diffing(), repo).apply(["s1", "review", *TEAM])
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")

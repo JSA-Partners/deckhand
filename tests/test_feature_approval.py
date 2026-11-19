@@ -8,7 +8,7 @@ import pytest
 from deckhand import answers, features, ops, planning, review, tiers, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
-from deckhand.records import Record
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
@@ -56,7 +56,8 @@ def sat(store: FakeStore, story: str, tier_answer: str = tiers.NONE) -> None:
 
 
 def reviewed(store: FakeStore) -> None:
-    clean = review.round_record(P1, "feature", review.RoundPlan(1, scoped=False, base_hash=""), "h1", [])
+    target = content_hash(features.review_text(store, load(store)))
+    clean = review.round_record(P1, "feature", review.RoundPlan(1, scoped=False, base_hash=""), target, [])
     for story in load(store).live:
         ops.ensure_record(store, story["id"], clean)
 
@@ -119,7 +120,10 @@ def test_changed_contract_voids_feature_approval():
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     feature = load(store)
     assert features.phase(feature) is Phase.PLANNING
-    assert features.approval_gaps(store, feature) == ["the Contract changed after it was approved"]
+    assert features.approval_gaps(store, feature) == [
+        "the Contract changed after it was approved",
+        "the feature review has not reviewed the current contract and stories; run a feature round",
+    ]
 
 
 def test_changed_story_voids_feature_approval():
@@ -131,6 +135,7 @@ def test_changed_story_voids_feature_approval():
     assert features.approval_gaps(store, feature) == [
         "ACME-2: the tier changed after it was decided",
         "ACME-2: the sitting changed after it was done",
+        "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
 
 

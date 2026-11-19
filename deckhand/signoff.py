@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import quiz, review, versions
+from deckhand import implplan, quiz, review, versions
 from deckhand.checks import passing
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -52,11 +52,27 @@ def _branch_gap(records: list[Record], story: str, head: str) -> list[str]:
     return ["the branch review has not stopped clean, and the person has not decided Proceed at its cap"]
 
 
+def _plan_gap(records: list[Record], story: str) -> list[str]:
+    plan = versions.held(records, implplan.PURPOSE, story)
+    if plan is None or not review.cleared(records, story, "plan", plan.version):
+        return ["the plan review has not stopped clean at the current plan version"]
+    return []
+
+
+def _tuicr_gap(records: list[Record], story: str, head: str) -> list[str]:
+    held = versions.held(records, TUICR, story)
+    if held is None or held.data.get("head") != head:
+        return [f"no tuicr review is built at {head}; run signoff apply REF review"]
+    return []
+
+
 def gaps(records: list[Record], story: str, head: str) -> list[str]:
     summary = held_summary(records, story, head)
     found = [] if summary else [f"no change summary is saved at {head}"]
     found += _quiz_gap(records, story, head, summary)
-    found += _branch_gap(records, story, head)
+    found += _plan_gap(records, story) + review.delivery_gaps(records, story, "plan")
+    found += _branch_gap(records, story, head) + review.delivery_gaps(records, story, "branch")
+    found += _tuicr_gap(records, story, head)
     if not passing(records, story, head):
         found.append(f"checks are not passing at {head}")
     return found

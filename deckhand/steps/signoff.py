@@ -23,7 +23,7 @@ USAGE = (
 MERGE_USAGE = "merge takes REF and --team-key KEY on both verbs"
 SCREENS = ("what changed", "evidence", "findings", "tuicr", "quiz")
 ACTIONS = ("summary", "review")
-WAIT = 300
+WAIT = 100
 INTERVAL = 15
 
 
@@ -294,6 +294,8 @@ class Merge(_Located):
         if held is None or not signoff.current(at.records, sid, head):
             reason = signoff.standing(at.records, sid, head) if held else "the person has not signed off"
             raise Refusal(f"{ref} has no current sign-off: {reason}")
+        if at.head is not None and at.head != head:
+            self._void(at.story, held, f"head moved: the worktree is at {at.head}")
         branch = branch_of(at.records, at.story)
         repo = gh.repo_name(at.clone, self._runner)
         pr = gh.pr_for(branch, repo, self._runner) if branch else None
@@ -312,10 +314,11 @@ class Merge(_Located):
                 self._void(at.story, held, "checks failed: " + ", ".join(found.failing))
             if found.state == "pass":
                 break
-            if self._clock() - start >= WAIT:
+            waited = self._clock() - start
+            if waited >= WAIT:
                 print(f"checks pending, run merge apply {ref} again")
                 return
-            self._sleep(INTERVAL)
+            self._sleep(min(INTERVAL, WAIT - waited))
         try:
             gh.merge_pinned(pr["number"], repo, head, self._runner)
         except gh.HeadMoved:

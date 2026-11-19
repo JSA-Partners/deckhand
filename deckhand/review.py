@@ -36,10 +36,10 @@ class Finding:
     reason: str = ""
     changes_delivery: bool = False
 
-    @property
-    def id(self) -> str:
-        parts = (self.lens, self.path, str(self.line), self.summary)
-        return content_hash("\0".join(parts))[:12]
+
+def finding_id(finding: Finding, stage: str) -> str:
+    parts = (stage, finding.lens, finding.path, str(finding.line), finding.summary)
+    return content_hash("\0".join(parts))[:12]
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,7 @@ class RoundPlan:
     n: int
     scoped: bool
     base_hash: str
+    carry: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ def round_record(
 ) -> Record:
     data = {
         "target_hash": target_hash,
-        "findings": [asdict(f) | {"id": f.id} for f in findings],
+        "findings": [asdict(f) | {"id": finding_id(f, stage)} for f in findings],
         "scoped": plan.scoped,
         "base_hash": plan.base_hash,
     }
@@ -148,10 +149,10 @@ def accept_record(finding: str, version: str) -> Record:
 def locate(records: list[Record], finding: str) -> tuple[Record, dict] | None:
     prefixes = sorted({r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND})
     for prefix in prefixes:
-        latest = last(rounds_of(records, prefix))
-        for item in latest.data["findings"] if latest else []:
-            if item["id"] == finding:
-                return latest, item
+        for round in reversed(rounds_of(records, prefix)):
+            for item in round.data["findings"]:
+                if item["id"] == finding:
+                    return round, item
     return None
 
 
@@ -159,13 +160,41 @@ def open_p1(record: Record, declined: set[str]) -> list[dict]:
     return [f for f in record.data["findings"] if f["severity"] == "P1" and f["id"] not in declined]
 
 
-def next_round(rounds: list[Record], target_hash: str, declined: set[str]) -> RoundPlan | Stop:
+def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: str) -> Record:
+    target = last.data["target_hash"]
+    data = {"target_hash": target, "findings": last.data["findings"], "scoped": True, "base_hash": target}
+    data |= {"head": head, "carry": True}
+    return Record(KIND, f"{story}:{stage}:{plan.n}", target, "agent:review", data)
+
+
+def _reviewed_count(rounds: list[Record]) -> int:
+    return sum(not r.data.get("carry") for r in rounds)
+
+
+def undecided_delivery(records: list[Record], story: str, stage: str) -> list[dict]:
+    held, _ = counted(records, f"{story}:{stage}")
+    by_person = decided(records)
+    found = {f["id"]: f for r in held for f in r.data["findings"] if f.get("changes_delivery")}
+    return [f for id, f in found.items() if id not in by_person]
+
+
+def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
+    return [
+        f"{f['id']} changes what the story delivers and the person has not decided it:"
+        f" decide context finding {ref} --finding {f['id']}"
+        for f in undecided_delivery(records, story, stage)
+    ]
+
+
+def next_round(rounds: list[Record], target_hash: str, declined: set[str], head: str = "") -> RoundPlan | Stop:
     latest = last(rounds)
     if latest is None:
         return RoundPlan(1, scoped=False, base_hash="")
     if latest.data["target_hash"] == target_hash:
+        if head and latest.data.get("head") and latest.data["head"] != head:
+            return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
         return Stop("unchanged") if open_p1(latest, declined) else Stop("clean")
-    if len(rounds) >= CAP:
+    if _reviewed_count(rounds) >= CAP:
         return Stop("cap")
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
 
@@ -211,7 +240,7 @@ def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
 
 def at_cap(rounds: list[Record], declined: set[str], at: str) -> bool:
     latest = last(rounds)
-    if latest is None or len(rounds) < CAP:
+    if latest is None or _reviewed_count(rounds) < CAP:
         return False
     return bool(open_p1(latest, declined)) or reviewed(latest) != at
 
@@ -227,10 +256,13 @@ def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
     return any(r.version == pinned for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
 
 
-def feature_gaps(project: str, records: list[Record]) -> list[str]:
-    latest = last(rounds_of(records, f"{project}:feature"))
+def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
+    rounds = rounds_of(records, f"{project}:feature")
+    latest = last(rounds)
     if latest is None:
         return ["the feature review has not run"]
+    if reviewed(latest) != at and _reviewed_count(rounds) < CAP:
+        return ["the feature review has not reviewed the current contract and stories; run a feature round"]
     found = open_p1(latest, declined(records))
     return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]
 

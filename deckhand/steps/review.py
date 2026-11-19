@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from deckhand import answers, features, git, implplan, lenses, ops, planning, review, tiers, versions
+from deckhand import answers, features, git, implplan, lenses, ops, review, tiers, versions
 from deckhand.checks import passing
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
@@ -20,7 +20,7 @@ from deckhand.store.linear import LinearStore
 USAGE = (
     "review takes REF, --stage plan|branch and --team-key KEY, feature-review --team-key KEY alone; context takes"
     " --json; apply takes round --findings FINDINGS.json --target HASH (the target_hash context printed),"
-    " or resolve --accept ID (repeat for each)"
+    " round --target HASH alone when context stops at carry, or resolve --accept ID (repeat for each)"
 )
 FEATURE = "feature"
 ACTIONS = ("round", "resolve")
@@ -28,6 +28,8 @@ STOPS = {
     "unchanged": "the target is unchanged since the last round; nothing to review",
     "clean": "the last round holds no accepted P1; the review is done",
     "cap": "three rounds ran and a P1 is open or the target changed; the person decides with review-cap",
+    "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
+    " carries the last round forward without reviewers",
 }
 
 
@@ -134,14 +136,9 @@ class Review:
     def _target(self, store: Store, subject: Subject, repo: Path) -> Target:
         state = answers.state_dir()
         if subject.stage == FEATURE:
-            feature = subject.feature
-            contract = planning.section(store, feature, "Contract")
-            if contract is None:
+            text = features.review_text(store, subject.feature)
+            if text is None:
                 raise Refusal("the Contract section is not saved")
-            parts = ["# Contract", contract]
-            for story in sorted(feature.live, key=lambda s: s["id"]):
-                parts += [f"# {story['identifier']} {story['title']}", story["description"] or ""]
-            text = "\n\n".join(parts) + "\n"
             found = Target(content_hash(text), text=text)
         elif subject.stage == "plan":
             plan = versions.held(subject.records, implplan.PURPOSE, subject.stories[0])
@@ -207,27 +204,32 @@ class Review:
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
         last = review.last(rounds)
         target = self._target(store, subject, repo)
-        plan = review.next_round(counted, target.hash, declined)
+        plan = review.next_round(counted, target.hash, declined, target.head)
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts["note"] = target.note
         if isinstance(plan, review.Stop):
             facts["stop"] = plan.reason
+        elif plan.carry:
+            facts |= {"stop": "carry", "round": plan.n + cut}
         else:
             plan = replace(plan, n=plan.n + cut)
             facts |= {"round": plan.n, "scoped": plan.scoped}
             names = self._lenses(subject, clone)
             facts["lenses"] = [{"name": n, "path": str(lenses.path_of(n, clone))} for n in names]
-            if subject.stage != "branch" and target.text is not None:
-                owner = subject.prefix.split(":")[0]
-                facts["target"] = str(review.save_text(answers.state_dir(), owner, target.hash, target.text))
-            if subject.stage == "branch" and not plan.scoped:
-                facts["diff"] = target.text
+            key, text = target.hash, target.text
             if plan.scoped and last is not None:
-                facts["diff"], note = self._scoped_diff(subject, target, last, repo)
+                diff, note = self._scoped_diff(subject, target, last, repo)
                 facts["note"] = note or facts["note"]
+                if subject.stage != "branch":
+                    facts["diff"] = diff
+                elif diff is not None:
+                    key, text = content_hash(diff), diff
+            if text is not None:
+                owner = subject.prefix.split(":")[0]
+                facts["target"] = str(review.save_text(answers.state_dir(), owner, key, text))
         facts["carried"] = []
-        if not isinstance(plan, review.Stop) and plan.scoped:
+        if isinstance(plan, review.RoundPlan) and plan.scoped and not plan.carry:
             held = review.last(counted)
             facts["carried"] = [
                 {k: f[k] for k in ("id", "lens", "path", "line", "summary")}
@@ -251,7 +253,6 @@ class Review:
         if action == "resolve":
             self._resolve(parsed)
             return
-        found = review.parse_findings(_read(parsed.get("findings", "")))
         if not parsed.get("target"):
             raise Refusal(f"--target is required; {USAGE}")
         subject = self._subject(parsed)
@@ -262,16 +263,26 @@ class Review:
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
-        plan = review.next_round(counted, target.hash, review.declined(subject.records))
+        plan = review.next_round(counted, target.hash, review.declined(subject.records), target.head)
         if isinstance(plan, review.Stop):
             raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
-        plan = replace(plan, n=plan.n + cut)
-        owner = subject.prefix.split(":")[0]
-        record = review.round_record(owner, subject.stage, plan, target.hash, review.ordered(found), target.head)
+        if plan.carry and parsed.get("findings"):
+            raise Refusal(
+                f"the diff is unchanged at {target.head}, so this round carries the last round forward;"
+                " run apply round --target HASH without --findings"
+            )
+        found = [] if plan.carry else review.parse_findings(_read(parsed.get("findings", "")))
+        plan, owner = replace(plan, n=plan.n + cut), subject.prefix.split(":")[0]
+        if plan.carry:
+            record = review.carry_record(owner, subject.stage, plan, review.last(counted), target.head)
+        else:
+            record = review.round_record(owner, subject.stage, plan, target.hash, review.ordered(found), target.head)
         for story in subject.stories:
             ops.ensure_record(store, story, record)
-        p1 = sum(f.severity == "P1" for f in found)
-        print(f"done: recorded round {plan.n} of {subject.label} {subject.stage}, {len(found)} findings, {p1} P1")
+        held = record.data["findings"]
+        p1 = sum(f["severity"] == "P1" for f in held)
+        what = "carried the last round forward as" if plan.carry else "recorded"
+        print(f"done: {what} round {plan.n} of {subject.label} {subject.stage}, {len(held)} findings, {p1} P1")
 
     def _resolve(self, parsed: dict) -> None:
         subject = self._subject(parsed)
@@ -328,6 +339,7 @@ def _print(facts: dict) -> None:
     head = f"review {facts['subject']} {facts['stage']}"
     if facts["stop"]:
         print(f"{head}: stop, {facts['stop']}: {STOPS[facts['stop']]}")
+        print(f"target_hash: {facts['target_hash']}")
     else:
         scope = "scoped to the revision" if facts["scoped"] else "the whole target"
         print(f"{head}: round {facts['round']}, {scope}")
