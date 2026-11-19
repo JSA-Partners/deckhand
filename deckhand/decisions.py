@@ -25,6 +25,8 @@ KINDS = (
     review.CAP_DECISION,
     quiz.KIND,
     signoff.KIND,
+    signoff.SECOND,
+    signoff.AFTER,
     asks.ANSWER,
     asks.EDIT,
 )
@@ -43,6 +45,8 @@ _OPTIONS = {
     "finding": [review.DECLINE, review.ACCEPT],
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
     signoff.KIND: [signoff.SIGN, signoff.NOT_YET],
+    signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
+    signoff.AFTER: [signoff.DONE, signoff.NOT_YET],
     asks.EDIT: asks.EDIT_OPTIONS,
 }
 
@@ -59,12 +63,24 @@ _ASKS = {
     review.CAP_DECISION: "Three plan review rounds ran, none clean. Proceed to the build or rework the plan for",
     quiz.KIND: "Quiz on",
     signoff.KIND: "Sign off",
+    signoff.SECOND: "Second sign-off on",
+    signoff.AFTER: "Is this after-merge item done for",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
 }
 _BRANCH_CAP = "Three branch review rounds ran, none clean. Proceed to sign-off or rework the branch for"
-_RECORDED = ("tier", "decision-item", "finding", review.CAP_DECISION, quiz.KIND, signoff.KIND, asks.ANSWER, asks.EDIT)
-_CHOSEN = ("finding", review.CAP_DECISION, quiz.KIND, signoff.KIND, asks.EDIT)
+_RECORDED = (
+    "tier",
+    "decision-item",
+    "finding",
+    review.CAP_DECISION,
+    quiz.KIND,
+    signoff.KIND,
+    signoff.SECOND,
+    asks.ANSWER,
+    asks.EDIT,
+)
+_CHOSEN = ("finding", review.CAP_DECISION, quiz.KIND, signoff.KIND, signoff.SECOND, signoff.AFTER, asks.EDIT)
 
 _POSITIVE = {
     "contract": "Approve",
@@ -73,6 +89,7 @@ _POSITIVE = {
     "feature-approval": "Approve",
     "sitting": "Done",
     "lean": "Prove it in Lean",
+    signoff.AFTER: signoff.DONE,
 }
 
 PENDING = "pending"
@@ -215,12 +232,22 @@ def _owner_signs(store: Store, pending: Pending, by: str) -> None:
         raise Refusal(f"only {story['assignee_name']}, who owns {ref}, signs it off")
 
 
+def _another_signs(store: Store, pending: Pending, by: str) -> None:
+    story = store.issue(pending.stories[0])
+    if story["assignee"] == by:
+        raise Refusal(
+            f"{story['identifier']} belongs to {story['assignee_name']}; a second sign-off comes from someone else"
+        )
+
+
 def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     found = check(pending, state)
     if not _creates_record(pending, found.answer):
         return False
     if pending.kind == signoff.KIND:
         _owner_signs(store, pending, by)
+    if pending.kind == signoff.SECOND:
+        _another_signs(store, pending, by)
     graded = {}
     if pending.kind == quiz.KIND:
         records = store.records(pending.stories[0])

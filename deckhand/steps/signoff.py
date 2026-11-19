@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import shlex
+from dataclasses import replace
 from pathlib import Path
 
-from deckhand import answers, git, implplan, ops, quiz, review, signoff, tuicr, versions
+from deckhand import answers, gh, git, implplan, ops, quiz, review, signoff, tuicr, versions
 from deckhand.checks import KIND as CHECKS
 from deckhand.checks import passing
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
-from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep
+from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep, branch_of
 from deckhand.summary import parse_summary
 
 USAGE = (
@@ -66,7 +67,7 @@ def _finding(item: dict) -> str:
 class Signoff(StoryStep):
     def context(self, args: list[str]) -> None:
         parsed = _parse(args, USAGE)
-        at = self.locate(parsed["words"][0], team_key(parsed))
+        at = _from_records(self.locate(parsed["words"][0], team_key(parsed)))
         screen = parsed.get("screen", "")
         if screen and screen not in ("1", "2", "3", "4", "5"):
             raise Refusal(f"--screen takes 1 to 5; {USAGE}")
@@ -89,11 +90,11 @@ class Signoff(StoryStep):
             "what changed": "saved" if summary else "no change summary at this head",
             "evidence": "checks pass" if passing(at.records, sid, head) else "checks are not passing",
             "findings": f"{len(_last_branch(at.records, at.story['id']).get('findings', []))} in the last branch round",
-            "tuicr": "not built at this head" if built is None else _built_status(comments),
+            "tuicr": self._pr_diff(at) if at.path is None else _tuicr_status(built, comments),
             "quiz": "passed" if quiz.passed(at.records, sid, head) else "not passed",
         }
         missing = signoff.gaps(at.records, sid, head)
-        standing = signoff.standing(at.records, sid, head)
+        standing = signoff.standing(at.records, sid, head, at.policy.second_signoff)
         missing += [standing] if standing else []
         lines = [f"sign-off for {at.story['identifier']} at {head}"]
         lines += [f"{n} {name}: {status[name]}" for n, name in enumerate(SCREENS, start=1)]
@@ -105,11 +106,24 @@ class Signoff(StoryStep):
         if at.head is None:
             return {"screen": n, "lines": [f"{at.story['identifier']} has no worktree on this machine"]}
         lines = [f"{n} {SCREENS[n - 1]} for {at.story['identifier']} at {at.head}"]
+        if n == 4 and at.path is None:
+            return {"screen": n, "lines": [*lines, self._pr_diff(at)]}
         if n == 4:
             comments = self._comments(at)
             return {"screen": n, "comments": comments, "lines": lines + _tuicr(at, comments)}
         lines += {1: _what_changed, 2: _evidence, 3: _findings, 5: _quiz}[n](at)
         return {"screen": n, "lines": lines}
+
+    def _pr_diff(self, at: Located) -> str:
+        branch = branch_of(at.records, at.story)
+        try:
+            repo = gh.repo_name(at.clone, self._runner)
+            pr = gh.pr_for(branch, repo, self._runner) if branch else None
+        except gh.GhError:
+            return "the pull request cannot be read from here; run gh pr diff in a terminal"
+        if pr is None:
+            return f"{at.story['identifier']} has no open pull request"
+        return f"run gh pr diff {pr['number']} --repo {repo} in a terminal"
 
     def _comments(self, at: Located) -> list[dict]:
         built = _built(at)
@@ -222,7 +236,17 @@ def _built(at: Located) -> dict | None:
     return held.data if held is not None and held.data.get("head") == at.head else None
 
 
-def _built_status(comments: list[dict]) -> str:
+def _from_records(at: Located) -> Located:
+    if at.head is not None:
+        return at
+    held = quiz.held_set(at.records, at.story["id"])
+    head = held.data.get("head") if held is not None else None
+    return replace(at, head=head) if isinstance(head, str) and head else at
+
+
+def _tuicr_status(built: dict | None, comments: list[dict]) -> str:
+    if built is None:
+        return "not built at this head"
     if not comments:
         return "built"
     return f"built, {len(comments)} comment{'' if len(comments) == 1 else 's'} from you"

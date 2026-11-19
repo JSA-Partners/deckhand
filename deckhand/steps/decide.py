@@ -13,9 +13,10 @@ from deckhand.store import Store
 USAGE = (
     "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
     " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
-    " quiz takes a story and --item N, question takes its id and one --story, config-edit takes a story and --item ID,"
+    " quiz and after-merge take a story and --item N, question takes its id and one --story,"
+    " config-edit takes a story and --item ID,"
     " review-cap takes a story and --stage plan|branch,"
-    " sign-off takes a story;"
+    " sign-off and second-sign-off take a story;"
     " apply NONCE"
 )
 
@@ -66,7 +67,8 @@ class Decide(StoryStep):
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
         store = self._store_for_run()
-        feature = features.open_feature(store, team_key(parsed))
+        find = features.current if kind == signoff.AFTER else features.open_feature
+        feature = find(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")

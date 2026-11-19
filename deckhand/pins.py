@@ -6,13 +6,13 @@ from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
-ITEM_KINDS = {quiz.KIND: "N", asks.EDIT: "ID"}
+ITEM_KINDS = {quiz.KIND: "N", signoff.AFTER: "N", asks.EDIT: "ID"}
 STORY_ARGUMENT = ("decision-item", asks.ANSWER)
 
 
 def _number(text: str) -> int:
     if not text.isdigit() or int(text) < 1:
-        raise Refusal("--item takes a quiz item number from 1")
+        raise Refusal("--item takes an item number from 1")
     return int(text)
 
 
@@ -59,6 +59,32 @@ def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -
         raise Refusal(f"{story['identifier']} is not ready for sign-off: " + "; ".join(missing))
     version = signoff.version(records, story["id"], head)
     return Pin(story["id"], version, [story["id"]], f"head {head}", _label(story), [_label(story)])
+
+
+def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    held = signoff.signed(records, story["id"])
+    head = signoff.signed_head(held) if held else ""
+    if held is None or not signoff.current(records, story["id"], head):
+        reason = signoff.standing(records, story["id"], head) if held else "the person has not signed off"
+        raise Refusal(f"{story['identifier']} has no current sign-off to second: {reason}")
+    label = _label(story)
+    return Pin(story["id"], held.version, [story["id"]], f"head {head}", label, [label])
+
+
+def _after_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    items = signoff.after_items(records, story["id"])
+    if n > len(items):
+        raise Refusal(f"{story['identifier']} has no after-merge item {n}; it has {len(items)}")
+    status, held = signoff.after_status(records, story["id"], n, items[n - 1])
+    if status != signoff.FOR_PERSON or held is None:
+        raise Refusal(f"item {n} of {story['identifier']} is not left for the person; it is {status}")
+    label = _label(story)
+    detail = f"item {n}, {items[n - 1]} ({held.data.get('why')})"
+    return Pin(held.subject, held.version, [story["id"]], detail, label, [label])
 
 
 def _quiz_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
@@ -129,7 +155,7 @@ def pin(
     if kind in ITEM_KINDS and item is None:
         raise Refusal(f"{kind} needs --item {ITEM_KINDS[kind]}")
     if kind not in ITEM_KINDS and item is not None:
-        raise Refusal(f"--item applies only to {' and '.join(ITEM_KINDS)}")
+        raise Refusal(f"--item applies only to {', '.join(ITEM_KINDS)}")
     if kind not in STORY_ARGUMENT and stories:
         raise Refusal(f"--story applies only to {' and '.join(STORY_ARGUMENT)}; every other kind finds its own stories")
     if stage and kind != review.CAP_DECISION:
@@ -142,6 +168,10 @@ def pin(
         if not head:
             raise Refusal("sign-off needs the head of the story's worktree")
         return _signoff_pin(store, feature, subject, head)
+    if kind == signoff.SECOND:
+        return _second_pin(store, feature, subject)
+    if kind == signoff.AFTER:
+        return _after_pin(store, feature, subject, _number(item or ""))
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)
     if kind == quiz.KIND:

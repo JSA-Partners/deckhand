@@ -177,16 +177,32 @@ def team_features(store: Store, team: str) -> list[dict]:
     return [p for p in store.team_projects(team) if is_feature(p)]
 
 
+def _started(store: Store, team: str) -> list[Feature]:
+    return [load(store, p) for p in team_features(store, team) if p["start_date"]]
+
+
+def _one_open(found: list[Feature]) -> Feature | None:
+    held = [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
+    if len(held) > 1:
+        raise Refusal("more than one feature is open: " + ", ".join(describe(f.project) for f in held))
+    return held[0] if held else None
+
+
 def open_features(store: Store, team: str) -> list[Feature]:
-    found = [load(store, p) for p in team_features(store, team) if p["start_date"]]
-    return [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
+    return [f for f in _started(store, team) if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
 
 
 def open_feature(store: Store, team: str) -> Feature | None:
-    found = open_features(store, team)
-    if len(found) > 1:
-        raise Refusal("more than one feature is open: " + ", ".join(describe(f.project) for f in found))
-    return found[0] if found else None
+    return _one_open(_started(store, team))
+
+
+def current(store: Store, team: str) -> Feature | None:
+    started = _started(store, team)
+    found = _one_open(started)
+    if found is not None:
+        return found
+    released = [f for f in started if phase(f) is Phase.RELEASED]
+    return max(released, key=lambda f: (f.project["start_date"], f.project["id"]), default=None)
 
 
 def parked(store: Store, team: str) -> list[dict]:

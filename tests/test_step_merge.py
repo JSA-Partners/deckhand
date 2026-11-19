@@ -20,8 +20,10 @@ from tests.test_step_signoff import (
     overview,
     ready,
     save_summary,
+    second,
     sign,
     signable,
+    two_signers,
     voids,
 )
 
@@ -237,3 +239,17 @@ def test_a_local_head_move_is_voided_when_github_cannot_be_reached(
     with pytest.raises(Refusal, match="void, head moved: the worktree is at c3.*may still be ready"):
         Merge(store, unreachable, repo, clock.sleep, clock).apply(["s1", *TEAM])
     assert [v.data["head"] for v in voids(store)] == ["c2"]
+
+
+def test_merge_waits_for_second_signoff(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    two_signers(repo)
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    gh = Gh()
+    written = list(store.writes)
+    with pytest.raises(Refusal, match="^ACME-1 is waiting for a second sign-off$"):
+        merge(store, repo, gh)
+    assert store.writes == written and gh.ran("gh", "pr", "merge") == [] and gh.ran("gh", "pr", "ready") == []
+    second(store, repo, state, capsys, "teammate-2", "Sign off")
+    merge(store, repo, gh)
+    assert len(gh.ran("gh", "pr", "merge")) == 1

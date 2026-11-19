@@ -16,7 +16,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
 from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
-from deckhand.steps.signoff import Signoff
+from deckhand.steps.signoff import SCREENS, Signoff
 from deckhand.store.fake import FakeStore
 from tests.test_implplan import BASE, Git
 from tests.test_quiz import ask, decide, item, reply, submit, summary
@@ -550,3 +550,54 @@ def test_every_hand_write_refuses_a_story_another_holds(tmp_path: Path, repo: Pa
     with pytest.raises(Refusal, match="^ACME-1 belongs to bob$"):
         step(store, Shell(), repo, me=lambda: "ann").apply([*args, *TEAM])
     assert store.writes == []
+
+
+def two_signers(repo: Path) -> None:
+    (repo / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\nsecond_signoff = true\n')
+
+
+def second(store: FakeStore, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], by: str, choice: str):
+    step = Decide(store, runner=Shell(), repo=repo, me=lambda: by)
+    return answer(state, step, capsys, ["second-sign-off", "ACME-1"], choice)
+
+
+def test_second_signoff_needs_another_person(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    two_signers(repo)
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    owner = store.viewer()["id"]
+    assert signoff.current(store.records("s1"), "s1", "c2")
+    assert not signoff.current(store.records("s1"), "s1", "c2", second=True)
+    assert overview(store, repo, capsys)["missing"] == ["waiting for a second sign-off"]
+    written = list(store.writes)
+    with pytest.raises(Refusal, match=f"ACME-1 belongs to {owner}; a second sign-off comes from someone else"):
+        second(store, repo, state, capsys, owner, "Sign off")
+    assert store.writes == written
+    question = second(store, repo, state, capsys, "teammate-2", "Sign off")
+    assert [o["label"] for o in question["options"]] == ["Sign off", "Not yet"]
+    [held] = [r for r in store.records("s1") if r.kind == signoff.SECOND]
+    assert (held.version, held.data["by"]) == (signoff.signed(store.records("s1"), "s1").version, "teammate-2")
+    assert signoff.current(store.records("s1"), "s1", "c2", second=True)
+    assert overview(store, repo, capsys)["missing"] == []
+
+
+def test_second_signer_screens_from_records(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    (repo / ".worktrees" / BRANCH).rmdir()
+
+    def shown(n: int) -> list[str]:
+        capsys.readouterr()
+        Signoff(store, Gh(), repo).context(["s1", "--screen", str(n), *TEAM])
+        return capsys.readouterr().out.splitlines()
+
+    for n in (1, 2, 3, 5):
+        out = shown(n)
+        assert out[0] == f"{n} {SCREENS[n - 1]} for ACME-1 at c2"
+        assert not any("no worktree" in line or "not this head" in line for line in out)
+    assert "checks: passed at this head" in shown(2)
+    assert shown(4)[1:] == ["run gh pr diff 7 --repo acme/widgets in a terminal"]

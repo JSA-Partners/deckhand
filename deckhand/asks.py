@@ -20,7 +20,7 @@ HAND = "agent:hand"
 EDIT_OPTIONS = ["Done", "Not doing it"]
 QUESTION_SHAPE = {"question": "TEXT", "options": ["TWO TO FOUR OPTIONS"], "why": "TEXT"}
 EDIT_SHAPE = {"path": "PATH", "change": "TEXT", "why": "TEXT"}
-WAITING = (ANSWER, review.DECISION, review.CAP_DECISION, signoff.KIND, "second-sign-off", EDIT)
+WAITING = (ANSWER, review.DECISION, review.CAP_DECISION, signoff.KIND, signoff.SECOND, EDIT)
 _OWN_FILES = ("deckhand.toml", "deckhand")
 
 

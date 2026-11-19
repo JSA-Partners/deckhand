@@ -8,7 +8,9 @@ from deckhand.step import Refusal, read_toml
 
 STAGES = ("plan", "branch")
 TIER_KEYS = ("0", "1", "2", "3", "4")
-KEYS = frozenset({"repository_label", "tier_tools", "checks", "sensitive_paths", "extra_lenses", "front_end"})
+KEYS = frozenset(
+    {"repository_label", "tier_tools", "checks", "sensitive_paths", "extra_lenses", "front_end", "second_signoff"}
+)
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,7 @@ class Policy:
     sensitive_paths: list[str] = field(default_factory=list)
     extra_lenses: dict[str, list[str]] = field(default_factory=dict)
     front_end: bool = False
+    second_signoff: bool = False
 
     @classmethod
     def load(cls, repo_root: Path) -> Policy:
@@ -30,9 +33,7 @@ class Policy:
         label = table.get("repository_label")
         if not isinstance(label, str) or not label:
             raise Refusal(f"{path}: repository_label must be a non-empty string")
-        front_end = table.get("front_end", False)
-        if not isinstance(front_end, bool):
-            raise Refusal(f"{path}: front_end must be true or false")
+        front_end = _flag(path, table, "front_end")
         return cls(
             repository_label=label,
             tier_tools=_tier_tools(path, table.get("tier_tools", {})),
@@ -40,7 +41,15 @@ class Policy:
             sensitive_paths=_strings(path, "sensitive_paths", table.get("sensitive_paths", [])),
             extra_lenses=_extra_lenses(path, table.get("extra_lenses", {})),
             front_end=front_end,
+            second_signoff=_flag(path, table, "second_signoff"),
         )
+
+
+def _flag(path: Path, table: dict, name: str) -> bool:
+    value = table.get(name, False)
+    if not isinstance(value, bool):
+        raise Refusal(f"{path}: {name} must be true or false")
+    return value
 
 
 def _strings(path: Path, name: str, value: Any) -> list[str]:

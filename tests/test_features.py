@@ -4,7 +4,17 @@ from datetime import date
 
 import pytest
 
-from deckhand.features import FEATURE_LABEL, Budget, Feature, Phase, is_feature, open_feature, phase, team_features
+from deckhand.features import (
+    FEATURE_LABEL,
+    Budget,
+    Feature,
+    Phase,
+    current,
+    is_feature,
+    open_feature,
+    phase,
+    team_features,
+)
 from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -41,6 +51,23 @@ def test_open_feature_refuses_two():
         store.set_project_dates(id, "2026-11-16", "2026-11-23")
     with pytest.raises(Refusal, match=r"(?=.*Alpha)(?=.*Beta)"):
         open_feature(store, "ACME")
+
+
+def test_current_is_the_open_feature_else_the_newest_released():
+    store = FakeStore()
+    assert current(store, "ACME") is None
+    for n, (name, start) in enumerate((("Alpha", "2026-11-02"), ("Beta", "2026-11-09"), ("Gamma", None))):
+        id = create_id(f"ACME:{name}", "feature")
+        store.create_project(id, "ACME", name, "", [FEATURE_LABEL])
+        store.set_project_dates(id, start, None)
+        store.create_issue(f"s{n}", "ACME", name, "", id, [])
+        if start:
+            store.set_issue_state(f"s{n}", "Done")
+    found = current(store, "ACME")
+    assert found is not None and found.project["name"] == "Beta"
+    store.set_project_dates(create_id("ACME:Gamma", "feature"), "2026-11-16", None)
+    found = current(store, "ACME")
+    assert found is not None and (found.project["name"], phase(found)) == ("Gamma", Phase.PLANNING)
 
 
 def test_renamed_project_stays_a_feature():

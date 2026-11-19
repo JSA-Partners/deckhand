@@ -49,7 +49,7 @@ class Merge(StoryStep):
         if at.head is not None and at.head != head:
             print(f"{at.story['identifier']}: head moved: the worktree is at {at.head}, signed at {head}")
             return
-        standing = signoff.standing(at.records, at.story["id"], head)
+        standing = signoff.standing(at.records, at.story["id"], head, at.policy.second_signoff)
         print(f"{at.story['identifier']}: {standing or f'signed off at {head}, ready to merge pinned to it'}")
 
     def apply(self, args: list[str]) -> None:
@@ -63,6 +63,8 @@ class Merge(StoryStep):
             reason = signoff.standing(at.records, sid, head) if held else "the person has not signed off"
             raise Refusal(f"{ref} has no current sign-off: {reason}{self._redraft(at, held)}")
         moved = at.head is not None and at.head != head
+        if not moved and not signoff.current(at.records, sid, head, at.policy.second_signoff):
+            raise Refusal(f"{ref} is waiting for a second sign-off")
         branch = branch_of(at.records, at.story)
         try:
             repo = gh.repo_name(at.clone, self._runner)
