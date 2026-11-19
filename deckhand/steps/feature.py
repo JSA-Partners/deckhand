@@ -156,6 +156,7 @@ class Feature:
             team,
             name,
             _description(parsed["references"]),
+            [features.FEATURE_LABEL],
         )
         print(f"done: parked feature {name} ({id})")
 

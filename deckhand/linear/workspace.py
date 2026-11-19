@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from deckhand.features import FEATURE_LABEL
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient
 from deckhand.ops import create_id
@@ -48,7 +49,14 @@ class Workspace:
         team["states"] = self._page(queries.TEAM_STATES, team["id"], "states")
         team["labels"] = self._page(queries.TEAM_LABELS, team["id"], "labels")
         team["gitAutomationStates"] = self._page(queries.TEAM_AUTOMATION, team["id"], "gitAutomationStates")
+        team["projectLabels"] = self._workspace_project_labels()
         return team
+
+    def _workspace_project_labels(self) -> dict[str, Any]:
+        connection = self._client.query(queries.WORKSPACE_PROJECT_LABELS, {})["projectLabels"]
+        if connection["pageInfo"]["hasNextPage"]:
+            raise Refusal(f"the workspace has more than {queries.PAGE_SIZE} project labels; setup cannot plan safely")
+        return connection
 
     def _page(self, document: str, team_id: str, field: str) -> dict[str, Any]:
         connection = self._client.query(document, {"id": team_id})["team"][field]
@@ -74,6 +82,7 @@ class Workspace:
                 changes.append(Change(f"create state {name}", create_state(name)))
         changes += self._automation(team, held)
         changes += self._labels(team, labels)
+        changes += self._project_label(team)
         if team["autoArchivePeriod"] != ARCHIVE_MONTHS or team["autoCloseParentIssues"] is not True:
             settings = {"autoArchivePeriod": ARCHIVE_MONTHS, "autoCloseParentIssues": True}
             changes.append(
@@ -136,6 +145,19 @@ class Workspace:
             fields["parentId"] = group_id
             changes.append(Change(f"create label {name} under {GROUP}", lambda ids, f=fields: self._create_label(f)))
         return changes
+
+    def _project_label(self, team: dict[str, Any]) -> list[Change]:
+        if any(label["name"] == FEATURE_LABEL for label in team["projectLabels"]["nodes"]):
+            return []
+        fields = {"id": create_id("workspace", f"project-label:{FEATURE_LABEL}"), "name": FEATURE_LABEL}
+
+        def run(ids: dict[str, str]) -> None:
+            try:
+                self._client.query(queries.PROJECT_LABEL_CREATE, {"input": fields})
+            except DuplicateId:
+                pass
+
+        return [Change(f"create project label {FEATURE_LABEL}", run)]
 
     def _create_label(self, fields: dict[str, Any]) -> None:
         try:

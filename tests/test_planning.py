@@ -11,7 +11,7 @@ P1 = create_id("ACME:Alpha", "feature")
 
 
 def open_feature(store: FakeStore) -> features.Feature:
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [features.FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     found = features.open_feature(store, "ACME")
     assert found is not None

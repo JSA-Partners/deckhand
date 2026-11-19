@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import inspect
 import re
 import shlex
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
+from deckhand import decisions
 from deckhand.cli import _load_steps
 from deckhand.step import REGISTRY, VERBS, Refusal
 
@@ -32,12 +36,27 @@ def test_frontmatter_and_one_injection(path: Path) -> None:
     assert len(INJECTION.findall(body)) == 1
 
 
-def test_feature_skill_exists() -> None:
-    assert (SKILLS / "feature" / "SKILL.md").exists()
+INJECTED = re.compile(r'^!`"\$\{CLAUDE_PLUGIN_ROOT\}/bin/deckhand" ([^\s`]+) ([^\s`]+)', re.MULTILINE)
+UNPORTED = {"captain"}
 
 
-def test_feature_skill_stays_short() -> None:
-    _, body = split(SKILLS / "feature" / "SKILL.md")
+@pytest.mark.parametrize("path", [p for p in FILES if p.parent.name not in UNPORTED], ids=lambda p: p.parent.name)
+def test_injection_runs_a_registered_command(path: Path) -> None:
+    _load_steps()
+    _, body = split(path)
+    [(command, verb)] = INJECTED.findall(body)
+    assert command in REGISTRY, command
+    assert verb in VERBS, f"{command} {verb}"
+
+
+STEP_SKILLS = ("feature", "story", "signoff")
+
+
+@pytest.mark.parametrize("name", STEP_SKILLS)
+def test_step_skill_exists_and_stays_short(name: str) -> None:
+    path = SKILLS / name / "SKILL.md"
+    assert path.exists()
+    _, body = split(path)
     assert len(body.split()) < 400
 
 
@@ -46,18 +65,43 @@ def named_commands(body: str) -> list[list[str]]:
     return [shlex.split(re.sub(r"[\[\]]|\.\.\.", "", span))[1:] for span in spans]
 
 
-def test_feature_skill_commands_parse_as_written() -> None:
+def parser(module: ModuleType) -> Callable[[list[str]], dict]:
+    parse = getattr(module, "_parse", None) or module.parse
+    if len(inspect.signature(parse).parameters) == 2:
+        return lambda args: parse(args, module.USAGE)
+    return parse
+
+
+def known_words(name: str, module: ModuleType) -> tuple[str, ...] | None:
+    return decisions.KINDS if name == "decide" else getattr(module, "ACTIONS", None)
+
+
+@pytest.mark.parametrize("name", STEP_SKILLS)
+def test_step_skill_commands_parse_as_written(name: str) -> None:
     _load_steps()
-    _, body = split(SKILLS / "feature" / "SKILL.md")
+    _, body = split(SKILLS / name / "SKILL.md")
     commands = named_commands(body)
     assert commands
     for tokens in commands:
-        name, verb, *args = tokens
-        assert name in REGISTRY, name
-        assert verb in VERBS, f"{name} {verb}"
-        assert hasattr(REGISTRY[name], verb)
-        parse = sys.modules[type(REGISTRY[name]).__module__]._parse
+        command, verb, *args = tokens
+        assert command in REGISTRY, command
+        assert verb in VERBS, f"{command} {verb}"
+        assert hasattr(REGISTRY[command], verb)
+        module = sys.modules[type(REGISTRY[command]).__module__]
         try:
-            parse(args)
+            words = parser(module)(args).get("words", [])
         except Refusal as refusal:
             pytest.fail(f"deckhand {' '.join(tokens)}: {refusal}")
+        known = known_words(command, module)
+        if known is not None:
+            for word in (w for w in words if w.islower()):
+                assert word in known, f"deckhand {' '.join(tokens)}: {word}"
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.parent.name)
+def test_a_skill_that_names_deckhand_commands_may_run_them(path: Path) -> None:
+    fields, body = split(path)
+    if not named_commands(body):
+        return
+    allowed = fields["allowed-tools"].split()
+    assert "Bash" in allowed or "Bash(deckhand *)" in fields["allowed-tools"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from deckhand import features, ops, planning, versions
+from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
 from deckhand.store.fake import FakeStore
@@ -11,7 +12,7 @@ P1 = create_id("ACME:Alpha", "feature")
 
 def setup() -> FakeStore:
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, [])
     return store

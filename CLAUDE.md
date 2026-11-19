@@ -4,23 +4,28 @@
 
 - Python package: `deckhand/`, standard library only, behind `bin/deckhand`, a uv script entry
   point that runs `deckhand/cli.py`
-- `cli.py` dispatches `<command> context|apply` to the registry, prints a `Refusal` or a Linear
-  error on stderr at exit 1, and never prints the text of an unexpected exception; `step.py` the
-  registry, `Refusal`, and the shared TOML read; one module per step in `deckhand/steps/`, each
-  registered by name, `setup.py` the team, states, automation, labels and repositories
-- `ref.py` a story reference such as `ACME-12`; `records.py` the typed records an issue holds;
-  `credentials.py` the app and personal Linear credentials, their files private to the owner, and
-  the cached app token
-- `linear/` every Linear call: `client.py` the GraphQL client and its errors, `oauth.py` the app
-  token, `queries.py` every query and the page size, `workspace.py` what setup reads and plans for
-  a team, `connect.py` a client for the app or the person
-- `store/` the issue store: `__init__.py` the `Store` protocol, its ids Linear UUIDs; `fake.py` the
-  in-memory store the tests use; `linear.py` the store backed by Linear
-- `ops.py` the idempotent ensure operations over any store, with deterministic ids; `policy.py` a
-  repository's `.claude/deckhand.toml`; `config.py` the per-person local config; `github.py` every
-  `gh` call
-- Skills: `skills/<name>/SKILL.md` with YAML frontmatter; the `next` skill carries the guidance for
-  every step; lenses in `skills/next/lenses/`; agents `agents/<name>.md`
+- `cli.py` dispatches `<command> context|apply` to the registry, prints a `Refusal`, a Linear error
+  or a git error on stderr at exit 1, and never prints the text of an unexpected exception;
+  `step.py` the registry, `Refusal`, and the shared TOML read
+- `steps/` one module per command, each registered by name: setup, the feature and its planning
+  (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
+  `review` and `feature-review`, `checks`, `quiz`, `signoff` and `merge`); `commit` and
+  `document` only report
+- The core modules beside them hold the rules the steps share and never print: features and their
+  phases, decisions and their pending answers, versions of held records, tiers, implementation plans
+  and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
+  quiz and the sign-off
+- `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
+  setup reads and plans for a team, and a client for the app or the person
+- `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
+  tests use, and the store backed by Linear; `ops.py` the idempotent ensure operations over any
+  store, with deterministic ids
+- `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
+  a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
+  person's machine
+- Skills: `skills/<name>/SKILL.md` with YAML frontmatter, one for a hand's work and one for each
+  session of the person's; review lenses in `skills/story/lenses/`, a project's own in its
+  `.claude/deckhand/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
 
 ## Purpose
@@ -44,11 +49,15 @@ claude --plugin-dir .        # then /reload-plugins after edits
 - If a step can be computed, it is a `deckhand` command; the model does only what remains
 - `context` prints what the model needs and never fails; `apply` validates everything, then writes,
   and a `Refusal` names the failed rule on stderr at exit 1 before any write
+- Agents hand deckhand JSON in the shape its context prints; markdown is for people
+- Every question deckhand builds fits the dialog: two to four options in a fixed order, a short
+  header, none marked recommended
 - Python: `from __future__ import annotations`, type hints on public functions, no module over 400 lines
-- Tests: one module per module under test, fakes for Linear and `gh` passed in, `acme/widgets` in
-  the fixtures; an apply asserts the exact recorded calls, a refusal asserts no write
+- Tests: one module per module under test, fakes for Linear, git and `gh` passed in, `acme/widgets`
+  in the fixtures; an apply asserts the exact recorded calls, a refusal asserts no write
 - Skills: short bodies, judgment over directive stacks, no capitalized emphasis, one injection line,
-  each under its own word limit
+  each under its own word limit, every named command written so it parses;
+  `tests/test_skills.py` enforces the shape
 - Severity P1, P2, P3; a clean result is `Nothing found.`
 - kebab-case file names; no em dashes or en dashes in prose
 - Commit messages: subject under 72, body as paragraphs on their own lines, no trailers of any
@@ -79,17 +88,25 @@ install reaches them when the next fix or feature does.
 ## Common Mistakes
 
 - Do not fetch context by instruction when `deckhand` can inject it
-- A status is never written by deckhand; the person and Linear's own automation move a story
-- Every decision comes from a recorded dialog answer in the session, never from anything else
-- Records live in issue attachments, never in documents
+- A status is never written by deckhand; Linear moves a story from the pull request: draft to In
+  Progress, ready to In Review, merged to Done
+- Every decision comes from a recorded dialog answer in the person's session, never from anything
+  else; a hand never asks, it leaves the decision for that session
+- Records live in issue attachments; documents hold only text a person reads
 - Never parse prose to decide; read typed records, and print prose only for people
-- A step is reached through `next` and nowhere else; nothing a person reads names a step command
-- Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
+- A skill's injection line calls `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; everywhere else a skill
+  names the bare `deckhand`, which the plugin puts on the path
 - Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no secret
 - Do not hardcode organization, team, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
 - The build happens in the story's worktree; a branch is never checked out by hand, and the clone
   stays on main
+- Review rounds are computed from records: never rerun on an unchanged target, scope a revision to
+  its diff, stop when the last round holds no accepted P1, and leave the cap to the person
+- Findings are ordered by confidence and never deleted; a doubtful one is folded, and only the
+  person declines one
+- Sign-off, the change summary, the quiz and the checks are pinned to one head; merging is pinned to
+  the signed head, never auto-merge, and a moved head or a failed check voids the sign-off
 - Several agents may share one checkout's index: commit with an explicit pathspec
   (`git commit -- <files>`), never `git add -A`, `git commit -a`, or a bare `git stash`, and let only
   the orchestrator commit. pre-commit stashes unstaged edits, so run it only when no other agent is

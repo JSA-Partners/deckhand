@@ -42,7 +42,7 @@ front_end = true
 "3" = ["gh"]
 
 [extra_lenses]
-security = ["lenses/auth.md"]
+branch = ["auth"]
 """,
     )
 
@@ -51,7 +51,7 @@ security = ["lenses/auth.md"]
     assert policy.checks == ["uv run pytest", "uv run ruff check ."]
     assert policy.sensitive_paths == ["deckhand/credentials.py"]
     assert policy.front_end is True
-    assert policy.extra_lenses == {"security": ["lenses/auth.md"]}
+    assert policy.extra_lenses == {"branch": ["auth"]}
 
 
 def test_tier_tools_keys_become_ints(tmp_path):
@@ -63,8 +63,14 @@ def test_tier_tools_keys_become_ints(tmp_path):
     assert Policy.load(tmp_path).tier_tools == {0: ["git"], 3: ["pytest"]}
 
 
-@pytest.mark.parametrize("key", ["4", "5", "-1", "one", "01x"])
-def test_tier_tools_refuses_keys_outside_zero_to_three(tmp_path, key):
+def test_tier_tools_accepts_the_lean_tier(tmp_path):
+    write_policy(tmp_path, 'repository_label = "acme/widgets"\n\n[tier_tools]\n"4" = ["lake build"]\n')
+
+    assert Policy.load(tmp_path).tier_tools == {4: ["lake build"]}
+
+
+@pytest.mark.parametrize("key", ["5", "-1", "one", "01x"])
+def test_tier_tools_refuses_keys_outside_zero_to_four(tmp_path, key):
     path = write_policy(
         tmp_path,
         f'repository_label = "acme/widgets"\n\n[tier_tools]\n"{key}" = ["git"]\n',
@@ -125,3 +131,24 @@ def test_missing_file_refuses_naming_the_file(tmp_path):
         Policy.load(tmp_path)
 
     assert str(tmp_path / ".claude" / "deckhand.toml") in refused.value.rule
+
+
+def test_extra_lenses_refuses_an_unknown_stage(tmp_path):
+    path = write_policy(tmp_path, 'repository_label = "acme/widgets"\n\n[extra_lenses]\nsecurity = ["auth"]\n')
+
+    with pytest.raises(Refusal) as refused:
+        Policy.load(tmp_path)
+
+    assert str(path) in refused.value.rule
+    assert "security" in refused.value.rule
+
+
+@pytest.mark.parametrize("name", ["lenses/auth.md", "auth.md", "../auth"])
+def test_extra_lenses_refuses_a_path_for_a_name(tmp_path, name):
+    path = write_policy(tmp_path, f'repository_label = "acme/widgets"\n\n[extra_lenses]\nplan = ["{name}"]\n')
+
+    with pytest.raises(Refusal) as refused:
+        Policy.load(tmp_path)
+
+    assert str(path) in refused.value.rule
+    assert name in refused.value.rule

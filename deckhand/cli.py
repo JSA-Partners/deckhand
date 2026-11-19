@@ -5,6 +5,7 @@ import pkgutil
 import sys
 
 from deckhand import steps
+from deckhand.git import GitError
 from deckhand.linear.client import LinearError
 from deckhand.step import REGISTRY, VERBS, Refusal
 
@@ -32,6 +33,8 @@ def main(argv: list[str]) -> int:
             getattr(command, verb)(args)
         except Refusal as refusal:
             print(f"deckhand: {argv[0]} context: {refusal.rule}")
+        except GitError as error:
+            print(f"deckhand: {argv[0]} context: {error.command} failed (exit {error.code}): {error.stderr_tail}")
         except Exception as problem:
             print(f"deckhand: {argv[0]} context could not be read: {type(problem).__name__}")
         return 0
@@ -42,6 +45,9 @@ def main(argv: list[str]) -> int:
         return 1
     except LinearError as error:
         print(f"deckhand: {error.code}: {error.message}", file=sys.stderr)
+        return 1
+    except GitError as error:
+        print(f"deckhand: {argv[0]} failed (exit {error.code}): {error.stderr_tail}", file=sys.stderr)
         return 1
     except Exception as problem:
         print(f"deckhand: {argv[0]} apply failed: {type(problem).__name__}", file=sys.stderr)

@@ -9,7 +9,6 @@ import urllib.request
 import pytest
 
 from deckhand.cli import main
-from deckhand.github import Github
 from deckhand.linear.client import LinearError
 from deckhand.linear.workspace import Workspace
 from deckhand.step import Refusal
@@ -30,6 +29,7 @@ class FakeLinear:
             }
             for key in keys
         }
+        self.project_labels: list[dict] = []
         self.writes: list[tuple[str, dict]] = []
         self.fail_after: int | None = None
         self.more = False
@@ -50,6 +50,8 @@ class FakeLinear:
                 return {"teams": {"nodes": []}}
             keep = ("id", "key", "autoArchivePeriod", "autoCloseParentIssues")
             return {"teams": {"nodes": [{k: found[k] for k in keep}]}}
+        if name == "WorkspaceProjectLabels":
+            return {"projectLabels": {"nodes": self.project_labels, "pageInfo": {"hasNextPage": self.more}}}
         if name in self.reads:
             field, source = self.reads[name]
             rows = self._team(variables["id"])[source]
@@ -72,6 +74,8 @@ class FakeLinear:
                     "parent": {"name": parent["name"]} if parent else None,
                 }
             )
+        elif name == "ProjectLabelCreate":
+            self.project_labels.append({"id": data["id"], "name": data["name"], "isGroup": False})
         elif name == "GitAutomationStateCreate":
             team = self._team(data["teamId"])
             state = next(x for x in team["states"] if x["id"] == data["stateId"])
@@ -90,22 +94,8 @@ class FakeLinear:
         return {name[0].lower() + name[1:]: {"success": True}}
 
 
-class FakeRunner:
-    def __init__(self, current: str = "false") -> None:
-        self.current = current
-        self.calls: list[list[str]] = []
-
-    def __call__(self, args: list[str]) -> str:
-        self.calls.append(args)
-        if "PATCH" in args:
-            self.current = "true"
-            return ""
-        return self.current
-
-
-def make(linear: FakeLinear, runner: FakeRunner | None = None) -> tuple[Setup, FakeRunner]:
-    runner = runner or FakeRunner()
-    return Setup(workspace=Workspace(linear), github=Github(runner)), runner
+def make(linear: FakeLinear) -> Setup:
+    return Setup(workspace=Workspace(linear))
 
 
 ARGS = ["--team-key", "ACME", "--repository", "widgets=acme/widgets"]
@@ -113,7 +103,7 @@ ARGS = ["--team-key", "ACME", "--repository", "widgets=acme/widgets"]
 
 def test_apply_twice_writes_once(capsys: pytest.CaptureFixture[str]):
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     setup.apply(ARGS)
     first = len(linear.writes)
     assert first > 0
@@ -126,7 +116,7 @@ def test_apply_twice_writes_once(capsys: pytest.CaptureFixture[str]):
 @pytest.mark.parametrize("key", ["ACME", "ZED"])
 def test_any_team_key(key: str):
     linear = FakeLinear("ACME", "ZED")
-    setup, _ = make(linear)
+    setup = make(linear)
     setup.apply(["--team-key", key, "--repository", "widgets=acme/widgets"])
     other = "ZED" if key == "ACME" else "ACME"
     assert linear.teams[key]["autoCloseParentIssues"] is True
@@ -140,7 +130,7 @@ def test_any_team_key(key: str):
 
 def test_existing_states_kept_and_missing_added():
     linear = FakeLinear("ACME", states=[("Backlog", "backlog"), ("Triage", "triage"), ("Done", "completed")])
-    setup, _ = make(linear)
+    setup = make(linear)
     setup.apply(ARGS)
     names = [state["name"] for state in linear.teams["ACME"]["states"]]
     assert names[:3] == ["Backlog", "Triage", "Done"]
@@ -156,20 +146,19 @@ def test_existing_states_kept_and_missing_added():
 
 def test_context_lists_planned_changes_without_writing(capsys: pytest.CaptureFixture[str]):
     linear = FakeLinear("ACME", states=[("Triage", "triage")])
-    setup, runner = make(linear)
+    setup = make(linear)
     setup.context(ARGS)
     out = capsys.readouterr().out
     assert linear.writes == []
-    assert not any("PATCH" in call for call in runner.calls)
     assert "Triage" in out
     assert "create state In Progress" in out
     assert "create label group Repository" in out
-    assert "acme/widgets" in out and "allow_auto_merge" in out
+    assert "acme/widgets" in out and "auto_merge" not in out
 
 
 def test_refuses_without_team_key():
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     with pytest.raises(Refusal):
         setup.apply(["--repository", "widgets=acme/widgets"])
     assert linear.writes == []
@@ -177,7 +166,7 @@ def test_refuses_without_team_key():
 
 def test_refuses_unknown_team_before_any_write():
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     with pytest.raises(Refusal, match="NOPE"):
         setup.apply(["--team-key", "NOPE"])
     assert linear.writes == []
@@ -185,28 +174,35 @@ def test_refuses_unknown_team_before_any_write():
 
 def test_refuses_malformed_repository_before_any_write():
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     with pytest.raises(Refusal):
         setup.apply(["--team-key", "ACME", "--repository", "widgets"])
     assert linear.writes == []
 
 
-def test_auto_merge_only_with_flag():
+@pytest.mark.parametrize("verb", ["context", "apply"])
+def test_setup_has_no_auto_merge_option(verb: str):
     linear = FakeLinear("ACME")
-    setup, runner = make(linear)
+    setup = make(linear)
+    with pytest.raises(Refusal, match="--enable-auto-merge"):
+        getattr(setup, verb)([*ARGS, "--enable-auto-merge"])
+    assert linear.writes == []
+
+
+def test_setup_ensures_the_workspace_project_label_once():
+    linear = FakeLinear("ACME", "ZED")
+    setup = make(linear)
     setup.apply(ARGS)
-    assert not any("PATCH" in call for call in runner.calls)
-    setup.apply([*ARGS, "--enable-auto-merge"])
-    patches = [call for call in runner.calls if "PATCH" in call]
-    assert patches == [["api", "-X", "PATCH", "repos/acme/widgets", "-F", "allow_auto_merge=true"]]
-    setup.apply([*ARGS, "--enable-auto-merge"])
-    assert len([call for call in runner.calls if "PATCH" in call]) == 1
+    setup.apply(["--team-key", "ZED"])
+    created = [w[1]["input"] for w in linear.writes if w[0] == "ProjectLabelCreate"]
+    assert [row["name"] for row in created] == ["deckhand"]
+    assert "teamId" not in created[0]
 
 
 def test_wrong_automation_state_is_updated_not_created():
     linear = FakeLinear("ACME", states=[(n, "started") for n in ("In Progress", "In Review", "Done", "Backlog")])
     linear.teams["ACME"]["automation"] = [{"id": "a-merge", "event": "merge", "state": {"name": "In Review"}}]
-    setup, _ = make(linear)
+    setup = make(linear)
     setup.apply(ARGS)
     names = [w[0] for w in linear.writes]
     assert "GitAutomationStateUpdate" in names
@@ -217,7 +213,7 @@ def test_wrong_automation_state_is_updated_not_created():
 
 def test_rerun_after_partial_apply_writes_only_what_is_missing():
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     linear.fail_after = 3
     with pytest.raises(LinearError):
         setup.apply(ARGS)
@@ -235,7 +231,7 @@ def test_rerun_after_partial_apply_writes_only_what_is_missing():
 
 def test_context_without_team_prints_message_and_does_not_raise(capsys: pytest.CaptureFixture[str]):
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     setup.context(["--team-key", "NOPE"])
     assert "no team has this key" in capsys.readouterr().out
     assert linear.writes == []
@@ -244,7 +240,7 @@ def test_context_without_team_prints_message_and_does_not_raise(capsys: pytest.C
 def test_team_past_one_page_refuses():
     linear = FakeLinear("ACME")
     linear.more = True
-    setup, _ = make(linear)
+    setup = make(linear)
     with pytest.raises(Refusal, match="more than"):
         setup.apply(ARGS)
     assert linear.writes == []
@@ -301,11 +297,10 @@ def test_context_json_prints_the_same_facts(capsys: pytest.CaptureFixture[str]):
     linear = FakeLinear("ACME", states=[("Triage", "triage"), ("Done", "completed")])
     linear.teams["ACME"]["automation"] = [{"id": "a-merge", "event": "merge", "state": {"name": "Done"}}]
     linear.teams["ACME"]["labels"] = [{"id": "l1", "name": "Bug", "isGroup": False, "parent": None}]
-    setup, runner = make(linear, FakeRunner("true"))
+    setup = make(linear)
     setup.context([*ARGS, "--json"])
     facts = json.loads(capsys.readouterr().out)
     assert linear.writes == []
-    assert not any("PATCH" in call for call in runner.calls)
     assert facts["team"] == {"key": "ACME", "found": True}
     assert facts["states"] == [
         {"name": "Triage", "type": "triage", "designed": False},
@@ -313,20 +308,20 @@ def test_context_json_prints_the_same_facts(capsys: pytest.CaptureFixture[str]):
     ]
     assert facts["automation"] == [{"event": "merge", "state": "Done"}]
     assert facts["labels"] == ["Bug"]
-    assert facts["repositories"] == [{"label": "widgets", "repository": "acme/widgets", "allow_auto_merge": True}]
+    assert facts["repositories"] == [{"label": "widgets", "repository": "acme/widgets"}]
     assert "create state In Progress" in facts["planned_changes"]
     assert "create label widgets under Repository" in facts["planned_changes"]
 
 
 def test_context_json_for_a_missing_team(capsys: pytest.CaptureFixture[str]):
-    setup, _ = make(FakeLinear("ACME"))
+    setup = make(FakeLinear("ACME"))
     setup.context(["--team-key", "NOPE", "--json"])
     assert json.loads(capsys.readouterr().out) == {"team": {"key": "NOPE", "found": False}}
 
 
 def test_apply_refuses_json():
     linear = FakeLinear("ACME")
-    setup, _ = make(linear)
+    setup = make(linear)
     with pytest.raises(Refusal, match="--json"):
         setup.apply([*ARGS, "--json"])
     assert linear.writes == []

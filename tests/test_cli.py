@@ -223,6 +223,21 @@ def test_apply_linear_error_prints_code_and_message_and_exits_1(registry, capsys
     assert capsys.readouterr().err == "deckhand: network: could not reach Linear\n"
 
 
+def test_apply_git_error_prints_command_code_and_tail_and_exits_1(registry, capsys):
+    from deckhand.git import GitError
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            raise GitError("git merge-base", 128, "fatal: no such ref")
+
+    assert main(["probe", "apply"]) == 1
+    assert capsys.readouterr().err == "deckhand: probe failed (exit 128): fatal: no such ref\n"
+
+
 def test_apply_header_unfit_token_prints_a_fixed_line_without_it(registry, capsys):
     import http.client
     import json
@@ -248,3 +263,22 @@ def test_apply_header_unfit_token_prints_a_fixed_line_without_it(registry, capsy
     captured = capsys.readouterr()
     assert SECRET not in captured.out + captured.err
     assert captured.err == "deckhand: credentials: the credential cannot be sent as a header\n"
+
+
+def test_context_git_error_prints_its_reason_at_exit_0(registry, capsys):
+    from deckhand.git import GitError, stderr_tail
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise GitError("git diff", 128, stderr_tail(f"fatal: bad revision\nremote: {SECRET}"))
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert (
+        captured.out == "deckhand: probe context: git diff failed (exit 128): fatal: bad revision\nremote: [redacted]\n"
+    )

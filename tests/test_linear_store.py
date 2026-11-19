@@ -48,6 +48,7 @@ ISSUE_NODE = {
     "id": UUID,
     "identifier": "ACME-5",
     "number": 5,
+    "branchName": "acme-5-title",
     "title": "Title",
     "description": "body",
     "team": {"key": "ACME"},
@@ -130,6 +131,7 @@ def test_issue_maps_the_node() -> None:
         "team": "ACME",
         "number": 5,
         "identifier": "ACME-5",
+        "branch_name": "acme-5-title",
         "title": "Title",
         "description": "body",
         "project": "proj-1",
@@ -175,6 +177,19 @@ def test_set_labels_resolves_ids_in_the_issue_team() -> None:
         ("LabelIds", {"names": ["ready"], "teamId": TEAM_ID}),
         ("IssueUpdate", {"id": UUID, "input": {"labelIds": ["l2"]}}),
     ]
+
+
+def test_workspace_label_survives_repository_swap() -> None:
+    workspace_label = {"id": "w1", "name": "Urgent"}
+    client = FakeClient(
+        Issue={"issue": ISSUE_NODE},
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        LabelIds={"issueLabels": {"nodes": [{"id": "l2", "name": "gadgets"}, workspace_label]}},
+        IssueUpdate={"issueUpdate": {"success": True}},
+    )
+    LinearStore(client).set_labels(UUID, ["gadgets", "Urgent"])
+    assert client.calls[-1] == ("IssueUpdate", {"id": UUID, "input": {"labelIds": ["l2", "w1"]}})
+    assert "null: true" in client.documents[2]
 
 
 def test_set_labels_empty_clears_without_lookup() -> None:
@@ -436,6 +451,7 @@ PROJECT_NODE = {
     "description": "about",
     "startDate": "2026-11-01",
     "targetDate": None,
+    "labels": {"nodes": [{"name": "deckhand"}], "pageInfo": {"hasNextPage": False}},
 }
 PROJECT = {
     "id": "proj-1",
@@ -443,6 +459,7 @@ PROJECT = {
     "description": "about",
     "start_date": "2026-11-01",
     "target_date": None,
+    "labels": ["deckhand"],
 }
 
 
@@ -459,6 +476,53 @@ def test_create_project_resolves_the_team_and_sends_teamids() -> None:
             {"input": {"id": "proj-1", "name": "Feature", "description": "about", "teamIds": [TEAM_ID]}},
         ),
     ]
+
+
+def test_create_project_sends_project_label_ids() -> None:
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        ProjectLabelIds={"projectLabels": {"nodes": [{"id": "pl1", "name": "deckhand"}]}},
+        ProjectCreate={"projectCreate": {"success": True, "project": {"id": "proj-1"}}},
+    )
+    LinearStore(client).create_project("proj-1", "ACME", "Feature", "about", ["deckhand"])
+    assert client.calls[1:] == [
+        ("ProjectLabelIds", {"names": ["deckhand"]}),
+        (
+            "ProjectCreate",
+            {
+                "input": {
+                    "id": "proj-1",
+                    "name": "Feature",
+                    "description": "about",
+                    "teamIds": [TEAM_ID],
+                    "labelIds": ["pl1"],
+                }
+            },
+        ),
+    ]
+
+
+def test_set_project_labels_refuses_a_label_the_workspace_lacks() -> None:
+    client = FakeClient(ProjectLabelIds={"projectLabels": {"nodes": []}})
+    with pytest.raises(Refusal, match="no project label named deckhand"):
+        LinearStore(client).set_project_labels("proj-1", ["deckhand"])
+    assert client.names == ["ProjectLabelIds"]
+
+
+def test_set_project_labels_replaces_the_list() -> None:
+    client = FakeClient(
+        ProjectLabelIds={"projectLabels": {"nodes": [{"id": "pl1", "name": "deckhand"}]}},
+        ProjectUpdate={"projectUpdate": {"success": True}},
+    )
+    LinearStore(client).set_project_labels("proj-1", ["deckhand"])
+    assert client.calls[-1] == ("ProjectUpdate", {"id": "proj-1", "input": {"labelIds": ["pl1"]}})
+
+
+def test_project_past_one_page_of_labels_refuses() -> None:
+    node = {**PROJECT_NODE, "labels": {"nodes": [], "pageInfo": MORE}}
+    client = FakeClient(Project={"project": node})
+    with pytest.raises(Refusal, match="more than 10 project labels"):
+        LinearStore(client).project("proj-1")
 
 
 def test_create_project_repeat_id_raises_duplicate() -> None:
@@ -520,6 +584,7 @@ def test_project_issues_maps_nodes_with_state() -> None:
         "id": UUID,
         "identifier": "ACME-5",
         "number": 5,
+        "branchName": "acme-5-title",
         "title": "Title",
         "description": "body",
         "team": {"key": "ACME"},
@@ -533,6 +598,7 @@ def test_project_issues_maps_nodes_with_state() -> None:
             "team": "ACME",
             "number": 5,
             "identifier": "ACME-5",
+            "branch_name": "acme-5-title",
             "title": "Title",
             "description": "body",
             "project": "proj-1",
@@ -555,6 +621,7 @@ def test_project_issues_label_overflow_refuses() -> None:
         "id": UUID,
         "identifier": "ACME-5",
         "number": 5,
+        "branchName": "acme-5-t",
         "title": "T",
         "description": "",
         "team": {"key": "ACME"},

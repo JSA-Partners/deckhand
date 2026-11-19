@@ -3,6 +3,9 @@ from __future__ import annotations
 PAGE_SIZE = 250
 PAGE = f"(first: {PAGE_SIZE})"
 MORE = "pageInfo { hasNextPage }"
+PROJECT_LABEL_LIMIT = 10
+PROJECT_LABEL_PAGE = f"(first: {PROJECT_LABEL_LIMIT})"
+PROJECT_LABELS_FIELD = f"labels{PROJECT_LABEL_PAGE} {{ nodes {{ name }} {MORE} }}"
 
 TEAM_ID = """
 query TeamId($key: String!) {
@@ -12,7 +15,7 @@ query TeamId($key: String!) {
 
 LABEL_IDS = """
 query LabelIds($names: [String!]!, $teamId: ID!) {
-  issueLabels(filter: { name: { in: $names }, team: { id: { eq: $teamId } } }) {
+  issueLabels(filter: { name: { in: $names }, or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) {
     nodes { id name }
   }
 }
@@ -24,6 +27,7 @@ query Issue($id: String!) {{
     id
     identifier
     number
+    branchName
     title
     description
     team {{ key }}
@@ -36,14 +40,32 @@ query Issue($id: String!) {{
 TEAM_PROJECTS = f"""
 query TeamProjects($id: String!) {{
   team(id: $id) {{
-    projects{PAGE} {{ nodes {{ id name description startDate targetDate }} {MORE} }}
+    projects{PAGE} {{ nodes {{ id name description startDate targetDate {PROJECT_LABELS_FIELD} }} {MORE} }}
   }}
 }}
 """
 
-PROJECT = """
-query Project($id: String!) {
-  project(id: $id) { id name description startDate targetDate }
+PROJECT = f"""
+query Project($id: String!) {{
+  project(id: $id) {{ id name description startDate targetDate {PROJECT_LABELS_FIELD} }}
+}}
+"""
+
+PROJECT_LABEL_IDS = """
+query ProjectLabelIds($names: [String!]!) {
+  projectLabels(filter: { name: { in: $names } }) { nodes { id name } }
+}
+"""
+
+WORKSPACE_PROJECT_LABELS = f"""
+query WorkspaceProjectLabels {{
+  projectLabels(first: {PAGE_SIZE}, filter: {{ team: {{ null: true }} }}) {{ nodes {{ id name isGroup }} {MORE} }}
+}}
+"""
+
+PROJECT_LABEL_CREATE = """
+mutation ProjectLabelCreate($input: ProjectLabelCreateInput!) {
+  projectLabelCreate(input: $input) { success }
 }
 """
 
@@ -55,6 +77,7 @@ query ProjectIssues($id: String!) {{
         id
         identifier
         number
+        branchName
         title
         description
         team {{ key }}

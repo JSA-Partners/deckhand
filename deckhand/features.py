@@ -4,13 +4,14 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from deckhand import ops, planning, tiers, versions
-from deckhand.records import Record
+from deckhand import ops, planning, review, tiers, versions
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
 
 APPROVAL = "feature-approval"
 PURPOSE = "feature"
+FEATURE_LABEL = "deckhand"
 FINISHED = ("Done", "Canceled", "Duplicate")
 DROPPED = ("Canceled", "Duplicate")
 STATE_CHART_TIERS = (2, 3)
@@ -127,7 +128,19 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
             if story in live and versions.current(store, feature, record):
                 settled.add(record.subject)
     gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
-    return gaps
+    held = [record for story in live for record in feature.records.get(story["id"], [])]
+    text = review_text(store, feature)
+    return gaps + review.feature_gaps(project, held, content_hash(text) if text is not None else "")
+
+
+def review_text(store: Store, feature: Feature) -> str | None:
+    contract = planning.section(store, feature, "Contract")
+    if contract is None:
+        return None
+    parts = ["# Contract", contract]
+    for story in sorted(feature.live, key=lambda s: s["id"]):
+        parts += [f"# {story['identifier']} {story['title']}", story["description"] or ""]
+    return "\n\n".join(parts) + "\n"
 
 
 def story(store: Store, feature: Feature, ref: str) -> dict:
@@ -156,12 +169,12 @@ def key(team: str, name: str) -> str:
     return f"{team}:{name}"
 
 
-def is_feature(project: dict, team: str) -> bool:
-    return project["id"] == ops.create_id(key(team, project["name"]), PURPOSE)
+def is_feature(project: dict) -> bool:
+    return FEATURE_LABEL in project["labels"]
 
 
 def team_features(store: Store, team: str) -> list[dict]:
-    return [p for p in store.team_projects(team) if is_feature(p, team)]
+    return [p for p in store.team_projects(team) if is_feature(p)]
 
 
 def open_features(store: Store, team: str) -> list[Feature]:

@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, ops, planning, tiers, versions
-from deckhand.features import Phase
+from deckhand import answers, features, ops, planning, review, tiers, versions
+from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
-from deckhand.records import Record
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
@@ -22,7 +22,7 @@ STATE_CHART = "A flow or an entity with several states"
 
 def setup() -> FakeStore:
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     feature = load(store)
     for name in planning.SECTIONS:
@@ -55,7 +55,15 @@ def sat(store: FakeStore, story: str, tier_answer: str = tiers.NONE) -> None:
     decided(store, "sitting", story, "Done", [story])
 
 
+def reviewed(store: FakeStore) -> None:
+    target = content_hash(features.review_text(store, load(store)))
+    clean = review.round_record(P1, "feature", review.RoundPlan(1, scoped=False, base_hash=""), target, [])
+    for story in load(store).live:
+        ops.ensure_record(store, story["id"], clean)
+
+
 def approve_everything(store: FakeStore) -> None:
+    reviewed(store)
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     sat(store, "s1")
@@ -73,6 +81,7 @@ def test_approval_gaps_lists_each_missing_decision():
         "ACME-1: the sitting is not done",
         "ACME-2: the tier is not decided",
         "ACME-2: the sitting is not done",
+        "the feature review has not run",
     ]
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1"])
@@ -82,12 +91,13 @@ def test_approval_gaps_lists_each_missing_decision():
         "ACME-1: the state chart is not approved",
         "ACME-2: the tier is not decided",
         "ACME-2: the sitting is not done",
+        "the feature review has not run",
     ]
 
 
 def test_approval_gaps_name_each_unsaved_section_first():
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
     planning.save_section(store, load(store), "Shape", "The shape.", False)
@@ -110,7 +120,10 @@ def test_changed_contract_voids_feature_approval():
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     feature = load(store)
     assert features.phase(feature) is Phase.PLANNING
-    assert features.approval_gaps(store, feature) == ["the Contract changed after it was approved"]
+    assert features.approval_gaps(store, feature) == [
+        "the Contract changed after it was approved",
+        "the feature review has not reviewed the current contract and stories; run a feature round",
+    ]
 
 
 def test_changed_story_voids_feature_approval():
@@ -122,6 +135,7 @@ def test_changed_story_voids_feature_approval():
     assert features.approval_gaps(store, feature) == [
         "ACME-2: the tier changed after it was decided",
         "ACME-2: the sitting changed after it was done",
+        "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
 
 
@@ -131,6 +145,7 @@ def test_canceled_story_needs_no_approval():
     decided(store, "contract", P1, "Approve", ["s1"])
     decided(store, "invariants", P1, "Approve", ["s1"])
     sat(store, "s1")
+    reviewed(store)
     assert features.approval_gaps(store, load(store)) == []
     decided(store, "feature-approval", P1, "Approve", ["s1"])
     assert features.phase(load(store)) is Phase.BUILDING
@@ -230,7 +245,7 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_decide_context_refuses_approving_a_missing_section(state: Path):
     store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "")
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
     with pytest.raises(Refusal, match="the Invariants section is not saved"):
@@ -250,6 +265,7 @@ def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsy
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     sat(store, "s1")
     sat(store, "s2")
+    reviewed(store)
     step = Decide(store)
     step.context(["feature-approval", P1, *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)

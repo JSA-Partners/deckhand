@@ -53,7 +53,7 @@ your decision. The dashed one happens on its own.
 | Column | Claude | You, to move it on |
 | --- | --- | --- |
 | Draft | Holds a parked feature | Write it into a story |
-| Refinement | Writes the story, then reviewer and skeptic read it | Nothing |
+| Refinement | Writes the story, then reviewer and confidence scorer read it | Nothing |
 | Ready | Waits | Choose the kind and points |
 | Backlog | Puts it in build order and checks the plan against main | Say build |
 | In Progress | Builds in the story's worktree and reviews the branch | Read the branch |
@@ -105,7 +105,8 @@ These are slash commands, typed in a Claude Code session in your repository.
 | --- | --- |
 | `/deckhand:setup` | Links the repository to a GitHub Project and fixes the board's fields |
 | `/deckhand:new "<idea>"` | Turns an idea into a story, or a big idea into several |
-| `/deckhand:next N` | Carries story N on to your next decision |
+| `/deckhand:story REF KEY` | Builds story REF in its worktree, through review, up to your sign-off |
+| `/deckhand:signoff REF KEY` | Walks you through story REF's sign-off, one screen at a time |
 | `/deckhand:captain` | Answers for the whole project and says what to run next |
 | `/deckhand:commit` | Writes a conventional commit for the staged changes |
 | `/deckhand:document` | Records what a branch taught in `docs/claude/` |
@@ -119,8 +120,10 @@ GitHub API cannot do and where to click.
 feature. A big idea comes out as several stories, blocked on each other where one needs another
 first, across repositories when the work spans them.
 
-`next` carries a story to the next decision that is yours and stops there. Run it again, in any
-session, and it picks up where the story is.
+`story` builds one story in a background session, its worktree, from the implementation plan
+through plan and branch review to a change summary and a quiz, and stops there. `signoff` is yours:
+it shows what changed, the evidence, the findings, a targeted tuicr pass and the quiz, one screen at
+a time. Once you sign off, the story session merges pinned to the commit you signed.
 
 ### The captain
 

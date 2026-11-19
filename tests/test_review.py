@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from deckhand import review
+from deckhand.records import Record
+from deckhand.review import RoundPlan, Stop
+from deckhand.step import Refusal
+
+
+def raw(**over) -> dict:
+    item = {
+        "lens": "correctness",
+        "severity": "P2",
+        "path": "plan.md",
+        "line": 3,
+        "summary": "A step contradicts a criterion.",
+        "fix": "Reorder the steps.",
+        "evidence": "plan.md:3 with an empty cart",
+        "confidence": 0.9,
+        "reason": "the evidence holds",
+    }
+    return item | over
+
+
+def findings(*items: dict) -> list[review.Finding]:
+    return review.parse_findings(json.dumps(list(items)))
+
+
+def done(n: int, target: str, *items: dict, stage: str = "plan", head: str = ""):
+    plan = RoundPlan(n, scoped=n > 1, base_hash=f"h{n - 1}" if n > 1 else "")
+    return review.round_record("s1", stage, plan, target, findings(*items), head)
+
+
+def id_of(item: dict, stage: str = "plan") -> str:
+    return review.finding_id(findings(item)[0], stage)
+
+
+def test_unchanged_text_stops():
+    rounds = [done(1, "h1", raw(severity="P1"))]
+    assert review.next_round(rounds, "h1", set()) == Stop("unchanged")
+
+
+def test_unchanged_wins_over_clean_and_cap():
+    rounds = [done(1, "h1"), done(2, "h2"), done(3, "h3", raw(severity="P1"))]
+    assert review.next_round(rounds, "h3", set()) == Stop("unchanged")
+
+
+def test_first_round_is_not_scoped():
+    assert review.next_round([], "h1", set()) == RoundPlan(1, scoped=False, base_hash="")
+
+
+def test_no_accepted_p1_stops():
+    rounds = [done(1, "h1", raw(severity="P2"), raw(severity="P3", summary="other"))]
+    assert review.next_round(rounds, "h1", set()) == Stop("clean")
+
+
+def test_revision_after_a_clean_round_is_scoped():
+    rounds = [done(1, "h1", raw(severity="P2"))]
+    assert review.next_round(rounds, "h2", set()) == RoundPlan(2, scoped=True, base_hash="h1")
+
+
+def test_revision_after_a_clean_third_round_goes_to_the_person():
+    rounds = [done(1, "h1", raw(severity="P1")), done(2, "h2", raw(severity="P1")), done(3, "h3")]
+    assert review.next_round(rounds, "h3", set()) == Stop("clean")
+    assert review.next_round(rounds, "h4", set()) == Stop("cap")
+    assert review.at_cap(rounds, set(), "h4") and not review.at_cap(rounds, set(), "h3")
+
+
+def test_declined_p1_is_not_accepted():
+    p1 = raw(severity="P1")
+    rounds = [done(1, "h1", p1)]
+    declined = {id_of(p1)}
+    assert review.next_round(rounds, "h1", declined) == Stop("clean")
+    assert review.next_round(rounds, "h1", {"other"}) == Stop("unchanged")
+    assert review.next_round(rounds, "h2", declined) == RoundPlan(2, scoped=True, base_hash="h1")
+
+
+def test_cap_after_three():
+    p1 = raw(severity="P1")
+    rounds = [done(1, "h1", p1), done(2, "h2", p1), done(3, "h3", p1)]
+    assert review.next_round(rounds, "h4", set()) == Stop("cap")
+
+
+def test_revision_is_scoped():
+    p1 = raw(severity="P1")
+    rounds = [done(1, "h1", p1), done(2, "h2", p1)]
+    assert review.next_round(rounds, "h3", set()) == RoundPlan(3, scoped=True, base_hash="h2")
+
+
+def test_round_record_shape():
+    record = done(2, "h2", raw())
+    assert (record.kind, record.subject, record.version) == ("review-round", "s1:plan:2", "h2")
+    assert record.data["target_hash"] == "h2"
+    assert record.data["scoped"] is True
+    assert record.data["base_hash"] == "h1"
+    assert record.data["findings"][0]["summary"] == "A step contradicts a criterion."
+
+
+def test_doubtful_folded_last():
+    items = findings(
+        raw(summary="doubtful", confidence=0.4),
+        raw(summary="low", confidence=0.5),
+        raw(summary="high", confidence=0.95),
+    )
+    assert [f.summary for f in review.ordered(items)] == ["high", "low", "doubtful"]
+
+
+def test_ordered_keeps_every_finding_and_ties_keep_order():
+    items = findings(raw(summary="a", confidence=0.7), raw(summary="b", confidence=0.7))
+    assert [f.summary for f in review.ordered(items)] == ["a", "b"]
+
+
+def test_finding_id_is_stable_and_depends_on_identity_and_stage():
+    a = id_of(raw())
+    assert a == id_of(raw(confidence=0.1, fix="else", evidence="else"))
+    assert len(a) == 12
+    assert a != id_of(raw(line=4))
+    assert a != id_of(raw(), "branch")
+    assert done(1, "h1", raw(), stage="branch").data["findings"][0]["id"] == id_of(raw(), "branch")
+
+
+def test_empty_list_is_clean():
+    assert review.parse_findings("[]") == []
+
+
+@pytest.mark.parametrize(
+    ("text", "where"),
+    [
+        ("not json", "JSON"),
+        ('{"a": 1}', "list"),
+        ("[1]", "finding 0"),
+        (json.dumps([raw(), raw(severity="P4")]), "finding 1: severity"),
+        (json.dumps([raw(path=3)]), "finding 0: path"),
+        (json.dumps([raw(line="3")]), "finding 0: line"),
+        (json.dumps([raw(line=True)]), "finding 0: line"),
+        (json.dumps([raw(line=-1)]), "finding 0: line"),
+        (json.dumps([raw(confidence=1.5)]), "finding 0: confidence"),
+        (json.dumps([raw(confidence="high")]), "finding 0: confidence"),
+        (json.dumps([{k: v for k, v in raw().items() if k != "fix"}]), "finding 0: fix"),
+    ],
+)
+def test_bad_finding_json_refuses(text, where):
+    with pytest.raises(Refusal, match=where):
+        review.parse_findings(text)
+
+
+def test_rounds_in_any_order_use_the_latest():
+    p1 = raw(severity="P1")
+    rounds = [done(2, "h2", p1), done(1, "h1", p1)]
+    assert review.next_round(rounds, "h2", set()) == Stop("unchanged")
+
+
+def test_a_new_head_with_the_same_diff_carries_the_last_round():
+    rounds = [done(1, "h1", raw(severity="P1"), stage="branch", head="c1")]
+    assert review.next_round(rounds, "h1", set(), "c1") == Stop("unchanged")
+    assert review.next_round(rounds, "h1", set(), "c2") == RoundPlan(2, scoped=True, base_hash="h1", carry=True)
+    assert review.next_round(rounds, "h2", set(), "c2") == RoundPlan(2, scoped=True, base_hash="h1")
+
+
+def test_a_carried_round_keeps_the_findings_at_the_new_head_and_never_counts_to_the_cap():
+    p1 = raw(severity="P1")
+    rounds = [done(n, f"h{n}", p1, stage="branch", head=f"c{n}") for n in (1, 2, 3)]
+    plan = review.next_round(rounds, "h3", set(), "c4")
+    assert plan == RoundPlan(4, scoped=True, base_hash="h3", carry=True)
+    carried = review.carry_record("s1", "branch", plan, rounds[-1], "c4")
+    assert (carried.subject, carried.version) == ("s1:branch:4", "h3")
+    assert carried.data["findings"] == rounds[-1].data["findings"]
+    assert (carried.data["head"], carried.data["carry"]) == ("c4", True)
+    rounds.append(carried)
+    assert review.at_cap(rounds, set(), "c4")
+    assert not review.at_cap(rounds, {id_of(p1, "branch")}, "c4")
+    early = [done(1, "h1", p1, stage="branch", head="c1")]
+    early.append(review.carry_record("s1", "branch", RoundPlan(2, True, "h1", carry=True), early[0], "c2"))
+    early.append(done(3, "h3", p1, stage="branch", head="c3"))
+    assert review.next_round(early, "h4", set(), "c4") == RoundPlan(4, scoped=True, base_hash="h3")
+
+
+def test_locate_finds_a_finding_of_an_earlier_round():
+    first, second = raw(summary="first"), raw(summary="second")
+    records = [done(1, "h1", first), done(2, "h2", second)]
+    found = review.locate(records, id_of(first))
+    assert found is not None and found[0].subject == "s1:plan:1"
+
+
+def test_a_delivery_finding_without_a_person_decision_is_undecided():
+    delivery = raw(changes_delivery=True)
+    records = [done(1, "h1", delivery), done(2, "h2")]
+    assert [f["id"] for f in review.undecided_delivery(records, "s1", "plan")] == [id_of(delivery)]
+    assert review.undecided_delivery(records, "s1", "branch") == []
+    hand = review.accept_record(id_of(delivery), "h1")
+    assert review.undecided_delivery([*records, hand], "s1", "plan") != []
+    person = Record(review.DECISION, id_of(delivery), "h1", "person:pat", {"answer": review.ACCEPT})
+    assert review.undecided_delivery([*records, person], "s1", "plan") == []
+
+
+def test_feature_gaps_need_the_current_target_while_a_round_is_left():
+    def feature(n: int, target: str) -> Record:
+        return review.round_record("p1", "feature", RoundPlan(n, n > 1, ""), target, [])
+
+    assert review.feature_gaps("p1", [feature(1, "h1")], "h1") == []
+    assert review.feature_gaps("p1", [feature(1, "h1")], "h2") == [
+        "the feature review has not reviewed the current contract and stories; run a feature round"
+    ]
+    capped = [feature(n, f"h{n}") for n in (1, 2, 3)]
+    assert review.feature_gaps("p1", capped, "h4") == []

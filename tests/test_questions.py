@@ -33,7 +33,7 @@ def test_build_refuses_option_counts_the_dialog_cannot_show(count: int):
 
 @pytest.mark.parametrize("kind", decisions.KINDS)
 def test_every_decision_kind_fits_the_question_dialog(kind: str):
-    pin = decisions.Pin("Checkout", "v1", ["s1"], label="Checkout", story_labels=["ACME-1"])
+    pin = decisions.Pin("Checkout", "v1", ["s1"], label="Checkout", story_labels=["ACME-1"], options=["Yes", "No"])
     shaped = questions.as_tool_input(decisions.make_question(kind, pin))
     assert 1 <= len(shaped["questions"]) <= 4
     for item in shaped["questions"]:
