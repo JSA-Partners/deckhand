@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import tomllib
 
 import pytest
@@ -368,3 +371,31 @@ def test_a_story_hand_cannot_answer_a_spike(recorders, monkeypatch, capsys):
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
     assert refused(["spike", "apply", "ACME-1", "--file", "a.md"], capsys)
     assert recorders["spike"].seen == []
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not on PATH")
+@pytest.mark.parametrize("planted", [".python-version", "uv.toml"])
+def test_the_entry_point_ignores_a_planted_interpreter_and_uv_config(planted, tmp_path):
+    plugin = tmp_path / "plugin"
+    shutil.copytree(ROOT / "bin", plugin / "bin")
+    shutil.copytree(ROOT / "deckhand", plugin / "deckhand", ignore=shutil.ignore_patterns("__pycache__"))
+    work = tmp_path / "work"
+    work.mkdir()
+    marker = tmp_path / "marker"
+    python = tmp_path / "python"
+    python.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+    python.chmod(0o755)
+    text = {".python-version": f"{python}\n", "uv.toml": "this is not toml\n"}[planted]
+    (work / planted).write_text(text)
+    outside = {k: v for k, v in os.environ.items() if not k.startswith("UV") and k != "VIRTUAL_ENV"}
+    fresh = {**outside, "UV_CACHE_DIR": str(tmp_path / "cache")}
+    done = subprocess.run(
+        [os.path.join("..", "plugin", "bin", "deckhand"), "nonesuch"],
+        cwd=work,
+        env=fresh,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert not marker.exists()
+    assert (done.returncode, done.stderr) == (2, "deckhand: unknown command 'nonesuch'\n")
