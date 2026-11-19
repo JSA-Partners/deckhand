@@ -7,7 +7,7 @@ import sys
 from deckhand import steps
 from deckhand.git import GitError
 from deckhand.linear.client import LinearError
-from deckhand.step import REGISTRY, VERBS, Refusal
+from deckhand.step import REGISTRY, VERBS, Refusal, hand_may_apply, hand_role
 
 
 def _load_steps() -> None:
@@ -20,6 +20,9 @@ def _load_steps() -> None:
 
 def main(argv: list[str]) -> int:
     _load_steps()
+    if hand_role() and argv[1:2] == ["apply"] and not hand_may_apply(argv[0], argv[2:]):
+        print(f"deckhand: a hand cannot run {argv[0]} apply; leave it for the person's captain", file=sys.stderr)
+        return 1
     if not argv or argv[0] not in REGISTRY:
         name = argv[0] if argv else ""
         print(f"deckhand: unknown command {name!r}", file=sys.stderr)

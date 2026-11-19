@@ -35,7 +35,9 @@ or one that changes what the story delivers, is the person's. Rerun the context 
 fixing: clean or proceeded carries on; a cap is the person's.
 
 Build with superpowers:test-driven-development, and impeccable:impeccable when a person sees the
-change. Commit with deckhand:commit `--yes`. Then run
+change. Commit with `deckhand build apply REF commit --message FILE`: a conventional subject
+under 72, no trailer. Bring main in with `deckhand build apply REF sync`; resolve any conflict
+it names, then commit. Then run
 `deckhand checks apply REF` and
 `deckhand build apply REF push`.
 

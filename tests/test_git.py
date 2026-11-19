@@ -187,3 +187,32 @@ def test_clone_root_outside_a_repository_names_the_rule() -> None:
     fake = Fake((128, "", "fatal: not a git repository (or any of the parent directories): .git\n"))
     with pytest.raises(Refusal, match="run deckhand from the clone or a story worktree"):
         git.clone_root(Path("/tmp/scratch"), fake)
+
+
+def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+
+    def recorded(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "abc\n", "")
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    git.head(WT)
+    git.run(["gh", "pr", "list"], WT)
+    assert seen == [
+        ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"],
+        ["gh", "pr", "list"],
+    ]
+
+
+def test_a_call_without_a_directory_runs_in_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    where: list[Path | None] = []
+
+    def recorded(argv, **kwargs):
+        where.append(kwargs["cwd"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    git.run(["gh", "pr", "list", "--repo", "acme/widgets"])
+    git.run(["git", "status"], WT)
+    assert where == [Path.home(), WT]

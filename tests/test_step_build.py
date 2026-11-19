@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import review, step
+from deckhand import git, review, step
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
@@ -352,3 +352,111 @@ def test_a_hand_write_refuses_a_story_another_holds(tmp_path: Path, repo: Path, 
         Build(store, shell, repo, me=lambda: "ann").apply(["s1", "push", *TEAM])
     assert store.writes == []
     assert shell.ran("git", "push") == []
+
+
+def real(tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[FakeStore, Path]:
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@t")
+    origin = tmp_path / "origin.git"
+    sh(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    sh(repo, "init", "-q", "-b", "main")
+    (repo / "a.txt").write_text("one\n")
+    sh(repo, "add", "a.txt")
+    sh(repo, "commit", "-qm", "chore: base")
+    sh(repo, "remote", "add", "origin", str(origin))
+    sh(repo, "push", "-q", "-u", "origin", "main")
+    sh(repo, "remote", "set-head", "origin", "main")
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    Build(store, git.run, repo).apply(["s1", "worktree", *TEAM])
+    return store, repo / ".worktrees" / BRANCH
+
+
+def sh(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def commit(store: FakeStore, repo: Path, tmp_path: Path, message: str, runner: git.Runner = git.run) -> None:
+    path = tmp_path / "message.txt"
+    path.write_text(message)
+    Build(store, runner, repo).apply(["s1", "commit", "--message", str(path), *TEAM])
+
+
+def test_commit_stages_and_commits(tmp_path: Path, repo: Path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    (worktree / "a.txt").write_text("two\n")
+    (worktree / "b.txt").write_text("new\n")
+    capsys.readouterr()
+    commit(store, repo, tmp_path, "feat: queue the order\n\nThe order waits in a queue.\n")
+    head = sh(worktree, "rev-parse", "HEAD")
+    assert sh(worktree, "log", "-1", "--format=%B") == "feat: queue the order\n\nThe order waits in a queue."
+    assert sh(worktree, "status", "--porcelain") == ""
+    assert sh(worktree, "show", "--name-only", "--format=", "HEAD").splitlines() == ["a.txt", "b.txt"]
+    assert head in capsys.readouterr().out
+    with pytest.raises(Refusal, match="nothing to commit"):
+        commit(store, repo, tmp_path, "fix: again\n")
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "feat: queue the order\n\nCo-Authored-By: someone <s@example.test>\n",
+        "queue the order\n",
+        "feat: " + "x" * 66 + "\n",
+        "feat: two\nlines\n",
+        "",
+    ],
+)
+def test_commit_refuses_trailer(tmp_path: Path, repo: Path, message: str):
+    store = labeled(tmp_path, repo)
+    shell = Shell(dirty=True)
+    with pytest.raises(Refusal, match="conventional subject"):
+        commit(store, repo, tmp_path, message, shell)
+    assert shell.ran("git", "add") == [] and shell.ran("git", "commit") == []
+
+
+def test_sync_conflict_leaves_markers(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    (worktree / "a.txt").write_text("story\n")
+    commit(store, repo, tmp_path, "feat: story side\n")
+    (repo / "a.txt").write_text("main\n")
+    sh(repo, "commit", "-qam", "fix: main side")
+    sh(repo, "push", "-q", "origin", "main")
+    with pytest.raises(Refusal, match=r"conflicts in a\.txt"):
+        Build(store, git.run, repo).apply(["s1", "sync", *TEAM])
+    assert "<<<<<<<" in (worktree / "a.txt").read_text()
+    with pytest.raises(Refusal, match="conflict markers remain in a.txt"):
+        commit(store, repo, tmp_path, "fix: take both sides\n")
+    (worktree / "a.txt").write_text("story\nmain\n")
+    commit(store, repo, tmp_path, "fix: take both sides\n")
+    assert len(sh(worktree, "log", "-1", "--format=%P").split()) == 2
+    assert sh(worktree, "status", "--porcelain") == ""
+
+
+def test_sync_merges_main_into_the_branch(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    (repo / "c.txt").write_text("main\n")
+    sh(repo, "add", "c.txt")
+    sh(repo, "commit", "-qm", "feat: main side")
+    sh(repo, "push", "-q", "origin", "main")
+    Build(store, git.run, repo).apply(["s1", "sync", *TEAM])
+    assert (worktree / "c.txt").read_text() == "main\n"
+    (worktree / "c.txt").write_text("dirty\n")
+    with pytest.raises(Refusal, match="uncommitted"):
+        Build(store, git.run, repo).apply(["s1", "sync", *TEAM])
+
+
+def test_hand_role_ignores_working_directory_clone(tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch):
+    store = labeled(tmp_path, repo)
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.chdir(repo)
+    with pytest.raises(Refusal, match="no clone for widgets"):
+        Build(store, Rooted(repo)).locate("s1", "ACME")
+    with pytest.raises(Refusal, match="no clone for widgets"):
+        Build(store, Shell(), repo).locate("s1", "ACME")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config_dir))
+    assert Build(store, Shell(), tmp_path / "elsewhere").locate("s1", "ACME").clone == repo

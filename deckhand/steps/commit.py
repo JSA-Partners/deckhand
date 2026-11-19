@@ -159,7 +159,7 @@ class Commit:
     def context(self, args: list[str]) -> None:
         if args:
             raise Refusal(f"commit context takes no arguments; {USAGE}")
-        print(report(self._cwd or Path.cwd(), self._runner), end="")
+        print(report(self._cwd or git.working_directory(self._runner), self._runner), end="")
 
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"commit has no apply; {USAGE}")

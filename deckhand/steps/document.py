@@ -121,7 +121,10 @@ class Document:
     def context(self, args: list[str]) -> None:
         if len(args) > 1:
             raise Refusal(f"document context takes at most one directory; {USAGE}")
-        print(report(self._cwd or Path.cwd(), args[0] if args else DEFAULT_DIR, self._runner), end="")
+        print(
+            report(self._cwd or git.working_directory(self._runner), args[0] if args else DEFAULT_DIR, self._runner),
+            end="",
+        )
 
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"document has no apply; {USAGE}")

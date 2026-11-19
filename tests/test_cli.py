@@ -6,7 +6,7 @@ import tomllib
 import pytest
 
 from deckhand import __version__
-from deckhand.cli import main
+from deckhand.cli import _load_steps, main
 from deckhand.step import REGISTRY, Refusal, register
 from tests.conftest import ROOT
 
@@ -282,3 +282,89 @@ def test_context_git_error_prints_its_reason_at_exit_0(registry, capsys):
     assert (
         captured.out == "deckhand: probe context: git diff failed (exit 128): fatal: bad revision\nremote: [redacted]\n"
     )
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.seen: list[list[str]] = []
+
+    def context(self, args):
+        return None
+
+    def apply(self, args):
+        self.seen.append(args)
+
+
+@pytest.fixture
+def recorders(registry):
+    _load_steps()
+    found: dict[str, Recorder] = {}
+    for name in ("setup", "feature", "stories", "hand", "decide", "signoff", "hook", "draft", "build", "ask", "spike"):
+        found[name] = registry[name] = Recorder()
+    return found
+
+
+def refused(argv: list[str], capsys) -> bool:
+    code = main(argv)
+    err = capsys.readouterr().err
+    return code == 1 and err == f"deckhand: a hand cannot run {argv[0]} apply; leave it for the person's captain\n"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["setup", "apply", "--team-key", "ACME"],
+        ["feature", "apply", "new", "--name", "N"],
+        ["stories", "apply", "--file", "map.json"],
+        ["hand", "apply", "start", "ACME-1"],
+        ["nonesuch", "apply", "ACME-1"],
+        ["decide", "apply", "nonce"],
+        ["signoff", "apply", "ACME-1", "review"],
+        ["signoff", "apply", "ACME-1", "--team-key", "ACME", "summary"],
+        ["hook", "apply", "answer"],
+        ["draft", "apply", "ACME-1", "take"],
+        ["draft", "apply", "ACME-1", "--file", "d.md", "take"],
+    ],
+)
+def test_hand_role_refuses_person_applies(argv, recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert refused(argv, capsys)
+    assert all(not r.seen for r in recorders.values())
+
+
+def test_hand_role_refuses_another_story(recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert refused(["build", "apply", "ACME-2", "push"], capsys)
+    assert refused(["build", "apply", "--team-key", "ACME-1", "ACME-2", "push"], capsys)
+    monkeypatch.setenv("DECKHAND_STORY", "")
+    assert refused(["build", "apply", "", "push"], capsys)
+    assert recorders["build"].seen == []
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert main(["build", "apply", "ACME-1", "push"]) == 0
+    assert main(["signoff", "apply", "ACME-1", "summary", "--summary", "s.json"]) == 0
+    assert main(["draft", "apply", "ACME-1", "--file", "d.md"]) == 0
+    assert main(["hook", "apply", "session"]) == 0
+    assert main(["build", "context", "ACME-2"]) == 0
+    assert recorders["build"].seen == [["ACME-1", "push"]]
+    assert recorders["signoff"].seen and recorders["draft"].seen and recorders["hook"].seen
+
+
+def test_spike_hand_cannot_ask(recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_SPIKE", "0123456789ab")
+    assert refused(["ask", "apply", "0123456789ab", "--file", "q.json"], capsys)
+    assert refused(["build", "apply", "0123456789ab", "push"], capsys)
+    assert refused(["spike", "apply", "ffffffffffff", "--file", "a.md"], capsys)
+    assert main(["spike", "apply", "0123456789ab", "--file", "a.md"]) == 0
+    assert main(["hook", "apply", "permission"]) == 0
+    assert recorders["ask"].seen == [] and recorders["build"].seen == []
+    assert recorders["spike"].seen == [["0123456789ab", "--file", "a.md"]]
+
+
+def test_a_story_hand_cannot_answer_a_spike(recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert refused(["spike", "apply", "ACME-1", "--file", "a.md"], capsys)
+    assert recorders["spike"].seen == []

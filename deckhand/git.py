@@ -7,21 +7,26 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand.step import Refusal
+from deckhand import config
+from deckhand.step import Refusal, hand_role
 
 TIMEOUT = 120
 TAIL_LINES = 5
 TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
+
+UNHOOKED = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
 
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
 
 def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     command = " ".join(argv[:2])
+    full = [argv[0], *UNHOOKED, *argv[1:]] if argv[0] == "git" else argv
     try:
         return subprocess.run(
-            argv,
-            cwd=cwd,
+            full,
+            # Without a directory, gh and claude would run git in a repository a hand may have planted.
+            cwd=cwd or Path.home(),
             input=stdin,
             capture_output=True,
             text=True,
@@ -54,6 +59,20 @@ def call(argv: list[str], cwd: Path | None, runner: Runner, stdin: str | None = 
     if done.returncode != 0:
         raise GitError(" ".join(argv[:2]), done.returncode, stderr_tail(done.stderr))
     return done.stdout
+
+
+def working_directory(runner: Runner = run) -> Path:
+    cwd = Path.cwd()
+    if not hand_role():
+        return cwd
+    for clone in config.local().clones.values():
+        listing = runner(["git", "worktree", "list", "--porcelain"], clone, None)
+        listed = [
+            Path(line[len("worktree ") :]) for line in listing.stdout.splitlines() if line.startswith("worktree ")
+        ]
+        if listing.returncode == 0 and any(path.is_dir() and path.samefile(cwd) for path in listed):
+            return cwd
+    raise Refusal(f"a hand runs deckhand only from its story worktree, not {cwd}")
 
 
 def worktree_path(clone: Path, branch: str) -> Path:
@@ -114,6 +133,30 @@ def merge_base(repo: Path, a: str, b: str, runner: Runner = run) -> str:
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str, runner: Runner = run) -> bool:
     return runner(["git", "merge-base", "--is-ancestor", ancestor, descendant], repo, None).returncode == 0
+
+
+def unmerged(worktree: Path, runner: Runner = run) -> list[str]:
+    return call(["git", "diff", "--name-only", "--diff-filter=U"], worktree, runner).splitlines()
+
+
+def merging(worktree: Path, runner: Runner = run) -> bool:
+    return runner(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], worktree, None).returncode == 0
+
+
+def commit_all(worktree: Path, message: str, runner: Runner = run) -> None:
+    call(["git", "add", "-A"], worktree, runner)
+    call(["git", "commit", "-F", "-"], worktree, runner, stdin=message)
+
+
+def merge_from(worktree: Path, base: str, runner: Runner = run) -> list[str]:
+    call(["git", "fetch", "--no-recurse-submodules", "origin"], worktree, runner)
+    done = runner(["git", "merge", "--no-edit", base], worktree, None)
+    if done.returncode == 0:
+        return []
+    conflicts = unmerged(worktree, runner)
+    if not conflicts:
+        raise GitError("git merge", done.returncode, stderr_tail(done.stderr))
+    return conflicts
 
 
 def push(worktree: Path, branch: str, runner: Runner = run) -> None:

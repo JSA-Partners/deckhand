@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,15 +12,20 @@ from deckhand.features import Phase
 from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import Record
-from deckhand.step import Refusal, register, team_key
+from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "build takes REF and [--team-key KEY] on both verbs; context [--json], apply worktree or apply push"
-    " after the plan review stopped clean"
+    "build takes REF and [--team-key KEY] on both verbs; context [--json], apply worktree, commit --message FILE,"
+    " sync, or push after the plan review stopped clean"
 )
-ACTIONS = ("worktree", "push")
+ACTIONS = ("worktree", "commit", "sync", "push")
+SUBJECT = re.compile(r"[a-z]+(\([^()\s]+\))?!?: \S.*")
+TRAILER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*: ")
+MESSAGE_RULE = (
+    "the commit message takes a conventional subject under 72 characters, a blank line before any body, and no trailer"
+)
 WORKTREE = "worktree"
 DEFAULT_BASE = "origin/HEAD"
 
@@ -30,13 +36,41 @@ def parse(args: list[str], usage: str) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
-        elif arg == "--team-key":
-            found["team_key"] = next(rest, "")
+        elif arg in ("--team-key", "--message"):
+            found[arg[2:].replace("-", "_")] = next(rest, "")
         elif arg.startswith("--"):
             raise Refusal(f"unknown argument {arg}; {usage}")
         else:
             found["words"].append(arg)
     return found
+
+
+def message_of(path: str) -> str:
+    if not path:
+        raise Refusal(f"commit takes --message FILE; {USAGE}")
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise Refusal(f"{path}: cannot be read as UTF-8 text") from None
+    lines = text.strip().splitlines()
+    subject = lines[0] if lines else ""
+    last = "\n".join(lines[1:]).split("\n\n")[-1].splitlines()
+    if (
+        not SUBJECT.fullmatch(subject)
+        or len(subject) >= 72
+        or lines[1:2] not in ([], [""])
+        or any(TRAILER.match(line) for line in last)
+    ):
+        raise Refusal(MESSAGE_RULE)
+    return text.strip() + "\n"
+
+
+def conflicted(worktree: Path, name: str) -> bool:
+    path = worktree / name
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(worktree.resolve()):
+        return False
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return any(line.startswith(("<<<<<<< ", ">>>>>>> ")) for line in lines)
 
 
 def branch_of(records: list[Record], story: dict) -> str | None:
@@ -85,6 +119,11 @@ class StoryStep:
     def _clone(self, labels: list[str]) -> Path:
         clones = config.local().clones
         configured = next((clones[label] for label in labels if label in clones), None)
+        if hand_role():
+            if configured is None:
+                where = config.config_dir() / config.FILE
+                raise Refusal(f"no clone for {', '.join(labels)} in {where}; a hand takes its clone only from there")
+            return configured
         return configured or self._repo or git.clone_root(Path.cwd(), self._runner)
 
     def _story(self, ref: str, team_key: str) -> tuple[features.Feature, dict, Policy, Path]:
@@ -148,8 +187,9 @@ class Build(StoryStep):
     def apply(self, args: list[str]) -> None:
         parsed = parse(args, USAGE)
         if len(parsed["words"]) != 2 or parsed["words"][1] not in ACTIONS:
-            raise Refusal(f"apply takes REF and worktree or push; {USAGE}")
+            raise Refusal(f"apply takes REF and worktree, commit, sync or push; {USAGE}")
         ref, action = parsed["words"]
+        message = message_of(parsed.get("message", "")) if action == "commit" else None
         at = self.locate(ref, team_key(parsed))
         self.owned(at)
         feature, story, clone = at.feature, at.story, at.clone
@@ -157,8 +197,34 @@ class Build(StoryStep):
             raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
         if action == "worktree":
             self._worktree(feature, story, clone)
-            return
-        self._push(feature, story, clone)
+        elif message is not None:
+            self._commit(at, message)
+        elif action == "sync":
+            self._sync(at)
+        else:
+            self._push(feature, story, clone)
+
+    def _commit(self, at: Located, message: str) -> None:
+        path = _worktree_of(at)
+        if not git.merging(path, self._runner) and not git.dirty(path, self._runner):
+            raise Refusal(f"nothing to commit in {path}")
+        marked = [name for name in git.unmerged(path, self._runner) if conflicted(path, name)]
+        if marked:
+            raise Refusal(f"conflict markers remain in {', '.join(marked)}; resolve them, then commit again")
+        git.commit_all(path, message, self._runner)
+        print(f"done: committed {git.head(path, self._runner)} on {at.story['identifier']}")
+
+    def _sync(self, at: Located) -> None:
+        path, ref = _worktree_of(at), at.story["identifier"]
+        if git.dirty(path, self._runner):
+            raise Refusal(f"{path} has uncommitted changes; run build apply {ref} commit --message FILE first")
+        conflicts = git.merge_from(path, DEFAULT_BASE, self._runner)
+        if conflicts:
+            raise Refusal(
+                f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; resolve the markers,"
+                f" then run build apply {ref} commit --message FILE"
+            )
+        print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, self._runner)}")
 
     def _worktree(self, feature: features.Feature, story: dict, clone: Path) -> None:
         records = feature.records.get(story["id"], [])
@@ -192,6 +258,13 @@ class Build(StoryStep):
         title = f"{story['identifier']} {story['title']}"
         found = gh.ensure_draft_pr(branch, repo, title, f"Draft for {story['identifier']}.", self._runner)
         print(f"done: pushed {branch} and opened the draft pull request {found['url']}")
+
+
+def _worktree_of(at: Located) -> Path:
+    if at.path is None:
+        ref = at.story["identifier"]
+        raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")
+    return at.path
 
 
 def _print(facts: dict) -> None:
