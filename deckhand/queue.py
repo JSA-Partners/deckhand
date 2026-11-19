@@ -60,7 +60,7 @@ def _signoff(story: dict, records: list[Record]) -> list[Item]:
     return [_story_item(signoff.KIND, 0, story, summary.at, [f"ready to sign off at {head[:12]}"], next)]
 
 
-def _second_due(story: dict, records: list[Record], policy_for: Callable[[dict], Policy]) -> Record | None:
+def second_due(story: dict, records: list[Record], policy_for: Callable[[dict], Policy]) -> Record | None:
     sign = signoff.signed(records, story["id"])
     if sign is None:
         return None
@@ -71,7 +71,7 @@ def _second_due(story: dict, records: list[Record], policy_for: Callable[[dict],
 
 
 def _second(story: dict, records: list[Record], policy_for: Callable[[dict], Policy]) -> list[Item]:
-    sign = _second_due(story, records, policy_for)
+    sign = second_due(story, records, policy_for)
     if sign is None:
         return []
     head = signoff.signed_head(sign)
@@ -294,7 +294,7 @@ def _feature_items(
             found += _for_person(story, records, rank)
             if not read.note:
                 session = hands.get(story["identifier"])
-                second = _second_due(story, records, policy_for) is not None
+                second = second_due(story, records, policy_for) is not None
                 found += _prompt(story, records, session, rank) + _stalled(story, records, session, rank, second)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)

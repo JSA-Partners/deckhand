@@ -188,8 +188,7 @@ class Build(StoryStep):
         at = self.locate(ref, team_key(parsed))
         self.owned(at)
         feature, story, clone = at.feature, at.story, at.clone
-        if self._runner(["git", "rev-parse", "--verify", "--quiet", DEFAULT_BASE], clone, None).returncode != 0:
-            raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
+        require_base(clone, self._runner)
         if action == "worktree":
             self._worktree(feature, story, clone)
         elif message is not None:
@@ -222,13 +221,8 @@ class Build(StoryStep):
         print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, self._runner)}")
 
     def _worktree(self, feature: features.Feature, story: dict, clone: Path) -> None:
-        records = feature.records.get(story["id"], [])
-        branch = branch_of(records, story) or story["branch_name"]
-        if not branch:
-            raise Refusal(f"{story['identifier']} has no branch name in Linear")
-        path = git.worktree_add(clone, branch, DEFAULT_BASE, self._runner)
-        record = Record(WORKTREE, story["id"], branch, "agent:build", {"branch": branch})
-        ops.ensure_record(self._store_for_run(), story["id"], record)
+        branch = worktree_branch(story, feature.records.get(story["id"], []))
+        path = make_worktree(self._store_for_run(), story, clone, branch, self._runner)
         print(f"done: worktree for {story['identifier']} at {path}")
 
     def _push(self, feature: features.Feature, story: dict, clone: Path) -> None:
@@ -253,6 +247,24 @@ class Build(StoryStep):
         title = f"{story['identifier']} {story['title']}"
         found = gh.ensure_draft_pr(branch, repo, title, f"Draft for {story['identifier']}.", self._runner)
         print(f"done: pushed {branch} and opened the draft pull request {found['url']}")
+
+
+def require_base(clone: Path, runner: git.Runner) -> None:
+    if runner(["git", "rev-parse", "--verify", "--quiet", DEFAULT_BASE], clone, None).returncode != 0:
+        raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
+
+
+def worktree_branch(story: dict, records: list[Record]) -> str:
+    branch = branch_of(records, story) or story["branch_name"]
+    if not branch:
+        raise Refusal(f"{story['identifier']} has no branch name in Linear")
+    return branch
+
+
+def make_worktree(store: Store, story: dict, clone: Path, branch: str, runner: git.Runner) -> Path:
+    path = git.worktree_add(clone, branch, DEFAULT_BASE, runner)
+    ops.ensure_record(store, story["id"], Record(WORKTREE, story["id"], branch, "agent:build", {"branch": branch}))
+    return path
 
 
 def _worktree_of(at: Located) -> Path:
