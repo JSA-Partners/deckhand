@@ -15,6 +15,9 @@ TAIL_LINES = 5
 TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
 
 UNHOOKED = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+# Without it, status and worktree diffs run git inside a nested repository a hand configured.
+UNNESTED = "--ignore-submodules=all"
+GITLINK = "160000"
 
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
@@ -104,7 +107,7 @@ def head(worktree: Path, runner: Runner = run) -> str:
 
 
 def dirty(worktree: Path, runner: Runner = run) -> bool:
-    return bool(call(["git", "status", "--porcelain"], worktree, runner).strip())
+    return bool(call(["git", "status", "--porcelain", UNNESTED], worktree, runner).strip())
 
 
 def diff(worktree: Path, base: str, paths: list[str] | None = None, runner: Runner = run) -> str:
@@ -136,11 +139,34 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str, runner: Runner = run
 
 
 def unmerged(worktree: Path, runner: Runner = run) -> list[str]:
-    return call(["git", "diff", "--name-only", "--diff-filter=U"], worktree, runner).splitlines()
+    return call(["git", "diff", "--name-only", "--diff-filter=U", UNNESTED], worktree, runner).splitlines()
 
 
 def merging(worktree: Path, runner: Runner = run) -> bool:
     return runner(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], worktree, None).returncode == 0
+
+
+def nested_repositories(worktree: Path, runner: Runner = run) -> list[str]:
+    common = Path(call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], worktree, runner).strip())
+    untracked = call(["git", "ls-files", "--others", "--exclude-standard", "-z"], worktree, runner).split("\0")
+    found = [path.rstrip("/") for path in untracked if path.endswith("/")]
+    for entry in call(["git", "ls-files", "-s", "-z"], worktree, runner).split("\0"):
+        meta, _, path = entry.partition("\t")
+        if meta.startswith(f"{GITLINK} ") and not _owned_by(worktree / path, common.resolve()):
+            found.append(path)
+    return found
+
+
+def _owned_by(submodule: Path, common: Path) -> bool:
+    gitfile = submodule / ".git"
+    if submodule.is_symlink() or gitfile.is_symlink():
+        return False
+    if not gitfile.exists():
+        return True
+    if not gitfile.is_file():
+        return False
+    text = gitfile.read_text(encoding="utf-8", errors="replace").strip()
+    return text.startswith("gitdir: ") and (submodule / text[len("gitdir: ") :]).resolve().is_relative_to(common)
 
 
 def commit_all(worktree: Path, message: str, runner: Runner = run) -> None:

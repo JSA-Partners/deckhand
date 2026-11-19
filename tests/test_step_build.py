@@ -9,6 +9,7 @@ import pytest
 from deckhand import git, review, step
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
+from deckhand.steps.commit import Commit
 from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import Review
@@ -460,3 +461,55 @@ def test_hand_role_ignores_working_directory_clone(tmp_path: Path, repo: Path, m
     (config_dir / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
     monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config_dir))
     assert Build(store, Shell(), tmp_path / "elsewhere").locate("s1", "ACME").clone == repo
+
+
+def nested(worktree: Path, tmp_path: Path) -> Path:
+    marker = tmp_path / "marker"
+    (worktree / "hidden").mkdir()
+    sh(worktree, "init", "-q", "--separate-git-dir", str(worktree / "hidden" / "store"), "n")
+    inner = worktree / "n"
+    (inner / "f").write_text("a\n")
+    sh(inner, "add", "f")
+    sh(inner, "commit", "-qm", "chore: inner")
+    sh(inner, "config", "filter.x.clean", f"touch {marker}; cat")
+    (inner / ".gitattributes").write_text("* filter=x\n")
+    (worktree / ".gitmodules").write_text('[submodule "n"]\n\tpath = n\n\tignore = none\n')
+    return marker
+
+
+def test_a_nested_repository_runs_nothing(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    marker = nested(worktree, tmp_path)
+    sh(worktree, "add", "n", ".gitmodules")
+    sh(worktree, "commit", "-qm", "chore: track n")
+    marker.unlink(missing_ok=True)
+    (worktree / "n" / "f").write_text("b\n")
+    (worktree / "a.txt").write_text("two\n")
+    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
+        commit(store, repo, tmp_path, "feat: change a\n")
+    with pytest.raises(Refusal, match="uncommitted"):
+        Build(store, git.run, repo).apply(["s1", "sync", *TEAM])
+    Commit(cwd=worktree).context([])
+    assert git.unmerged(worktree) == []
+    assert not marker.exists()
+
+
+def test_a_submodule_the_clone_holds_still_commits(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    sh(worktree, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(tmp_path / "origin.git"), "sub")
+    sh(worktree, "commit", "-qm", "chore: add sub")
+    (worktree / "a.txt").write_text("two\n")
+    commit(store, repo, tmp_path, "feat: change a\n")
+    assert sh(worktree, "log", "-1", "--format=%s") == "feat: change a"
+
+
+def test_commit_refuses_a_gitlink(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    marker = nested(worktree, tmp_path)
+    (worktree / "a.txt").write_text("two\n")
+    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
+        commit(store, repo, tmp_path, "feat: change a\n")
+    assert not marker.exists()
+    assert "160000" not in sh(worktree, "ls-files", "-s")
+    assert sh(worktree, "rev-parse", "HEAD") == sh(worktree, "rev-parse", BRANCH)
+    assert sh(worktree, "log", "-1", "--format=%s") == "chore: base"

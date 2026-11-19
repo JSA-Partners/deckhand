@@ -37,7 +37,7 @@ def test_dirty_reads_porcelain_status() -> None:
     fake = Fake((0, " M a.py\n", ""), (0, "", ""))
     assert git.dirty(WT, fake) is True
     assert git.dirty(WT, fake) is False
-    assert fake.argvs[0] == ["git", "status", "--porcelain"]
+    assert fake.argvs[0] == ["git", "status", "--porcelain", "--ignore-submodules=all"]
 
 
 def test_diff_with_and_without_paths() -> None:

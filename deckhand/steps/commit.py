@@ -125,20 +125,20 @@ def report(cwd: Path, runner: git.Runner = git.run) -> str:
     def out(*args: str) -> str:
         return git.call(["git", *args], cwd, runner)
 
-    staged = [line for line in out("diff", "--cached", "--name-only").splitlines() if line]
+    staged = [line for line in out("diff", "--cached", "--name-only", git.UNNESTED).splitlines() if line]
     if not staged:
-        status = out("status", "--porcelain")
+        status = out("status", "--porcelain", git.UNNESTED)
         lines = ["Nothing is staged.", "", "Unstaged or untracked:", *(f"- {s}" for s in status.splitlines() if s)]
         paths = porcelain_paths(status)
         if paths:
             lines += ["", "Stage: git add -- " + " ".join(shlex.quote(p) for p in paths), "", STAGE_RULE]
         return "\n".join(lines) + "\n"
-    diff = out("diff", "--cached")
+    diff = out("diff", "--cached", git.UNNESTED)
     marks = fence(diff)
     diff_lines = diff.split("\n")
     log = runner(["git", "log", "--oneline", "-15"], cwd, None)
     history = [line for line in log.stdout.splitlines() if line] if log.returncode == 0 else []
-    lines = ["## Staged", "", out("diff", "--cached", "--stat"), "", "## Diff", "", f"{marks}diff"]
+    lines = ["## Staged", "", out("diff", "--cached", "--stat", git.UNNESTED), "", "## Diff", "", f"{marks}diff"]
     lines += diff_lines[:DIFF_LIMIT]
     if len(diff_lines) > DIFF_LIMIT:
         lines.append(f"... (truncated at {DIFF_LIMIT} lines; use git diff --cached for the rest)")
