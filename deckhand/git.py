@@ -30,6 +30,8 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
         raise GitError(command, -1, f"timed out after {TIMEOUT} seconds") from None
     except FileNotFoundError:
         raise GitError(command, -1, f"{argv[0]} not found") from None
+    except OSError as error:
+        raise GitError(command, -1, f"{argv[0]} could not run: {error.strerror or error}") from None
 
 
 class GitError(Exception):

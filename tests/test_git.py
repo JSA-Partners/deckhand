@@ -113,7 +113,9 @@ def test_apply_hunks_removes_the_scratch_worktree_when_apply_fails() -> None:
     assert not any(a[:2] == ["git", "update-ref"] for a in fake.argvs)
 
 
-@pytest.mark.parametrize("error", [subprocess.TimeoutExpired(["git", "push"], 120), FileNotFoundError("git")])
+@pytest.mark.parametrize(
+    "error", [subprocess.TimeoutExpired(["git", "push"], 120), FileNotFoundError("git"), PermissionError("git")]
+)
 def test_default_runner_failures_become_git_error(error: Exception, monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*args, **kwargs):
         raise error
