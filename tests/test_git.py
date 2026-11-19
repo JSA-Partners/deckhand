@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -198,10 +201,19 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(subprocess, "run", recorded)
     git.head(WT)
-    git.run(["gh", "pr", "list"], WT)
+    git.run(["sh", "-c", "true"], WT)
+    search = git.trusted_path()
     assert seen == [
-        ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "rev-parse", "HEAD"],
-        ["gh", "pr", "list"],
+        [
+            shutil.which("git", path=search),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            "rev-parse",
+            "HEAD",
+        ],
+        [shutil.which("sh", path=search), "-c", "true"],
     ]
 
 
@@ -216,3 +228,63 @@ def test_a_call_without_a_directory_runs_in_home(monkeypatch: pytest.MonkeyPatch
     git.run(["gh", "pr", "list", "--repo", "acme/widgets"])
     git.run(["git", "status"], WT)
     assert where == [Path.home(), WT]
+
+
+def plant_git(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    marker = directory / "planted-ran"
+    fake = directory / "git"
+    fake.write_text(f"#!/bin/sh\ntouch '{marker}'\necho planted\n")
+    fake.chmod(0o755)
+    return marker
+
+
+@pytest.fixture
+def real_path() -> str:
+    found = shutil.which("git")
+    assert found is not None
+    return os.environ["PATH"]
+
+
+def test_planted_git_in_temp_dir_never_runs(tmp_path: Path, real_path: str, monkeypatch: pytest.MonkeyPatch):
+    temp = tmp_path / "temp"
+    marker = plant_git(temp)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f"{temp}{os.pathsep}{real_path}")
+    done = git.run(["git", "--version"])
+    assert not marker.exists()
+    assert done.stdout.startswith("git version")
+
+
+@pytest.mark.parametrize("entry", ["", "."])
+def test_empty_or_dot_path_entry_ignored(tmp_path: Path, real_path: str, monkeypatch: pytest.MonkeyPatch, entry: str):
+    work = tmp_path / "work"
+    marker = plant_git(work)
+    elsewhere = tmp_path / "elsewhere-temp"
+    elsewhere.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(elsewhere))
+    monkeypatch.setenv("TMPDIR", str(elsewhere))
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PATH", f"{entry}{os.pathsep}{real_path}")
+    done = git.run(["git", "--version"], work)
+    assert not marker.exists()
+    assert done.stdout.startswith("git version")
+
+
+def test_child_gets_the_cleaned_path(tmp_path: Path, real_path: str, monkeypatch: pytest.MonkeyPatch):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f".{os.pathsep}relative/bin{os.pathsep}{temp}{os.pathsep}{real_path}")
+    printed = git.run(["sh", "-c", 'printf %s "$PATH"']).stdout
+    assert printed == git.trusted_path()
+    assert printed and not {".", "relative/bin", str(temp)} & set(printed.split(os.pathsep))
+
+
+def test_program_on_no_trusted_entry_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    temp = tmp_path / "temp"
+    plant_git(temp)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f".{os.pathsep}{temp}")
+    with pytest.raises(git.GitError, match="trusted PATH"):
+        git.run(["git", "--version"])

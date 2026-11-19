@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from deckhand.step import Refusal
-from deckhand.steps.checks import Checks
+from deckhand.steps.checks import Checks, run_command
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
@@ -135,3 +137,14 @@ def test_dirty_worktree_refuses_and_records_nothing(tmp_path: Path, repo: Path):
     with pytest.raises(Refusal, match="uncommitted"):
         Checks(store, Shell(dirty=True), repo, commands).apply(["s1", *TEAM])
     assert commands.ran == [] and store.writes == before
+
+
+def test_check_commands_run_on_the_trusted_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    (temp / "git").write_text("#!/bin/sh\necho planted\n")
+    (temp / "git").chmod(0o755)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f"{temp}{os.pathsep}{os.environ['PATH']}")
+    done = run_command("git --version", tmp_path)
+    assert done.stdout.startswith("git version")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import os
 import re
 import shutil
 import subprocess
@@ -25,12 +26,55 @@ NESTED = "a commit takes no nested repository: {}; remove it or list it in .giti
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
 
+UNTRUSTED = (
+    "{} is on no trusted PATH directory; deckhand skips empty, relative, temp, state, clone and worktree entries"
+)
+
+
+# A directory a hand can write must never supply a program deckhand runs outside the sandbox.
+def _untrusted_roots() -> list[Path]:
+    from deckhand import answers
+
+    roots = [Path(tempfile.gettempdir()), Path("/tmp"), answers.state_dir()]
+    if os.environ.get("TMPDIR"):
+        roots.append(Path(os.environ["TMPDIR"]))
+    roots += config.local().clones.values()
+    return [root.expanduser().resolve() for root in roots]
+
+
+def _trusted(directory: Path, untrusted: list[Path]) -> bool:
+    resolved = directory.resolve()
+    return not any(resolved.is_relative_to(root) for root in untrusted)
+
+
+def trusted_path() -> str:
+    untrusted = _untrusted_roots()
+    kept: list[str] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if os.path.isabs(entry) and entry not in kept and _trusted(Path(entry), untrusted):
+            kept.append(entry)
+    return os.pathsep.join(kept)
+
+
+def _program(name: str, search: str) -> str:
+    if os.path.isabs(name):
+        found = name if _trusted(Path(name).parent, _untrusted_roots()) else None
+    else:
+        found = shutil.which(name, path=search) if search and os.sep not in name else None
+    if found is None:
+        raise GitError(name, -1, UNTRUSTED.format(name))
+    return found
+
+
 def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     command = " ".join(argv[:2])
-    full = [argv[0], *UNHOOKED, *argv[1:]] if argv[0] == "git" else argv
+    search = trusted_path()
+    program = _program(argv[0], search)
+    full = [program, *UNHOOKED, *argv[1:]] if argv[0] == "git" else [program, *argv[1:]]
     try:
         return subprocess.run(
             full,
+            env={**os.environ, "PATH": search},
             # Without a directory, gh and claude would run git in a repository a hand may have planted.
             cwd=cwd or Path.home(),
             input=stdin,

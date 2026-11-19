@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -21,7 +22,15 @@ Checker = Callable[[str, Path], subprocess.CompletedProcess[str]]
 
 def run_command(command: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
+        return subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            env={**os.environ, "PATH": git.trusted_path()},
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT,
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(command, -1, "", f"timed out after {TIMEOUT} seconds")
 
