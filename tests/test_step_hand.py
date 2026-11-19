@@ -239,7 +239,7 @@ def test_after_merge_work_starts_after_done(clone: Path, capsys: pytest.CaptureF
     assert shell.launched() == ["hand-ACME-2", "hand-ACME-1", "hand-ACME-2"]
     capsys.readouterr()
     hand(store, shell).context([*TEAM, "--json"])
-    assert [i["ref"] for i in json.loads(capsys.readouterr().out)["startable"]] == ["ACME-2"]
+    assert json.loads(capsys.readouterr().out)["startable"] == []
 
 
 def test_wake_once_per_decision(clone: Path, capsys: pytest.CaptureFixture[str]):
@@ -304,3 +304,65 @@ def test_context_shows_slots_live_hands_and_startable(clone: Path, capsys: pytes
     ]
     hand(store, Shell(fleet_fails=True)).context(TEAM)
     assert "the fleet read failed" in capsys.readouterr().out
+
+
+def asked(store: FakeStore, story: str) -> None:
+    question = {"question": "Which queue?", "options": ["Redis", "SQS"], "why": "Both fit."}
+    store.put_record(story, asks.question_record(story, asks.parse_question(json.dumps(question))))
+
+
+def test_wake_live_waiting_hand_waits_for_a_slot(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = building(), Shell()
+    store.assign("s2", ME)
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    asked(store, "s1")
+    shell.rows = [row("ACME-1", "blocked", "waiting")]
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-2"]
+    shell.rows = [row("ACME-1", "blocked", "waiting"), row("ACME-2", "working", "busy")]
+    decided(store, "s1", "n1")
+    written = list(store.writes)
+    capsys.readouterr()
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    assert capsys.readouterr().out.strip() == "waits for a slot"
+    assert store.writes == written
+    assert asks.wake_due(store.records("s1")) is not None
+    shell.rows = [row("ACME-1", "blocked", "waiting"), row("ACME-2", "done")]
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    assert capsys.readouterr().out.startswith("send to hand-ACME-1: ")
+
+
+def test_wake_refuses_a_story_now_owned_by_another(clone: Path):
+    store, shell = building(), Shell()
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    decided(store, "s1", "n1")
+    shell.rows = [row("ACME-1", "blocked", "waiting")]
+    store.assign("s1", "someone-else")
+    written = list(store.writes)
+    with pytest.raises(Refusal, match="ACME-1 belongs to someone-else"):
+        hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    assert store.writes == written
+
+
+def test_context_omits_a_started_story_waiting_on_the_person(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    asked(store, "s1")
+    shell.rows = [row("ACME-1", "done")]
+    capsys.readouterr()
+    hand(store, shell).context([*TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["startable"] == []
+
+
+class NoKey:
+    def viewer(self) -> dict:
+        raise Refusal("missing credentials file: personal-key")
+
+
+def test_context_prints_without_a_personal_key(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = building()
+    Hand(store, Shell(row("ACME-1", "working", "busy")), person=NoKey()).context(TEAM)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == ["missing credentials file: personal-key", "slots: 1 of 1"]
+    assert "live: hand-ACME-1 working" in lines

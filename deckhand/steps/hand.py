@@ -8,6 +8,7 @@ from pathlib import Path
 from deckhand import answers, asks, claims, config, features, fleet, git, launch, ops, order, queue, signoff
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
+from deckhand.linear.client import LinearError
 from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
@@ -123,10 +124,16 @@ class Hand:
         feature = features.current(store, team_key(parsed))
         hands = fleet.hands(read.sessions)
         live = [s for _, s in sorted(hands.items()) if fleet.live(s)]
-        work = startable(store, feature, claims.me(self._person_store())) if feature is not None else []
-        work = [w for w in work if w.story["identifier"] not in {s.name.removeprefix(fleet.HAND) for s in live}]
+        notes, work = [read.note] if read.note else [], []
+        try:
+            me = claims.me(self._person_store())
+        except (Refusal, LinearError) as error:
+            notes.append(str(error))
+        else:
+            if feature is not None:
+                work = [w for w in startable(store, feature, me) if self._due(w, feature, hands)]
         facts = {
-            "note": read.note,
+            "notes": notes,
             "feature": feature.project["name"] if feature is not None else None,
             "slots": {"used": fleet.slots_used(read.sessions), "cap": cap},
             "live": [{"name": s.name, "state": s.state, "status": s.status} for s in live],
@@ -180,15 +187,12 @@ class Hand:
         hands = fleet.hands(read.sessions)
         plans = []
         for work in startable(store, feature, me):
+            if used >= cap or not self._due(work, feature, hands):
+                continue
             story = work.story
-            session = hands.get(story["identifier"])
-            if used >= cap or (session is not None and fleet.live(session)):
-                continue
             records = feature.records.get(story["id"], [])
-            if _started(records) and not self._restart_due(story, records, session, work.clone):
-                continue
             prompt = STORY_PROMPT.format(story["identifier"])
-            plans.append(self._prepare(story, records, work.clone, prompt, _resume(session)))
+            plans.append(self._prepare(story, records, work.clone, prompt, _resume(hands.get(story["identifier"]))))
             used += 1
         for plan in plans:
             self._launch(plan, person, me)
@@ -198,8 +202,15 @@ class Hand:
         elif not plans:
             print("nothing to start")
 
-    def _restart_due(self, story: dict, records: list[Record], session: fleet.Session | None, clone: Path) -> bool:
-        policy = Policy.load(clone)
+    def _due(self, work: Work, feature: Feature, hands: dict[str, fleet.Session]) -> bool:
+        story = work.story
+        session = hands.get(story["identifier"])
+        if session is not None and fleet.live(session):
+            return False
+        records = feature.records.get(story["id"], [])
+        if not _started(records):
+            return True
+        policy = Policy.load(work.clone)
         second = queue.second_due(story, records, lambda _: policy) is not None
         return queue.restart_due(story, records, session, second)
 
@@ -215,20 +226,21 @@ class Hand:
             return
         name = fleet.hand_name(story["identifier"])
         wake = Record(asks.WAKE, story["id"], str(due.data.get("nonce") or due.version), HAND, {"decision": due.kind})
-        session = fleet.hands(read.sessions).get(story["identifier"])
-        if session is not None and fleet.live(session):
-            ops.ensure_record(store, story["id"], wake)
-            print(f"send to {name}: the person decided the {due.kind} you waited on; carry on with the story")
-            return
         person = self._person_store()
         me = claims.me(person)
         claims.owned(story, me)
+        session = fleet.hands(read.sessions).get(story["identifier"])
+        live = session is not None and fleet.live(session)
+        if not (live and fleet.holds_slot(session)) and fleet.slots_used(read.sessions) >= config.local().slot_cap:
+            print("waits for a slot")
+            return
+        if live:
+            ops.ensure_record(store, story["id"], wake)
+            print(f"send to {name}: the person decided the {due.kind} you waited on; carry on with the story")
+            return
         clone = _clone(story)
         if clone is None:
             raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
-        if fleet.slots_used(read.sessions) >= config.local().slot_cap:
-            print("waits for a slot")
-            return
         plan = self._prepare(story, records, clone, STORY_PROMPT.format(story["identifier"]), _resume(session))
         self._launch(plan, person, me, wake)
         print(f"resumed {name}")
@@ -266,8 +278,8 @@ def _free_slot(read: fleet.Fleet) -> None:
 
 
 def _print(facts: dict) -> None:
-    if facts["note"]:
-        print(facts["note"])
+    for note in facts["notes"]:
+        print(note)
     print(f"slots: {facts['slots']['used']} of {facts['slots']['cap']}")
     for session in facts["live"]:
         print(f"live: {session['name']} {session['state']}")

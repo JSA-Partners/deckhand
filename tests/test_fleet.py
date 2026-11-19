@@ -141,6 +141,14 @@ def test_waiting_hand_frees_its_slot():
     assert fleet.slots_used(held + [session("hand-ACME-1", "done", None, at=1)]) == 2
 
 
+def test_only_working_or_permission_blocked_hands_hold_a_slot():
+    assert fleet.holds_slot(session("hand-A", "working", "busy"))
+    assert fleet.holds_slot(session("hand-A", "blocked", "waiting", "permission prompt"))
+    assert not fleet.holds_slot(session("hand-A", "blocked", "waiting", "input needed"))
+    assert not fleet.holds_slot(session("hand-A", "working", None))
+    assert not fleet.holds_slot(session("hand-A", "failed", None))
+
+
 def test_live_and_busy():
     assert fleet.live(session("hand-A", "working", "busy"))
     assert fleet.live(session("hand-A", "blocked", "waiting"))

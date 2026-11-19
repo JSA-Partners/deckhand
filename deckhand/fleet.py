@@ -106,7 +106,7 @@ def failed(session: Session) -> bool:
     return session.state in FAILED
 
 
-def _holds_slot(session: Session) -> bool:
+def holds_slot(session: Session) -> bool:
     if not live(session):
         return False
     return session.state == "working" or session.waiting_for == PERMISSION
@@ -114,4 +114,4 @@ def _holds_slot(session: Session) -> bool:
 
 def slots_used(sessions: list[Session]) -> int:
     held = [*hands(sessions).values(), *spikes(sessions).values()]
-    return sum(_holds_slot(session) for session in held)
+    return sum(holds_slot(session) for session in held)
