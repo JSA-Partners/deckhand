@@ -151,9 +151,7 @@ class Signoff(_Located):
             found = tuicr.comments(at.path, session["slug"], self._runner) if session else []
         except (git.GitError, ValueError):
             return []
-        seeded = built.get("seeded", {})
-        ids = set(seeded.get("ids", [])) if session and seeded.get("session") == session["slug"] else set()
-        return [c for c in found if c.get("id") not in ids]
+        return tuicr.persons(found, built.get("hunks", []))
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args, USAGE)
@@ -204,13 +202,10 @@ class Signoff(_Located):
         session = tuicr.session_for(at.path, sha, self._runner)
         if session is None:
             note = "run again after tuicr opens to seed the reasons"
-        elif held.data.get("seeded", {}).get("session") == session["slug"]:
-            note = "the reasons are seeded"
         else:
-            ids = tuicr.seed_comments(session["slug"], hunks, at.path, self._runner)
-            data = held.data | {"seeded": {"session": session["slug"], "ids": ids}}
-            ops.ensure_record(self._store_for_run(), sid, Record(signoff.TUICR, sid, head, "agent:signoff", data))
-            note = "seeded the reasons as comments"
+            present = tuicr.comments(at.path, session["slug"], self._runner)
+            added = tuicr.seed_comments(session["slug"], hunks, at.path, self._runner, present)
+            note = "seeded the missing reasons as comments" if added else "the reasons are seeded"
         print(f"done: {_shown_command(at.path, held.data['base'], sha)}; {note}")
 
 
@@ -224,7 +219,18 @@ def _open_plan(records: list[Record], story: str) -> list[str]:
     found = review.open_findings(latest, review.declined(records)) if latest else []
     if not found:
         return []
-    return [f"plan round {latest.subject.rsplit(':', 1)[1]}, open:", *(_finding(f) for f in found)]
+    lines = [f"plan round {latest.subject.rsplit(':', 1)[1]}, open:"]
+    plan = versions.held(records, implplan.PURPOSE, story)
+    if plan is None or review.reviewed(latest) != plan.version:
+        lines.append(f"reviewed plan version {review.reviewed(latest)[:12]}, not the current one")
+    return lines + _folded(found)
+
+
+def _folded(found: list[dict]) -> list[str]:
+    sure = [f for f in found if f["confidence"] >= review.DOUBTFUL]
+    doubtful = [f for f in found if f["confidence"] < review.DOUBTFUL]
+    lines = [_finding(f) for f in sure] or (["Nothing found."] if not doubtful else [])
+    return lines + (["doubtful:", *(_finding(f) for f in doubtful)] if doubtful else [])
 
 
 def _shown_command(worktree: Path | None, base: str, sha: str) -> str:
@@ -237,7 +243,9 @@ def _built(at: Story) -> dict | None:
 
 
 def _built_status(comments: list[dict]) -> str:
-    return f"built, {len(comments)} comments from you" if comments else "built"
+    if not comments:
+        return "built"
+    return f"built, {len(comments)} comment{'' if len(comments) == 1 else 's'} from you"
 
 
 def _tuicr(at: Story, comments: list[dict]) -> list[str]:
@@ -287,11 +295,7 @@ def _findings(at: Story) -> list[str]:
     lines = [f"branch round {last['n']}"]
     if last.get("head") and last["head"] != at.head:
         lines.append(f"reviewed at {last['head']}, not this head")
-    found = last.get("findings", [])
-    sure = [f for f in found if f["confidence"] >= review.DOUBTFUL]
-    doubtful = [f for f in found if f["confidence"] < review.DOUBTFUL]
-    lines += [_finding(f) for f in sure] or (["Nothing found."] if not doubtful else [])
-    lines += ["doubtful:", *(_finding(f) for f in doubtful)] if doubtful else []
+    lines += _folded(last.get("findings", []))
     lines += _open_plan(at.records, at.story["id"])
     declined = _declined(at.records)
     lines += ["declined by the person:", *(_finding(f) for f in declined)] if declined else []

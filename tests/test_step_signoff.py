@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
-from itertools import takewhile
 from pathlib import Path
 
 import pytest
 
-from deckhand import review, signoff
+from deckhand import implplan, review, signoff, versions
+from deckhand.git import GitError
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
@@ -388,27 +388,41 @@ def test_review_commit_is_built_once_per_head(
 SLUG = "acme/widgets@acme-1-orders/commits/c2..c2"
 
 
+ONE_HUNK = "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-old\n+new\n"
+TWO_HUNKS = ONE_HUNK + "@@ -10 +10 @@\n-old10\n+new10\n"
+
+
 class Diffing(Shell):
-    def __init__(self, sessions: list[dict] | None = None, comments: list[dict] | None = None) -> None:
+    def __init__(
+        self, sessions: list[dict] | None = None, comments: list[dict] | None = None, diff: str = ONE_HUNK
+    ) -> None:
         super().__init__()
-        self.sessions, self.comments = sessions or [], comments or []
+        self.sessions, self.comments, self.diff = sessions or [], comments or [], diff
         self.broken = ""
+        self.fail_add: int | None = None
 
     def __call__(self, argv, cwd=None, stdin=None):
         if argv[:2] == ["git", "diff"]:
             self.argvs.append(argv)
-            diff = "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-old\n+new\n"
-            return subprocess.CompletedProcess(argv, 0, diff, "")
+            return subprocess.CompletedProcess(argv, 0, self.diff, "")
         if argv[:3] == ["git", "branch", "--show-current"]:
             self.argvs.append(argv)
             return subprocess.CompletedProcess(argv, 0, "acme-1-orders\n", "")
         if argv[:2] == ["tuicr", "review"] and self.broken:
             self.argvs.append(argv)
             return subprocess.CompletedProcess(argv, 1 if self.broken == "fails" else 0, self.broken, "")
-        if argv[:2] == ["tuicr", "review"]:
+        if argv[:3] == ["tuicr", "review", "add"]:
             self.argvs.append(argv)
             added = len(self.ran("tuicr", "review", "add"))
-            out = {"list": self.sessions, "add": {"id": f"seed{added}"}, "comments": self.comments}[argv[2]]
+            if added == self.fail_add:
+                return subprocess.CompletedProcess(argv, 1, "", "anchor rejected")
+            path, line = argv[argv.index("--target-file") + 1], argv[argv.index("--line") + 1]
+            made = {"id": f"seed{added}", "location": f"{path}:{line}", "path": path, "content": argv[-1]}
+            self.comments.append(made)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(made), "")
+        if argv[:2] == ["tuicr", "review"]:
+            self.argvs.append(argv)
+            out = {"list": self.sessions, "comments": self.comments}[argv[2]]
             return subprocess.CompletedProcess(argv, 0, json.dumps(out), "")
         return super().__call__(argv, cwd, stdin)
 
@@ -469,7 +483,36 @@ def test_reasons_are_seeded_once_per_session_after_the_person_comments_first(
     for _ in range(2):
         Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     assert len(shell.ran("tuicr", "review", "add")) == 1
-    assert tuicr_held(store).data["seeded"] == {"session": SLUG, "ids": ["seed1"]}
+    assert "seeded" not in tuicr_held(store).data
+
+
+def test_a_rerun_after_a_failed_add_seeds_only_the_missing_reason(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing(sessions=[{"slug": SLUG}], diff=TWO_HUNKS)
+    shell.fail_add = 2
+    with pytest.raises(GitError):
+        Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    shell.fail_add = None
+    before = len(shell.ran("tuicr", "review", "add"))
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    [rerun] = shell.ran("tuicr", "review", "add")[before:]
+    assert rerun[rerun.index("--line") + 1] == "10"
+
+
+def test_a_session_holding_every_reason_is_left_alone_and_shows_none_as_the_persons(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    held = [said("t1", "contract site"), said("t2", "contract site"), said("p1", "Why?")]
+    shell = Diffing(sessions=[{"slug": SLUG}], comments=held, diff=TWO_HUNKS)
+    capsys.readouterr()
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    assert shell.ran("tuicr", "review", "add") == []
+    assert capsys.readouterr().out.rstrip().endswith("the reasons are seeded")
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
+    assert json.loads(capsys.readouterr().out)["comments"] == [said("p1", "Why?")]
 
 
 def said(id: str, content: str) -> dict:
@@ -490,7 +533,7 @@ def test_the_persons_tuicr_comments_are_shown_apart_from_the_seeded_reasons(
     assert overview(store, repo, capsys)["screens"]["tuicr"] == "built"
     Signoff(store, shell, repo).context(["s1", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
-    assert shown["screens"]["tuicr"] == "built, 1 comments from you"
+    assert shown["screens"]["tuicr"] == "built, 1 comment from you"
     assert shown["comments"] == [said("p1", "Rename this.")]
 
 
@@ -529,19 +572,37 @@ def screen(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str], n: 
     return capsys.readouterr().out.splitlines()
 
 
+def plan_round(store: FakeStore, target: str, *items: dict) -> list[review.Finding]:
+    found = review.parse_findings(json.dumps(list(items)))
+    plan = review.RoundPlan(2, scoped=True, base_hash="")
+    store.put_record("s1", review.round_record("s1", "plan", plan, target, found))
+    return found
+
+
 def test_findings_screen_lists_the_open_findings_of_the_last_plan_round(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys)
     assert not any(line.startswith("plan round") for line in screen(store, repo, capsys, 3))
-    kept, declined = raw(summary="Kept open."), raw(summary="Declined plan.", line=5)
-    found = review.parse_findings(json.dumps([kept, declined]))
-    plan = review.RoundPlan(2, scoped=True, base_hash="")
-    store.put_record("s1", review.round_record("s1", "plan", plan, "planhash", found))
+    kept, unsure = raw(summary="Kept open."), raw(summary="Unsure plan.", line=7, confidence=0.3)
+    found = plan_round(store, "planhash", kept, raw(summary="Declined plan.", line=5), unsure)
     gone = review.finding_id(found[1], "plan")
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", gone], "Decline")
     lines = screen(store, repo, capsys, 3)
     start = lines.index("plan round 2, open:")
     assert start > lines.index("branch round 1") + 1
-    section = list(takewhile(lambda line: line.startswith("- "), lines[start + 1 :]))
-    assert len(section) == 1 and "Kept open." in section[0]
+    section = lines[start + 1 : lines.index("declined by the person:")]
+    assert section[0] == "reviewed plan version planhash, not the current one"
+    assert "Kept open." in section[1] and section[2] == "doubtful:" and "Unsure plan." in section[3]
+    assert len(section) == 4
+
+
+def test_findings_screen_shows_the_plan_round_before_any_branch_round(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    current = versions.held(store.records("s1"), implplan.PURPOSE, "s1")
+    plan_round(store, current.version, raw(summary="Kept open."))
+    lines = screen(store, repo, capsys, 3)
+    assert lines[1:3] == ["the branch review has not run", "plan round 2, open:"]
+    assert len(lines) == 4 and "Kept open." in lines[3]

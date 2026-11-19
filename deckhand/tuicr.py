@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -160,9 +161,12 @@ def _anchor(hunk: Hunk, shift: int) -> tuple[int, str]:
     return first_removed or old_start, "old"
 
 
-def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run) -> list[str]:
+def seed_comments(
+    session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run, present: list[dict] | None = None
+) -> int:
+    held = Counter((c.get("path"), c.get("content")) for c in present or [])
     shifts: dict[str, int] = {}
-    ids: list[str] = []
+    added = 0
     for hunk in hunks:
         argv = ["tuicr", "review", "add", "--session", session]
         if repo is not None:
@@ -174,18 +178,24 @@ def seed_comments(session: str, hunks: list[Hunk], repo: Path | None = None, run
             _, old_count, _, new_count = _counts(hunk.lines[0])
             shifts[hunk.path] = shift + new_count - old_count
             argv += ["--line", str(line), "--side", side]
-        ids.append(_comment_id(call([*argv, "--username", USERNAME, hunk.reason], None, runner)))
-    return ids
+        if held[(hunk.path, hunk.reason)]:
+            held[(hunk.path, hunk.reason)] -= 1
+            continue
+        call([*argv, "--username", USERNAME, hunk.reason], None, runner)
+        added += 1
+    return added
 
 
-def _comment_id(out: str) -> str:
-    try:
-        found = json.loads(out)
-    except ValueError:
-        found = None
-    if not isinstance(found, dict) or not found.get("id"):
-        raise Refusal("tuicr review add printed no comment id")
-    return str(found["id"])
+def persons(comments: list[dict], reasons: list[dict]) -> list[dict]:
+    seeded = Counter((r.get("path"), r.get("reason")) for r in reasons)
+    found = []
+    for comment in comments:
+        key = (comment.get("path"), comment.get("content"))
+        if seeded[key]:
+            seeded[key] -= 1
+        else:
+            found.append(comment)
+    return found
 
 
 def command(base: str, sha: str) -> list[str]:

@@ -36,7 +36,8 @@ For the tuicr screen, run `deckhand signoff apply REF review --team-key "$team_k
 a commit of the selected hunks and prints the tuicr command; give it to the person as a plain
 message, with each hunk's reason. Once tuicr is open, run the same apply again to seed the reasons as
 comments. When they are done, show screen 4 again and, for each comment it lists as theirs, ask the
-person whether it is work for the hand. A yes means the sign-off decision is "Not yet".
+person whether it is work for the hand. A comment they call work for the hand means they answer
+"Not yet" to the sign-off.
 
 For the quiz screen, ask each open item with
 `deckhand decide context quiz REF --item 1 --team-key "$team_key"`, then 2 and on. A wrong answer

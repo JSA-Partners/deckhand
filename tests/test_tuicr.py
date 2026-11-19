@@ -205,7 +205,7 @@ def test_seed_comments_argv() -> None:
     fake = Tuicr()
     added = tuicr.Hunk("src/a.py", "H", ["@@ -3,2 +3,3 @@", " x", "+y", " z"], "sensitive path src/*.py")
     removed = tuicr.Hunk("old.txt", "H", ["@@ -1 +0,0 @@", "-bye"], "doubtful finding")
-    assert tuicr.seed_comments("slug", [added, removed], Path("/clone"), fake) == ["c1", "c2"]
+    assert tuicr.seed_comments("slug", [added, removed], Path("/clone"), fake) == 2
     assert fake.calls[0][0] == [
         "tuicr", "review", "add", "--session", "slug", "--repo", "/clone",
         "--target-file", "src/a.py", "--line", "4", "--side", "new",
@@ -238,6 +238,20 @@ def test_comments_reads_the_session_comments() -> None:
     fake = Tuicr(comments=[said])
     assert tuicr.comments(Path("/work"), SLUG, fake) == [said]
     assert fake.calls[0][0] == ["tuicr", "review", "comments", "--session", SLUG, "--repo", "/work"]
+
+
+def test_seed_comments_skips_reasons_already_present_and_keeps_the_line_shift() -> None:
+    fake = Tuicr()
+    first = tuicr.Hunk("f", "H", ["@@ -1,1 +1,3 @@", " a", "+b", "+c"], "r1")
+    second = tuicr.Hunk("f", "H", ["@@ -10,1 +12,2 @@", " j", "+k"], "r2")
+    assert tuicr.seed_comments("s", [first, second], None, fake, [{"path": "f", "content": "r1"}]) == 1
+    [(argv, _, _)] = fake.calls
+    assert argv[argv.index("--line") + 1] == "13" and argv[-1] == "r2"
+
+
+def test_a_slug_without_a_commit_range_matches_no_review_commit() -> None:
+    fake = Tuicr(sessions=[{"slug": "acme/widgets@acme-1-orders/pr/7"}])
+    assert tuicr.session_for(Path("/work"), "e024343" + "1" * 33, fake) is None
 
 
 def test_command_is_the_range_argv() -> None:
