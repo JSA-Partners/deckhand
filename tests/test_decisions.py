@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, tiers
+from deckhand import answers, decisions, signoff, tiers
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -45,7 +45,7 @@ def test_decide_without_recorded_answer_refuses_and_writes_nothing(tmp_path: Pat
     _, pending = ask(tmp_path)
     store = store_with("s1")
     with pytest.raises(Refusal, match="no recorded answer"):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -53,7 +53,7 @@ def test_decide_without_an_answers_file_names_the_file(tmp_path: Path):
     _, pending = ask(tmp_path)
     store = store_with("s1")
     with pytest.raises(Refusal, match=str(tmp_path / answers.FILE)):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -62,7 +62,7 @@ def test_decide_with_option_description_refuses(tmp_path: Path):
     answered(tmp_path, question, "contract: Checkout")
     store = store_with("s1")
     with pytest.raises(Refusal, match="option description"):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -70,20 +70,25 @@ def test_decide_records_on_every_story(tmp_path: Path):
     question, pending = ask(tmp_path, stories=["s1", "s2"])
     answered(tmp_path, question, "Approve", "sess-9")
     store = store_with("s1", "s2")
-    assert decisions.decide(store, pending, tmp_path) is True
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     for story in ("s1", "s2"):
         [record] = store.records(story)
         assert (record.kind, record.subject, record.version) == ("contract", "Checkout", "v1")
         assert record.author == "person:sess-9"
-        assert record.data == {"answer": "Approve", "question": question.text, "nonce": question.nonce}
+        assert record.data == {
+            "answer": "Approve",
+            "question": question.text,
+            "nonce": question.nonce,
+            "by": "viewer-1",
+        }
 
 
 def test_decide_twice_writes_once(tmp_path: Path):
     question, pending = ask(tmp_path)
     answered(tmp_path, question, "Approve")
     store = store_with("s1")
-    decisions.decide(store, pending, tmp_path)
-    decisions.decide(store, pending, tmp_path)
+    decisions.decide(store, pending, tmp_path, "viewer-1")
+    decisions.decide(store, pending, tmp_path, "viewer-1")
     assert [w[0] for w in store.writes] == ["put_record"]
 
 
@@ -92,7 +97,7 @@ def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer:
     question, pending = ask(tmp_path, kind)
     answered(tmp_path, question, answer)
     store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path) is False
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is False
     assert store.writes == []
 
 
@@ -107,7 +112,7 @@ def test_only_proving_in_lean_records_a_lean_decision(tmp_path: Path, answer: st
     question, pending = ask(tmp_path, "lean")
     answered(tmp_path, question, answer)
     store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path) is written
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is written
     assert [r.kind for r in store.records("s1")] == (["lean"] if written else [])
 
 
@@ -157,7 +162,7 @@ def test_pending_edited_after_the_answer_is_refused(tmp_path: Path, changes: dic
     pending = edit_pending(tmp_path, question.nonce, **changes)
     store = store_with("s1", "s2")
     with pytest.raises(Refusal, match="differs from the question the person saw"):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -198,7 +203,7 @@ def test_tier_record_holds_the_chosen_level_and_fact(tmp_path: Path, index: int,
     question, pending = ask(tmp_path, "tier")
     answered(tmp_path, question, question.options[index])
     store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path) is True
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     [record] = store.records("s1")
     assert (record.data["level"], record.data["fact"]) == (level, fact)
     assert "facts" not in record.data
@@ -210,7 +215,7 @@ def test_tier_answer_other_than_one_option_refuses(tmp_path: Path, answer: str):
     answered(tmp_path, question, answer)
     store = store_with("s1")
     with pytest.raises(Refusal, match="not one of the offered options"):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -229,7 +234,7 @@ def test_answer_marked_copied_refuses(tmp_path: Path):
     (tmp_path / answers.FILE).chmod(0o600)
     store = store_with("s1")
     with pytest.raises(Refusal, match="copied from recent agent output"):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -238,7 +243,7 @@ def test_every_decision_item_answer_is_recorded(tmp_path: Path, answer: str):
     question, pending = ask(tmp_path, "decision-item")
     answered(tmp_path, question, answer)
     store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path) is True
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     [record] = store.records("s1")
     assert record.data["answer"] == answer
 
@@ -276,7 +281,7 @@ def test_options_the_person_saw_must_match_the_pending_question(tmp_path: Path, 
     answered(tmp_path, question, "Approve", **changes)
     store = store_with("s1")
     with pytest.raises(Refusal, match="options the person saw"):
-        decisions.decide(store, pending, tmp_path)
+        decisions.decide(store, pending, tmp_path, "viewer-1")
     assert store.writes == []
 
 
@@ -284,3 +289,45 @@ def test_question_text_ending_in_a_question_mark_gets_no_second_one():
     label = "ACME-9 Dialog check story"
     shown = decisions.Pin("s9", "v1", ["s9"], "item 1 of 1, What happens?", label, [label])
     assert "??" not in decisions.make_question("quiz", replace(shown, options=["a", "b"])).text
+
+
+def test_decision_names_who(tmp_path: Path):
+    question, pending = ask(tmp_path)
+    answered(tmp_path, question, "Approve")
+    store = store_with("s1")
+    decisions.decide(store, pending, tmp_path, "ann")
+    [record] = store.records("s1")
+    assert record.data["by"] == "ann"
+
+
+def test_other_teammate_may_decide(tmp_path: Path):
+    question, pending = ask(tmp_path)
+    answered(tmp_path, question, "Approve")
+    store = store_with("s1")
+    store.assign("s1", "ann")
+    assert decisions.decide(store, pending, tmp_path, "bob") is True
+    [record] = store.records("s1")
+    assert record.data["by"] == "bob"
+
+
+def test_only_owner_signs_off(tmp_path: Path):
+    question, pending = ask(tmp_path, signoff.KIND)
+    answered(tmp_path, question, signoff.SIGN)
+    store = store_with("s1")
+    store.assign("s1", "ann")
+    store.writes.clear()
+    with pytest.raises(Refusal, match="^only ann, who owns ACME-1, signs it off$"):
+        decisions.decide(store, pending, tmp_path, "bob")
+    assert store.writes == []
+    assert decisions.decide(store, pending, tmp_path, "ann") is True
+    [record] = store.records("s1")
+    assert (record.kind, record.data["by"]) == (signoff.KIND, "ann")
+
+
+def test_an_unclaimed_story_is_not_signed_off(tmp_path: Path):
+    question, pending = ask(tmp_path, signoff.KIND)
+    answered(tmp_path, question, signoff.SIGN)
+    store = store_with("s1")
+    with pytest.raises(Refusal, match="^ACME-1 has no owner in Linear, and only its owner signs it off$"):
+        decisions.decide(store, pending, tmp_path, "ann")
+    assert store.writes == []

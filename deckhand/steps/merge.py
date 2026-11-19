@@ -32,8 +32,10 @@ class Merge(StoryStep):
         repo: Path | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        *,
+        me: Callable[[], str] | None = None,
     ) -> None:
-        super().__init__(store, runner, repo)
+        super().__init__(store, runner, repo, me=me)
         self._sleep, self._clock = sleep, clock
 
     def context(self, args: list[str]) -> None:
@@ -53,6 +55,7 @@ class Merge(StoryStep):
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
         at = self.locate(parsed["words"][0], team_key(parsed))
+        self.owned(at)
         sid, ref = at.story["id"], at.story["identifier"]
         held = signoff.signed(at.records, sid)
         head = signoff.signed_head(held) if held else ""

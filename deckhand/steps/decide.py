@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, decisions, features, git, quiz, review, signoff, versions
+from deckhand import answers, claims, decisions, features, git, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
@@ -53,9 +54,14 @@ class Decide(StoryStep):
         runner: git.Runner = git.run,
         repo: Path | None = None,
         reader: quiz.Reader = read_text,
+        *,
+        me: Callable[[], str] | None = None,
     ) -> None:
-        super().__init__(store, runner, repo)
+        super().__init__(store, runner, repo, me=me)
         self._reader = reader
+
+    def _store_for_run(self) -> Store:
+        return self._store if self._store is not None else claims.person_store()
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
@@ -125,7 +131,7 @@ class Decide(StoryStep):
         state = answers.state_dir()
         pending = decisions.load_pending(nonce, state)
         store = self._store_for_run()
-        if decisions.decide(store, pending, state):
+        if decisions.decide(store, pending, state, self.viewer()):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == quiz.KIND:
                 held = versions.held(store.records(pending.stories[0]), quiz.KIND, pending.subject)

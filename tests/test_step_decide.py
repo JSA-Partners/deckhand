@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-from deckhand import answers, decisions, features, planning, versions
+from deckhand import answers, claims, decisions, features, planning, versions
+from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import content_hash
 from deckhand.step import Refusal
+from deckhand.steps import build
 from deckhand.steps.decide import Decide
 from deckhand.store.fake import FakeStore
 
@@ -75,6 +78,7 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
     for story in ("s1", "s2"):
         [record] = store.records(story)
         assert (record.kind, record.version, record.author) == ("contract", version, "person:sess")
+        assert record.data["by"] == "viewer-1"
     assert store.records("x1") == []
     assert not decisions.pending_path(nonce, state).exists()
 
@@ -137,3 +141,28 @@ def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, cap
     shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
     assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]
     assert all("s2" not in option["description"] for option in shown["options"])
+
+
+class Connected(Exception):
+    pass
+
+
+def roles_connected(monkeypatch: pytest.MonkeyPatch, *steps: ModuleType) -> list[str]:
+    roles: list[str] = []
+
+    def connect(credentials: object, role: str) -> None:
+        roles.append(role)
+        raise Connected
+
+    monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path: object()))
+    monkeypatch.setattr(claims, "connect", connect)
+    for step in steps:
+        monkeypatch.setattr(step, "connect", connect)
+    return roles
+
+
+def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
+    roles = roles_connected(monkeypatch, build)
+    with pytest.raises(Connected):
+        Decide().context(["contract", P1, *TEAM])
+    assert roles == ["person"]

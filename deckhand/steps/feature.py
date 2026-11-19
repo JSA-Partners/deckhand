@@ -4,13 +4,10 @@ import json
 from collections.abc import Callable
 from datetime import date, timedelta
 
-from deckhand import config, features, ops, planning
-from deckhand.credentials import Credentials
+from deckhand import claims, features, ops, planning
 from deckhand.features import Phase
-from deckhand.linear.connect import connect
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
 
 USAGE = (
     "feature takes [--team-key KEY] on both verbs, --json on context only, and on apply one of: new --name N"
@@ -52,7 +49,7 @@ class Feature:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return claims.person_store()
 
     def _facts(self, store: Store, team: str) -> dict:
         today = self._today()

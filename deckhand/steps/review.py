@@ -241,7 +241,7 @@ class Review(StoryStep):
             return
         if not parsed.get("target"):
             raise Refusal(f"--target is required; {USAGE}")
-        subject = self._subject(parsed)
+        subject = self._writable(parsed)
         store = self._store_for_run()
         repo = self._worktree(subject, self._clone_of(subject))
         self._checked(subject, repo)
@@ -270,8 +270,14 @@ class Review(StoryStep):
         what = "carried the last round forward as" if plan.carry else "recorded"
         print(f"done: {what} round {plan.n} of {subject.label} {subject.stage}, {len(held)} findings, {p1} P1")
 
-    def _resolve(self, parsed: dict) -> None:
+    def _writable(self, parsed: dict) -> Subject:
         subject = self._subject(parsed)
+        if subject.located is not None:
+            self.owned(subject.located)
+        return subject
+
+    def _resolve(self, parsed: dict) -> None:
+        subject = self._writable(parsed)
         ref = subject.story["identifier"] if subject.story else subject.feature.live[0]["identifier"]
         if parsed["decline"]:
             asks = "; ".join(f"decide context finding {ref} --finding {id}" for id in parsed["decline"])

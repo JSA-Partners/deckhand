@@ -11,8 +11,10 @@ from deckhand import implplan, review, signoff, versions
 from deckhand.git import GitError
 from deckhand.records import Record
 from deckhand.step import Refusal
+from deckhand.steps.checks import Checks
 from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
+from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
 from deckhand.steps.signoff import Signoff
 from deckhand.store.fake import FakeStore
@@ -91,6 +93,7 @@ def built(store: FakeStore, head: str = "c2") -> None:
 
 def signable(tmp_path: Path, repo: Path, tuicr: bool = True) -> FakeStore:
     store = labeled(tmp_path, repo)
+    store.assign("s1", store.viewer()["id"])
     record_round(Review(store, Git(BASE), repo), tmp_path)
     if tuicr:
         built(store)
@@ -528,3 +531,22 @@ def test_sign_off_of_a_story_in_another_repository_refuses(tmp_path: Path, repo:
     store.set_labels("s1", ["gadgets"])
     with pytest.raises(Refusal, match="another repository"):
         Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+
+
+@pytest.mark.parametrize(
+    "step,args",
+    [
+        (Review, ["s1", "round", "--stage", "branch", "--target", "t", "--findings", "f.json"]),
+        (Checks, ["s1"]),
+        (Quiz, ["s1", "--quiz", "q.json", "--summary", "s.json"]),
+        (Signoff, ["s1", "summary", "--summary", "s.json"]),
+        (Merge, ["s1"]),
+    ],
+)
+def test_every_hand_write_refuses_a_story_another_holds(tmp_path: Path, repo: Path, step: type, args: list[str]):
+    store = signable(tmp_path, repo)
+    store.assign("s1", "bob")
+    store.writes.clear()
+    with pytest.raises(Refusal, match="^ACME-1 belongs to bob$"):
+        step(store, Shell(), repo, me=lambda: "ann").apply([*args, *TEAM])
+    assert store.writes == []

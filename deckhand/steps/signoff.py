@@ -136,6 +136,7 @@ class Signoff(StoryStep):
         self._review(at)
 
     def _summary(self, at: Located, parsed: dict) -> None:
+        self.owned(at)
         summary = parse_summary(_read(parsed.get("summary", "")))
         if git.dirty(at.path, self._runner):
             raise Refusal(f"{at.path} has uncommitted changes; commit them first so the summary is pinned")

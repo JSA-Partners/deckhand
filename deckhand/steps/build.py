@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import config, features, gh, git, implplan, ops, review, tiers, versions
+from deckhand import claims, config, features, gh, git, implplan, ops, review, tiers, versions
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
@@ -55,15 +56,31 @@ class Located:
 
 
 class StoryStep:
-    def __init__(self, store: Store | None = None, runner: git.Runner = git.run, repo: Path | None = None) -> None:
+    def __init__(
+        self,
+        store: Store | None = None,
+        runner: git.Runner = git.run,
+        repo: Path | None = None,
+        *,
+        me: Callable[[], str] | None = None,
+    ) -> None:
         self._store = store
         self._runner = runner
         self._repo = repo
+        self._me = me
 
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
         return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+
+    def viewer(self) -> str:
+        if self._me is not None:
+            return self._me()
+        return claims.me(self._store if self._store is not None else claims.person_store())
+
+    def owned(self, at: Located) -> None:
+        claims.owned(at.story, self.viewer())
 
     def _clone(self, labels: list[str]) -> Path:
         clones = config.local().clones
@@ -134,6 +151,7 @@ class Build(StoryStep):
             raise Refusal(f"apply takes REF and worktree or push; {USAGE}")
         ref, action = parsed["words"]
         at = self.locate(ref, team_key(parsed))
+        self.owned(at)
         feature, story, clone = at.feature, at.story, at.clone
         if self._runner(["git", "rev-parse", "--verify", "--quiet", DEFAULT_BASE], clone, None).returncode != 0:
             raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")

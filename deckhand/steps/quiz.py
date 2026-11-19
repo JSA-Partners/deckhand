@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from deckhand import git, ops, quiz, summary, tiers, versions
+from deckhand import claims, git, ops, quiz, summary, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
@@ -88,6 +88,7 @@ class Quiz(StoryStep):
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
         story, _, tier, head, path = self._worktree(parsed)
+        claims.owned(story, self.viewer())
         if tier is None:
             raise Refusal(f"{story['identifier']} has no tier decided; the quiz is sized by its tier")
         text, summary_text = _read(parsed.get("quiz", ""), "--quiz"), _read(parsed.get("summary", ""), "--summary")

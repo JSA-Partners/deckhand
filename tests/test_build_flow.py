@@ -45,6 +45,7 @@ class Hand:
         self.world.head = "c1"
         self.store = setup()
         self.store.set_labels("s1", ["widgets"])
+        self.store.assign("s1", self.store.viewer()["id"])
         approve_everything(self.store)
 
     def review(self) -> Review:

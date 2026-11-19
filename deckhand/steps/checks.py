@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import git, versions
+from deckhand import claims, git, versions
 from deckhand.checks import KIND, passing
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
@@ -33,8 +33,10 @@ class Checks(StoryStep):
         runner: git.Runner = git.run,
         repo: Path | None = None,
         checker: Checker = run_command,
+        *,
+        me: Callable[[], str] | None = None,
     ) -> None:
-        super().__init__(store, runner, repo)
+        super().__init__(store, runner, repo, me=me)
         self._checker = checker
 
     def _worktree(self, args: list[str]) -> tuple[dict, list[Record], str, list[str], Path]:
@@ -70,6 +72,7 @@ class Checks(StoryStep):
 
     def apply(self, args: list[str]) -> None:
         story, _, head, commands, path = self._worktree(args)
+        claims.owned(story, self.viewer())
         if git.dirty(path, self._runner):
             raise Refusal(f"{path} has uncommitted changes; commit them first so the pass is pinned to {head}")
         failed, tail = None, ""

@@ -324,10 +324,21 @@ def _tier_data(answer: str) -> dict:
     return {"level": tier.level, "fact": tier.fact}
 
 
-def decide(store: Store, pending: Pending, state: Path) -> bool:
+def _owner_signs(store: Store, pending: Pending, by: str) -> None:
+    story = store.issue(pending.stories[0])
+    ref = story["identifier"]
+    if story["assignee"] is None:
+        raise Refusal(f"{ref} has no owner in Linear, and only its owner signs it off")
+    if story["assignee"] != by:
+        raise Refusal(f"only {story['assignee_name']}, who owns {ref}, signs it off")
+
+
+def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     found = check(pending, state)
     if not _creates_record(pending, found.answer):
         return False
+    if pending.kind == signoff.KIND:
+        _owner_signs(store, pending, by)
     graded = {}
     if pending.kind == quiz.KIND:
         records = store.records(pending.stories[0])
@@ -337,7 +348,7 @@ def decide(store: Store, pending: Pending, state: Path) -> bool:
         pending.subject,
         pending.version,
         f"person:{found.session_id}",
-        {"answer": found.answer, "question": pending.question, "nonce": pending.nonce}
+        {"answer": found.answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"item": pending.detail} if pending.kind == "decision-item" else {})
         | (_tier_data(found.answer) if pending.kind == "tier" else {})
         | graded,

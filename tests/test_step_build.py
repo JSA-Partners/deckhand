@@ -339,3 +339,16 @@ def test_locate_story_of_second_repository(tmp_path: Path, repo: Path, monkeypat
     monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config_dir))
     found = Build(store, Shell(), repo).locate("s1", "ACME")
     assert (found.clone, found.policy.repository_label, found.path) == (second, "gadgets", None)
+
+
+def test_a_hand_write_refuses_a_story_another_holds(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
+    store = labeled(tmp_path, repo)
+    store.assign("s1", "bob")
+    store.writes.clear()
+    shell = Shell()
+    Build(store, shell, repo, me=lambda: "ann").context(["s1", *TEAM])
+    assert "story: ACME-1" in capsys.readouterr().out
+    with pytest.raises(Refusal, match="^ACME-1 belongs to bob$"):
+        Build(store, shell, repo, me=lambda: "ann").apply(["s1", "push", *TEAM])
+    assert store.writes == []
+    assert shell.ran("git", "push") == []
