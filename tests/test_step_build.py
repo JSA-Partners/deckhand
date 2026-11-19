@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -546,6 +547,42 @@ def test_a_file_swapped_for_a_repository_is_never_staged(tmp_path: Path, repo: P
         commit(store, repo, tmp_path, "feat: change a\n", swapping(worktree / "n", tmp_path / "aside", True))
     assert "160000" not in sh(worktree, "ls-files", "-s")
     assert sh(worktree, "log", "-1", "--format=%s") == "chore: base"
+
+
+def test_a_gitlink_staged_by_a_failing_add_is_never_committed(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    nested(worktree, tmp_path)
+    (worktree / "q").write_text("q\n")
+    swap = swapping(worktree / "n", tmp_path / "aside", True)
+
+    def failing(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+        if argv[:2] == ["git", "add"]:
+            (worktree / ".gitignore").write_text("q\n")
+        return swap(argv, cwd, stdin)
+
+    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
+        commit(store, repo, tmp_path, "feat: add q\n", failing)
+    assert "160000" not in sh(worktree, "ls-files", "-s")
+    (worktree / ".gitignore").unlink()
+    (worktree / "n").unlink()
+    (tmp_path / "aside").rename(worktree / "n")
+    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
+        commit(store, repo, tmp_path, "feat: add q\n")
+    assert "160000" not in sh(worktree, "ls-tree", "-r", "HEAD")
+
+
+def test_a_gitlink_an_interrupted_commit_left_is_removed_and_refused(tmp_path: Path, repo: Path, monkeypatch):
+    store, worktree = real(tmp_path, repo, monkeypatch)
+    nested(worktree, tmp_path)
+    sh(worktree, "update-index", "--add", "--cacheinfo", f"160000,{sh(worktree / 'n', 'rev-parse', 'HEAD')},n")
+    shutil.move(worktree / "n", tmp_path / "aside")
+    (worktree / "a.txt").write_text("two\n")
+    with pytest.raises(Refusal, match="a commit takes no nested repository: n"):
+        commit(store, repo, tmp_path, "feat: change a\n")
+    assert "160000" not in sh(worktree, "ls-files", "-s")
+    assert sh(worktree, "log", "-1", "--format=%s") == "chore: base"
+    commit(store, repo, tmp_path, "feat: change a\n")
+    assert sh(worktree, "show", "--name-only", "--format=", "HEAD").splitlines() == ["a.txt"]
 
 
 def test_a_submodule_the_clone_holds_still_commits(tmp_path: Path, repo: Path, monkeypatch):

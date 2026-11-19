@@ -150,19 +150,17 @@ def merging(worktree: Path, runner: Runner = run) -> bool:
 
 
 def commit_all(worktree: Path, message: str, runner: Runner = run) -> None:
-    # A second commit must never stage while the first holds a gitlink it is about to refuse.
+    # A second commit must never stage onto a gitlink the first has staged and not yet removed.
     with _locked(worktree, runner):
-        before = _index(worktree, runner)
-        _stage(worktree, [path for path, entries in before.items() if _links(entries)], runner)
-        after = _index(worktree, runner)
-        added = sorted(path for path, entries in after.items() if _links(entries) and entries != before.get(path))
-        if added:
-            _restore(worktree, added, before, after, runner)
-            raise Refusal(NESTED.format(", ".join(added)))
+        _refuse_strays(worktree, runner)
+        try:
+            _stage(worktree, runner)
+        finally:
+            _refuse_strays(worktree, runner)
         call(["git", "commit", "-F", "-"], worktree, runner, stdin=message)
 
 
-def _stage(worktree: Path, links: list[str], runner: Runner) -> None:
+def _stage(worktree: Path, runner: Runner) -> None:
     argv = ["git", "status", "--porcelain=v2", "-z", "--no-renames", "--untracked-files=all", UNNESTED]
     paths, nested = [], []
     for record in call(argv, worktree, runner).split("\0"):
@@ -174,6 +172,7 @@ def _stage(worktree: Path, links: list[str], runner: Runner) -> None:
             (nested if record.endswith("/") else paths).append(record[2:].rstrip("/"))
     if nested:
         raise Refusal(NESTED.format(", ".join(nested)))
+    links = {path for path, meta in _entries(["ls-files", "-s"], worktree, runner) if meta.startswith(GITLINK)}
     # A pathspec that reaches an index gitlink makes git add run status inside that repository.
     chosen = [path for path in paths if not any(_overlaps(path, link) for link in links)]
     if chosen:
@@ -185,27 +184,32 @@ def _overlaps(path: str, link: str) -> bool:
     return path == link or path.startswith(f"{link}/") or link.startswith(f"{path}/")
 
 
-def _index(worktree: Path, runner: Runner) -> dict[str, list[str]]:
-    entries: dict[str, list[str]] = {}
-    for record in call(["git", "ls-files", "-s", "-z"], worktree, runner).split("\0"):
-        meta, _, path = record.partition("\t")
-        if path:
-            entries.setdefault(path, []).append(meta)
-    return entries
-
-
-def _links(entries: list[str]) -> bool:
-    return any(meta.startswith(f"{GITLINK} ") for meta in entries)
-
-
-def _restore(
-    worktree: Path, paths: list[str], before: dict[str, list[str]], after: dict[str, list[str]], runner: Runner
-) -> None:
+def _refuse_strays(worktree: Path, runner: Runner) -> None:
+    head = dict(_entries(["ls-tree", "-r", "HEAD"], worktree, runner))
+    known = {(path, meta.split()[2]) for path, meta in head.items() if meta.startswith(GITLINK)}
+    if merging(worktree, runner):
+        merged = _entries(["ls-tree", "-r", "MERGE_HEAD"], worktree, runner)
+        known |= {(path, meta.split()[2]) for path, meta in merged if meta.startswith(GITLINK)}
+    strays = {}
+    for path, meta in _entries(["ls-files", "-s"], worktree, runner):
+        mode, sha, stage = meta.split()
+        if mode == GITLINK and stage == "0" and (path, sha) not in known:
+            strays[path] = sha
+    if not strays:
+        return
     lines = []
-    for path in paths:
-        zero = "0" * len(after[path][0].split()[1])
-        lines += [f"0 {zero}\t{path}", *(f"{meta}\t{path}" for meta in before.get(path, []))]
+    for path, sha in sorted(strays.items()):
+        lines.append(f"0 {'0' * len(sha)}\t{path}")
+        if path in head:
+            mode, _, blob = head[path].split()
+            lines.append(f"{mode} {blob} 0\t{path}")
     call(["git", "update-index", "-z", "--index-info"], worktree, runner, stdin="".join(f"{line}\0" for line in lines))
+    raise Refusal(NESTED.format(", ".join(sorted(strays))))
+
+
+def _entries(argv: list[str], worktree: Path, runner: Runner) -> list[tuple[str, str]]:
+    records = call(["git", argv[0], "-z", *argv[1:]], worktree, runner).split("\0")
+    return [(path, meta) for meta, _, path in (record.partition("\t") for record in records) if path]
 
 
 @contextmanager
