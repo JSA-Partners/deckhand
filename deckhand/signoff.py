@@ -191,20 +191,24 @@ def after_status(records: list[Record], story: str, n: int, text: str) -> tuple[
     return FOR_PERSON, left
 
 
-def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int, str, str]]:
+def _left(records: list[Record], story: str) -> list[tuple[int, str, Record]]:
     found = []
     for n, text in enumerate(after_items(records, story), start=1):
         status, held = after_status(records, story, n, text)
         if status == FOR_PERSON and held is not None:
-            found.append((n, text, str(held.data.get("why", ""))))
+            found.append((n, text, held))
     return found
 
 
-def after_merge_queue(store: Store, team: str, me: str) -> list[tuple[dict, int, str, str]]:
+def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int, str, str]]:
+    return [(n, text, str(held.data.get("why", ""))) for n, text, held in _left(records, story)]
+
+
+def after_merge_queue(store: Store, team: str, me: str) -> list[tuple[dict, int, str, str, str]]:
     found = []
     for feature in features.started(store, team):
         for story in feature.stories:
-            if story["assignee"] in (None, me):
-                held = after_merge_for_person(feature.records.get(story["id"], []), story["id"])
-                found += [(story, n, text, why) for n, text, why in held]
+            if story["assignee"] == me:
+                held = _left(feature.records.get(story["id"], []), story["id"])
+                found += [(story, n, text, str(left.data.get("why", "")), left.at) for n, text, left in held]
     return found

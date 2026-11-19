@@ -295,7 +295,7 @@ class LinearStore(Store):
             if _missing(error):
                 return []
             raise
-        return [{"id": n["id"], "title": n["title"], "at": n["updatedAt"]} for n in nodes]
+        return [{"id": n["id"], "title": n["title"], "url": n["url"], "at": n["updatedAt"]} for n in nodes]
 
     def assign(self, issue: str, user: str) -> None:
         self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": {"assigneeId": user}})

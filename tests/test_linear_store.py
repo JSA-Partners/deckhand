@@ -742,7 +742,14 @@ def test_project_documents_listed_across_pages() -> None:
             {
                 "project": {
                     "documents": {
-                        "nodes": [{"id": "d1", "title": "One", "updatedAt": "2026-11-19T10:00:00.000Z"}],
+                        "nodes": [
+                            {
+                                "id": "d1",
+                                "title": "One",
+                                "url": "https://linear.app/d1",
+                                "updatedAt": "2026-11-19T10:00:00.000Z",
+                            }
+                        ],
                         "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
                     }
                 }
@@ -750,7 +757,14 @@ def test_project_documents_listed_across_pages() -> None:
             {
                 "project": {
                     "documents": {
-                        "nodes": [{"id": "d2", "title": "Two", "updatedAt": "2026-11-19T11:00:00.000Z"}],
+                        "nodes": [
+                            {
+                                "id": "d2",
+                                "title": "Two",
+                                "url": "https://linear.app/d2",
+                                "updatedAt": "2026-11-19T11:00:00.000Z",
+                            }
+                        ],
                         "pageInfo": DONE,
                     }
                 }
@@ -758,8 +772,8 @@ def test_project_documents_listed_across_pages() -> None:
         ]
     )
     assert LinearStore(client).project_documents("proj-1") == [
-        {"id": "d1", "title": "One", "at": "2026-11-19T10:00:00.000Z"},
-        {"id": "d2", "title": "Two", "at": "2026-11-19T11:00:00.000Z"},
+        {"id": "d1", "title": "One", "url": "https://linear.app/d1", "at": "2026-11-19T10:00:00.000Z"},
+        {"id": "d2", "title": "Two", "url": "https://linear.app/d2", "at": "2026-11-19T11:00:00.000Z"},
     ]
     assert client.calls[1] == ("ProjectDocuments", {"id": "proj-1", "after": "c1"})
 

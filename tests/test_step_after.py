@@ -125,10 +125,14 @@ def test_released_items_stay_after_the_next_feature_opens(state: Path, capsys: p
     store.set_project_dates(beta, "2026-11-23", "2026-11-30")
     store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
     waiting = signoff.after_merge_queue(store, "ACME", me)
-    assert [(s["identifier"], n, text, why) for s, n, text, why in waiting] == [
-        ("ACME-1", 2, CHORES[1], "the secret lives in the vault")
+    [left] = [r for r in store.records("s1") if r.kind == signoff.AFTER_PERSON]
+    assert [(s["identifier"], n, text, why, at) for s, n, text, why, at in waiting] == [
+        ("ACME-1", 2, CHORES[1], "the secret lives in the vault", left.at)
     ]
     assert signoff.after_merge_queue(store, "ACME", "someone-else") == []
+    store.assign("s1", None)
+    assert signoff.after_merge_queue(store, "ACME", me) == []
+    store.assign("s1", me)
     assert statuses(store, capsys) == ["open", "left for the person"]
     answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Done")
     After(store).apply(["ACME-1", "done", "1", "--note", "dropped", *TEAM])

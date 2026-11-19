@@ -114,7 +114,7 @@ query IssueAttachments($id: String!, $after: String) {{
 
 PROJECT_DOCUMENTS = f"""
 query ProjectDocuments($id: String!, $after: String) {{
-  project(id: $id) {{ documents{AFTER} {{ nodes {{ id title updatedAt }} {CURSOR} }} }}
+  project(id: $id) {{ documents{AFTER} {{ nodes {{ id title url updatedAt }} {CURSOR} }} }}
 }}
 """
 

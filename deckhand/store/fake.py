@@ -20,6 +20,9 @@ def _branch_name(team: str, number: int, title: str) -> str:
     return f"{team.lower()}-{number}-{slug}"
 
 
+DOCUMENT_URL = "https://linear.invalid/document/"
+
+
 class WriteFailed(Exception):
     pass
 
@@ -148,7 +151,10 @@ class FakeStore(Store):
 
     def project_documents(self, project: str) -> list[dict]:
         held = [d for d in self._documents.values() if d["parent"] == project]
-        return [{"id": d["id"], "title": d["title"], "at": d["at"]} for d in sorted(held, key=lambda d: d["id"])]
+        return [
+            {"id": d["id"], "title": d["title"], "url": f"{DOCUMENT_URL}{d['id']}", "at": d["at"]}
+            for d in sorted(held, key=lambda d: d["id"])
+        ]
 
     def put_record(self, issue: str, record: Record) -> None:
         url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"

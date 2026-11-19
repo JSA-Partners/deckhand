@@ -20,8 +20,8 @@ TEAM = ["--team-key", "ACME"]
 STATE_CHART = "A flow or an entity with several states"
 
 
-def setup() -> FakeStore:
-    store = FakeStore()
+def setup(store: FakeStore | None = None) -> FakeStore:
+    store = store if store is not None else FakeStore()
     store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     feature = load(store)
