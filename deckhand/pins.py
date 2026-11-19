@@ -70,7 +70,7 @@ def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
         reason = signoff.standing(records, story["id"], head) if held else "the person has not signed off"
         raise Refusal(f"{story['identifier']} has no current sign-off to second: {reason}")
     label = _label(story)
-    return Pin(story["id"], held.version, [story["id"]], f"head {head}", label, [label])
+    return Pin(story["id"], signoff.second_version(held), [story["id"]], f"head {head}", label, [label])
 
 
 def _after_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:

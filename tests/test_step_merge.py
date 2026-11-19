@@ -253,3 +253,22 @@ def test_merge_waits_for_second_signoff(tmp_path: Path, repo: Path, state: Path,
     second(store, repo, state, capsys, "teammate-2", "Sign off")
     merge(store, repo, gh)
     assert len(gh.ran("gh", "pr", "merge")) == 1
+
+
+def test_second_signoff_does_not_outlive_a_void(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    two_signers(repo)
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    second(store, repo, state, capsys, "teammate-2", "Sign off")
+    with pytest.raises(Refusal, match="checks failed"):
+        merge(store, repo, Gh(buckets=[["fail"]]))
+    sign(store, repo, state, capsys)
+    gh = Gh()
+    with pytest.raises(Refusal, match="^ACME-1 is waiting for a second sign-off$"):
+        merge(store, repo, gh)
+    assert gh.ran("gh", "pr", "merge") == []
+    second(store, repo, state, capsys, "teammate-2", "Sign off")
+    merge(store, repo, gh)
+    assert len(gh.ran("gh", "pr", "merge")) == 1

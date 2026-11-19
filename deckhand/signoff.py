@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import implplan, quiz, review, versions
+from deckhand import features, implplan, quiz, review, versions
 from deckhand.checks import passing
-from deckhand.records import Record, content_hash
+from deckhand.records import HAND, Record, content_hash
 from deckhand.step import Refusal
+from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
 KIND = "sign-off"
@@ -120,14 +121,19 @@ def _first(records: list[Record], story: str, head: str) -> bool:
     )
 
 
+def second_version(sign: Record) -> str:
+    return f"{sign.version}:{sign.data.get('nonce', '')}"
+
+
 def seconded(records: list[Record], story: str, sign: Record) -> bool:
     held = versions.held(records, SECOND, story)
     return (
         held is not None
         and held.author.startswith(review.PERSON)
         and held.data.get("answer") == SIGN
-        and held.version == sign.version
+        and held.version == second_version(sign)
         and held.data.get("by") != sign.data.get("by")
+        and voided(records, story, sign) is None
     )
 
 
@@ -163,7 +169,7 @@ def after_items(records: list[Record], story: str) -> list[str]:
 
 
 def after_record(kind: str, story: str, n: int, text: str, data: dict) -> Record:
-    return Record(kind, f"{story}:{n}", content_hash(text), "agent:after", {"n": n, "text": text} | data)
+    return Record(kind, f"{story}:{n}", content_hash(text), HAND, {"n": n, "text": text} | data)
 
 
 def after_status(records: list[Record], story: str, n: int, text: str) -> tuple[str, Record | None]:
@@ -191,4 +197,14 @@ def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int,
         status, held = after_status(records, story, n, text)
         if status == FOR_PERSON and held is not None:
             found.append((n, text, str(held.data.get("why", ""))))
+    return found
+
+
+def after_merge_queue(store: Store, team: str, me: str) -> list[tuple[dict, int, str, str]]:
+    found = []
+    for feature in features.started(store, team):
+        for story in feature.stories:
+            if story["assignee"] in (None, me):
+                held = after_merge_for_person(feature.records.get(story["id"], []), story["id"])
+                found += [(story, n, text, why) for n, text, why in held]
     return found

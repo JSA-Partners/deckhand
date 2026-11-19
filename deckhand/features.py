@@ -151,6 +151,16 @@ def story(store: Store, feature: Feature, ref: str) -> dict:
     return held
 
 
+def owning(store: Store, team: str, ref: str) -> Feature:
+    found = ops.issue_id_or_none(store, ref)
+    issue = store.issue(found) if found else None
+    held = issue is not None and issue["project"] and issue["team"] == team
+    project = store.project(issue["project"]) if held else None
+    if project is None or not is_feature(project):
+        raise Refusal(f"{ref} is not a story of any feature of {team}")
+    return load(store, project)
+
+
 def crosses_repositories(store: Store, feature: Feature, story: dict) -> bool:
     group = set(store.repository_labels(story["team"]))
     edges = {end for pair in store.relations(story["id"]) for end in pair} - {story["id"]}
@@ -177,7 +187,7 @@ def team_features(store: Store, team: str) -> list[dict]:
     return [p for p in store.team_projects(team) if is_feature(p)]
 
 
-def _started(store: Store, team: str) -> list[Feature]:
+def started(store: Store, team: str) -> list[Feature]:
     return [load(store, p) for p in team_features(store, team) if p["start_date"]]
 
 
@@ -189,19 +199,19 @@ def _one_open(found: list[Feature]) -> Feature | None:
 
 
 def open_features(store: Store, team: str) -> list[Feature]:
-    return [f for f in _started(store, team) if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
+    return [f for f in started(store, team) if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
 
 
 def open_feature(store: Store, team: str) -> Feature | None:
-    return _one_open(_started(store, team))
+    return _one_open(started(store, team))
 
 
 def current(store: Store, team: str) -> Feature | None:
-    started = _started(store, team)
-    found = _one_open(started)
+    held = started(store, team)
+    found = _one_open(held)
     if found is not None:
         return found
-    released = [f for f in started if phase(f) is Phase.RELEASED]
+    released = [f for f in held if phase(f) is Phase.RELEASED]
     return max(released, key=lambda f: (f.project["start_date"], f.project["id"]), default=None)
 
 

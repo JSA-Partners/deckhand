@@ -578,7 +578,10 @@ def test_second_signoff_needs_another_person(
     question = second(store, repo, state, capsys, "teammate-2", "Sign off")
     assert [o["label"] for o in question["options"]] == ["Sign off", "Not yet"]
     [held] = [r for r in store.records("s1") if r.kind == signoff.SECOND]
-    assert (held.version, held.data["by"]) == (signoff.signed(store.records("s1"), "s1").version, "teammate-2")
+    assert (held.version, held.data["by"]) == (
+        signoff.second_version(signoff.signed(store.records("s1"), "s1")),
+        "teammate-2",
+    )
     assert signoff.current(store.records("s1"), "s1", "c2", second=True)
     assert overview(store, repo, capsys)["missing"] == []
 

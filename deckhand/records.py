@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 RECORD_SCHEMA = 1
+HAND = "agent:hand"
 
 _FIELDS: dict[str, type] = {"kind": str, "subject": str, "version": str, "author": str, "data": dict}
 

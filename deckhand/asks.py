@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 
 from deckhand import review, signoff
 from deckhand.questions import MAX_OPTIONS, MIN_OPTIONS, RECOMMENDED
-from deckhand.records import Record, content_hash
+from deckhand.records import HAND, Record, content_hash
 from deckhand.step import Refusal
 
 QUESTION = "hand-question"
@@ -16,7 +16,6 @@ EDIT_REQUEST = "config-edit-request"
 PROPOSAL = "decline-proposal"
 HAND_START = "hand-start"
 WAKE = "wake"
-HAND = "agent:hand"
 EDIT_OPTIONS = ["Done", "Not doing it"]
 QUESTION_SHAPE = {"question": "TEXT", "options": ["TWO TO FOUR OPTIONS"], "why": "TEXT"}
 EDIT_SHAPE = {"path": "PATH", "change": "TEXT", "why": "TEXT"}

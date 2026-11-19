@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from deckhand import implplan, signoff
+from deckhand.features import FEATURE_LABEL
+from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.after import After
@@ -46,6 +48,7 @@ def test_after_items_open_once_done(capsys: pytest.CaptureFixture[str]):
     store = chored()
     before = listing(store, capsys)
     assert (before["done"], [i["text"] for i in before["items"]]) == (False, CHORES)
+    assert {i["status"] for i in before["items"]} == {"waits for the merge"}
     written = list(store.writes)
     with pytest.raises(Refusal, match="ACME-1 is not Done"):
         After(store).apply(["ACME-1", "done", "1", "--note", "dropped", *TEAM])
@@ -108,3 +111,26 @@ def test_after_merge_decision_refused_for_hand_item(capsys: pytest.CaptureFixtur
         with pytest.raises(Refusal, match=f"item {item} of ACME-1 is not left for the person"):
             Decide(store).context(["after-merge", "ACME-1", "--item", item, *TEAM])
     assert store.writes == written
+
+
+def test_released_items_stay_after_the_next_feature_opens(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = chored()
+    me = store.viewer()["id"]
+    store.assign("s1", me)
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
+    beta = create_id("ACME:Beta", "feature")
+    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
+    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
+    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
+    waiting = signoff.after_merge_queue(store, "ACME", me)
+    assert [(s["identifier"], n, text, why) for s, n, text, why in waiting] == [
+        ("ACME-1", 2, CHORES[1], "the secret lives in the vault")
+    ]
+    assert signoff.after_merge_queue(store, "ACME", "someone-else") == []
+    assert statuses(store, capsys) == ["open", "left for the person"]
+    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Done")
+    After(store).apply(["ACME-1", "done", "1", "--note", "dropped", *TEAM])
+    assert statuses(store, capsys) == ["done by the hand", "done by the person"]
+    assert signoff.after_merge_queue(store, "ACME", me) == []

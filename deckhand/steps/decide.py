@@ -67,8 +67,10 @@ class Decide(StoryStep):
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
         store = self._store_for_run()
-        find = features.current if kind == signoff.AFTER else features.open_feature
-        feature = find(store, team_key(parsed))
+        if kind == signoff.AFTER:
+            feature = features.owning(store, team_key(parsed), subject)
+        else:
+            feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
