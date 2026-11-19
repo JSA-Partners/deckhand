@@ -25,4 +25,6 @@ rather than appended as a dated entry, a new topic file only when none fits; mem
 true across repositories; `CLAUDE.md` only for the rare rule that must load every session. If
 `docs/claude/` is missing, confirm where to write before creating it.
 
-When unsure where a learning belongs, ask. List the files touched and stop.
+When unsure where a learning belongs, ask. A story's hand has no one to ask: it writes to
+`docs/claude/` and lists each doubt as a line of a Docs intent in the change summary. List the
+files touched and stop.

@@ -26,7 +26,7 @@ First take what the hand left for the person. In
 open finding that is a P1 or changes delivery is decided with
 `deckhand decide context finding REF --finding ID --team-key "$team_key"`. A stage stopped at its cap
 is decided with `deckhand decide context review-cap REF --stage branch --team-key "$team_key"`, or
-`--stage plan`.
+`--stage plan`. When the context above shows no change summary, the hand is not done: stop here.
 
 Then show each screen in order with
 `deckhand signoff context REF --screen 1 --team-key "$team_key"`, and 2 to 5 the same way: what

@@ -13,6 +13,7 @@ from deckhand.linear.connect import connect
 from deckhand.policy import STAGES, Policy
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register
+from deckhand.steps.build import branch_of
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
@@ -175,6 +176,20 @@ class Review:
             return None, "the previously reviewed text is not on this machine; review the whole text"
         return review.text_diff(old, target.text), ""
 
+    def _clone(self, subject: Subject) -> Path:
+        if self._repo is not None:
+            return self._repo
+        return Path.cwd() if subject.stage == FEATURE else git.clone_root(Path.cwd(), self._runner)
+
+    def _worktree(self, subject: Subject, clone: Path) -> Path:
+        if subject.stage != "branch":
+            return clone
+        branch = branch_of(subject.records, subject.story)
+        path = git.worktree_path(clone, branch) if branch else None
+        if path is None or not path.is_dir():
+            raise Refusal(f"{subject.label} has no worktree; run build apply {subject.label} worktree")
+        return path
+
     def _checked(self, subject: Subject, repo: Path) -> None:
         if subject.stage != "branch":
             return
@@ -184,7 +199,8 @@ class Review:
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
         subject = self._subject(parsed)
-        store, repo = self._store_for_run(), self._repo or Path.cwd()
+        store, clone = self._store_for_run(), self._clone(subject)
+        repo = self._worktree(subject, clone)
         self._checked(subject, repo)
         rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
@@ -200,8 +216,8 @@ class Review:
         else:
             plan = replace(plan, n=plan.n + cut)
             facts |= {"round": plan.n, "scoped": plan.scoped}
-            names = self._lenses(subject, repo)
-            facts["lenses"] = [{"name": n, "path": str(lenses.path_of(n, repo))} for n in names]
+            names = self._lenses(subject, clone)
+            facts["lenses"] = [{"name": n, "path": str(lenses.path_of(n, clone))} for n in names]
             if subject.stage != "branch" and target.text is not None:
                 owner = subject.prefix.split(":")[0]
                 facts["target"] = str(review.save_text(answers.state_dir(), owner, target.hash, target.text))
@@ -239,7 +255,8 @@ class Review:
         if not parsed.get("target"):
             raise Refusal(f"--target is required; {USAGE}")
         subject = self._subject(parsed)
-        store, repo = self._store_for_run(), self._repo or Path.cwd()
+        store = self._store_for_run()
+        repo = self._worktree(subject, self._clone(subject))
         self._checked(subject, repo)
         counted, cut = review.counted(subject.records, subject.prefix)
         target = self._target(store, subject, repo)

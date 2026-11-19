@@ -9,7 +9,8 @@
   `step.py` the registry, `Refusal`, and the shared TOML read
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
-  `review` and `feature-review`, `checks`, `quiz`, `signoff` and `merge`)
+  `review` and `feature-review`, `checks`, `quiz`, `signoff` and `merge`); `commit` and
+  `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
@@ -22,9 +23,9 @@
 - `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
   a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
   person's machine
-- Skills: `skills/<name>/SKILL.md` with YAML frontmatter: `setup`, `feature`, `story` for a hand,
-  `signoff` for the person, `captain`, `commit`, `document`; review lenses in `skills/story/lenses/`,
-  a project's own in its `.claude/deckhand/lenses/`; agents `agents/<name>.md`
+- Skills: `skills/<name>/SKILL.md` with YAML frontmatter, one for a hand's work and one for each
+  session of the person's; review lenses in `skills/story/lenses/`, a project's own in its
+  `.claude/deckhand/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
 
 ## Purpose
@@ -93,7 +94,8 @@ install reaches them when the next fix or feature does.
   else; a hand never asks, it leaves the decision for that session
 - Records live in issue attachments; documents hold only text a person reads
 - Never parse prose to decide; read typed records, and print prose only for people
-- Skills call `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; nothing else in a skill runs deckhand
+- A skill's injection line calls `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand"`; everywhere else a skill
+  names the bare `deckhand`, which the plugin puts on the path
 - Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no secret
 - Do not hardcode organization, team, or repository values in code or tests; only the plugin
   manifests and the install commands carry them

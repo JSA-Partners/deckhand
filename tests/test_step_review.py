@@ -12,6 +12,7 @@ from deckhand import answers, features, planning, review
 from deckhand.features import FEATURE_LABEL
 from deckhand.records import Record
 from deckhand.step import Refusal
+from deckhand.steps.build import WORKTREE
 from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import FeatureReview, Review
@@ -49,6 +50,13 @@ def raw(**over: object) -> dict:
         "confidence": 0.9,
     }
     return item | over
+
+
+def worktree(store: FakeStore, repo: Path, story: str = "s1") -> Path:
+    store.put_record(story, Record(WORKTREE, story, "acme-1-queue", "agent:build", {"branch": "acme-1-queue"}))
+    path = repo / ".worktrees" / "acme-1-queue"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def checked(store: FakeStore, head: str, story: str = "s1") -> None:
@@ -228,9 +236,11 @@ class BranchGit:
         self.head = head
         self.diffs = diffs
         self.argvs: list[list[str]] = []
+        self.calls: list[tuple[list[str], Path | None]] = []
 
     def __call__(self, argv, cwd=None, stdin=None):
         self.argvs.append(argv)
+        self.calls.append((argv, cwd))
         out = {"merge-base": "base1\n", "rev-parse": f"{self.head}\n"}.get(argv[1], "")
         if argv[1] == "diff":
             out = self.diffs[argv[2]]
@@ -239,6 +249,7 @@ class BranchGit:
 
 def test_branch_revision_is_scoped_to_the_new_commits(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
     store = planned(tmp_path, repo)
+    worktree(store, repo)
     git = BranchGit("c1", {"base1...HEAD": "+one\n"})
     checked(store, "c1")
     record_round(Review(store, git, repo), tmp_path, raw(severity="P1"), stage="branch")
@@ -313,6 +324,7 @@ def test_plan_revised_after_context_refuses_the_round(tmp_path: Path, repo: Path
 
 def test_branch_commit_after_context_refuses_the_round(tmp_path: Path, repo: Path):
     store = planned(tmp_path, repo)
+    worktree(store, repo)
     checked(store, "c1")
     seen = target_of(Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo), stage="branch")
     checked(store, "c2")
@@ -348,6 +360,7 @@ def test_branch_round_without_a_head_refuses(tmp_path: Path, repo: Path):
     found = review.parse_findings(json.dumps([raw(severity="P1")]))
     store.put_record("s1", review.round_record("s1", "branch", plan, "h1", found))
     checked(store, "c2")
+    worktree(store, repo)
     step = Review(store, BranchGit("c2", {"base1...HEAD": "+two\n"}), repo)
     with pytest.raises(Refusal, match="holds no head"):
         step.context(["s1", "--stage", "branch", *TEAM])
@@ -369,3 +382,22 @@ def test_scoped_round_carries_the_open_p1s(tmp_path: Path, repo: Path, state: Pa
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(p1)], "Decline")
     facts = shown(step, capsys, "s1", "--stage", "plan")
     assert (facts["round"], facts["scoped"], facts["carried"]) == (2, True, [])
+
+
+def test_branch_review_runs_from_the_clone_in_the_story_worktree(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    path = worktree(store, repo)
+    checked(store, "c1")
+    git = BranchGit("c1", {"base1...HEAD": "+one\n"})
+    found = shown(Review(store, git, repo), capsys, "s1", "--stage", "branch")
+    assert (found["round"], found["diff"]) == (1, "+one\n")
+    assert {cwd for _, cwd in git.calls} == {path}
+
+
+def test_branch_review_without_a_worktree_refuses(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    checked(store, "c1")
+    with pytest.raises(Refusal, match="has no worktree"):
+        Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo).context(["s1", "--stage", "branch", *TEAM])

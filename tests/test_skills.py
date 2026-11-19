@@ -36,6 +36,19 @@ def test_frontmatter_and_one_injection(path: Path) -> None:
     assert len(INJECTION.findall(body)) == 1
 
 
+INJECTED = re.compile(r'^!`"\$\{CLAUDE_PLUGIN_ROOT\}/bin/deckhand" ([^\s`]+) ([^\s`]+)', re.MULTILINE)
+UNPORTED = {"captain"}
+
+
+@pytest.mark.parametrize("path", [p for p in FILES if p.parent.name not in UNPORTED], ids=lambda p: p.parent.name)
+def test_injection_runs_a_registered_command(path: Path) -> None:
+    _load_steps()
+    _, body = split(path)
+    [(command, verb)] = INJECTED.findall(body)
+    assert command in REGISTRY, command
+    assert verb in VERBS, f"{command} {verb}"
+
+
 STEP_SKILLS = ("feature", "story", "signoff")
 
 
