@@ -10,9 +10,10 @@ from deckhand import review
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
+from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
-from tests.test_implplan import BASE, Git
+from tests.test_implplan import BASE, Git, manifest
 from tests.test_step_review import (
     PLAN,
     TEAM,
@@ -262,3 +263,46 @@ def test_push_waits_for_the_person_on_a_delivery_finding(
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(delivery)], "Accept")
     push(store, shell, repo)
     assert len(shell.ran("git", "push")) == 1
+
+
+class Rooted(Shell):
+    def __init__(self, clone: Path) -> None:
+        super().__init__()
+        self.clone = clone
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        if "--git-common-dir" in argv:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, f"{self.clone / '.git'}\n", "")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_locate_from_clone_and_worktree_agree(tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch):
+    store = labeled(tmp_path, repo)
+    from_clone = Build(store, Shell(), repo).locate("s1", "ACME")
+    worktree = repo / ".worktrees" / BRANCH
+    monkeypatch.chdir(worktree)
+    from_worktree = Build(store, Rooted(repo)).locate("s1", "ACME")
+    assert (from_worktree.clone, from_worktree.path, from_worktree.head) == (repo, worktree, "c2")
+    assert (from_clone.clone, from_clone.path, from_clone.head) == (repo, worktree, "c2")
+    assert from_worktree.story["id"] == from_clone.story["id"] == "s1"
+
+
+def test_locate_without_worktree_has_no_head(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    shell = Shell()
+    found = Build(store, shell, repo).locate("s1", "ACME")
+    assert (found.path, found.head) == (None, None)
+    assert shell.ran("git", "rev-parse") == []
+
+
+def test_a_plan_is_checked_at_the_story_worktree(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    git = Git(BASE)
+    plan, found = tmp_path / "again.md", tmp_path / "again.json"
+    plan.write_text(PLAN + "- [ ] more\n")
+    found.write_text(json.dumps(manifest()))
+    ImplPlan(store, git, repo).apply(["s1", *TEAM, "--plan", str(plan), "--manifest", str(found)])
+    [base] = [cwd for argv, cwd in git.calls if argv[:2] == ["git", "merge-base"]]
+    assert base == repo / ".worktrees" / BRANCH

@@ -12,9 +12,10 @@ from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.checks import Checks
 from deckhand.steps.decide import Decide
+from deckhand.steps.merge import Merge
 from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
-from deckhand.steps.signoff import Merge, Signoff
+from deckhand.steps.signoff import Signoff
 from tests.test_feature_approval import approve_everything, load, setup
 from tests.test_quiz import SOURCE, ask, item, reader, reply, summary
 from tests.test_step_build import BRANCH, repo, state

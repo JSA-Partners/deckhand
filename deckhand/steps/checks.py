@@ -9,7 +9,7 @@ from deckhand import git, versions
 from deckhand.checks import KIND, passing
 from deckhand.records import Record
 from deckhand.step import Refusal, register
-from deckhand.steps.build import StoryStep, branch_of, parse
+from deckhand.steps.build import StoryStep, parse
 from deckhand.store import Store
 
 USAGE = "checks takes REF and --team-key KEY on both verbs; context [--json], apply runs the commands"
@@ -41,14 +41,11 @@ class Checks(StoryStep):
         parsed = parse(args, USAGE)
         if len(parsed["words"]) != 1:
             raise Refusal(f"checks takes one story REF; {USAGE}")
-        clone = self._clone()
-        feature, story, policy = self._story(parsed["words"][0], parsed["team_key"], clone)
-        records = feature.records.get(story["id"], [])
-        branch = branch_of(records, story)
-        path = git.worktree_path(clone, branch) if branch else None
-        if path is None or not path.is_dir():
-            raise Refusal(f"{story['identifier']} has no worktree; run build apply {story['identifier']} worktree")
-        return story, records, git.head(path, self._runner), policy.checks, path
+        at = self.locate(parsed["words"][0], parsed["team_key"])
+        if at.path is None or at.head is None:
+            ref = at.story["identifier"]
+            raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")
+        return at.story, at.records, at.head, at.policy.checks, at.path
 
     def context(self, args: list[str]) -> None:
         story, records, head, commands, path = self._worktree(args)

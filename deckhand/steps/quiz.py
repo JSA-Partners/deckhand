@@ -6,7 +6,7 @@ from pathlib import Path
 from deckhand import git, ops, quiz, summary, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register
-from deckhand.steps.build import StoryStep, branch_of
+from deckhand.steps.build import StoryStep
 from deckhand.summary import digest, parse_summary
 
 USAGE = (
@@ -47,16 +47,13 @@ def _read(path: str, flag: str) -> str:
 
 class Quiz(StoryStep):
     def _worktree(self, parsed: dict) -> tuple[dict, list[Record], tiers.Tier | None, str, Path]:
-        clone = self._clone()
-        feature, story, _ = self._story(parsed["words"][0], parsed["team_key"], clone)
-        records = feature.records.get(story["id"], [])
-        branch = branch_of(records, story)
-        path = git.worktree_path(clone, branch) if branch else None
-        if path is None or not path.is_dir():
-            raise Refusal(f"{story['identifier']} has no worktree; run build apply {story['identifier']} worktree")
-        held = versions.held(records, "tier", story["id"])
+        at = self.locate(parsed["words"][0], parsed["team_key"])
+        if at.path is None or at.head is None:
+            ref = at.story["identifier"]
+            raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")
+        held = versions.held(at.records, "tier", at.story["id"])
         tier = tiers.from_record(held.data) if held else None
-        return story, records, tier, git.head(path, self._runner), path
+        return at.story, at.records, tier, at.head, at.path
 
     def context(self, args: list[str]) -> None:
         story, records, tier, head, path = self._worktree(_parse(args))

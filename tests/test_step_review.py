@@ -18,7 +18,9 @@ from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import FeatureReview, Review
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import P1, approve_everything, decided, load, sat, setup
-from tests.test_implplan import BASE, Git, manifest
+from tests.test_implplan import BASE, Git, manifest, repo
+
+__all__ = ["repo"]
 
 TEAM = ["--team-key", "ACME"]
 PLAN = "# Plan\n\n- [ ] queue the order\n"
@@ -28,14 +30,6 @@ PLAN = "# Plan\n\n- [ ] queue the order\n"
 def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
     return tmp_path / "state"
-
-
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    found = tmp_path / "repo"
-    (found / ".claude").mkdir(parents=True)
-    (found / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\n')
-    return found
 
 
 def raw(**over: object) -> dict:
@@ -419,3 +413,12 @@ def test_proceed_at_the_cap_ends_the_review(
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap"
     answer(state, Decide(store), capsys, ["review-cap", "ACME-1", "--stage", "plan"], "Proceed")
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "proceeded"
+
+
+def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path):
+    store = setup()
+    approve_everything(store)
+    store.set_labels("s1", ["gadgets"])
+    with pytest.raises(Refusal, match="another repository"):
+        submit(store, tmp_path, repo)
+    assert [r for r in store.records("s1") if r.kind == "implplan"] == []

@@ -27,8 +27,8 @@ def setup() -> FakeStore:
     feature = load(store)
     for name in planning.SECTIONS:
         planning.save_section(store, feature, name, f"The {name} of Alpha.", False)
-    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, [])
-    store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", P1, [])
+    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, ["widgets"])
+    store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", P1, ["widgets"])
     return store
 
 

@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deckhand import answers, features, git, implplan, lenses, ops, review, tiers, versions
 from deckhand.checks import passing
-from deckhand.credentials import Credentials
 from deckhand.features import Phase
-from deckhand.linear.connect import connect
 from deckhand.policy import STAGES, Policy
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register
-from deckhand.steps.build import branch_of
+from deckhand.steps.build import Located, StoryStep
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
 
 USAGE = (
     "review takes REF, --stage plan|branch and --team-key KEY, feature-review --team-key KEY alone; context takes"
@@ -32,10 +28,6 @@ STOPS = {
     "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
     " carries the last round forward without reviewers",
 }
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def _parse(args: list[str]) -> dict:
@@ -66,6 +58,7 @@ class Subject:
     records: list[Record]
     story: dict | None = None
     feature: features.Feature | None = None
+    located: Located | None = None
 
 
 @dataclass
@@ -83,46 +76,38 @@ def _status(item: dict, declined: set[str], accepted: set[str]) -> str:
 
 
 @register("review")
-class Review:
+class Review(StoryStep):
     stage_fixed: str | None = None
 
-    def __init__(self, store: Store | None = None, runner: git.Runner = git.run, repo: Path | None = None) -> None:
-        self._store = store
-        self._runner = runner
-        self._repo = repo
-
-    def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
-
     def _subject(self, parsed: dict) -> Subject:
-        store = self._store_for_run()
-        feature = features.open_feature(store, parsed["team-key"])
+        if self.stage_fixed != FEATURE:
+            return self._story_subject(parsed)
+        feature = features.open_feature(self._store_for_run(), parsed["team-key"])
         if feature is None:
             raise Refusal("no feature is open")
         current = features.phase(feature)
-        if self.stage_fixed == FEATURE:
-            if parsed["words"]:
-                raise Refusal(f"feature-review takes no story REF; {USAGE}")
-            if current is not Phase.PLANNING:
-                raise Refusal(f"{features.describe(feature.project)} is {current.value}; the feature review is over")
-            if not feature.live:
-                raise Refusal(f"{features.describe(feature.project)} has no stories to review")
-            held = [r for s in feature.live for r in feature.records.get(s["id"], [])]
-            project = feature.project["id"]
-            ids = [s["id"] for s in feature.live]
-            return Subject(f"{project}:{FEATURE}", FEATURE, feature.project["name"], ids, held, None, feature)
+        if parsed["words"]:
+            raise Refusal(f"feature-review takes no story REF; {USAGE}")
+        if current is not Phase.PLANNING:
+            raise Refusal(f"{features.describe(feature.project)} is {current.value}; the feature review is over")
+        if not feature.live:
+            raise Refusal(f"{features.describe(feature.project)} has no stories to review")
+        held = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+        project = feature.project["id"]
+        ids = [s["id"] for s in feature.live]
+        return Subject(f"{project}:{FEATURE}", FEATURE, feature.project["name"], ids, held, None, feature)
+
+    def _story_subject(self, parsed: dict) -> Subject:
         stage = parsed.get("stage", "")
         if stage not in STAGES:
             raise Refusal(f"--stage must be plan or branch; {USAGE}")
         if len(parsed["words"]) != 1:
             raise Refusal(f"review takes one story REF; {USAGE}")
-        if current is not Phase.BUILDING:
-            raise Refusal(f"{features.describe(feature.project)} is {current.value}, not building; approve it first")
-        story = features.story(store, feature, parsed["words"][0])
-        held = feature.records.get(story["id"], [])
-        return Subject(f"{story['id']}:{stage}", stage, story["identifier"], [story["id"]], held, story, feature)
+        at = self.locate(parsed["words"][0], parsed["team-key"])
+        story = at.story
+        return Subject(
+            f"{story['id']}:{stage}", stage, story["identifier"], [story["id"]], at.records, story, at.feature, at
+        )
 
     def _lenses(self, subject: Subject, repo: Path) -> list[str]:
         if subject.stage == FEATURE:
@@ -174,19 +159,18 @@ class Review:
             return None, "the previously reviewed text is not on this machine; review the whole text"
         return review.text_diff(old, target.text), ""
 
-    def _clone(self, subject: Subject) -> Path:
-        if self._repo is not None:
-            return self._repo
-        return Path.cwd() if subject.stage == FEATURE else git.clone_root(Path.cwd(), self._runner)
+    def _clone_of(self, subject: Subject) -> Path:
+        if subject.located is not None:
+            return subject.located.clone
+        return self._repo or Path.cwd()
 
     def _worktree(self, subject: Subject, clone: Path) -> Path:
         if subject.stage != "branch":
             return clone
-        branch = branch_of(subject.records, subject.story)
-        path = git.worktree_path(clone, branch) if branch else None
-        if path is None or not path.is_dir():
+        at = subject.located
+        if at is None or at.path is None:
             raise Refusal(f"{subject.label} has no worktree; run build apply {subject.label} worktree")
-        return path
+        return at.path
 
     def _checked(self, subject: Subject, repo: Path) -> None:
         if subject.stage != "branch":
@@ -197,7 +181,7 @@ class Review:
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
         subject = self._subject(parsed)
-        store, clone = self._store_for_run(), self._clone(subject)
+        store, clone = self._store_for_run(), self._clone_of(subject)
         repo = self._worktree(subject, clone)
         self._checked(subject, repo)
         rounds = review.rounds_of(subject.records, subject.prefix)
@@ -261,7 +245,7 @@ class Review:
             raise Refusal(f"--target is required; {USAGE}")
         subject = self._subject(parsed)
         store = self._store_for_run()
-        repo = self._worktree(subject, self._clone(subject))
+        repo = self._worktree(subject, self._clone_of(subject))
         self._checked(subject, repo)
         counted, cut = review.counted(subject.records, subject.prefix)
         target = self._target(store, subject, repo)

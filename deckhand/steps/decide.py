@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from deckhand import answers, decisions, features, git, quiz, review, signoff, versions
-from deckhand.credentials import Credentials
-from deckhand.linear.connect import connect
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, register
-from deckhand.steps.build import WORKTREE
+from deckhand.steps.build import WORKTREE, StoryStep
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
 
 USAGE = (
     "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
@@ -20,10 +16,6 @@ USAGE = (
     " sign-off takes a story;"
     " apply NONCE"
 )
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def _parse(args: list[str]) -> dict:
@@ -54,7 +46,7 @@ def read_text(path: Path) -> str:
 
 
 @register("decide")
-class Decide:
+class Decide(StoryStep):
     def __init__(
         self,
         store: Store | None = None,
@@ -62,29 +54,25 @@ class Decide:
         repo: Path | None = None,
         reader: quiz.Reader = read_text,
     ) -> None:
-        self._store = store
-        self._runner = runner
-        self._repo = repo
+        super().__init__(store, runner, repo)
         self._reader = reader
 
-    def _store_for_run(self, parsed: dict) -> Store:
-        if self._store is not None:
-            return self._store
-        if not parsed.get("team_key"):
+    def _store_of(self, parsed: dict) -> Store:
+        if self._store is None and not parsed.get("team_key"):
             raise Refusal(f"--team-key is required; {USAGE}")
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+        return self._store_for_run()
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
         if len(parsed["words"]) != 2:
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
-        store = self._store_for_run(parsed)
+        store = self._store_of(parsed)
         feature = features.open_feature(store, parsed.get("team_key", ""))
         if feature is None:
             raise Refusal("no feature is open")
         wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
-        head = self._head(store, feature, subject) if wants_head else ""
+        head = self._head(subject, parsed.get("team_key", "")) if wants_head else ""
         pin = decisions.pin(
             store,
             feature,
@@ -109,15 +97,11 @@ class Decide:
         print(f"nonce: {question.nonce}")
         print(json.dumps(tool_input, indent=2))
 
-    def _head(self, store: Store, feature: features.Feature, ref: str) -> str:
-        story = features.story(store, feature, ref)
-        held = versions.held(feature.records.get(story["id"], []), WORKTREE, story["id"])
-        name = held.data.get("branch") if held else None
-        clone = self._repo or git.clone_root(Path.cwd(), self._runner)
-        path = git.worktree_path(clone, name) if isinstance(name, str) and name else None
-        if path is None or not path.is_dir():
-            raise Refusal(f"{story['identifier']} has no worktree on this machine to sign off")
-        return git.head(path, self._runner)
+    def _head(self, ref: str, team_key: str) -> str:
+        at = self.locate(ref, team_key)
+        if at.head is None:
+            raise Refusal(f"{at.story['identifier']} has no worktree on this machine to sign off")
+        return at.head
 
     def _missed_code(self, feature: features.Feature, pin: decisions.Pin) -> dict:
         story, _, n = pin.subject.rpartition(":")
@@ -128,7 +112,7 @@ class Decide:
         where = quiz.items_of(held)[int(n) - 1].where
         worktree = versions.held(records, WORKTREE, story)
         try:
-            clone = self._repo or git.clone_root(Path.cwd(), self._runner)
+            clone = self._clone()
         except git.GitError:
             clone = None
         branch = worktree.data.get("branch") if worktree else None
@@ -144,7 +128,7 @@ class Decide:
         nonce = parsed["words"][0]
         state = answers.state_dir()
         pending = decisions.load_pending(nonce, state)
-        store = self._store_for_run(parsed)
+        store = self._store_of(parsed)
         if decisions.decide(store, pending, state):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == quiz.KIND:
