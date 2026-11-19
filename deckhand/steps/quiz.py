@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from deckhand import git, ops, quiz, tiers, versions
+from deckhand import git, ops, quiz, summary, tiers, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register
 from deckhand.steps.build import StoryStep, branch_of
@@ -68,6 +68,7 @@ class Quiz(StoryStep):
             "tier": tier.level if tier else None,
             "base": quiz.BASE[tier.level] if tier else None,
             "shape": SHAPE,
+            "summary_shape": summary.SHAPE,
             "quiz_head": held.data.get("head") if held else None,
             "open": quiz.open_items(records, story["id"]) if held else None,
         }
@@ -80,6 +81,9 @@ class Quiz(StoryStep):
         else:
             print(f"size: {facts['base']} for tier {tier.level}, plus one per new_here entry in the change summary")
         print(f"shape: {SHAPE}")
+        print("change summary, a JSON object:")
+        for name, meaning in summary.SHAPE.items():
+            print(f"- {name}: {meaning}")
         if held is None:
             print("no quiz saved")
             return
@@ -91,8 +95,8 @@ class Quiz(StoryStep):
         story, _, tier, head, path = self._worktree(parsed)
         if tier is None:
             raise Refusal(f"{story['identifier']} has no tier decided; the quiz is sized by its tier")
-        text, summary = _read(parsed.get("quiz", ""), "--quiz"), _read(parsed.get("summary", ""), "--summary")
-        parsed_summary = parse_summary(summary)
+        text, summary_text = _read(parsed.get("quiz", ""), "--quiz"), _read(parsed.get("summary", ""), "--summary")
+        parsed_summary = parse_summary(summary_text)
         new_here = len(parsed_summary.new_here)
         items = quiz.parse_quiz(text, quiz.quiz_size(tier, new_here))
         if git.dirty(path, self._runner):

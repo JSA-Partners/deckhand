@@ -33,7 +33,7 @@ which sessions must then bring their branch up to date.
 
 When the person states a priority or asks how many sessions to open, run
 `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context --only candidates` and answer with lanes, one
-per session, each naming its repository and its `/deckhand:next N` commands in order. Two stories
+per session, each naming its repository and its `/deckhand:story REF KEY` commands in order. Two stories
 whose files overlap never run in parallel lanes. Judge a "named, no edge" pair from its `Named:` line,
 asking only when the line leaves it open.
 

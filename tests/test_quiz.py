@@ -12,6 +12,7 @@ from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.quiz import Quiz
 from deckhand.store.fake import FakeStore
+from deckhand.summary import SHAPE as SUMMARY_SHAPE
 from deckhand.summary import digest, parse_summary
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import TEAM
@@ -267,3 +268,4 @@ def test_context_lists_the_size_and_open_items(tmp_path: Path, repo: Path, capsy
     facts = json.loads(capsys.readouterr().out)
     assert (facts["head"], facts["base"], facts["open"], facts["quiz_head"]) == ("c2", 0, [1], "c2")
     assert facts["worktree"] == str(repo / ".worktrees" / BRANCH)
+    assert facts["summary_shape"] == SUMMARY_SHAPE
