@@ -146,6 +146,21 @@ def test_proceed_at_the_cap_opens_the_gate(tmp_path: Path, repo: Path, state: Pa
     assert len(shell.ran("gh", "pr", "create")) == 1
 
 
+def test_proceed_does_not_cover_a_later_plan_revision(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    to_cap(store, tmp_path, repo)
+    answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
+    submit(store, tmp_path, repo, PLAN + "- [ ] revised after the cap\n")
+    shell = Shell()
+    with pytest.raises(Refusal, match="has not stopped clean"):
+        push(store, shell, repo)
+    assert shell.ran("git", "push") == []
+    answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
+    push(store, Shell(), repo)
+
+
 def test_cap_decision_refuses_before_the_cap(tmp_path: Path, repo: Path):
     store = labeled(tmp_path, repo)
     record_round(Review(store, Git(BASE), repo), tmp_path, raw(severity="P1"))

@@ -304,6 +304,31 @@ def test_branch_cap_proceed_clears_the_branch_review(
     assert signoff.current(store.records("s1"), "s1", "c2")
 
 
+def test_proceed_does_not_cover_later_commits(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    quizzer = decide(store, repo)
+    reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
+    checked(store, "c2")
+    for n in (1, 2, 3):
+        branch_round(store, raw(severity="P1"), n=n, head="c1")
+    cap = ["review-cap", "ACME-1", "--stage", "branch"]
+    question = answer(state, Decide(store, runner=Shell(head="c1"), repo=repo), capsys, cap, "Proceed")
+    assert "at c1" in question["question"]
+    step = Decide(store, runner=Shell(), repo=repo)
+    with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
+        step.context(["sign-off", "ACME-1", *TEAM])
+    with pytest.raises(Refusal, match="no current sign-off"):
+        merge(store, repo, Gh())
+    question = answer(state, step, capsys, cap, "Proceed")
+    assert "at c2" in question["question"]
+    sign(store, repo, state, capsys)
+    merge(store, repo, Gh())
+
+
 def test_findings_screen_folds_doubtful_and_shows_declines(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):

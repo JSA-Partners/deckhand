@@ -174,9 +174,13 @@ def reviewed(record: Record) -> str:
     return record.data.get("head") or record.data["target_hash"]
 
 
+def cap_version(round: Record, at: str) -> str:
+    return f"{round.subject}:{at}"
+
+
 def _cap_cut(record: Record) -> int:
     try:
-        return int(record.version.rsplit(":", 1)[1])
+        return int(record.version.split(":")[2])
     except (IndexError, ValueError):
         return 0
 
@@ -219,7 +223,8 @@ def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
         return False
     if reviewed(latest) == at and not open_p1(latest, declined(records)):
         return True
-    return any(r.version == latest.subject for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
+    pinned = cap_version(latest, at)
+    return any(r.version == pinned for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
 
 
 def feature_gaps(project: str, records: list[Record]) -> list[str]:

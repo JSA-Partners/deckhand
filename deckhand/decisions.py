@@ -147,9 +147,10 @@ def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str, head
             f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open or a later revision"
         )
     latest = review.last(held)
-    detail = f"{len(held)} rounds, {len(review.open_p1(latest, review.declined(records)))} P1 open"
-    subject = review.cap_subject(story["id"], stage)
-    return Pin(subject, latest.subject, [story["id"]], detail, _label(story), [_label(story)])
+    open_count = len(review.open_p1(latest, review.declined(records)))
+    detail = f"{len(held)} rounds, {open_count} P1 open, at {at[:12]}"
+    subject, version = review.cap_subject(story["id"], stage), review.cap_version(latest, at)
+    return Pin(subject, version, [story["id"]], detail, _label(story), [_label(story)])
 
 
 def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -> Pin:
