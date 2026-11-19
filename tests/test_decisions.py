@@ -331,3 +331,9 @@ def test_an_unclaimed_story_is_not_signed_off(tmp_path: Path):
     with pytest.raises(Refusal, match="^ACME-1 has no owner in Linear, and only its owner signs it off$"):
         decisions.decide(store, pending, tmp_path, "ann")
     assert store.writes == []
+
+
+def test_question_takes_the_options_of_its_pin_and_config_edit_has_two():
+    shown = decisions.Pin("abc", "v1", ["s9"], "Which queue?", "ACME-9 Orders", ["ACME-9 Orders"], ["Redis", "SQS"])
+    assert decisions.make_question("question", shown).options == ["Redis", "SQS"]
+    assert decisions.make_question("config-edit", shown).options == ["Done", "Not doing it"]

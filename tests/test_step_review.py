@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, planning, review
+from deckhand import answers, asks, features, planning, review
 from deckhand.features import FEATURE_LABEL
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -131,7 +131,7 @@ def test_agent_decline_refuses(tmp_path: Path, repo: Path):
     record_round(step, tmp_path, p1, delivery)
     before = list(store.writes)
     resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
-    with pytest.raises(Refusal, match="only the person declines a finding"):
+    with pytest.raises(Refusal, match="only the person declines a finding.*--propose-decline"):
         step.apply([*resolve, "--decline", finding_id(p1)])
     with pytest.raises(Refusal, match="changes what the story delivers"):
         step.apply([*resolve, "--accept", finding_id(p1), "--accept", finding_id(delivery)])
@@ -142,6 +142,31 @@ def test_agent_decline_refuses(tmp_path: Path, repo: Path):
     [accept] = [r for r in store.records("s1") if r.kind == review.HAND_ACCEPT]
     assert (accept.subject, accept.author, accept.data["answer"]) == (finding_id(p1), "agent:review", "Accept")
     assert review.declined(store.records("s1")) == set()
+
+
+def test_decline_proposal_awaits_person(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    p1 = raw(severity="P1")
+    record_round(step, tmp_path, p1)
+    resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
+    before = list(store.writes)
+    with pytest.raises(Refusal, match="--reason"):
+        step.apply([*resolve, "--propose-decline", finding_id(p1)])
+    with pytest.raises(Refusal, match="not a finding of the last round"):
+        step.apply([*resolve, "--propose-decline", "000000000000", "--reason", "noise"])
+    assert store.writes == before
+    step.apply([*resolve, "--propose-decline", finding_id(p1), "--reason", "The plan already orders these."])
+    [proposal] = [r for r in store.records("s1") if r.kind == "decline-proposal"]
+    assert (proposal.subject, proposal.author) == (finding_id(p1), "agent:review")
+    assert proposal.data["reason"] == "The plan already orders these."
+    assert review.declined(store.records("s1")) == set()
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] != "clean"
+    assert [r.subject for r in asks.open_proposals(store.records("s1"))] == [finding_id(p1)]
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(p1)], "Decline")
+    assert asks.open_proposals(store.records("s1")) == []
+    with pytest.raises(Refusal, match="already decided"):
+        step.apply([*resolve, "--propose-decline", finding_id(p1), "--reason", "again"])
 
 
 def test_person_decline_through_decide(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):

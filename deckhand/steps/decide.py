@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, claims, decisions, features, git, quiz, review, signoff, versions
+from deckhand import answers, claims, decisions, features, git, pins, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
@@ -13,7 +13,8 @@ from deckhand.store import Store
 USAGE = (
     "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
     " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
-    " quiz takes a story and --item N, review-cap takes a story and --stage plan|branch,"
+    " quiz takes a story and --item N, question takes its id and one --story, config-edit takes a story and --item ID,"
+    " review-cap takes a story and --stage plan|branch,"
     " sign-off takes a story;"
     " apply NONCE"
 )
@@ -35,10 +36,6 @@ def _parse(args: list[str]) -> dict:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
-    if "item" in found:
-        if not found["item"].isdigit() or int(found["item"]) < 1:
-            raise Refusal(f"--item takes a quiz item number from 1; {USAGE}")
-        found["item"] = int(found["item"])
     return found
 
 
@@ -74,7 +71,7 @@ class Decide(StoryStep):
             raise Refusal("no feature is open")
         wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
         head = self._head(subject, team_key(parsed)) if wants_head else ""
-        pin = decisions.pin(
+        pin = pins.pin(
             store,
             feature,
             kind,
