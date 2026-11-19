@@ -7,6 +7,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from deckhand.step import Refusal
+
 TIMEOUT = 120
 TAIL_LINES = 5
 TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
@@ -71,7 +73,10 @@ def worktree_add(clone: Path, branch: str, base: str, runner: Runner = run) -> P
 
 
 def clone_root(cwd: Path, runner: Runner = run) -> Path:
-    common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()
+    try:
+        common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()
+    except GitError:
+        raise Refusal(f"{cwd} is not in a git repository; run deckhand from the clone or a story worktree") from None
     return Path(common).parent
 
 

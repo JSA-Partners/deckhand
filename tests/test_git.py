@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import git
+from deckhand.step import Refusal
 
 
 class Fake:
@@ -180,3 +181,9 @@ def test_merge_base_reads_the_common_ancestor() -> None:
     fake = Fake((0, "abc123\n", ""))
     assert git.merge_base(WT, "HEAD", "origin/HEAD", fake) == "abc123"
     assert fake.calls == [(["git", "merge-base", "HEAD", "origin/HEAD"], WT, None)]
+
+
+def test_clone_root_outside_a_repository_names_the_rule() -> None:
+    fake = Fake((128, "", "fatal: not a git repository (or any of the parent directories): .git\n"))
+    with pytest.raises(Refusal, match="run deckhand from the clone or a story worktree"):
+        git.clone_root(Path("/tmp/scratch"), fake)
