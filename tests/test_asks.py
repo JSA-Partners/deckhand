@@ -5,7 +5,7 @@ import json
 import pytest
 
 from deckhand import asks
-from deckhand.records import Record
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 
 
@@ -21,6 +21,7 @@ def test_question_id_is_the_first_twelve_hex_of_the_question_hash():
     found = asks.parse_question(question())
     assert asks.question_id(found["question"]) == asks.question_id("Which queue?")
     assert len(asks.question_id("Which queue?")) == 12
+    assert asks.question_id("Which queue?") == content_hash("Which queue?")[:12]
     assert asks.question_id("Which queue?") != asks.question_id("Which store?")
 
 
@@ -29,6 +30,7 @@ def test_question_id_is_the_first_twelve_hex_of_the_question_hash():
     [
         ({"options": ["Redis", "SQS (Recommended)"]}, "recommended"),
         ({"question": "Is Redis the recommended queue?"}, "recommended"),
+        ({"why": "SQS is recommended by ops"}, "recommended"),
         ({"options": ["a", "b", "c", "d", "e"]}, "2 to 4 options"),
         ({"options": ["a"]}, "2 to 4 options"),
         ({"options": ["a", " "]}, "empty option"),
@@ -69,7 +71,7 @@ def test_wake_due_ignores_stories_without_a_hand_and_decisions_a_hand_does_not_w
     assert asks.wake_due([stamped("question", "2026-11-19T10:10:00.000Z", "person:s1")]) is None
     start = stamped("hand-start", "2026-11-19T10:00:00.000Z", "agent:hand")
     assert asks.wake_due([start, tier, stamped("sitting", "2026-11-19T10:11:00.000Z", "person:s1")]) is None
-    edit = stamped("config-edit", "2026-11-19T10:12:00.000Z", "agent:hand")
+    edit = stamped("config-edit-request", "2026-11-19T10:12:00.000Z", "agent:hand")
     assert asks.wake_due([start, tier, edit]) is None
 
 

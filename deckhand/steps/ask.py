@@ -56,13 +56,8 @@ class Ask(StoryStep):
     def context(self, args: list[str]) -> None:
         parsed = _arguments(args)
         story, records = self._find(parsed)
-        questions = [
-            {"id": r.subject.rpartition(":")[2], "question": r.data["question"], "options": r.data["options"]}
-            | {"why": r.data["why"]}
-            for r in records
-            if r.kind == asks.QUESTION
-        ]
-        edits = [{"id": r.subject.rpartition(":")[2]} | r.data for r in records if r.kind == asks.EDIT]
+        questions = [{"id": r.subject.rpartition(":")[2]} | r.data for r in records if r.kind == asks.QUESTION]
+        edits = [{"id": r.subject.rpartition(":")[2]} | r.data for r in records if r.kind == asks.EDIT_REQUEST]
         for held in questions:
             held["answer"] = _answer(records, held["id"], asks.ANSWER)
         for held in edits:
@@ -71,7 +66,7 @@ class Ask(StoryStep):
         if parsed["json"]:
             print(
                 json.dumps(
-                    {"story": story["identifier"], "shape": shape} | {"questions": questions, "edits": edits}, indent=2
+                    {"story": story["identifier"], "shape": shape, "questions": questions, "edits": edits}, indent=2
                 )
             )
             return

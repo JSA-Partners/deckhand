@@ -12,6 +12,7 @@ from deckhand.step import Refusal
 QUESTION = "hand-question"
 ANSWER = "question"
 EDIT = "config-edit"
+EDIT_REQUEST = "config-edit-request"
 PROPOSAL = "decline-proposal"
 HAND_START = "hand-start"
 WAKE = "wake"
@@ -52,7 +53,7 @@ def parse_question(text: str) -> dict:
     keys = [o.strip().casefold() for o in options]
     if len(set(keys)) != len(keys):
         raise Refusal("a question takes no duplicate option")
-    if any(RECOMMENDED.search(text) for text in [found["question"], *options]):
+    if any(RECOMMENDED.search(text) for text in [found["question"], found["why"], *options]):
         raise Refusal("a question names no recommended option; the person chooses without a lean")
     return found
 
@@ -76,7 +77,7 @@ def edit_id(found: dict) -> str:
 
 
 def edit_record(story: str, found: dict) -> Record:
-    return Record(EDIT, f"{story}:{edit_id(found)}", edit_id(found), HAND, found)
+    return Record(EDIT_REQUEST, f"{story}:{edit_id(found)}", edit_id(found), HAND, found)
 
 
 def proposal_record(finding: str, version: str, reason: str) -> Record:
@@ -93,7 +94,7 @@ def _person(record: Record) -> bool:
 
 
 def answer_of(records: list[Record], subject: str, kind: str) -> Record | None:
-    found = [r for r in records if r.kind == kind and r.subject == subject and _person(r)]
+    found = [r for r in records if r.kind == kind and r.subject == subject]
     return found[-1] if found else None
 
 

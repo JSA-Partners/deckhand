@@ -102,7 +102,7 @@ def _question_pin(store: Store, feature: features.Feature, ref: str, qid: str) -
 def _edit_pin(store: Store, feature: features.Feature, ref: str, item: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
-    held = _find(records, asks.EDIT, f"{story['id']}:{item}", f"config edit {item}", story["identifier"])
+    held = _find(records, asks.EDIT_REQUEST, f"{story['id']}:{item}", f"config edit {item}", story["identifier"])
     if asks.answer_of(records, item, asks.EDIT):
         raise Refusal(f"config edit {item} on {story['identifier']} is already settled")
     data = held.data

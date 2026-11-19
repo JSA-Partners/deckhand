@@ -106,15 +106,18 @@ def test_config_edit_request_awaits_person(tmp_path: Path, state: Path, capsys: 
     Ask(store).apply(["ACME-1", "--edit", "--file", filed(tmp_path, EDIT), *TEAM])
     [request] = store.records("s1")
     item = request.subject.rpartition(":")[2]
-    assert (request.kind, request.author, request.data["path"]) == ("config-edit", "agent:hand", EDIT["path"])
+    assert (request.kind, request.author, request.data["path"]) == ("config-edit-request", "agent:hand", EDIT["path"])
     assert len(item) == 12
     [held] = listing(store, capsys)["edits"]
     assert (held["id"], held["answer"]) == (item, None)
     asked = decided(state, store, capsys, ["config-edit", "ACME-1", "--item", item], "Done")
     assert [o["label"] for o in asked["options"]] == ["Done", "Not doing it"]
     assert ".claude/settings.json" in asked["question"]
-    assert listing(store, capsys)["edits"][0]["answer"] == "Done"
+    [settled] = listing(store, capsys)["edits"]
+    assert (settled["id"], settled["answer"], settled["path"]) == (item, "Done", EDIT["path"])
     assert len(store.records("s1")) == 2
+    Ask(store).context(["ACME-1", *TEAM])
+    assert f"{item} {EDIT['path']} Done" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

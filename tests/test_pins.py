@@ -47,7 +47,7 @@ def test_question_pin_refuses(stories: list[str], match: str):
 
 def test_config_edit_pin_takes_an_item_id_and_names_the_edit():
     store, feature = asked()
-    [record] = [r for r in store.records("s1") if r.kind == "config-edit"]
+    [record] = [r for r in store.records("s1") if r.kind == "config-edit-request"]
     item = record.subject.rpartition(":")[2]
     held = pins.pin(store, feature, "config-edit", "ACME-1", [], item=item)
     assert held.subject == item
