@@ -180,7 +180,10 @@ def test_captain_keeps_dialog_and_messaging(layout: dict) -> None:
     assert captain["env"] == {"DECKHAND_ROLE": "captain"}
 
 
-def test_hand_env_carries_dirs_and_path_only_for_testing(
+PLUGIN_BIN = str(Path(launch.__file__).resolve().parent.parent / "bin")
+
+
+def test_hand_env_carries_dirs_and_plugin_bin_first(
     tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     protected = launch.protected(tmp_path / "config", tmp_path / "state")
@@ -194,10 +197,29 @@ def test_hand_env_carries_dirs_and_path_only_for_testing(
         "DECKHAND_STORY": "ACME-7",
         "DECKHAND_CONFIG_DIR": "/c",
         "DECKHAND_STATE_DIR": "/s",
+        "PATH": f"{PLUGIN_BIN}:/usr/bin",
     }
     monkeypatch.setenv("DECKHAND_PLUGIN_DIR", "/plugin")
     env = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)["env"]
     assert env["PATH"] == "/plugin/bin:/usr/bin"
+    monkeypatch.delenv("PATH")
+    env = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)["env"]
+    assert env["PATH"] == "/plugin/bin"
+
+
+def test_hand_path_holds_only_trusted_entries(tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp, clone, worktree, state = (tmp_path / name for name in ("temp", "clone", "worktree", "state"))
+    for directory in (temp, clone, worktree, state):
+        directory.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(state))
+    monkeypatch.setenv("DECKHAND_PLUGIN_DIR", "/plugin")
+    dirty = [".", f"{temp}/x", "", "rel", f"{clone}/bin", f"{worktree}/node/bin", f"{state}/bin", "/usr/bin", "/bin"]
+    monkeypatch.setenv("PATH", os.pathsep.join(dirty))
+    protected = launch.protected(tmp_path / "config", state)
+    policy = Policy(repository_label="widgets")
+    env = launch.hand_settings("ACME-7", clone, worktree, policy, LocalConfig(), protected)["env"]
+    assert env["PATH"].split(os.pathsep) == ["/plugin/bin", "/usr/bin", "/bin"]
 
 
 def test_resume_argv_carries_settings() -> None:
@@ -279,11 +301,15 @@ def test_sandbox_write_holding_a_path_dir_refuses(
 ) -> None:
     bin_dir = tmp_path / "tools" / "bin"
     bin_dir.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere-temp"
+    elsewhere.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(elsewhere))
+    monkeypatch.setenv("TMPDIR", str(elsewhere))
     monkeypatch.setenv("PATH", f"/usr/bin{os.pathsep}{bin_dir}")
     protected = launch.protected(tmp_path / "config", tmp_path / "state")
     policy = Policy(repository_label="widgets")
     local = LocalConfig(sandbox_write=[str(tmp_path / entry)])
     with pytest.raises(Refusal, match="PATH"):
-        launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, local, protected)
+        launch.hand_settings("ACME-7", tmp_path / "clone", tmp_path / "clone", policy, local, protected)
     local = LocalConfig(sandbox_write=[str(tmp_path / "cache")])
-    launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, local, protected)
+    launch.hand_settings("ACME-7", tmp_path / "clone", tmp_path / "clone", policy, local, protected)

@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -32,13 +32,13 @@ UNTRUSTED = (
 
 
 # A directory a hand can write must never supply a program deckhand runs outside the sandbox.
-def _untrusted_roots() -> list[Path]:
+def _untrusted_roots(extra: Iterable[Path] = ()) -> list[Path]:
     from deckhand import answers
 
     roots = [Path(tempfile.gettempdir()), Path("/tmp"), answers.state_dir()]
     if os.environ.get("TMPDIR"):
         roots.append(Path(os.environ["TMPDIR"]))
-    roots += config.local().clones.values()
+    roots += [*config.local().clones.values(), *extra]
     return [root.expanduser().resolve() for root in roots]
 
 
@@ -47,8 +47,8 @@ def _trusted(directory: Path, untrusted: list[Path]) -> bool:
     return not any(resolved.is_relative_to(root) for root in untrusted)
 
 
-def trusted_path() -> str:
-    untrusted = _untrusted_roots()
+def trusted_path(extra: Iterable[Path] = ()) -> str:
+    untrusted = _untrusted_roots(extra)
     kept: list[str] = []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         if os.path.isabs(entry) and entry not in kept and _trusted(Path(entry), untrusted):

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from deckhand import git
 from deckhand.config import LocalConfig
 from deckhand.policy import Policy
 from deckhand.step import Refusal
@@ -89,12 +90,12 @@ def _sandbox(exempt: list[str], filesystem: dict, credentials: dict) -> dict[str
     }
 
 
-def _hand_env(ref: str) -> dict[str, str]:
+def _hand_env(ref: str, roots: list[Path]) -> dict[str, str]:
     env = {"DECKHAND_ROLE": "hand", "DECKHAND_STORY": ref}
     env.update({name: os.environ[name] for name in PASSED_DIRS if os.environ.get(name)})
     plugin_dir = os.environ.get("DECKHAND_PLUGIN_DIR")
-    if plugin_dir:
-        env["PATH"] = f"{Path(plugin_dir) / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"
+    plugin_bin = Path(plugin_dir) / "bin" if plugin_dir else Path(__file__).resolve().parent.parent / "bin"
+    env["PATH"] = os.pathsep.join([str(plugin_bin), *filter(None, git.trusted_path(roots).split(os.pathsep))])
     return env
 
 
@@ -115,10 +116,10 @@ def _refuse_path_writes(sandbox_write: list[str], search_path: str) -> None:
 def hand_settings(
     ref: str, clone: Path, worktree: Path, policy: Policy, local: LocalConfig, protected: Protected
 ) -> dict[str, Any]:
-    env = _hand_env(ref)
-    _refuse_path_writes(local.sandbox_write, env.get("PATH", os.environ.get("PATH", "")))
     clones = _forms(clone)
     worktrees = _forms(worktree)
+    env = _hand_env(ref, clones + worktrees)
+    _refuse_path_writes(local.sandbox_write, env["PATH"])
     git_credentials = _forms(*(Path.home() / name for name in GIT_CREDENTIALS))
     deny = list(NO_DIALOG)
     deny += [_rule("Read", path, suffix) for path in git_credentials for suffix in ("", "/**")]
