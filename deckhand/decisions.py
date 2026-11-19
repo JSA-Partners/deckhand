@@ -109,13 +109,14 @@ def make_question(kind: str, pin: Pin) -> Question:
 def question_text(kind: str, pin: Pin) -> str:
     fields = {"kind": kind, **asdict(pin)}
     check = content_hash(json.dumps(fields, sort_keys=True))[:12]
-    stories = ", ".join(pin.story_labels or pin.stories)
-    where = f"version {content_hash(pin.version)[:12]}, stories {stories}, check {check}"
     ask = _BRANCH_CAP if kind == review.CAP_DECISION and pin.subject.endswith(":branch") else _ASKS[kind]
     shown = " ".join(part for part in (ask, pin.label) if part)
     if pin.detail:
         shown += f": {pin.detail}"
-    return f"{shown} ({where})? (decision kind: {kind})"
+    stories = pin.story_labels or pin.stories
+    if stories != [pin.label]:
+        shown += f" (stories {', '.join(stories)})"
+    return f"{shown}? [{check}]"
 
 
 def _label(story: dict) -> str:

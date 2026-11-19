@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from deckhand import answers, decisions, tiers
 from deckhand.questions import as_tool_input
-from deckhand.records import content_hash
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
 
@@ -110,10 +111,10 @@ def test_only_proving_in_lean_records_a_lean_decision(tmp_path: Path, answer: st
     assert [r.kind for r in store.records("s1")] == (["lean"] if written else [])
 
 
-def test_question_text_is_ascii_and_names_kind_and_subject():
+def test_question_text_is_ascii_and_names_what_is_asked():
     question = decisions.make_question("state-chart", pin())
     assert question.text.isascii()
-    assert "state-chart" in question.text and "Checkout" in question.text
+    assert "state chart" in question.text and "Checkout" in question.text
     assert question.options == ["Approve", "Not yet"]
 
 
@@ -160,12 +161,13 @@ def test_pending_edited_after_the_answer_is_refused(tmp_path: Path, changes: dic
     assert store.writes == []
 
 
-def test_question_text_states_version_and_story_labels_not_ids():
+def test_question_text_states_story_labels_not_ids():
     shown = decisions.Pin("p1", "v1", ["u1", "u2"], label="Alpha", story_labels=["ACME-1 Orders", "ACME-2 Receipts"])
     question = decisions.make_question("contract", shown)
-    assert "Alpha" in question.text
-    assert "ACME-1 Orders, ACME-2 Receipts" in question.text
-    assert content_hash("v1")[:12] in question.text
+    assert re.fullmatch(
+        r"Approve the contract for Alpha \(stories ACME-1 Orders, ACME-2 Receipts\)\? \[[0-9a-f]{12}\]", question.text
+    )
+    assert decisions.make_question("contract", replace(shown, version="v2")).text != question.text
     assert not any(id in question.text for id in ("p1", "u1", "u2"))
     assert question.text.isascii()
     assert (
@@ -174,6 +176,13 @@ def test_question_text_states_version_and_story_labels_not_ids():
         ).text
         != question.text
     )
+
+
+def test_question_text_shows_no_hash_but_its_check_tag():
+    label = "ACME-9 Dialog check story"
+    shown = decisions.Pin("s9", "v1", ["s9"], "head c2", label, [label])
+    text = decisions.make_question("sign-off", shown).text
+    assert re.fullmatch(r"Sign off ACME-9 Dialog check story: head c2\? \[[0-9a-f]{12}\]", text)
 
 
 def test_tier_is_one_choice_of_four_ending_with_none_of_these():
