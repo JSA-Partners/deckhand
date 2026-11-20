@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -312,3 +313,45 @@ def test_worktree_detached_never_makes_a_branch() -> None:
     fake = Fake((0, "", ""))
     git.worktree_detached(Path("/nowhere"), "spike-abc", "origin/HEAD", fake)
     assert fake.argvs == [["git", "worktree", "add", "--detach", "/nowhere/.worktrees/spike-abc", "origin/HEAD"]]
+
+
+def test_two_commits_in_one_worktree_take_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clone = repo_with_story(tmp_path, monkeypatch)
+    worktree = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "story", str(worktree)], cwd=clone, check=True)
+    parked, release, entered = threading.Event(), threading.Event(), threading.Event()
+    calls: list[tuple[str, list[str]]] = []
+    failures: list[BaseException] = []
+
+    def runner(argv, cwd=None, stdin=None):
+        name = threading.current_thread().name
+        calls.append((name, argv[:2]))
+        if name == "A" and argv[:2] == ["git", "add"]:
+            parked.set()
+            release.wait(5)
+        if name == "B" and argv[:2] == ["git", "ls-tree"]:
+            entered.set()
+        return git.run(argv, cwd, stdin)
+
+    def commit(message: str) -> None:
+        try:
+            git.commit_all(worktree, message, runner)
+        except BaseException as problem:
+            failures.append(problem)
+
+    (worktree / "one.txt").write_text("1\n")
+    first = threading.Thread(target=commit, args=("feat: one\n",), name="A")
+    first.start()
+    assert parked.wait(5)
+    (worktree / "two.txt").write_text("2\n")
+    second = threading.Thread(target=commit, args=("feat: two\n",), name="B")
+    second.start()
+    assert not entered.wait(0.5)
+    assert [argv for name, argv in calls if name == "B"] == [["git", "rev-parse"]]
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert failures == []
+    assert calls.index(("A", ["git", "commit"])) < calls.index(("B", ["git", "ls-tree"]))
+    log = subprocess.run(["git", "log", "--format=%s"], cwd=worktree, check=True, capture_output=True, text=True)
+    assert log.stdout.split("\n")[:3] == ["feat: two", "feat: one", "base"]

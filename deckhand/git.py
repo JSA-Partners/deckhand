@@ -263,6 +263,7 @@ def _entries(argv: list[str], worktree: Path, runner: Runner) -> list[tuple[str,
     return [(path, meta) for meta, _, path in (record.partition("\t") for record in records) if path]
 
 
+# Commits alone take it: a merge stages no hand pathspec, and git's index.lock already guards it.
 @contextmanager
 def _locked(worktree: Path, runner: Runner) -> Iterator[None]:
     gitdir = Path(call(["git", "rev-parse", "--path-format=absolute", "--git-dir"], worktree, runner).strip())
