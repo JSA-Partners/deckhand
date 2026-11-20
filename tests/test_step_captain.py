@@ -129,6 +129,8 @@ def test_idle_or_done_hand_never_watched(clone: Path, capsys: pytest.CaptureFixt
 def test_wake_due_clears_after_wake(clone: Path, capsys: pytest.CaptureFixture[str]):
     store = owned()
     store.put_record("s1", Record(asks.HAND_START, "s1", "v", HAND, {"kind": "story", "session": "hand-ACME-1"}))
+    asked = {"question": "Which queue?", "options": ["Redis", "SQS"], "why": "Both fit."}
+    store.put_record("s1", Record(asks.QUESTION, "s1:q-n1", "v1", HAND, asked))
     answer = {"answer": "Redis", "nonce": "n1", "by": ME}
     store.put_record("s1", Record(asks.ANSWER, "q-n1", "v1", "person:session-1", answer))
     assert "wake due: ACME-1" in output(store, [], capsys).splitlines()

@@ -114,3 +114,14 @@ def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.Captu
     assert "The Contract of Alpha." in out
     assert "The Examples of Alpha." in out
     assert "never settled here" in out
+
+
+def test_draft_refused_once_the_draft_is_taken(tmp_path: Path):
+    store = approved_contract()
+    step = Draft(store, me=lambda: "viewer-1")
+    step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
+    step.apply(["ACME-1", "take", *TEAM])
+    written = list(store.writes)
+    with pytest.raises(Refusal, match="ACME-1 took its draft already"):
+        step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
+    assert store.writes == written

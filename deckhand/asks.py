@@ -97,10 +97,28 @@ def answer_of(records: list[Record], subject: str, kind: str) -> Record | None:
     return found[-1] if found else None
 
 
-def wake_due(records: list[Record]) -> Record | None:
+def _finding_waited(records: list[Record], finding: str, story: str) -> bool:
+    found = review.locate(records, finding)
+    if found is None or not found[0].subject.startswith(f"{story}:"):
+        return False
+    return found[1].get("changes_delivery") is True or any(r.kind == PROPOSAL and r.subject == finding for r in records)
+
+
+def _waited(records: list[Record], decision: Record, story: str) -> bool:
+    asked = {ANSWER: QUESTION, EDIT: EDIT_REQUEST}.get(decision.kind)
+    if asked is not None:
+        return any(r.kind == asked and r.subject == f"{story}:{decision.subject}" for r in records)
+    if decision.kind == review.DECISION:
+        return _finding_waited(records, decision.subject, story)
+    if decision.kind == review.CAP_DECISION:
+        return decision.subject in (review.cap_subject(story, "plan"), review.cap_subject(story, "branch"))
+    return decision.subject == story
+
+
+def wake_due(records: list[Record], story: str) -> Record | None:
     starts = [r for r in records if r.kind == HAND_START]
     if not starts:
         return None
     floor = max((r.at for r in records if not _person(r)), default="")
-    due = [r for r in records if _person(r) and r.kind in WAITING and r.at > floor]
+    due = [r for r in records if _person(r) and r.kind in WAITING and r.at > floor and _waited(records, r, story)]
     return max(due, key=lambda r: r.at, default=None)

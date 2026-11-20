@@ -90,6 +90,7 @@ def settings_of(argv: list[str]) -> dict:
 
 
 def decided(store: FakeStore, story: str, nonce: str) -> None:
+    store.put_record(story, Record(asks.QUESTION, f"{story}:q-{nonce}", "v1", HAND, {"question": "Which queue?"}))
     data = {"answer": "Redis", "nonce": nonce, "by": ME}
     store.put_record(story, Record(asks.ANSWER, f"q-{nonce}", "v1", "person:session-1", data))
 
@@ -281,7 +282,7 @@ def test_wake_gone_hand_resumes(clone: Path, capsys: pytest.CaptureFixture[str])
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
     assert capsys.readouterr().out.strip() == "waits for a slot"
     assert store.writes == written
-    assert asks.wake_due(store.records("s1")) is not None
+    assert asks.wake_due(store.records("s1"), "s1") is not None
     shell.rows = [row("ACME-1", "stopped"), row("ACME-2", "done")]
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
     assert capsys.readouterr().out.strip() == "resumed hand-ACME-1"
@@ -289,7 +290,7 @@ def test_wake_gone_hand_resumes(clone: Path, capsys: pytest.CaptureFixture[str])
     assert argv[argv.index("--resume") + 1] == "sid-ACME-1"
     assert cwd == clone / ".worktrees" / "acme-1-orders"
     records = store.records("s1")
-    assert asks.wake_due(records) is None
+    assert asks.wake_due(records, "s1") is None
     [wake] = [r for r in records if r.kind == asks.WAKE]
     [start] = starts(store, "s1")
     assert (wake.version, start.at > wake.at) == ("n1", True)
@@ -329,7 +330,7 @@ def test_wake_live_waiting_hand_waits_for_a_slot(clone: Path, capsys: pytest.Cap
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
     assert capsys.readouterr().out.strip() == "waits for a slot"
     assert store.writes == written
-    assert asks.wake_due(store.records("s1")) is not None
+    assert asks.wake_due(store.records("s1"), "s1") is not None
     shell.rows = [row("ACME-1", "blocked", "waiting"), row("ACME-2", "done")]
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
     assert capsys.readouterr().out.startswith("send to hand-ACME-1: ")
@@ -561,3 +562,32 @@ def test_fill_starts_a_fresh_build_hand_for_a_drafted_story(clone: Path):
     assert "--resume" not in argv
     [start] = starts(store, "s1")
     assert start.data["kind"] == "story"
+
+
+def test_a_feature_finding_decision_wakes_no_draft_hand(clone: Path, capsys: pytest.CaptureFixture[str]):
+    configure(clone, 3)
+    store = planning()
+    drafted(store, "s1")
+    data = {"answer": "Decline", "nonce": "n1", "by": ME}
+    store.put_record("s1", Record("finding", "f-1", "v1", "person:session-1", data))
+    shell = Shell(row("ACME-1", "done"))
+    capsys.readouterr()
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    assert capsys.readouterr().out.strip() == "nothing to wake"
+    assert shell.launches() == []
+
+
+@pytest.mark.parametrize("phase", ["drafted while planning", "building"])
+def test_a_wake_relaunches_only_the_hand_the_story_still_needs(
+    clone: Path, capsys: pytest.CaptureFixture[str], phase: str
+):
+    store = planning() if phase.endswith("planning") else building()
+    store.put_record("s1", Record(asks.HAND_START, "s1", "", HAND, {"kind": "draft", "session": "hand-ACME-1"}))
+    if phase.endswith("planning"):
+        store.put_record("s1", Record(queue.DRAFT, "s1", "d1", "agent:draft", {}))
+    decided(store, "s1", "n1")
+    shell = Shell(row("ACME-1", "done"))
+    capsys.readouterr()
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    assert capsys.readouterr().out.strip() == "nothing to wake"
+    assert shell.launches() == []

@@ -77,6 +77,8 @@ class Draft(StoryStep):
             raise Refusal("the Contract is not approved; a draft waits for it")
         if not text.strip():
             raise Refusal("the draft is empty")
+        if any(r.kind == queue.TAKEN for r in feature.records.get(story["id"], [])):
+            raise Refusal(f"{story['identifier']} took its draft already; a new draft would not reach its description")
         ops.ensure_document(store, story["id"], PURPOSE, story["id"], TITLE, text)
         record = Record(queue.DRAFT, story["id"], content_hash(text), "agent:draft", {})
         ops.ensure_record(store, story["id"], record)

@@ -189,7 +189,7 @@ class Hand:
         feature = features.owning(store, team, ref)
         story = features.story(store, feature, ref)
         records = feature.records.get(story["id"], [])
-        due = asks.wake_due(records)
+        due = startable.wake_due(feature, story)
         if due is None:
             print("nothing to wake")
             return

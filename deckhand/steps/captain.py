@@ -5,7 +5,7 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from deckhand import asks, claims, config, features, fleet, git, order, queue
+from deckhand import claims, config, features, fleet, git, order, queue, startable
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
@@ -190,9 +190,7 @@ class Captain:
             facts["budget"] = _budget(feature, self._today())
             facts["order"], facts["cycle"] = _build_order(store, feature)
             mine = [s for s in feature.live if me is not None and s["assignee"] == me]
-            facts["wake_due"] = [
-                s["identifier"] for s in mine if asks.wake_due(feature.records.get(s["id"], [])) is not None
-            ]
+            facts["wake_due"] = [s["identifier"] for s in mine if startable.wake_due(feature, s) is not None]
         return facts
 
 

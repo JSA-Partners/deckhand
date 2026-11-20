@@ -52,27 +52,47 @@ def test_parse_question_refuses_what_is_not_the_shape():
 
 def test_wake_due_after_decision_until_hand_writes():
     start = stamped("hand-start", "2026-11-19T10:00:00.000Z", "agent:hand")
-    ask = stamped("hand-question", "2026-11-19T10:05:00.000Z", "agent:hand")
-    assert asks.wake_due([start, ask]) is None
+    ask = stamped("hand-question", "2026-11-19T10:05:00.000Z", "agent:hand", "s1:abc")
+    assert asks.wake_due([start, ask], "s1") is None
     answer = stamped("question", "2026-11-19T10:10:00.000Z", "person:s1", "abc")
-    assert asks.wake_due([start, ask, answer]) == answer
+    assert asks.wake_due([start, ask, answer], "s1") == answer
+    round = Record("review-round", "s1:branch:1", "r1", "agent:review", {"findings": [{"id": "f1"}]})
+    proposed = asks.proposal_record("f1", "r1", "noise")
     later = stamped("finding", "2026-11-19T10:20:00.000Z", "person:s1", "f1")
-    assert asks.wake_due([start, ask, answer, later]) == later
+    held = [start, round, proposed, ask, answer, later]
+    assert asks.wake_due(held, "s1") == later
     woke = stamped("wake", "2026-11-19T10:30:00.000Z", "agent:captain")
-    assert asks.wake_due([start, ask, answer, later, woke]) is None
+    assert asks.wake_due([*held, woke], "s1") is None
     wrote = stamped("review-round", "2026-11-19T10:40:00.000Z", "agent:review")
-    newer = stamped("sign-off", "2026-11-19T10:50:00.000Z", "person:s1")
-    assert asks.wake_due([start, ask, answer, later, woke, wrote, newer]) == newer
+    newer = stamped("sign-off", "2026-11-19T10:50:00.000Z", "person:s1", "s1")
+    assert asks.wake_due([*held, woke, wrote, newer], "s1") == newer
 
 
 def test_wake_due_ignores_stories_without_a_hand_and_decisions_a_hand_does_not_wait_on():
-    tier = stamped("tier", "2026-11-19T10:10:00.000Z", "person:s1")
-    assert asks.wake_due([tier]) is None
-    assert asks.wake_due([stamped("question", "2026-11-19T10:10:00.000Z", "person:s1")]) is None
+    tier = stamped("tier", "2026-11-19T10:10:00.000Z", "person:s1", "s1")
+    assert asks.wake_due([tier], "s1") is None
+    assert asks.wake_due([stamped("question", "2026-11-19T10:10:00.000Z", "person:s1")], "s1") is None
     start = stamped("hand-start", "2026-11-19T10:00:00.000Z", "agent:hand")
-    assert asks.wake_due([start, tier, stamped("sitting", "2026-11-19T10:11:00.000Z", "person:s1")]) is None
+    assert asks.wake_due([start, tier, stamped("sitting", "2026-11-19T10:11:00.000Z", "person:s1", "s1")], "s1") is None
     edit = stamped("config-edit-request", "2026-11-19T10:12:00.000Z", "agent:hand")
-    assert asks.wake_due([start, tier, edit]) is None
+    assert asks.wake_due([start, tier, edit], "s1") is None
+
+
+def test_wake_due_only_for_a_decision_this_story_s_hand_waits_on():
+    start = stamped("hand-start", "2026-11-19T10:00:00.000Z", "agent:hand", "s1")
+    feature_round = Record("review-round", "p1:feature:1", "r1", "agent:review", {"findings": [{"id": "f1"}]})
+    story_round = Record("review-round", "s1:plan:1", "r2", "agent:review", {"findings": [{"id": "f2"}]})
+    rounds = [start, feature_round, story_round]
+    on_feature = stamped("finding", "2026-11-19T10:10:00.000Z", "person:s1", "f1")
+    assert asks.wake_due([*rounds, on_feature], "s1") is None
+    on_story = stamped("finding", "2026-11-19T10:10:00.000Z", "person:s1", "f2")
+    assert asks.wake_due([*rounds, on_story], "s1") is None
+    proposed = asks.proposal_record("f2", "r2", "noise")
+    assert asks.wake_due([*rounds, proposed, on_story], "s1") == on_story
+    unasked = stamped("question", "2026-11-19T10:10:00.000Z", "person:s1", "abc")
+    assert asks.wake_due([start, unasked], "s1") is None
+    elsewhere = stamped("sign-off", "2026-11-19T10:10:00.000Z", "person:s1", "s2")
+    assert asks.wake_due([start, elsewhere], "s1") is None
 
 
 def test_open_proposals_are_those_without_a_person_decision():

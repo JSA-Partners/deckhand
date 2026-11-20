@@ -191,7 +191,7 @@ def _finished(story: dict, records: list[Record], start: Record) -> bool:
 def _waiting(story: dict, records: list[Record], second: bool) -> bool:
     if second or _for_person(story, records, 2) or signoff.after_merge_for_person(records, story["id"]):
         return True
-    return asks.wake_due(records) is not None
+    return asks.wake_due(records, story["id"]) is not None
 
 
 def stalled(
