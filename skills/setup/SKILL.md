@@ -1,18 +1,16 @@
 ---
 name: setup
 description: "Fit a Linear team to the story process, name its repositories and clones on this machine, set the slot cap, and print the line that launches the captain."
-arguments: key
-argument-hint: "<team key>"
 disable-model-invocation: true
 allowed-tools: Bash(deckhand *) AskUserQuestion
 ---
 
-# Setup $key
+# Setup
 
-!`deckhand setup context --team-key $key`
+!`deckhand setup context`
 
-Above: what setup found for team $key and what it would change. When it says the team key is
-required, ask the person for it: the key of their Linear team, such as the prefix of its issue ids.
+Above: what setup found for the team in config and what it would change, or what setup needs.
+Without a team, ask the person for its key: the prefix of their Linear team's issue ids.
 When it names a missing credentials file, tell the person which file and stop; it holds a secret,
 so they write it themselves, owner-only, and never paste it here.
 

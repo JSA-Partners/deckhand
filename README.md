@@ -115,7 +115,7 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 
 | Command | What it does |
 | --- | --- |
-| `/deckhand:setup KEY` | Fits Linear team KEY to the process, names its repositories and clones, and prints the captain's launch line |
+| `/deckhand:setup` | Fits a Linear team to the process, names its repositories and clones, and prints the captain's launch line |
 | `/deckhand:captain` | Starts hands, and brings you the queue one item at a time |
 | `/deckhand:feature` | Opens, picks or parks a feature, and plans it with you a screen at a time |
 | `/deckhand:signoff REF` | Walks you through story REF's sign-off, one screen at a time |

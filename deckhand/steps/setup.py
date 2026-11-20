@@ -20,6 +20,11 @@ USAGE = (
     "--slot-cap N, and --json on context only"
 )
 
+NEEDS = (
+    "setup needs --team-key KEY, the key of the Linear team, or team_key in config.toml;"
+    " then --repository LABEL=owner/name and --clone LABEL=PATH for each repository, and --slot-cap N"
+)
+
 
 def _clone(value: str) -> tuple[str, Path]:
     label, _, raw = value.partition("=")
@@ -89,6 +94,14 @@ def _differs(path: Path, text: str) -> bool:
         return True
 
 
+def _configured_key() -> str:
+    try:
+        return config.local().team_key
+    except Refusal as error:
+        print(error)
+        return ""
+
+
 def _launch_line() -> str:
     settings = shlex.quote(str(config.config_dir() / CAPTAIN_SETTINGS))
     return f'claude --settings {settings} --name captain "/deckhand:captain"'
@@ -125,7 +138,14 @@ class Setup:
 
     def context(self, args: list[str]) -> None:
         as_json = "--json" in args
-        parsed = _parse([arg for arg in args if arg != "--json"])
+        args = [arg for arg in args if arg != "--json"]
+        if "--team-key" not in args:
+            key = _configured_key()
+            if not key:
+                print(NEEDS)
+                return
+            args = ["--team-key", key, *args]
+        parsed = _parse(args)
         key = parsed["team_key"]
         facts = self._facts(key, parsed["repositories"])
         if facts["team"]["found"]:

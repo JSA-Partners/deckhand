@@ -172,6 +172,28 @@ def test_refuses_without_team_key():
     assert linear.writes == []
 
 
+def test_context_without_team_key_reads_it_from_config(capsys: pytest.CaptureFixture[str]):
+    config_dir = Path(os.environ["DECKHAND_CONFIG_DIR"])
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text('team_key = "ACME"\n')
+    linear = FakeLinear("ACME")
+    make(linear).context(["--repository", "widgets=acme/widgets"])
+    out = capsys.readouterr().out
+    assert "team ACME: found" in out
+    assert "acme/widgets" in out
+    assert linear.writes == []
+
+
+def test_context_without_any_team_key_prints_what_setup_needs(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME")
+    make(linear).context([])
+    out = capsys.readouterr().out
+    assert "--team-key KEY" in out
+    assert "found" not in out
+    assert linear.writes == []
+    assert not Path(os.environ["DECKHAND_CONFIG_DIR"]).exists()
+
+
 def test_refuses_unknown_team_before_any_write():
     linear = FakeLinear("ACME")
     setup = make(linear)
