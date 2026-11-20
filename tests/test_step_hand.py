@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, asks, config, implplan, launch, queue, signoff, spikes
+from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
 from deckhand.steps.hand import Hand
@@ -404,6 +405,14 @@ def test_spike_starts_a_detached_hand_with_its_own_key(clone: Path, tmp_path: Pa
     assert settings["env"]["DECKHAND_ROLE"] == "hand"
     assert settings["env"]["DECKHAND_SPIKE"] == key
     assert "DECKHAND_STORY" not in settings["env"]
+    protected = launch.protected(config.config_dir(), answers.state_dir())
+    story_settings = launch.hand_settings(key, clone, worktree, Policy.load(clone), config.local(), protected)
+    story_settings["env"].pop("DECKHAND_STORY")
+    story_settings["env"]["DECKHAND_SPIKE"] = key
+    assert settings == story_settings
+    assert settings["sandbox"]["enabled"] is True
+    assert "AskUserQuestion" in settings["permissions"]["deny"]
+    assert settings["sandbox"]["filesystem"]["denyWrite"]
     assert capsys.readouterr().out.strip() == f"started spike-{key}"
 
 
@@ -450,7 +459,34 @@ def test_spike_already_live_starts_nothing(clone: Path, tmp_path: Path, capsys: 
     assert capsys.readouterr().out.strip() == f"spike-{key} is already live"
 
 
-@pytest.mark.parametrize("text", ["one\ntwo", "x" * 201, "  padded", "", "\n"])
+def test_spike_takes_a_question_file_with_one_trailing_newline(clone: Path, tmp_path: Path):
+    store, shell = empty_feature(), Shell()
+    hand(store, shell).apply(
+        ["spike", "--repository", "widgets", "--file", question_file(tmp_path, QUESTION + "\n"), *TEAM]
+    )
+    key = spikes.key(P1, QUESTION)
+    assert spikes.question_path(answers.state_dir(), key).read_text() == QUESTION
+    assert spikes.keys(answers.state_dir(), P1) == {key}
+
+
+def test_spike_refused_by_policy_writes_nothing(clone: Path, tmp_path: Path):
+    (clone / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\nbogus = 1\n')
+    store, shell = empty_feature(), Shell()
+    with pytest.raises(Refusal, match="unknown key bogus"):
+        hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    assert shell.launches() == []
+    assert [a for a, _ in shell.calls if a[:3] == ["git", "worktree", "add"]] == []
+    assert not (answers.state_dir() / "spikes").exists()
+    assert not (clone / ".worktrees").exists()
+
+
+def test_context_names_a_live_spike(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = empty_feature(), Shell(spike_row("0123456789ab", "working", "busy"))
+    hand(store, shell).context(TEAM)
+    assert capsys.readouterr().out.splitlines()[:2] == ["slots: 1 of 1", "live: spike-0123456789ab working"]
+
+
+@pytest.mark.parametrize("text", ["one\ntwo", "x" * 201, "  padded", "", "\n", "a\tb", "a\rb", "q\n\n"])
 def test_spike_refuses_a_question_a_title_cannot_hold(clone: Path, tmp_path: Path, text: str):
     store, shell = empty_feature(), Shell()
     with pytest.raises(Refusal, match="one line of at most 200 characters"):

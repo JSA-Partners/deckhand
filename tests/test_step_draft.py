@@ -36,7 +36,12 @@ def test_draft_refused_before_contract(tmp_path: Path):
 
 def test_draft_saves_a_document_and_a_record(tmp_path: Path):
     store = approved_contract()
+    before = len(store.writes)
     Draft(store, me=lambda: "viewer-1").apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
+    assert store.writes[before:] == [
+        ("put_document", ops.create_id("s1", "draft")),
+        ("put_record", "s1", queue.DRAFT, "s1"),
+    ]
     document = store.document(ops.create_id("s1", "draft"))
     assert document is not None
     assert (document["title"], document["body"]) == ("Draft", DRAFT)
@@ -72,11 +77,19 @@ def test_draft_refused_once_the_feature_is_building(tmp_path: Path):
     assert store.writes == written
 
 
-def test_draft_taken_writes_text(tmp_path: Path):
+def test_draft_taken_writes_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-7")
     store = approved_contract()
     step = Draft(store, me=lambda: "viewer-1")
     step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
+    before = len(store.writes)
     step.apply(["ACME-1", "take", *TEAM])
+    assert [w[:3] for w in store.writes[before:]] == [
+        ("set_issue_text", "s1", "Orders"),
+        ("put_record", "s1", queue.TAKEN),
+    ]
+    [taken] = [r for r in store.records("s1") if r.kind == queue.TAKEN]
+    assert taken.author == "person:session-7"
     assert store.issue("s1")["description"] == DRAFT
     assert [r.kind for r in store.records("s1") if r.kind == queue.TAKEN] == [queue.TAKEN]
     written = list(store.writes)
@@ -99,4 +112,5 @@ def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.Captu
     assert "ACME-1 Orders" in out
     assert "Outcome: an order is placed." in out
     assert "The Contract of Alpha." in out
-    assert "Examples" in out
+    assert "The Examples of Alpha." in out
+    assert "never settled here" in out

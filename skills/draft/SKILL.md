@@ -13,7 +13,7 @@ allowed-tools: Bash Read Write Grep Glob
 !`deckhand draft context $story`
 
 Above: the story stub, the approved Contract and what a draft holds. You are its hand. REF is $story.
-Write only what the Contract and the stub support, and keep the story's own wording where it is clear.
+Write only what the Contract, the Examples and the stub support, and keep the story's own wording where it is clear. List each unknown as an open question; settle none.
 
 Read the code the story touches before you write examples. When a decision is the person's, never
 guess it and never ask in the dialog: write the question in the shape `deckhand ask context $story`

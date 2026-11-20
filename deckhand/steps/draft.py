@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
+
 from deckhand import claims, features, inputs, ops, planning, queue
 from deckhand.features import Phase
-from deckhand.records import HAND, Record, content_hash
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
 from deckhand.store import Store
@@ -12,9 +14,9 @@ PURPOSE = "draft"
 TITLE = "Draft"
 SHAPE = (
     "Outcome: what is true once the story is done",
-    "Examples: the cases the story must handle, one line each",
+    "Examples: the cases of the approved Examples this story owns, one line each",
     "Out of scope: what the story leaves to another",
-    "Unknowns settled: what the stub left open, and the answer",
+    "Unknowns: what the stub left open, each listed as a question for the person, never settled here",
 )
 
 
@@ -47,8 +49,9 @@ class Draft(StoryStep):
         for name in ("unknowns", "new_here", "decisions"):
             for item in stub.data.get(name, []) if stub else []:
                 print(f"{name}: {item}")
-        print("contract:")
-        print(planning.section(store, feature, "Contract") or "none saved")
+        for name in ("Contract", "Examples"):
+            print(f"{name.lower()}:")
+            print(planning.section(store, feature, name) or "none saved")
         print("the draft holds, in this order:")
         for part in SHAPE:
             print(f"- {part}")
@@ -84,6 +87,7 @@ class Draft(StoryStep):
         if held is None:
             raise Refusal(f"{story['identifier']} has no draft to take")
         ops.ensure_issue_text(store, story["id"], story["title"], held["body"])
-        record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), HAND, {})
+        author = f"person:{os.environ.get('CLAUDE_CODE_SESSION_ID', '')}"
+        record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), author, {})
         ops.ensure_record(store, story["id"], record)
         print(f"done: took the draft as the description of {story['identifier']}")

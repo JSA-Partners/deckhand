@@ -176,7 +176,8 @@ class Hand:
         read = fleet.sessions(self._runner)
         feature = features.current(store, team_key(parsed))
         hands = fleet.hands(read.sessions)
-        live = [s for _, s in sorted(hands.items()) if fleet.live(s)]
+        held = [*sorted(hands.items()), *sorted(fleet.spikes(read.sessions).items())]
+        live = [s for _, s in held if fleet.live(s)]
         notes, work = [read.note] if read.note else [], []
         try:
             me = claims.me(self._person_store())
@@ -319,8 +320,7 @@ class Hand:
         return Launch(story, records, clone, branch, argv, worktree, DRAFT if kind == DRAFT else "story")
 
     def _spike(self, team: str, label: str, path: str) -> None:
-        question = inputs.read(path, "--file", USAGE)
-        spikes.check(question)
+        question = spikes.question_of(inputs.read(path, "--file", USAGE))
         store = self._app()
         feature = features.open_feature(store, team)
         if feature is None:
@@ -343,11 +343,12 @@ class Hand:
             return
         _free_slot(read)
         require_base(clone, self._runner)
+        worktree = git.worktree_path(clone, name)
+        argv = self._argv(name, key, clone, worktree, SPIKE_PROMPT.format(key), _resume(session), spike=True)
         asked = spikes.question_path(answers.state_dir(), key)
         asked.parent.mkdir(parents=True, exist_ok=True)
         asked.write_text(question, encoding="utf-8")
-        worktree = git.worktree_detached(clone, name, DEFAULT_BASE, self._runner)
-        argv = self._argv(name, key, clone, worktree, SPIKE_PROMPT.format(key), _resume(session), spike=True)
+        git.worktree_detached(clone, name, DEFAULT_BASE, self._runner)
         git.call(argv, worktree, self._runner)
         print(f"started {name}")
 

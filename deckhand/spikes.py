@@ -16,9 +16,19 @@ FOLDER = "spikes"
 MAX_QUESTION = 200
 
 
-def check(question: str) -> None:
-    if not question or "\n" in question or question != question.strip() or len(question) > MAX_QUESTION:
-        raise Refusal(f"a spike question is one line of at most {MAX_QUESTION} characters, with no padding")
+def question_of(text: str) -> str:
+    question = text.removesuffix("\n")
+    if (
+        not question.strip()
+        or question != question.strip()
+        or len(question) > MAX_QUESTION
+        or any(not char.isprintable() for char in question)
+    ):
+        raise Refusal(
+            f"a spike question is one line of at most {MAX_QUESTION} characters,"
+            " printable, with no tab or carriage return and no space at either end"
+        )
+    return question
 
 
 def key(project_id: str, question: str) -> str:

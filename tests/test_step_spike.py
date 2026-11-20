@@ -36,7 +36,9 @@ def answer_file(tmp_path: Path, text: str = ANSWER) -> str:
 
 def test_spike_answer_is_a_project_document(tmp_path: Path):
     store, key = setup(), asked()
+    before = len(store.writes)
     Spike(store).apply([key, "--file", answer_file(tmp_path), *TEAM])
+    assert store.writes[before:] == [("put_document", spikes.answer_id(P1, key))]
     document = store.document(spikes.answer_id(P1, key))
     assert document is not None
     assert (document["title"], document["body"]) == (f"Spike: {QUESTION}", ANSWER)
