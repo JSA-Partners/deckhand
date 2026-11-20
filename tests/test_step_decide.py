@@ -188,3 +188,11 @@ def test_a_question_from_a_released_story_is_decided(state: Path, capsys: pytest
     Decide(store).context(["question", asks.question_id("Drop it?"), "--story", "ACME-1", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert [o["label"] for o in shown["tool_input"]["questions"][0]["options"]] == ["Yes", "No"]
+
+
+def test_a_hand_never_opens_a_decision(state: Path, monkeypatch: pytest.MonkeyPatch):
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    with pytest.raises(Refusal, match="a hand never decides"):
+        Decide(store).context(["contract", P1, *TEAM])
+    assert not (state / decisions.PENDING).exists()

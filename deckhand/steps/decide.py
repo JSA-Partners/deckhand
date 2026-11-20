@@ -6,7 +6,7 @@ from pathlib import Path
 
 from deckhand import answers, asks, claims, decisions, features, git, pins, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
-from deckhand.step import Refusal, register, team_key
+from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
 from deckhand.store import Store
 
@@ -62,6 +62,8 @@ class Decide(StoryStep):
         return self._store if self._store is not None else claims.person_store()
 
     def context(self, args: list[str]) -> None:
+        if hand_role():
+            raise Refusal("a hand never decides; record a question with ask apply REF --file QUESTION.json and stop")
         parsed = _parse(args)
         if len(parsed["words"]) != 2:
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
