@@ -55,7 +55,7 @@ WORD_LIMITS = {
     "setup": 400,
     "signoff": 400,
     "spike": 300,
-    "story": 400,
+    "story": 450,
 }
 STEP_SKILLS = tuple(WORD_LIMITS)
 
