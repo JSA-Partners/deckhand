@@ -24,6 +24,7 @@ from deckhand.records import Record
 from deckhand.store import Store
 
 DRAFT = "story-draft"
+DRAFT_HAND, STORY_HAND = "draft", "story"
 TAKEN = "draft-taken"
 FEATURE_SKILL = "/deckhand:feature"
 SIGNOFF_SKILL = "/deckhand:signoff"
@@ -172,12 +173,13 @@ def _for_person(story: dict, records: list[Record], rank: int) -> list[Item]:
     return found + _questions(story, records, rank) + _edits(story, records)
 
 
-def _last_start(records: list[Record]) -> Record | None:
-    return max((r for r in records if r.kind == asks.HAND_START), key=lambda r: r.at, default=None)
+def last_start(records: list[Record], launch: str | None = None) -> Record | None:
+    start = max((r for r in records if r.kind == asks.HAND_START), key=lambda r: r.at, default=None)
+    return start if start is None or launch is None or start.data.get("kind") == launch else None
 
 
 def _finished(story: dict, records: list[Record], start: Record) -> bool:
-    if any(r.kind == DRAFT and r.at >= start.at for r in records):
+    if start.data.get("kind") == DRAFT_HAND and any(r.kind == DRAFT and r.at >= start.at for r in records):
         return True
     if story["state"] != order.DONE:
         return False
@@ -192,26 +194,32 @@ def _waiting(story: dict, records: list[Record], second: bool) -> bool:
     return asks.wake_due(records) is not None
 
 
-def stalled(story: dict, records: list[Record], session: fleet.Session | None, second: bool = False) -> bool:
-    start = _last_start(records)
+def stalled(
+    story: dict, records: list[Record], session: fleet.Session | None, launch: str, second: bool = False
+) -> bool:
+    start = last_start(records, launch)
     if start is None or (session is not None and fleet.live(session)):
         return False
     return not _waiting(story, records, second) and not _finished(story, records, start)
 
 
-def _new_since_start(records: list[Record]) -> bool:
-    start = _last_start(records)
+def _new_since_start(records: list[Record], launch: str) -> bool:
+    start = last_start(records, launch)
     return start is not None and any(r.at > start.at and r.kind != asks.HAND_START for r in records)
 
 
-def restart_due(story: dict, records: list[Record], session: fleet.Session | None, second: bool = False) -> bool:
-    return stalled(story, records, session, second) and _new_since_start(records)
+def restart_due(
+    story: dict, records: list[Record], session: fleet.Session | None, launch: str, second: bool = False
+) -> bool:
+    return stalled(story, records, session, launch, second) and _new_since_start(records, launch)
 
 
-def _stalled(story: dict, records: list[Record], session: fleet.Session | None, rank: int, second: bool) -> list[Item]:
-    if not stalled(story, records, session, second) or _new_since_start(records):
+def _stalled(
+    story: dict, records: list[Record], session: fleet.Session | None, rank: int, launch: str, second: bool
+) -> list[Item]:
+    if not stalled(story, records, session, launch, second) or _new_since_start(records, launch):
         return []
-    start = _last_start(records)
+    start = last_start(records, launch)
     state = session.state if session is not None else "gone"
     lines = [f"its hand is {state}, and no record is new since it last started"]
     next = [f"hand apply start {story['identifier']}"]
@@ -296,7 +304,9 @@ def _feature_items(
             if not read.note:
                 session = hands.get(story["identifier"])
                 second = second_due(story, records, policy_for) is not None
-                found += _prompt(story, records, session, rank) + _stalled(story, records, session, rank, second)
+                launch = STORY_HAND if building or story["state"] == order.DONE else DRAFT_HAND
+                found += _prompt(story, records, session, rank)
+                found += _stalled(story, records, session, rank, launch, second)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found]

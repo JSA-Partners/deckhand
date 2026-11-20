@@ -540,3 +540,24 @@ def test_start_picks_the_draft_prompt_while_planning(clone: Path):
     assert argv[-1] == "/deckhand:draft ACME-1"
     assert cwd == clone / ".worktrees" / "acme-1-orders"
     assert ("put_record", "s1", "worktree", "s1") in [w for w in store.writes if w[0] == "put_record"]
+
+
+def drafted(store: FakeStore, story: str) -> None:
+    start = {"kind": "draft", "session": f"hand-{store.issue(story)['identifier']}"}
+    store.put_record(story, Record(asks.HAND_START, story, "", HAND, start))
+    store.put_record(story, Record(queue.DRAFT, story, "d1", "agent:draft", {}))
+    store.put_record(story, Record(queue.TAKEN, story, "d1", "person:x", {}))
+
+
+def test_fill_starts_a_fresh_build_hand_for_a_drafted_story(clone: Path):
+    configure(clone, 3)
+    store = building()
+    drafted(store, "s1")
+    shell = Shell(row("ACME-1", "done"))
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-2"]
+    argv, _ = shell.launches()[0]
+    assert argv[-1] == PROMPT.format("ACME-1")
+    assert "--resume" not in argv
+    [start] = starts(store, "s1")
+    assert start.data["kind"] == "story"

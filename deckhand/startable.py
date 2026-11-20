@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import asks, config, features, fleet, order, queue, signoff
+from deckhand import config, features, fleet, order, queue, signoff
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -82,14 +82,19 @@ def startable(store: Store, feature: Feature, me: str) -> list[Work]:
     return [w for w in build + after if w.clone is not None]
 
 
+def launch_of(kind: str) -> str:
+    return queue.DRAFT_HAND if kind == DRAFT else queue.STORY_HAND
+
+
 def due(work: Work, feature: Feature, hands: dict[str, fleet.Session]) -> bool:
     story = work.story
     session = hands.get(story["identifier"])
     if session is not None and fleet.live(session):
         return False
     records = feature.records.get(story["id"], [])
-    if not any(r.kind == asks.HAND_START for r in records):
+    launch = launch_of(work.kind)
+    if queue.last_start(records, launch) is None:
         return True
     policy = Policy.load(work.clone)
     second = queue.second_due(story, records, lambda _: policy) is not None
-    return queue.restart_due(story, records, session, second)
+    return queue.restart_due(story, records, session, launch, second)

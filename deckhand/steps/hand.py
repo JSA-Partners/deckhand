@@ -17,6 +17,7 @@ from deckhand import (
     launch,
     ops,
     order,
+    queue,
     spikes,
     startable,
 )
@@ -150,9 +151,7 @@ class Hand:
             raise Refusal(reason)
         _free_slot(read)
         records = feature.records.get(story["id"], [])
-        plan = self._prepare(
-            story, records, startable.clone_of(story), startable.kind(feature, story), _resume(session)
-        )
+        plan = self._prepare(story, records, startable.clone_of(story), startable.kind(feature, story), session)
         self._launch(plan, person, me)
         print(f"started {fleet.hand_name(story['identifier'])}")
 
@@ -173,8 +172,8 @@ class Hand:
                 continue
             story = work.story
             records = feature.records.get(story["id"], [])
-            resume = _resume(hands.get(story["identifier"]))
-            plans.append(self._prepare(story, records, work.clone, work.kind, resume))
+            session = hands.get(story["identifier"])
+            plans.append(self._prepare(story, records, work.clone, work.kind, session))
             used += 1
         for plan in plans:
             self._launch(plan, person, me)
@@ -211,7 +210,7 @@ class Hand:
         clone = startable.clone_of(story)
         if clone is None:
             raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
-        plan = self._prepare(story, records, clone, startable.kind(feature, story), _resume(session))
+        plan = self._prepare(story, records, clone, startable.kind(feature, story), session)
         self._launch(plan, person, me, wake)
         print(f"resumed {name}")
 
@@ -225,13 +224,17 @@ class Hand:
         plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
         return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
 
-    def _prepare(self, story: dict, records: list[Record], clone: Path, kind: str, resume: str | None) -> Launch:
+    # A hand of another kind, a draft hand once the feature builds, never lends its session.
+    def _prepare(
+        self, story: dict, records: list[Record], clone: Path, kind: str, session: fleet.Session | None
+    ) -> Launch:
         require_base(clone, self._runner)
         branch = worktree_branch(story, records)
         worktree = git.worktree_path(clone, branch)
-        ref = story["identifier"]
+        ref, launch_kind = story["identifier"], startable.launch_of(kind)
+        resume = _resume(session) if queue.last_start(records, launch_kind) is not None else None
         argv = self._argv(fleet.hand_name(ref), ref, clone, worktree, PROMPTS[kind].format(ref), resume)
-        return Launch(story, records, clone, branch, argv, worktree, DRAFT if kind == DRAFT else "story")
+        return Launch(story, records, clone, branch, argv, worktree, launch_kind)
 
     def _spike(self, team: str, label: str, path: str) -> None:
         question = spikes.question_of(inputs.read(path, "--file", USAGE))

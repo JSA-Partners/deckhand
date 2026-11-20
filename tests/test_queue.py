@@ -68,8 +68,8 @@ def asked(store: FakeStore, story: str, text: str = "Which queue?") -> None:
     store.put_record(story, asks.question_record(story, found))
 
 
-def started(store: FakeStore, story: str) -> None:
-    store.put_record(story, Record(asks.HAND_START, story, "v1", HAND, {"kind": "story", "session": "hand"}))
+def started(store: FakeStore, story: str, launch: str = "story") -> None:
+    store.put_record(story, Record(asks.HAND_START, story, "v1", HAND, {"kind": launch, "session": "hand"}))
 
 
 def chore(store: FakeStore, story: str) -> None:
@@ -183,23 +183,33 @@ def test_failed_hand_is_stalled_item():
     assert waiting(store, sessions=(hand("ACME-1", "failed", None),), note="the fleet read failed") == []
     store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
     assert waiting(store, sessions=(hand("ACME-1", "failed", None),)) == []
-    assert queue.restart_due(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), None)
+    assert queue.restart_due(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), None, "story")
     started(store, "s1")
-    assert not queue.restart_due(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), None)
+    assert not queue.restart_due(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), None, "story")
 
 
 def test_finished_hand_is_not_stalled():
     store = alpha(planning=True)
-    started(store, "s1")
+    started(store, "s1", "draft")
     records = store.records("s1")
-    assert queue.stalled(store.issue("s1") | {"state": "Backlog"}, records, None)
+    assert queue.stalled(store.issue("s1") | {"state": "Backlog"}, records, None, "draft")
     store.put_record("s1", Record(queue.DRAFT, "s1", "d1", HAND, {}))
-    assert not queue.stalled(store.issue("s1") | {"state": "Backlog"}, store.records("s1"), None)
+    assert not queue.stalled(store.issue("s1") | {"state": "Backlog"}, store.records("s1"), None, "draft")
     done = alpha()
     started(done, "s2")
-    assert not queue.stalled(done.issue("s2") | {"state": "Done"}, done.records("s2"), None)
+    assert not queue.stalled(done.issue("s2") | {"state": "Done"}, done.records("s2"), None, "story")
     asked(done, "s2")
-    assert not queue.stalled(done.issue("s2") | {"state": "Backlog"}, done.records("s2"), None)
+    assert not queue.stalled(done.issue("s2") | {"state": "Backlog"}, done.records("s2"), None, "story")
+
+
+def test_a_draft_start_is_no_start_of_a_build_hand():
+    store = alpha()
+    started(store, "s1", "draft")
+    store.put_record("s1", Record(queue.DRAFT, "s1", "d1", HAND, {}))
+    story = store.issue("s1") | {"state": "Backlog"}
+    assert queue.last_start(store.records("s1"), "story") is None
+    assert not queue.stalled(story, store.records("s1"), None, "story")
+    assert waiting(store, sessions=(hand("ACME-1", "done", None),)) == []
 
 
 QUESTION = "Does the queue keep order?"
@@ -298,9 +308,9 @@ def test_second_signoff_due_is_waiting_not_stalled(
     story, records = store.issue("s1") | {"state": "In Review"}, store.records("s1")
     store.put_record("s1", Record("checks", "s1", "x", "agent:checks", {"head": "x", "passed": False}))
     later = store.records("s1")
-    assert not queue.stalled(story, records, None, second=True)
-    assert not queue.restart_due(story, later, None, second=True)
-    assert queue.restart_due(story, later, None)
+    assert not queue.stalled(story, records, None, "story", second=True)
+    assert not queue.restart_due(story, later, None, "story", second=True)
+    assert queue.restart_due(story, later, None, "story")
 
 
 def test_released_feature_chore_stays_in_the_queue():
