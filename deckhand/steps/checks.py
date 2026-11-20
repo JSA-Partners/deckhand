@@ -6,7 +6,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import claims, git, versions
+from deckhand import claims, git, ops, signoff, versions
 from deckhand.checks import KIND, passing
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
@@ -80,7 +80,7 @@ class Checks(StoryStep):
         print("passed at this head" if facts["passed_at_head"] else "no passing record for this head")
 
     def apply(self, args: list[str]) -> None:
-        story, _, head, commands, path = self._worktree(args)
+        story, records, head, commands, path = self._worktree(args)
         claims.owned(story, self.viewer())
         if git.dirty(path, self._runner):
             raise Refusal(f"{path} has uncommitted changes; commit them first so the pass is pinned to {head}")
@@ -91,10 +91,20 @@ class Checks(StoryStep):
                 failed, tail = command, git.stderr_tail(f"{done.stdout}\n{done.stderr}", TAIL_LINES)
                 break
         data = {"head": head, "passed": failed is None, "command": failed, "tail": tail if failed else None}
-        self._store_for_run().put_record(story["id"], Record(KIND, story["id"], head, "agent:checks", data))
+        store = self._store_for_run()
+        store.put_record(story["id"], Record(KIND, story["id"], head, "agent:checks", data))
         if failed:
+            _void(store, story["id"], records, head, failed)
             raise Refusal(f"{failed} failed at {head}; the failure is recorded. Fix it and run checks again:\n{tail}")
         print(f"done: {len(commands) or 'no'} checks passed for {story['identifier']} at {head}")
+
+
+def _void(store: Store, story: str, records: list[Record], head: str, failed: str) -> None:
+    sign = signoff.signed(records, story)
+    if sign is None or sign.data.get("answer") != signoff.SIGN or signoff.signed_head(sign) != head:
+        return
+    if signoff.voided(records, story, sign) is None:
+        ops.ensure_record(store, story, signoff.void_record(story, sign, f"checks failed: {failed}", "agent:checks"))
 
 
 register("checks")(Checks)

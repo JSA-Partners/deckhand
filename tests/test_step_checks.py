@@ -148,3 +148,21 @@ def test_check_commands_run_on_the_trusted_path(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setenv("PATH", f"{temp}{os.pathsep}{os.environ['PATH']}")
     done = run_command("git --version", tmp_path)
     assert done.stdout.startswith("git version")
+
+
+def test_a_failing_check_at_the_signed_head_voids_the_sign_off(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand import signoff
+    from tests.test_step_signoff import ready, sign, voids
+
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")
+    configured(repo, "make test")
+    with pytest.raises(Refusal, match="make test failed"):
+        run(store, repo, Commands(failing="make test"))
+    [void] = voids(store)
+    assert void.data["reason"] == "checks failed: make test"
+    run(store, repo, Commands())
+    assert not signoff.current(store.records("s1"), "s1", "c2")
