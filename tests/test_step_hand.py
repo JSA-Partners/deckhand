@@ -591,3 +591,34 @@ def test_a_wake_relaunches_only_the_hand_the_story_still_needs(
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
     assert capsys.readouterr().out.strip() == "nothing to wake"
     assert shell.launches() == []
+
+
+def test_fill_resumes_a_woken_hand_before_new_work(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = building(), Shell()
+    store.assign("s2", ME)
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    decided(store, "s1", "n1")
+    shell.rows = [row("ACME-1", "stopped")]
+    capsys.readouterr()
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-1"]
+    assert capsys.readouterr().out.splitlines() == ["resumed hand-ACME-1", "no slot is free: 1 of 1 in use"]
+    [wake] = [r for r in store.records("s1") if r.kind == asks.WAKE]
+    assert wake.version == "n1"
+    assert asks.wake_due(store.records("s1"), "s1") is None
+
+
+def test_fill_names_a_live_woken_hand_to_send_to(clone: Path, capsys: pytest.CaptureFixture[str]):
+    configure(clone, 2)
+    store, shell = building(), Shell()
+    store.assign("s2", ME)
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    decided(store, "s1", "n1")
+    shell.rows = [row("ACME-1", "blocked", "waiting")]
+    capsys.readouterr()
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-2"]
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("send to hand-ACME-1: ")
+    assert out[1:] == ["started hand-ACME-2", "no slot is free: 2 of 2 in use"]
+    assert asks.wake_due(store.records("s1"), "s1") is None
