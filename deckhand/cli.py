@@ -22,22 +22,23 @@ def _load_steps() -> None:
 def _sandboxed() -> bool:
     try:
         os.listdir(config.config_dir())
-    except FileNotFoundError:
-        return False
-    except OSError:
+    except PermissionError:
         return True
+    except OSError:
+        return False
     return False
 
 
 def main(argv: list[str]) -> int:
     _load_steps()
-    if hand_role() and _sandboxed():
+    hand = hand_role()
+    if hand and _sandboxed():
         print(
             "deckhand: deckhand ran inside the sandbox: run it as one bare command, not after export, ; , | or a loop",
             file=sys.stderr,
         )
         return 1
-    if hand_role() and argv[1:2] == ["apply"] and not hand_may_apply(argv[0], argv[2:]):
+    if hand and argv[1:2] == ["apply"] and not hand_may_apply(argv[0], argv[2:]):
         print(f"deckhand: a hand cannot run {argv[0]} apply; leave it for the person's captain", file=sys.stderr)
         return 1
     if not argv or argv[0] not in REGISTRY:

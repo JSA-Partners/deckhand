@@ -441,11 +441,22 @@ def test_outside_the_hand_role_an_unreadable_config_dir_is_not_refused(
 def test_hand_with_a_readable_config_dir_dispatches(recorders, tmp_path, monkeypatch):
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
-    assert main(["ask", "context"]) == 0
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert main(["build", "apply", "ACME-1", "push"]) == 0
+    assert recorders["build"].seen == [["ACME-1", "push"]]
 
 
 def test_hand_with_a_missing_config_dir_is_not_refused(recorders, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path / "absent"))
+    assert main(["ask", "context"]) == 0
+    assert "sandbox" not in capsys.readouterr().err
+
+
+def test_hand_with_a_config_path_that_is_a_file_is_not_refused(recorders, tmp_path, monkeypatch, capsys):
+    path = tmp_path / "config"
+    path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(path))
     assert main(["ask", "context"]) == 0
     assert "sandbox" not in capsys.readouterr().err
