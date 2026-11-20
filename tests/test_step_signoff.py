@@ -379,21 +379,21 @@ def test_a_rerun_after_a_failed_add_seeds_only_the_missing_reason(
 ):
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
     shell = Diffing(sessions=[{"slug": SLUG}], diff=TWO_HUNKS)
-    shell.fail_add = 2
+    shell.fail_add = 1
     with pytest.raises(GitError):
         Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     shell.fail_add = None
-    before = len(shell.ran("tuicr", "review", "add"))
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
-    [rerun] = shell.ran("tuicr", "review", "add")[before:]
-    assert rerun[rerun.index("--line") + 1] == "10"
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    [_, rerun] = shell.ran("tuicr", "review", "add")
+    assert rerun[rerun.index("--line") + 1] == "1"
 
 
 def test_a_session_holding_every_reason_is_left_alone_and_shows_none_as_the_persons(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
-    held = [said("t1", "contract site"), said("t2", "contract site"), said("p1", "Why?")]
+    held = [said("t1", "contract site"), said("p1", "Why?")]
     shell = Diffing(sessions=[{"slug": SLUG}], comments=held, diff=TWO_HUNKS)
     capsys.readouterr()
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
@@ -604,3 +604,15 @@ def test_second_signer_screens_from_records(
         assert not any("no worktree" in line or "not this head" in line for line in out)
     assert "checks: passed at this head" in shown(2)
     assert shown(4)[1:] == ["run gh pr diff 7 --repo acme/widgets in a terminal"]
+
+
+def test_review_names_each_file_s_reason_once(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing(sessions=[{"slug": SLUG}], diff=TWO_HUNKS)
+    capsys.readouterr()
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    assert capsys.readouterr().out.splitlines()[1:] == ["- src/a.py: contract site"]
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4"])
+    assert capsys.readouterr().out.count("- src/a.py: contract site") == 1

@@ -184,8 +184,8 @@ class Signoff(StoryStep):
             added = tuicr.seed_comments(session["slug"], hunks, at.path, self._runner, present)
             note = "seeded the missing reasons as comments" if added else "the reasons are seeded"
         print(f"done: {_shown_command(at.path, held.data['base'], sha)}; {note}")
-        for hunk in held.data.get("hunks", []):
-            print(f"- {hunk['path']}: {hunk['reason']}")
+        for line in _reasons(held.data):
+            print(line)
 
 
 def _last_branch(records: list[Record], story: str) -> dict:
@@ -245,6 +245,11 @@ def _tuicr_status(built: dict | None, comments: list[dict]) -> str:
     return f"built, {len(comments)} comment{'' if len(comments) == 1 else 's'} from you"
 
 
+def _reasons(built: dict) -> list[str]:
+    pairs = [(str(h["path"]), str(h["reason"])) for h in built.get("hunks", [])]
+    return [f"- {path}: {reason}" for path, reason in tuicr.file_reasons(pairs).items()]
+
+
 def _tuicr(at: Located, comments: list[dict]) -> list[str]:
     data = _built(at)
     if data is None:
@@ -252,7 +257,7 @@ def _tuicr(at: Located, comments: list[dict]) -> list[str]:
     if not data.get("sha"):
         return ["no hunk is selected for review"]
     lines = [_shown_command(at.path, data["base"], data["sha"])]
-    lines += [f"- {h['path']}: {h['reason']}" for h in data.get("hunks", [])]
+    lines += _reasons(data)
     lines += ["your comments:", *(f"- {c.get('location')}: {c.get('content')}" for c in comments)] if comments else []
     return lines
 
