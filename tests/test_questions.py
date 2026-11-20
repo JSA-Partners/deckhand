@@ -15,7 +15,9 @@ def test_built_question_has_no_recommended_option_and_short_header():
     assert item["header"] == q.header
     assert item["multiSelect"] is False
     assert [o["label"] for o in item["options"]] == ["Narrow", "Wide"]
-    assert all(o["description"] for o in item["options"])
+    assert [o["description"] for o in item["options"]] == ["", ""]
+    described = questions.as_tool_input(questions.build("scope", "ACME-1", "Q?", ["A", "B"], ["one", "two"]))
+    assert [o["description"] for o in described["questions"][0]["options"]] == ["one", "two"]
     assert "recommended" not in str(shaped).lower()
 
 

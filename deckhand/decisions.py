@@ -50,6 +50,16 @@ _OPTIONS = {
     asks.EDIT: asks.EDIT_OPTIONS,
 }
 
+_DESCRIPTIONS = {
+    "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
+    "finding": ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"],
+    review.CAP_DECISION: ["carry on past the cap", "the hand reworks it and the rounds count again"],
+    signoff.KIND: ["the hand merges it, pinned to this head", "the hand changes what you name"],
+    signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
+    signoff.AFTER: ["the item is done", "the item stays in your queue"],
+    asks.EDIT: ["you made the change", "the hand carries on without it"],
+}
+
 _ASKS = {
     "contract": "Approve the contract for",
     "invariants": "Approve the invariants for",
@@ -127,7 +137,7 @@ def make_question(kind: str, pin: Pin) -> Question:
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
     options = pin.options if kind in _PIN_OPTIONS else _OPTIONS[kind]
-    return build(kind, pin.label or pin.subject, question_text(kind, pin), options)
+    return build(kind, pin.label or pin.subject, question_text(kind, pin), options, _DESCRIPTIONS.get(kind))
 
 
 def question_text(kind: str, pin: Pin) -> str:

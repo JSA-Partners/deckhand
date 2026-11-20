@@ -150,21 +150,10 @@ def test_hook_ask_denies_a_deckhand_question_that_carries_answers(monkeypatch, t
     assert deny(capsys)
 
 
-def test_recommended_in_a_story_title_does_not_deny(monkeypatch, tmp_path: Path, capsys):
-    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
-    pending_for(tmp_path, "abcd1234", "Q?", ["Approve", "Not yet"])
-    title = "contract: ACME-1 Show recommended products"
-    options = [{"label": label, "description": title} for label in ("Approve", "Not yet")]
-    payload = asked("dh abcd1234", [])
-    payload["tool_input"]["questions"][0]["options"] = options
-    assert run(monkeypatch, ["ask"], payload) == 0
-    assert capsys.readouterr().out == ""
-
-
 def test_recommended_in_a_fixed_description_still_denies(monkeypatch, tmp_path: Path, capsys):
     monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
     pending_for(tmp_path, "abcd1234", "Q?", ["Approve", "Not yet"])
-    options = [{"label": "Approve", "description": "recommended: ACME-1"}, {"label": "Not yet"}]
+    options = [{"label": "Approve", "description": "ACME-1: recommended"}, {"label": "Not yet"}]
     payload = asked("dh abcd1234", [])
     payload["tool_input"]["questions"][0]["options"] = options
     assert run(monkeypatch, ["ask"], payload) == 0

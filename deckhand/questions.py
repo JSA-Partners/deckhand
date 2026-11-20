@@ -22,23 +22,28 @@ class Question:
     options: list[str]
     kind: str = ""
     subject: str = ""
+    descriptions: tuple[str, ...] = ()
 
 
-def build(kind: str, subject: str, text: str, options: list[str]) -> Question:
+def build(kind: str, subject: str, text: str, options: list[str], descriptions: list[str] | None = None) -> Question:
     if not MIN_OPTIONS <= len(options) <= MAX_OPTIONS:
         raise ValueError(f"the question dialog shows {MIN_OPTIONS} to {MAX_OPTIONS} options, not {len(options)}")
     nonce = secrets.token_hex(4)
-    return Question(nonce, f"{HEADER_PREFIX}{nonce}", text, list(options), kind, subject)
+    said = tuple(descriptions or [""] * len(options))
+    return Question(nonce, f"{HEADER_PREFIX}{nonce}", text, list(options), kind, subject, said)
 
 
 def as_tool_input(q: Question) -> dict:
-    description = f"{q.kind}: {q.subject}"
+    descriptions = q.descriptions or ("",) * len(q.options)
     return {
         "questions": [
             {
                 "question": q.text,
                 "header": q.header,
-                "options": [{"label": label, "description": description} for label in q.options],
+                "options": [
+                    {"label": label, "description": description}
+                    for label, description in zip(q.options, descriptions, strict=True)
+                ],
                 "multiSelect": False,
             }
         ]

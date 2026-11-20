@@ -37,10 +37,9 @@ def _deckhand_items(hook_input: dict) -> list[dict]:
     return found
 
 
-# A description reads 'kind: subject'; the subject is a title the person wrote.
 def _recommended(items: list[dict]) -> bool:
     return any(
-        RECOMMENDED.search(f"{o.get('label', '')}\n{str(o.get('description', '')).partition(':')[0]}")
+        RECOMMENDED.search(f"{o.get('label', '')}\n{o.get('description', '')}")
         for item in items
         for o in item.get("options") or []
     )

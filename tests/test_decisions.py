@@ -58,8 +58,8 @@ def test_decide_without_an_answers_file_names_the_file(tmp_path: Path):
 
 
 def test_decide_with_option_description_refuses(tmp_path: Path):
-    question, pending = ask(tmp_path)
-    answered(tmp_path, question, "contract: Checkout")
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, as_tool_input(question)["questions"][0]["options"][0]["description"])
     store = store_with("s1")
     with pytest.raises(Refusal, match="option description"):
         decisions.decide(store, pending, tmp_path, "viewer-1")
@@ -337,3 +337,16 @@ def test_question_takes_the_options_of_its_pin_and_config_edit_has_two():
     shown = decisions.Pin("abc", "v1", ["s9"], "Which queue?", "ACME-9 Orders", ["ACME-9 Orders"], ["Redis", "SQS"])
     assert decisions.make_question("question", shown).options == ["Redis", "SQS"]
     assert decisions.make_question("config-edit", shown).options == ["Done", "Not doing it"]
+
+
+def test_option_descriptions_say_what_a_choice_does_and_never_repeat_the_subject():
+    def shown(kind: str, options: list[str] | None = None) -> list[str]:
+        question = decisions.make_question(kind, replace(pin(), options=options or []))
+        return [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
+
+    assert shown("quiz", ["The key", "A new key"]) == ["", ""]
+    assert shown("question", ["Redis", "SQS"]) == ["", ""]
+    assert shown("finding") == ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"]
+    for kind in decisions.KINDS:
+        if kind not in ("quiz", "question", "tier"):
+            assert all("Checkout" not in text for text in shown(kind)), kind
