@@ -191,10 +191,12 @@ def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF
 
 
 def left_open(records: list[Record], story: str, stage: str) -> list[dict]:
-    latest = last(counted(records, f"{story}:{stage}")[0])
+    held, _ = counted(records, f"{story}:{stage}")
     settled = accepted(records) | set(decided(records))
-    found = latest.data["findings"] if latest else []
-    return [f for f in found if f["severity"] != "P1" and not f.get("changes_delivery") and f["id"] not in settled]
+    found = {f["id"]: f for r in held for f in r.data["findings"]}
+    return [
+        f for id, f in found.items() if f["severity"] != "P1" and not f.get("changes_delivery") and id not in settled
+    ]
 
 
 def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:

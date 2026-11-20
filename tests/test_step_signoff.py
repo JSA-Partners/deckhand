@@ -720,3 +720,20 @@ def test_watch_stops_at_its_timeout_and_exits_cleanly(
     assert last.endswith("run signoff apply ACME-1 review --watch again")
     assert clock.now >= wait and clock.now < wait + step.WATCH_POLL
     assert len(shell.ran("tuicr", "review", "add")) == (1 if opens else 0)
+
+
+def test_a_finding_left_open_in_an_earlier_round_stays_the_persons(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    left = raw(summary="Left open.", severity="P3")
+    branch_round(store, raw(), left)
+    branch_round(store, n=2)
+    plan = versions.held(store.records("s1"), implplan.PURPOSE, "s1")
+    plan_left = review.finding_id(plan_round(store, "older", raw(summary="Plan left."))[0], "plan")
+    store.put_record("s1", review.round_record("s1", "plan", review.RoundPlan(3, True, ""), plan.version, []))
+    missing = "\n".join(overview(store, repo, capsys)["missing"])
+    assert f"{_id(left)} is a P3 the hand left open" in missing
+    assert f"{plan_left} is a P2 the hand left open" in missing
+    with pytest.raises(Refusal, match="not ready for sign-off"):
+        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
