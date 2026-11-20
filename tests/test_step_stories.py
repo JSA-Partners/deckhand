@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from deckhand import features, planning, versions
+from deckhand import answers, features, planning, spikes, versions
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
@@ -294,3 +296,53 @@ def test_context_prints_every_field_the_map_accepts(capsys: pytest.CaptureFixtur
     for field in FIELDS:
         assert re.search(rf"^  {field}: ", shown, re.MULTILINE), field
     assert "rule, example, invariant, spike, external" in shown
+
+
+def asked_spike(question: str = "Does the queue keep order?") -> str:
+    key = spikes.key(P1, question)
+    path = spikes.question_path(answers.state_dir(), key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(question)
+    return key
+
+
+def fleet_of(*rows: dict) -> Callable:
+    def runner(argv, cwd=None, stdin=None):
+        return subprocess.CompletedProcess(argv, 0, json.dumps(list(rows)), "")
+
+    return runner
+
+
+def spike_row(key: str, state: str, status: str | None) -> dict:
+    found = {"id": "i", "name": f"spike-{key}", "sessionId": "s", "cwd": "/w", "startedAt": 1795000000000}
+    return found | {"state": state} | ({"status": status} if status else {})
+
+
+def test_stories_refuse_while_spike_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store, key = setup(), asked_spike()
+    written = list(store.writes)
+    path = tmp_path / "map.json"
+    path.write_text(json.dumps([entry("a")]))
+    runner = fleet_of(spike_row(key, "working", "busy"))
+    with pytest.raises(Refusal, match=f"spike {key} is still running"):
+        Stories(store, runner).apply([*TEAM, "--file", str(path)])
+    assert store.writes == written
+    Stories(store, fleet_of(spike_row(key, "done", None))).apply([*TEAM, "--file", str(path)])
+    assert store.writes != written
+
+
+def test_stories_refuse_when_the_fleet_cannot_be_read_with_spikes_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store = setup()
+    asked_spike()
+    path = tmp_path / "map.json"
+    path.write_text(json.dumps([entry("a")]))
+
+    def broken(argv, cwd=None, stdin=None):
+        return subprocess.CompletedProcess(argv, 1, "", "no")
+
+    with pytest.raises(Refusal, match="the fleet read failed"):
+        Stories(store, broken).apply([*TEAM, "--file", str(path)])

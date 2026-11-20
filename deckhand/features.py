@@ -143,6 +143,14 @@ def review_text(store: Store, feature: Feature) -> str | None:
     return "\n\n".join(parts) + "\n"
 
 
+def contract_approved(store: Store, feature: Feature) -> bool:
+    project = feature.project["id"]
+    version = versions.version_for(store, feature, "contract", project)
+    return bool(feature.live) and all(
+        _gap(feature, s, "contract", project, version, ("", "")) is None for s in feature.live
+    )
+
+
 def story(store: Store, feature: Feature, ref: str) -> dict:
     found = ops.issue_id_or_none(store, ref)
     held = next((s for s in feature.live if s["id"] == found), None)

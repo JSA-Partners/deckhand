@@ -24,6 +24,7 @@ from deckhand.records import Record
 from deckhand.store import Store
 
 DRAFT = "story-draft"
+TAKEN = "draft-taken"
 FEATURE_SKILL = "/deckhand:feature"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")

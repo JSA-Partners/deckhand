@@ -5,7 +5,22 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import answers, asks, claims, config, features, fleet, git, launch, ops, order, queue, signoff
+from deckhand import (
+    answers,
+    asks,
+    claims,
+    config,
+    features,
+    fleet,
+    git,
+    inputs,
+    launch,
+    ops,
+    order,
+    queue,
+    signoff,
+    spikes,
+)
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
@@ -13,13 +28,17 @@ from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal, register, team_key
-from deckhand.steps.build import make_worktree, parse, require_base, worktree_branch
+from deckhand.steps.build import DEFAULT_BASE, make_worktree, require_base, worktree_branch
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
-USAGE = "hand takes [--team-key KEY]; context [--json], apply start REF, apply fill, or apply wake REF"
-STORY_PROMPT = "/deckhand:story {}"
-BUILD, AFTER = "build", "after-merge"
+USAGE = (
+    "hand takes [--team-key KEY]; context [--json], apply start REF, apply fill, apply wake REF,"
+    " or apply spike --repository LABEL --file QUESTION.md"
+)
+BUILD, AFTER, DRAFT = "build", "after-merge", "draft"
+PROMPTS = {BUILD: "/deckhand:story {}", AFTER: "/deckhand:story {}", DRAFT: "/deckhand:draft {}"}
+SPIKE_PROMPT = "/deckhand:spike {}"
 
 
 @dataclass(frozen=True)
@@ -37,6 +56,22 @@ class Launch:
     branch: str
     argv: list[str]
     cwd: Path
+    kind: str
+
+
+def _parse(args: list[str]) -> dict:
+    found: dict = {"words": [], "json": False}
+    rest = iter(args)
+    for arg in rest:
+        if arg == "--json":
+            found["json"] = True
+        elif arg in ("--team-key", "--repository", "--file"):
+            found[arg[2:].replace("-", "_")] = next(rest, "")
+        elif arg.startswith("--"):
+            raise Refusal(f"unknown argument {arg}; {USAGE}")
+        else:
+            found["words"].append(arg)
+    return found
 
 
 def _clone(story: dict) -> Path | None:
@@ -54,7 +89,21 @@ def _blocked_by(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict
     return [s["identifier"] for s in blockers if s["state"] != order.DONE]
 
 
-def _why_not(feature: Feature, story: dict, me: str, edges: list[tuple[str, str]]) -> str | None:
+def _kind(feature: Feature, story: dict) -> str:
+    if story["state"] == order.DONE:
+        return AFTER
+    return DRAFT if features.phase(feature) is Phase.PLANNING else BUILD
+
+
+def _why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
+    if any(r.kind in (queue.DRAFT, queue.TAKEN) for r in feature.records.get(story["id"], [])):
+        return f"{story['identifier']} is already drafted"
+    if not features.contract_approved(store, feature):
+        return f"the Contract of {features.describe(feature.project)} is not approved, so no story is drafted yet"
+    return None
+
+
+def _why_not(store: Store, feature: Feature, story: dict, me: str, edges: list[tuple[str, str]]) -> str | None:
     ref = story["identifier"]
     if story["assignee"] not in (None, me):
         return f"{ref} belongs to {story['assignee_name']}"
@@ -63,6 +112,10 @@ def _why_not(feature: Feature, story: dict, me: str, edges: list[tuple[str, str]
             return f"{ref} is Done and not yours"
         if not _open_chores(story, feature.records.get(story["id"], [])):
             return f"{ref} is Done with no open after-merge item"
+    elif features.phase(feature) is Phase.PLANNING:
+        drafted = _why_not_drafted(store, feature, story)
+        if drafted is not None:
+            return drafted
     elif features.phase(feature) is not Phase.BUILDING:
         return f"{features.describe(feature.project)} is {features.phase(feature).value}, not building"
     else:
@@ -78,8 +131,8 @@ def _why_not(feature: Feature, story: dict, me: str, edges: list[tuple[str, str]
 def startable(store: Store, feature: Feature, me: str) -> list[Work]:
     edges = order.edges(store, feature)
     ordered, _ = order.build_order(feature.live, edges)
-    found = [s for s in ordered if _why_not(feature, s, me, edges) is None]
-    build = [Work(s, BUILD, _clone(s)) for s in found if s["state"] != order.DONE]
+    found = [s for s in ordered if _why_not(store, feature, s, me, edges) is None]
+    build = [Work(s, _kind(feature, s), _clone(s)) for s in found if s["state"] != order.DONE]
     after = [Work(s, AFTER, _clone(s)) for s in found if s["state"] == order.DONE]
     return [w for w in build + after if w.clone is not None]
 
@@ -116,7 +169,7 @@ class Hand:
         return read
 
     def context(self, args: list[str]) -> None:
-        parsed = parse(args, USAGE)
+        parsed = _parse(args)
         if parsed["words"]:
             raise Refusal(f"context takes no REF; {USAGE}")
         store, cap = self._app(), config.local().slot_cap
@@ -145,14 +198,16 @@ class Hand:
         _print(facts)
 
     def apply(self, args: list[str]) -> None:
-        parsed = parse(args, USAGE)
+        parsed = _parse(args)
         words = parsed["words"]
         if words[:1] == ["fill"] and len(words) == 1:
             self._fill(team_key(parsed))
         elif words[:1] in (["start"], ["wake"]) and len(words) == 2:
             (self._start if words[0] == "start" else self._wake)(words[1], team_key(parsed))
+        elif words == ["spike"]:
+            self._spike(team_key(parsed), parsed.get("repository", ""), parsed.get("file", ""))
         else:
-            raise Refusal(f"apply takes start REF, fill, or wake REF; {USAGE}")
+            raise Refusal(f"apply takes start REF, fill, wake REF, or spike; {USAGE}")
 
     def _start(self, ref: str, team: str) -> None:
         read = self._fleet()
@@ -165,12 +220,12 @@ class Hand:
             return
         person = self._person_store()
         me = claims.me(person)
-        reason = _why_not(feature, story, me, order.edges(store, feature))
+        reason = _why_not(store, feature, story, me, order.edges(store, feature))
         if reason is not None:
             raise Refusal(reason)
         _free_slot(read)
         records = feature.records.get(story["id"], [])
-        plan = self._prepare(story, records, _clone(story), STORY_PROMPT.format(story["identifier"]), _resume(session))
+        plan = self._prepare(story, records, _clone(story), _kind(feature, story), _resume(session))
         self._launch(plan, person, me)
         print(f"started {fleet.hand_name(story['identifier'])}")
 
@@ -191,8 +246,8 @@ class Hand:
                 continue
             story = work.story
             records = feature.records.get(story["id"], [])
-            prompt = STORY_PROMPT.format(story["identifier"])
-            plans.append(self._prepare(story, records, work.clone, prompt, _resume(hands.get(story["identifier"]))))
+            resume = _resume(hands.get(story["identifier"]))
+            plans.append(self._prepare(story, records, work.clone, work.kind, resume))
             used += 1
         for plan in plans:
             self._launch(plan, person, me)
@@ -241,22 +296,60 @@ class Hand:
         clone = _clone(story)
         if clone is None:
             raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
-        plan = self._prepare(story, records, clone, STORY_PROMPT.format(story["identifier"]), _resume(session))
+        plan = self._prepare(story, records, clone, _kind(feature, story), _resume(session))
         self._launch(plan, person, me, wake)
         print(f"resumed {name}")
 
-    def _prepare(self, story: dict, records: list[Record], clone: Path, prompt: str, resume: str | None) -> Launch:
+    def _argv(
+        self, name: str, ref: str, clone: Path, worktree: Path, prompt: str, resume: str | None, spike: bool = False
+    ) -> list[str]:
+        protected = launch.protected(config.config_dir(), answers.state_dir())
+        settings = launch.hand_settings(
+            ref, clone, worktree, Policy.load(clone), config.local(), protected, spike=spike
+        )
+        plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
+        return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
+
+    def _prepare(self, story: dict, records: list[Record], clone: Path, kind: str, resume: str | None) -> Launch:
         require_base(clone, self._runner)
         branch = worktree_branch(story, records)
         worktree = git.worktree_path(clone, branch)
-        protected = launch.protected(config.config_dir(), answers.state_dir())
-        settings = launch.hand_settings(
-            story["identifier"], clone, worktree, Policy.load(clone), config.local(), protected
-        )
-        plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
-        name = fleet.hand_name(story["identifier"])
-        argv = launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
-        return Launch(story, records, clone, branch, argv, worktree)
+        ref = story["identifier"]
+        argv = self._argv(fleet.hand_name(ref), ref, clone, worktree, PROMPTS[kind].format(ref), resume)
+        return Launch(story, records, clone, branch, argv, worktree, DRAFT if kind == DRAFT else "story")
+
+    def _spike(self, team: str, label: str, path: str) -> None:
+        question = inputs.read(path, "--file", USAGE)
+        spikes.check(question)
+        store = self._app()
+        feature = features.open_feature(store, team)
+        if feature is None:
+            raise Refusal("no feature is open")
+        if feature.stories:
+            raise Refusal(
+                f"{features.describe(feature.project)} already has stories; a spike runs before the story map"
+            )
+        clone = config.local().clones.get(label)
+        if clone is None:
+            raise Refusal(
+                f"no clone for {label or 'a repository'} in {config.config_dir() / config.FILE}; pass --repository"
+            )
+        read = self._fleet()
+        key = spikes.key(feature.project["id"], question)
+        name = fleet.spike_name(key)
+        session = fleet.spikes(read.sessions).get(key)
+        if session is not None and fleet.live(session):
+            print(f"{name} is already live")
+            return
+        _free_slot(read)
+        require_base(clone, self._runner)
+        asked = spikes.question_path(answers.state_dir(), key)
+        asked.parent.mkdir(parents=True, exist_ok=True)
+        asked.write_text(question, encoding="utf-8")
+        worktree = git.worktree_detached(clone, name, DEFAULT_BASE, self._runner)
+        argv = self._argv(name, key, clone, worktree, SPIKE_PROMPT.format(key), _resume(session), spike=True)
+        git.call(argv, worktree, self._runner)
+        print(f"started {name}")
 
     # The hand-start is written last, so no record of this launch reads as new since it.
     def _launch(self, plan: Launch, person: Store, me: str, wake: Record | None = None) -> None:
@@ -266,7 +359,7 @@ class Hand:
         if wake is not None:
             ops.ensure_record(store, story["id"], wake)
         newest = max((r.at for r in plan.records), default="")
-        data = {"kind": "story", "session": fleet.hand_name(story["identifier"])}
+        data = {"kind": plan.kind, "session": fleet.hand_name(story["identifier"])}
         ops.ensure_record(store, story["id"], Record(asks.HAND_START, story["id"], newest, HAND, data))
         git.call(plan.argv, plan.cwd, self._runner)
 

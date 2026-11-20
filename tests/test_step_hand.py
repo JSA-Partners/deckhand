@@ -6,13 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, implplan, launch, signoff
+from deckhand import answers, asks, config, implplan, launch, queue, signoff, spikes
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
 from deckhand.steps.hand import Hand
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import approve_everything, setup
+from tests.test_feature_approval import P1, approve_everything, setup
+from tests.test_feature_approval import decided as decide_kind
 from tests.test_implplan import manifest
+from tests.test_step_stories import setup as empty_feature
 
 ME = "viewer-1"
 TEAM = ["--team-key", "ACME"]
@@ -366,3 +368,139 @@ def test_context_prints_without_a_personal_key(clone: Path, capsys: pytest.Captu
     lines = capsys.readouterr().out.splitlines()
     assert lines[:2] == ["missing credentials file: personal-key", "slots: 1 of 1"]
     assert "live: hand-ACME-1 working" in lines
+
+
+QUESTION = "Does the queue keep order?"
+
+
+def planning() -> FakeStore:
+    store = setup()
+    decide_kind(store, "contract", P1, "Approve", ["s1", "s2"])
+    return store
+
+
+def question_file(tmp_path: Path, text: str = QUESTION) -> str:
+    path = tmp_path / "question.md"
+    path.write_text(text)
+    return str(path)
+
+
+def spike_row(key: str, state: str, status: str | None = None) -> dict:
+    return row("x", state, status) | {"name": f"spike-{key}"}
+
+
+def test_spike_starts_a_detached_hand_with_its_own_key(clone: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = empty_feature(), Shell()
+    hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    key = spikes.key(P1, QUESTION)
+    assert spikes.question_path(answers.state_dir(), key).read_text() == QUESTION
+    worktree = clone / ".worktrees" / f"spike-{key}"
+    [add] = [a for a, _ in shell.calls if a[:3] == ["git", "worktree", "add"]]
+    assert add == ["git", "worktree", "add", "--detach", str(worktree), "origin/HEAD"]
+    [(argv, cwd)] = shell.launches()
+    settings = settings_of(argv)
+    assert argv == launch.hand_argv(f"spike-{key}", settings, f"/deckhand:spike {key}", None, None)
+    assert cwd == worktree
+    assert settings["env"]["DECKHAND_ROLE"] == "hand"
+    assert settings["env"]["DECKHAND_SPIKE"] == key
+    assert "DECKHAND_STORY" not in settings["env"]
+    assert capsys.readouterr().out.strip() == f"started spike-{key}"
+
+
+def test_spike_refused_once_stories_exist(clone: Path, tmp_path: Path):
+    store, shell = planning(), Shell()
+    written = list(store.writes)
+    with pytest.raises(Refusal, match="already has stories"):
+        hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    assert store.writes == written
+    assert shell.launches() == []
+    assert not (answers.state_dir() / "spikes").exists()
+
+
+def test_spike_refused_after_approval(clone: Path, tmp_path: Path):
+    store, shell = building(), Shell()
+    with pytest.raises(Refusal, match="already has stories"):
+        hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    assert shell.launches() == []
+
+
+def test_spike_holds_a_slot(clone: Path, tmp_path: Path):
+    store = empty_feature()
+    key = spikes.key(P1, QUESTION)
+    shell = Shell(spike_row("0123456789ab", "working", "busy"))
+    with pytest.raises(Refusal, match="no slot is free: 1 of 1 in use"):
+        hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    assert shell.launches() == []
+    assert not spikes.question_path(answers.state_dir(), key).exists()
+
+
+def test_a_live_spike_leaves_no_slot_for_a_hand(clone: Path):
+    store, shell = building(), Shell(spike_row("0123456789ab", "working", "busy"))
+    with pytest.raises(Refusal, match="no slot is free: 1 of 1 in use"):
+        hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    assert shell.launches() == []
+
+
+def test_spike_already_live_starts_nothing(clone: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    store = empty_feature()
+    key = spikes.key(P1, QUESTION)
+    shell = Shell(spike_row(key, "working", "busy"))
+    hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    assert shell.launches() == []
+    assert capsys.readouterr().out.strip() == f"spike-{key} is already live"
+
+
+@pytest.mark.parametrize("text", ["one\ntwo", "x" * 201, "  padded", "", "\n"])
+def test_spike_refuses_a_question_a_title_cannot_hold(clone: Path, tmp_path: Path, text: str):
+    store, shell = empty_feature(), Shell()
+    with pytest.raises(Refusal, match="one line of at most 200 characters"):
+        hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path, text), *TEAM])
+    assert shell.launches() == []
+    assert not (answers.state_dir() / "spikes").exists()
+
+
+def test_spike_refuses_a_repository_without_a_clone(clone: Path, tmp_path: Path):
+    store, shell = empty_feature(), Shell()
+    with pytest.raises(Refusal, match="no clone for gadgets"):
+        hand(store, shell).apply(["spike", "--repository", "gadgets", "--file", question_file(tmp_path), *TEAM])
+    assert shell.launches() == []
+
+
+def test_fill_starts_drafts_never_spikes(clone: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    configure(clone, 3)
+    store, shell = planning(), Shell()
+    asked_key = spikes.key(P1, QUESTION)
+    path = spikes.question_path(answers.state_dir(), asked_key)
+    path.parent.mkdir(parents=True)
+    path.write_text(QUESTION)
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-2"]
+    prompts = [argv[-1] for argv, _ in shell.launches()]
+    assert prompts == ["/deckhand:draft ACME-1", "/deckhand:draft ACME-2"]
+    [start] = starts(store, "s1")
+    assert start.data == {"kind": "draft", "session": "hand-ACME-1"}
+    assert capsys.readouterr().out.splitlines()[:2] == ["started hand-ACME-1", "started hand-ACME-2"]
+
+
+def test_fill_waits_for_the_contract(clone: Path):
+    store, shell = setup(), Shell()
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launches() == []
+
+
+def test_fill_skips_a_drafted_story(clone: Path):
+    configure(clone, 3)
+    store, shell = planning(), Shell()
+    store.put_record("s1", Record(queue.DRAFT, "s1", "v1", HAND, {}))
+    store.put_record("s2", Record(queue.TAKEN, "s2", "v1", HAND, {}))
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launches() == []
+
+
+def test_start_picks_the_draft_prompt_while_planning(clone: Path):
+    store, shell = planning(), Shell()
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    [(argv, cwd)] = shell.launches()
+    assert argv[-1] == "/deckhand:draft ACME-1"
+    assert cwd == clone / ".worktrees" / "acme-1-orders"
+    assert ("put_record", "s1", "worktree", "s1") in [w for w in store.writes if w[0] == "put_record"]

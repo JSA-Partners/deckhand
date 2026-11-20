@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from deckhand import ops
 from deckhand.records import content_hash
+from deckhand.step import Refusal
 from deckhand.store import Store
 
 if TYPE_CHECKING:
@@ -12,6 +13,12 @@ if TYPE_CHECKING:
 
 TITLE = "Spike: "
 FOLDER = "spikes"
+MAX_QUESTION = 200
+
+
+def check(question: str) -> None:
+    if not question or "\n" in question or question != question.strip() or len(question) > MAX_QUESTION:
+        raise Refusal(f"a spike question is one line of at most {MAX_QUESTION} characters, with no padding")
 
 
 def key(project_id: str, question: str) -> str:

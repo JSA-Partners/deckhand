@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from deckhand import config, features, inputs, ops, planning
+from deckhand import answers, config, features, fleet, git, inputs, ops, planning, spikes
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
 from deckhand.records import Record
@@ -148,13 +148,25 @@ def _discovery(entry: dict) -> dict:
 
 @register("stories")
 class Stories:
-    def __init__(self, store: Store | None = None) -> None:
+    def __init__(self, store: Store | None = None, runner: git.Runner = git.run) -> None:
         self._store = store
+        self._runner = runner
 
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
         return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+
+    def _refuse_running_spike(self, feature: features.Feature) -> None:
+        asked = spikes.keys(answers.state_dir(), feature.project["id"])
+        if not asked:
+            return
+        read = fleet.sessions(self._runner)
+        if read.note:
+            raise Refusal(read.note)
+        for key, session in sorted(fleet.spikes(read.sessions).items()):
+            if key in asked and fleet.live(session):
+                raise Refusal(f"spike {key} is still running")
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
@@ -184,6 +196,7 @@ class Stories:
         feature = features.open_feature(store, team)
         if feature is None:
             raise Refusal("no feature is open")
+        self._refuse_running_spike(feature)
         known = store.repository_labels(team)
         for entry in entries:
             if entry["repository"] not in known:

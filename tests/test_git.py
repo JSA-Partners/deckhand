@@ -288,3 +288,27 @@ def test_program_on_no_trusted_entry_refuses(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setenv("PATH", f".{os.pathsep}{temp}")
     with pytest.raises(git.GitError, match="trusted PATH"):
         git.run(["git", "--version"])
+
+
+def test_worktree_detached_adds_a_headless_worktree_once(tmp_path: Path) -> None:
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    for argv in (
+        ["git", "init", "-q", "-b", "main"],
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"],
+    ):
+        subprocess.run(argv, cwd=clone, check=True)
+    first = git.worktree_detached(clone, "spike-abc", "main")
+    second = git.worktree_detached(clone, "spike-abc", "main")
+    assert first == second == clone / ".worktrees" / "spike-abc"
+    listing = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"], cwd=clone, capture_output=True, text=True
+    ).stdout
+    assert listing.count("worktree ") == 2
+    assert "detached" in listing
+
+
+def test_worktree_detached_never_makes_a_branch() -> None:
+    fake = Fake((0, "", ""))
+    git.worktree_detached(Path("/nowhere"), "spike-abc", "origin/HEAD", fake)
+    assert fake.argvs == [["git", "worktree", "add", "--detach", "/nowhere/.worktrees/spike-abc", "origin/HEAD"]]

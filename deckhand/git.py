@@ -141,6 +141,13 @@ def worktree_add(clone: Path, branch: str, base: str, runner: Runner = run) -> P
     return path
 
 
+def worktree_detached(clone: Path, name: str, base: str, runner: Runner = run) -> Path:
+    path = worktree_path(clone, name)
+    if not path.exists():
+        call(["git", "worktree", "add", "--detach", str(path), base], clone, runner)
+    return path
+
+
 def clone_root(cwd: Path, runner: Runner = run) -> Path:
     try:
         common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()
