@@ -95,9 +95,9 @@ def test_rank_order_across_all_kinds():
     assert kinds(waiting(store, sessions=sessions)) == [
         ("sign-off", 0, "ACME-1"),
         ("finding", 1, "ACME-1"),
-        ("config-edit", 2, "ACME-1"),
         ("after-merge", 2, "ACME-2"),
         ("planning", 3, "Alpha"),
+        ("config-edit", 4, "ACME-1"),
         ("question", 4, "ACME-1"),
     ]
 

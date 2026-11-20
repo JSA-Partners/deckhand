@@ -145,7 +145,7 @@ def _questions(story: dict, records: list[Record], rank: int) -> list[Item]:
     return found
 
 
-def _edits(story: dict, records: list[Record]) -> list[Item]:
+def _edits(story: dict, records: list[Record], rank: int) -> list[Item]:
     found = []
     for held in records:
         item = _subject_id(held) if held.kind == asks.EDIT_REQUEST else ""
@@ -153,7 +153,7 @@ def _edits(story: dict, records: list[Record]) -> list[Item]:
             continue
         lines = [f"{held.data.get('path')}: {held.data.get('change')}", str(held.data.get("why", ""))]
         next = [f"decide context config-edit {story['identifier']} --item {item}"]
-        found.append(_story_item(asks.EDIT, 2, story, held.at, lines, next))
+        found.append(_story_item(asks.EDIT, rank, story, held.at, lines, next))
     return found
 
 
@@ -170,7 +170,7 @@ def _prompt(story: dict, records: list[Record], session: fleet.Session | None, r
 
 def _for_person(story: dict, records: list[Record], rank: int) -> list[Item]:
     found = _signoff(story, records) + _findings(story, records)
-    return found + _questions(story, records, rank) + _edits(story, records)
+    return found + _questions(story, records, rank) + _edits(story, records, rank)
 
 
 def last_start(records: list[Record], launch: str | None = None) -> Record | None:
