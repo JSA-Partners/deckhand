@@ -399,3 +399,53 @@ def test_the_entry_point_ignores_a_planted_interpreter_and_uv_config(planted, tm
     )
     assert not marker.exists()
     assert (done.returncode, done.stderr) == (2, "deckhand: unknown command 'nonesuch'\n")
+
+
+SANDBOX_REFUSAL = (
+    "deckhand: deckhand ran inside the sandbox: run it as one bare command, not after export, ; , | or a loop\n"
+)
+
+
+@pytest.fixture
+def unreadable_config(tmp_path, monkeypatch):
+    if os.geteuid() == 0:
+        pytest.skip("root reads every directory")
+    config = tmp_path / "config"
+    config.mkdir()
+    config.chmod(0o000)
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config))
+    yield config
+    config.chmod(0o700)
+
+
+@pytest.mark.parametrize("argv", [["build", "context", "ACME-1"], ["build", "apply", "ACME-1", "push"]])
+def test_hand_with_an_unreadable_config_dir_refuses_and_runs_no_step(
+    argv, recorders, unreadable_config, monkeypatch, capsys
+):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert main(argv) == 1
+    assert capsys.readouterr().err == SANDBOX_REFUSAL
+    assert all(not r.seen for r in recorders.values())
+
+
+def test_outside_the_hand_role_an_unreadable_config_dir_is_not_refused(
+    recorders, unreadable_config, monkeypatch, capsys
+):
+    monkeypatch.delenv("DECKHAND_ROLE", raising=False)
+    assert main(["build", "apply", "ACME-1", "push"]) == 0
+    assert recorders["build"].seen == [["ACME-1", "push"]]
+    assert capsys.readouterr().err == ""
+
+
+def test_hand_with_a_readable_config_dir_dispatches(recorders, tmp_path, monkeypatch):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
+    assert main(["ask", "context"]) == 0
+
+
+def test_hand_with_a_missing_config_dir_is_not_refused(recorders, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path / "absent"))
+    assert main(["ask", "context"]) == 0
+    assert "sandbox" not in capsys.readouterr().err

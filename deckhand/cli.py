@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
 import sys
 
-from deckhand import steps
+from deckhand import config, steps
 from deckhand.git import GitError
 from deckhand.linear.client import LinearError
 from deckhand.step import REGISTRY, VERBS, Refusal, hand_may_apply, hand_role
@@ -18,8 +19,24 @@ def _load_steps() -> None:
             print(f"deckhand: cannot load step {module.name}: {problem}", file=sys.stderr)
 
 
+def _sandboxed() -> bool:
+    try:
+        os.listdir(config.config_dir())
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return False
+
+
 def main(argv: list[str]) -> int:
     _load_steps()
+    if hand_role() and _sandboxed():
+        print(
+            "deckhand: deckhand ran inside the sandbox: run it as one bare command, not after export, ; , | or a loop",
+            file=sys.stderr,
+        )
+        return 1
     if hand_role() and argv[1:2] == ["apply"] and not hand_may_apply(argv[0], argv[2:]):
         print(f"deckhand: a hand cannot run {argv[0]} apply; leave it for the person's captain", file=sys.stderr)
         return 1
