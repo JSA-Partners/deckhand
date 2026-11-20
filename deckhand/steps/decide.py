@@ -111,13 +111,15 @@ class Decide(StoryStep):
 
     def _missed_code(self, feature: features.Feature, pin: decisions.Pin) -> dict:
         story, _, n = pin.subject.rpartition(":")
-        records = feature.records.get(story, [])
-        if not quiz.missed(records, story, int(n)):
+        labels = next((other["labels"] for other in feature.live if other["id"] == story), [])
+        return self._code(feature.records.get(story, []), story, int(n), labels)
+
+    def _code(self, records: list, story: str, n: int, labels: list[str]) -> dict:
+        if not quiz.missed(records, story, n):
             return {}
         held = quiz.held_set(records, story)
-        where = quiz.items_of(held)[int(n) - 1].where
+        where = quiz.items_of(held)[n - 1].where
         worktree = versions.held(records, WORKTREE, story)
-        labels = next((other["labels"] for other in feature.live if other["id"] == story), [])
         try:
             clone = self._clone(labels)
         except git.GitError:
@@ -139,9 +141,15 @@ class Decide(StoryStep):
         if decisions.decide(store, pending, state, self.viewer()):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == quiz.KIND:
-                held = versions.held(store.records(pending.stories[0]), quiz.KIND, pending.subject)
+                records = store.records(pending.stories[0])
+                held = versions.held(records, quiz.KIND, pending.subject)
                 verdict = "right" if held and held.data.get("correct") else "wrong, the item stays open"
                 print(f"done: recorded quiz answer for {pending.subject}: {verdict}")
+                story, _, n = pending.subject.rpartition(":")
+                shown = self._code(records, story, int(n), store.issue(story)["labels"])
+                if shown:
+                    print(f"where: {shown['where']}")
+                    print("\n".join(shown["code"]))
                 return
             print(f"done: recorded {pending.kind} for {pending.subject} on {len(pending.stories)} stories")
             return

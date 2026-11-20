@@ -157,10 +157,15 @@ def grade(records: list[Record], asked: str, version: str, options: list[str], a
 def code_at(worktree: Path, where: str, reader: Reader) -> list[str]:
     path, line = location(where)
     try:
-        lines = reader(worktree / path).splitlines()
+        text = reader(worktree / path)
     except (OSError, UnicodeDecodeError):
         return [f"{path} cannot be read in the worktree"]
+    lines = text.splitlines()
     if line > len(lines):
         return [f"{path} has {len(lines)} lines, fewer than {line}"]
     first, last = max(1, line - AROUND), min(len(lines), line + AROUND)
-    return [f"{'>' if n == line else ' '} {n} {lines[n - 1]}" for n in range(first, last + 1)]
+    shown = [f"{'>' if n == line else ' '} {n} {lines[n - 1]}" for n in range(first, last + 1)]
+    if last < len(lines):
+        return shown
+    ending = "with a newline" if text.endswith(("\n", "\r")) else "without a newline"
+    return [*shown, f"  end of file: the file ends {ending}"]

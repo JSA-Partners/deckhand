@@ -99,7 +99,7 @@ def _quiz_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
     if quiz.right(records, story["id"], n):
         raise Refusal(f"item {n} of the quiz on {story['identifier']} is already answered right")
     item = items[n - 1]
-    detail = f"item {n} of {len(items)}, {item.question}"
+    detail = f"item {n} of {len(items)}, {item.question.rstrip('?')}"
     if quiz.missed(records, story["id"], n):
         detail += f" (the code is at {item.where})"
     label = _label(story)

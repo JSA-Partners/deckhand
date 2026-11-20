@@ -277,3 +277,37 @@ def test_only_a_person_answer_grades_an_item():
     assert quiz.open_items([held, by_agent], "s1") == [1]
     by_person = Record(quiz.KIND, quiz.subject("s1", 1), held.version, "person:pat", {"correct": True})
     assert quiz.open_items([held, by_person], "s1") == []
+
+
+def test_a_located_question_ends_in_one_question_mark(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "A new key")
+    text = ask(step, capsys)["tool_input"]["questions"][0]["question"]
+    assert "reuse (the code is at src/queue.py:12)? [" in text
+    assert text.count("?") == 1
+
+
+def test_a_wrong_answer_prints_the_code_that_answers_it(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "A new key")
+    printed = capsys.readouterr().out.splitlines()
+    assert printed[0].endswith("wrong, the item stays open")
+    assert printed[1] == "where: src/queue.py:12"
+    assert "> 12 line 12" in printed
+
+
+@pytest.mark.parametrize(
+    "text,end", [("Goodbye\n", "the file ends with a newline"), ("Goodbye", "the file ends without a newline")]
+)
+def test_the_code_shows_how_the_file_ends(text: str, end: str):
+    shown = quiz.code_at(Path("/w"), "goodbye.txt:1", lambda _: text)
+    assert shown == ["> 1 Goodbye", f"  end of file: {end}"]
+    assert quiz.code_at(Path("/w"), "src/queue.py:12", lambda _: SOURCE)[-1] == "  17 line 17"
