@@ -17,16 +17,15 @@ from deckhand import (
     launch,
     ops,
     order,
-    queue,
-    signoff,
     spikes,
+    startable,
 )
 from deckhand.credentials import Credentials
-from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
 from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
+from deckhand.startable import AFTER, BUILD, DRAFT
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, make_worktree, require_base, worktree_branch
 from deckhand.store import Store
@@ -36,16 +35,8 @@ USAGE = (
     "hand takes [--team-key KEY]; context [--json], apply start REF, apply fill, apply wake REF,"
     " or apply spike --repository LABEL --file QUESTION.md"
 )
-BUILD, AFTER, DRAFT = "build", "after-merge", "draft"
 PROMPTS = {BUILD: "/deckhand:story {}", AFTER: "/deckhand:story {}", DRAFT: "/deckhand:draft {}"}
 SPIKE_PROMPT = "/deckhand:spike {}"
-
-
-@dataclass(frozen=True)
-class Work:
-    story: dict
-    kind: str
-    clone: Path
 
 
 @dataclass(frozen=True)
@@ -72,73 +63,6 @@ def _parse(args: list[str]) -> dict:
         else:
             found["words"].append(arg)
     return found
-
-
-def _clone(story: dict) -> Path | None:
-    clones = config.local().clones
-    return next((clones[label] for label in story["labels"] if label in clones), None)
-
-
-def _open_chores(story: dict, records: list[Record]) -> bool:
-    chores = enumerate(signoff.after_items(records, story["id"]), start=1)
-    return any(signoff.after_status(records, story["id"], n, text)[0] == signoff.OPEN for n, text in chores)
-
-
-def _blocked_by(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict]) -> list[str]:
-    blockers = [by_id[blocker] for blocker, blocked in edges if blocked == story["id"] and blocker in by_id]
-    return [s["identifier"] for s in blockers if s["state"] != order.DONE]
-
-
-def _kind(feature: Feature, story: dict) -> str:
-    if story["state"] == order.DONE:
-        return AFTER
-    return DRAFT if features.phase(feature) is Phase.PLANNING else BUILD
-
-
-def _why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
-    if any(r.kind in (queue.DRAFT, queue.TAKEN) for r in feature.records.get(story["id"], [])):
-        return f"{story['identifier']} is already drafted"
-    if not features.contract_approved(store, feature):
-        return f"the Contract of {features.describe(feature.project)} is not approved, so no story is drafted yet"
-    return None
-
-
-def _why_not(store: Store, feature: Feature, story: dict, me: str, edges: list[tuple[str, str]]) -> str | None:
-    ref = story["identifier"]
-    if story["assignee"] not in (None, me):
-        return f"{ref} belongs to {story['assignee_name']}"
-    if story["state"] == order.DONE:
-        if story["assignee"] != me:
-            return f"{ref} is Done and not yours"
-        if not _open_chores(story, feature.records.get(story["id"], [])):
-            return f"{ref} is Done with no open after-merge item"
-    elif features.phase(feature) is Phase.PLANNING:
-        drafted = _why_not_drafted(store, feature, story)
-        if drafted is not None:
-            return drafted
-    elif features.phase(feature) is not Phase.BUILDING:
-        return f"{features.describe(feature.project)} is {features.phase(feature).value}, not building"
-    else:
-        waiting = _blocked_by(story, edges, {s["id"]: s for s in feature.live})
-        if waiting:
-            verb = "is" if len(waiting) == 1 else "are"
-            return f"{ref} waits on {', '.join(waiting)}, which {verb} not Done"
-    if _clone(story) is None:
-        return f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}"
-    return None
-
-
-def startable(store: Store, feature: Feature, me: str) -> list[Work]:
-    edges = order.edges(store, feature)
-    ordered, _ = order.build_order(feature.live, edges)
-    found = [s for s in ordered if _why_not(store, feature, s, me, edges) is None]
-    build = [Work(s, _kind(feature, s), _clone(s)) for s in found if s["state"] != order.DONE]
-    after = [Work(s, AFTER, _clone(s)) for s in found if s["state"] == order.DONE]
-    return [w for w in build + after if w.clone is not None]
-
-
-def _started(records: list[Record]) -> bool:
-    return any(r.kind == asks.HAND_START for r in records)
 
 
 def _resume(session: fleet.Session | None) -> str | None:
@@ -185,7 +109,7 @@ class Hand:
             notes.append(str(error))
         else:
             if feature is not None:
-                work = [w for w in startable(store, feature, me) if self._due(w, feature, hands)]
+                work = [w for w in startable.startable(store, feature, me) if startable.due(w, feature, hands)]
         facts = {
             "notes": notes,
             "feature": feature.project["name"] if feature is not None else None,
@@ -221,12 +145,14 @@ class Hand:
             return
         person = self._person_store()
         me = claims.me(person)
-        reason = _why_not(store, feature, story, me, order.edges(store, feature))
+        reason = startable.why_not(store, feature, story, me, order.edges(store, feature))
         if reason is not None:
             raise Refusal(reason)
         _free_slot(read)
         records = feature.records.get(story["id"], [])
-        plan = self._prepare(story, records, _clone(story), _kind(feature, story), _resume(session))
+        plan = self._prepare(
+            story, records, startable.clone_of(story), startable.kind(feature, story), _resume(session)
+        )
         self._launch(plan, person, me)
         print(f"started {fleet.hand_name(story['identifier'])}")
 
@@ -242,8 +168,8 @@ class Hand:
         cap, used = config.local().slot_cap, fleet.slots_used(read.sessions)
         hands = fleet.hands(read.sessions)
         plans = []
-        for work in startable(store, feature, me):
-            if used >= cap or not self._due(work, feature, hands):
+        for work in startable.startable(store, feature, me):
+            if used >= cap or not startable.due(work, feature, hands):
                 continue
             story = work.story
             records = feature.records.get(story["id"], [])
@@ -257,18 +183,6 @@ class Hand:
             print(f"no slot is free: {used} of {cap} in use")
         elif not plans:
             print("nothing to start")
-
-    def _due(self, work: Work, feature: Feature, hands: dict[str, fleet.Session]) -> bool:
-        story = work.story
-        session = hands.get(story["identifier"])
-        if session is not None and fleet.live(session):
-            return False
-        records = feature.records.get(story["id"], [])
-        if not _started(records):
-            return True
-        policy = Policy.load(work.clone)
-        second = queue.second_due(story, records, lambda _: policy) is not None
-        return queue.restart_due(story, records, session, second)
 
     def _wake(self, ref: str, team: str) -> None:
         read = self._fleet()
@@ -294,10 +208,10 @@ class Hand:
             ops.ensure_record(store, story["id"], wake)
             print(f"send to {name}: the person decided the {due.kind} you waited on; carry on with the story")
             return
-        clone = _clone(story)
+        clone = startable.clone_of(story)
         if clone is None:
             raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
-        plan = self._prepare(story, records, clone, _kind(feature, story), _resume(session))
+        plan = self._prepare(story, records, clone, startable.kind(feature, story), _resume(session))
         self._launch(plan, person, me, wake)
         print(f"resumed {name}")
 
