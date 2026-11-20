@@ -278,3 +278,17 @@ def test_hooks_json_uses_the_full_path_form():
         assert entry["matcher"] == matcher
         [command] = entry["hooks"]
         assert command["command"] == f'"${{CLAUDE_PLUGIN_ROOT}}/bin/deckhand" hook apply {action}'
+
+
+def test_permission_gap_recorded_after_the_feature_is_released(monkeypatch, tmp_path: Path):
+    from tests.test_step_decide import feature_store
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = feature_store()
+    store.set_issue_state("s1", "Done")
+    store.set_issue_state("s2", "Done")
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert len(store.records("s1")) == 1

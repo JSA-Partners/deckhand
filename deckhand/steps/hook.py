@@ -85,7 +85,7 @@ class Hook(StoryStep):
         if not hand_role() or not ref:
             return
         store = self._store_for_run()
-        feature = features.open_feature(store, team_key({}))
+        feature = features.current(store, team_key({}))
         if feature is None:
             raise Refusal("no feature is open")
         story = features.story(store, feature, ref)
