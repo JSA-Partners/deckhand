@@ -16,8 +16,8 @@
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
   quiz and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
-  and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py` who owns a story, `asks.py` a hand's questions and wakes, `gaps.py`
-  permission gaps, `spikes.py` spike questions and answers, `order.py` the build order, `answers.py`
+  and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
+  who owns a story, `asks.py` a hand's questions and wakes, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the build order, `answers.py`
   the dialog answers the hook stores, `inputs.py` the files a hand may hand in
 - `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
   setup reads and plans for a team, and a client for the app or the person
