@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from datetime import date
+
+from deckhand import asks, claims, config, features, fleet, git, order, queue
+from deckhand.credentials import Credentials
+from deckhand.features import Feature, Phase
+from deckhand.linear.client import LinearError
+from deckhand.linear.connect import connect
+from deckhand.policy import Policy
+from deckhand.step import Refusal, register, team_key
+from deckhand.store import Store
+from deckhand.store.linear import LinearStore
+
+USAGE = "captain takes [--team-key KEY]; context [--count] [--json]"
+
+
+def _parse(args: list[str]) -> dict:
+    found: dict = {"count": False, "json": False}
+    rest = iter(args)
+    for arg in rest:
+        if arg in ("--count", "--json"):
+            found[arg[2:]] = True
+        elif arg == "--team-key":
+            found["team_key"] = next(rest, "")
+        else:
+            raise Refusal(f"unknown argument {arg}; {USAGE}")
+    return found
+
+
+def _budget(feature: Feature, today: date) -> dict | None:
+    budget = features.budget_of(feature.project, today)
+    if budget is None:
+        return None
+    note = features.phase(feature) is Phase.PLANNING and budget.planning_note
+    return {
+        "feature": feature.project["name"],
+        "days_used": budget.days_used,
+        "budget_days": budget.budget_days,
+        "planning_note": note,
+    }
+
+
+def _blockers(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict]) -> list[str]:
+    held = [by_id[blocker] for blocker, blocked in edges if blocked == story["id"] and blocker in by_id]
+    return sorted(s["identifier"] for s in held if s["state"] != order.DONE)
+
+
+def _build_order(store: Store, feature: Feature) -> tuple[list[dict], list[str]]:
+    edges = order.edges(store, feature)
+    by_id = {s["id"]: s for s in feature.live}
+    placed, cycle = order.build_order(feature.live, edges)
+    rows = [
+        {
+            "ref": s["identifier"],
+            "state": s["state"],
+            "owner": s["assignee_name"],
+            "blocked_by": _blockers(s, edges, by_id),
+        }
+        for s in placed
+    ]
+    return rows, cycle
+
+
+def _policy_for(notes: list[str]) -> Callable[[dict], Policy]:
+    clones = config.local().clones
+
+    def policy(story: dict) -> Policy:
+        clone = next((clones[label] for label in story["labels"] if label in clones), None)
+        try:
+            if clone is None:
+                raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
+            return Policy.load(clone)
+        except Refusal as error:
+            if str(error) not in notes:
+                notes.append(str(error))
+            return Policy("")
+
+    return policy
+
+
+@register("captain")
+class Captain:
+    def __init__(
+        self,
+        store: Store | None = None,
+        runner: git.Runner = git.run,
+        *,
+        person: Store | None = None,
+        today: Callable[[], date] = date.today,
+    ) -> None:
+        self._store = store
+        self._runner = runner
+        self._person = person
+        self._today = today
+
+    def _app(self) -> Store:
+        if self._store is not None:
+            return self._store
+        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+
+    def _person_store(self) -> Store:
+        return self._person if self._person is not None else claims.person_store()
+
+    def context(self, args: list[str]) -> None:
+        parsed = _parse(args)
+        store, read = self._app(), fleet.sessions(self._runner)
+        notes = [read.note] if read.note else []
+        feature = features.current(store, team_key(parsed))
+        me = self._me(notes)
+        waiting = self._waiting(store, team_key(parsed), feature, me, read, notes)
+        facts = self._facts(store, feature, waiting, read, me, notes)
+        if parsed["json"]:
+            print(json.dumps(facts, indent=2))
+        elif parsed["count"]:
+            print(facts["count"])
+        else:
+            _print(facts)
+
+    def apply(self, args: list[str]) -> None:
+        raise Refusal(f"captain has no apply; {USAGE}")
+
+    def _me(self, notes: list[str]) -> str | None:
+        try:
+            return claims.me(self._person_store())
+        except (Refusal, LinearError) as error:
+            notes.append(str(error))
+            return None
+
+    def _waiting(
+        self, store: Store, team: str, feature: Feature | None, me: str | None, read: fleet.Fleet, notes: list[str]
+    ) -> list[queue.Item]:
+        if me is None:
+            return []
+        return queue.items(store, team, feature, me, read, _policy_for(notes))
+
+    def _facts(
+        self,
+        store: Store,
+        feature: Feature | None,
+        waiting: list[queue.Item],
+        read: fleet.Fleet,
+        me: str | None,
+        notes: list[str],
+    ) -> dict:
+        top = waiting[0] if waiting else None
+        facts: dict = {
+            "notes": notes,
+            "count": queue.count_line(waiting),
+            "top": {"lines": top.lines, "next": top.next} if top else None,
+            "slots": {"used": fleet.slots_used(read.sessions), "cap": config.local().slot_cap},
+            "feature": feature.project["name"] if feature is not None else None,
+            "budget": None,
+            "order": [],
+            "cycle": [],
+            "release": feature is not None and features.phase(feature) is Phase.RELEASED,
+            "watch": [n for n, s in sorted(fleet.hands(read.sessions).items()) if fleet.busy(s)],
+            "wake_due": [],
+        }
+        if feature is not None:
+            facts["budget"] = _budget(feature, self._today())
+            facts["order"], facts["cycle"] = _build_order(store, feature)
+            mine = [s for s in feature.live if s["assignee"] == me]
+            facts["wake_due"] = [
+                s["identifier"] for s in mine if asks.wake_due(feature.records.get(s["id"], [])) is not None
+            ]
+        return facts
+
+
+def _budget_line(budget: dict) -> str:
+    line = f"{budget['feature']}: day {budget['days_used']} of {budget['budget_days']}"
+    return line + ", planning has passed half of the week" if budget["planning_note"] else line
+
+
+def _order_line(row: dict) -> str:
+    state = f"{row['ref']} {row['state']} {row['owner'] or 'unassigned'}"
+    return f"{state} blocked by {', '.join(row['blocked_by'])}" if row["blocked_by"] else f"{state} ready"
+
+
+def _print(facts: dict) -> None:
+    for note in facts["notes"]:
+        print(note)
+    print(facts["count"])
+    if facts["top"] is not None:
+        for line in facts["top"]["lines"]:
+            print(line)
+        for command in facts["top"]["next"]:
+            print(f"next: {command}")
+    print(f"slots {facts['slots']['used']} of {facts['slots']['cap']}")
+    if facts["budget"] is not None:
+        print(_budget_line(facts["budget"]))
+    for row in facts["order"]:
+        print(_order_line(row))
+    if facts["cycle"]:
+        print("cycle: " + ", ".join(facts["cycle"]))
+    if facts["release"]:
+        print(f"ready to release: {facts['feature']}")
+    if facts["watch"]:
+        print("watch: " + ", ".join(fleet.hand_name(ref) for ref in facts["watch"]))
+    if facts["wake_due"]:
+        print("wake due: " + ", ".join(facts["wake_due"]))
