@@ -15,8 +15,8 @@ comes from a fresh context. Run each deckhand command as its own bare Bash call,
 piped or prefixed. Say any note line plainly.
 
 Subscribe to every hand you hear of, with SendMessage and `notify_when_idle` set: each one on the
-`watch:` line, each `started hand-REF` line, and each hand you wake or resume. A pure subscription
-carries no message.
+`watch:` line, each `started hand-REF` or `started spike-KEY` line, and each hand you wake or
+resume. A pure subscription carries no message.
 
 Start hands with `deckhand hand apply fill`, which resumes woken hands before it fills free slots
 up to the cap. On an idle notice from a hand, run it, then `deckhand captain context --count`; say

@@ -14,7 +14,7 @@ from deckhand.steps.captain import Captain, _policy_for
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import setup
 from tests.test_queue import asked
-from tests.test_step_hand import ME, TEAM, Shell, building, clone, row, state
+from tests.test_step_hand import ME, TEAM, Shell, building, clone, row, spike_row, state
 
 __all__ = ["clone", "state"]
 
@@ -124,6 +124,12 @@ def test_idle_or_done_hand_never_watched(clone: Path, capsys: pytest.CaptureFixt
     assert "watch: hand-ACME-1" in text.splitlines()
     assert "ACME-2" not in text.split("watch:")[1]
     assert "slots 2 of 1" in text.splitlines()
+
+
+def test_a_busy_spike_is_watched(clone: Path, capsys: pytest.CaptureFixture[str]):
+    shell = Shell(row("ACME-1", "working", "busy"), spike_row("0123456789ab", "working", "busy"))
+    text = output(owned(), [], capsys, shell=shell)
+    assert "watch: hand-ACME-1, spike-0123456789ab" in text.splitlines()
 
 
 def test_wake_due_clears_after_wake(clone: Path, capsys: pytest.CaptureFixture[str]):

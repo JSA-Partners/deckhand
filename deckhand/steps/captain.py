@@ -183,7 +183,7 @@ class Captain:
             "order": [],
             "cycle": [],
             "release": feature is not None and features.phase(feature) is Phase.RELEASED,
-            "watch": [n for n, s in sorted(fleet.hands(read.sessions).items()) if fleet.busy(s)],
+            "watch": [s.name for s in _held(read) if fleet.busy(s)],
             "wake_due": [],
         }
         if feature is not None:
@@ -192,6 +192,10 @@ class Captain:
             mine = [s for s in feature.live if me is not None and s["assignee"] == me]
             facts["wake_due"] = [s["identifier"] for s in mine if startable.wake_due(feature, s) is not None]
         return facts
+
+
+def _held(read: fleet.Fleet) -> list[fleet.Session]:
+    return [s for _, s in [*sorted(fleet.hands(read.sessions).items()), *sorted(fleet.spikes(read.sessions).items())]]
 
 
 def _budget_line(budget: dict) -> str:
@@ -223,6 +227,6 @@ def _print(facts: dict) -> None:
     if facts["release"]:
         print(f"ready to release: {facts['feature']}")
     if facts["watch"]:
-        print("watch: " + ", ".join(fleet.hand_name(ref) for ref in facts["watch"]))
+        print("watch: " + ", ".join(facts["watch"]))
     if facts["wake_due"]:
         print("wake due: " + ", ".join(facts["wake_due"]))
