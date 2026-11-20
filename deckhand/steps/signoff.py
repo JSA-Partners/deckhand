@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shlex
+import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,23 +13,27 @@ from deckhand.checks import passing
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep, branch_of
+from deckhand.store import Store
 from deckhand.summary import parse_summary
 
 USAGE = (
     "signoff takes REF and [--team-key KEY] on both verbs; context [--screen 1-5] [--json],"
-    " apply summary --summary SUMMARY.json or apply review"
+    " apply summary --summary SUMMARY.json or apply review [--watch]"
 )
 SCREENS = ("what changed", "evidence", "findings", "tuicr", "quiz")
 ACTIONS = ("summary", "review")
 PLAN_FILE = "PLAN.md"
+WATCH_POLL = 2
+OPEN_WAIT = 600
+REVIEW_WAIT = 3600
 
 
 def _parse(args: list[str], usage: str) -> dict:
-    found: dict = {"words": [], "json": False}
+    found: dict = {"words": [], "json": False, "watch": False}
     rest = iter(args)
     for arg in rest:
-        if arg == "--json":
-            found["json"] = True
+        if arg in ("--json", "--watch"):
+            found[arg[2:]] = True
         elif arg in ("--team-key", "--summary", "--screen"):
             found[arg[2:].replace("-", "_")] = next(rest, "")
         elif arg.startswith("--"):
@@ -58,6 +64,19 @@ def _finding(item: dict) -> str:
 
 @register("signoff")
 class Signoff(StoryStep):
+    def __init__(
+        self,
+        store: Store | None = None,
+        runner: git.Runner = git.run,
+        repo: Path | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        *,
+        me: Callable[[], str] | None = None,
+    ) -> None:
+        super().__init__(store, runner, repo, me=me)
+        self._sleep, self._clock = sleep, clock
+
     def context(self, args: list[str]) -> None:
         parsed = _parse(args, USAGE)
         at = _from_records(self.locate(parsed["words"][0], team_key(parsed)))
@@ -137,10 +156,12 @@ class Signoff(StoryStep):
         if at.path is None or at.head is None:
             ref = at.story["identifier"]
             raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")
+        if parsed["watch"] and parsed["words"][1] != "review":
+            raise Refusal(f"--watch applies only to apply review; {USAGE}")
         if parsed["words"][1] == "summary":
             self._summary(at, parsed)
             return
-        self._review(at)
+        self._review(at, parsed["watch"])
 
     def _summary(self, at: Located, parsed: dict) -> None:
         self.owned(at)
@@ -151,7 +172,7 @@ class Signoff(StoryStep):
         ops.ensure_record(self._store_for_run(), at.story["id"], record)
         print(f"done: saved the change summary for {at.story['identifier']} at {at.head}")
 
-    def _review(self, at: Located) -> None:
+    def _review(self, at: Located, watch: bool) -> None:
         sid, head = at.story["id"], at.head
         summary = signoff.held_summary(at.records, sid, head)
         plan = versions.held(at.records, implplan.PURPOSE, sid)
@@ -176,16 +197,52 @@ class Signoff(StoryStep):
         if not sha:
             print(f"done: no hunk of {at.story['identifier']} is selected for review")
             return
+        command = _shown_command(at.path, held.data["base"], sha)
+        if watch:
+            print(f"done: {command}", *_reasons(held.data), sep="\n", flush=True)
+            self._watch(at, sha, hunks, held.data)
+            return
         session = tuicr.session_for(at.path, sha, self._runner)
-        if session is None:
-            note = "run again after tuicr opens to seed the reasons"
-        else:
-            present = tuicr.comments(at.path, session["slug"], self._runner)
-            added = tuicr.seed_comments(session["slug"], hunks, at.path, self._runner, present)
-            note = "seeded the missing reasons as comments" if added else "the reasons are seeded"
-        print(f"done: {_shown_command(at.path, held.data['base'], sha)}; {note}")
+        note = "--watch seeds the reasons once tuicr opens"
+        if session is not None:
+            note = self._seed(at, session, hunks)
+        print(f"done: {command}; {note}")
         for line in _reasons(held.data):
             print(line)
+
+    def _seed(self, at: Located, session: dict, hunks: list[tuicr.Hunk]) -> str:
+        present = tuicr.comments(at.path, session["slug"], self._runner)
+        added = tuicr.seed_comments(session["slug"], hunks, at.path, self._runner, present)
+        return "seeded the missing reasons as comments" if added else "the reasons are seeded"
+
+    def _watch(self, at: Located, sha: str, hunks: list[tuicr.Hunk], built: dict) -> None:
+        again = f"run signoff apply {at.story['identifier']} review --watch again"
+        print("waiting for tuicr to open", flush=True)
+        session = self._until(at, sha, True, OPEN_WAIT)
+        if session is None:
+            print(f"tuicr did not open within {OPEN_WAIT // 60} minutes; {again}")
+            return
+        print(f"tuicr is open; {self._seed(at, session, hunks)}", flush=True)
+        if self._until(at, sha, False, REVIEW_WAIT) is None:
+            print(f"tuicr is still open after {REVIEW_WAIT // 60} minutes; {again}")
+            return
+        found = tuicr.persons(tuicr.comments(at.path, session["slug"], self._runner), built.get("hunks", []))
+        if not found:
+            print("tuicr closed with no comment from you")
+            return
+        print("tuicr closed; your comments:")
+        for comment in found:
+            print(f"- {comment.get('location')}: {comment.get('content')}")
+
+    def _until(self, at: Located, sha: str, active: bool, wait: int) -> dict | None:
+        start = self._clock()
+        while True:
+            session = tuicr.session_for(at.path, sha, self._runner) or {}
+            if bool(session.get("active")) == active:
+                return session
+            if self._clock() - start >= wait:
+                return None
+            self._sleep(WATCH_POLL)
 
 
 def _last_branch(records: list[Record], story: str) -> dict:

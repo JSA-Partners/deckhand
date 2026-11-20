@@ -32,12 +32,11 @@ Then show each screen in order with
 `deckhand signoff context REF --screen 1`, and 2 to 5 the same way: what
 changed, evidence, findings, tuicr, quiz.
 
-For the tuicr screen, run `deckhand signoff apply REF review` first. It builds
-a commit of the selected hunks and prints the tuicr command; give it to the person as a plain
-message, with each hunk's reason. Once tuicr is open, run the same apply again to seed the reasons as
-comments. When they are done, show screen 4 again and, for each comment it lists as theirs, ask the
-person whether it is work for the hand. A comment they call work for the hand means they answer
-"Not yet" to the sign-off.
+For the tuicr screen, run `deckhand signoff apply REF review --watch` in the
+background. Its first lines are the tuicr command and each file's reason: give them to the person
+as a plain message. It seeds the reasons once tuicr opens and ends when tuicr closes, printing the
+person's own comments. Ask about each whether it is work for the hand, which makes the sign-off
+"Not yet"; with none, go on to the quiz. On a timeout line, run it again.
 
 For the quiz screen, ask each open item with
 `deckhand decide context quiz REF --item 1`, then 2 and on. A wrong answer

@@ -654,3 +654,69 @@ def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
         answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", id], "Decline")
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", ids[2]], "Accept")
     assert overview(store, repo, capsys)["missing"] == ["the person has not signed off"]
+
+
+class Watching(Diffing):
+    def __init__(self, *listings: list[dict], comments: list[dict] | None = None) -> None:
+        super().__init__(comments=comments)
+        self.listings = list(listings)
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:3] == ["tuicr", "review", "list"] and self.listings:
+            self.sessions = self.listings.pop(0) if len(self.listings) > 1 else self.listings[0]
+        return super().__call__(argv, cwd, stdin)
+
+
+def watch(store: FakeStore, repo: Path, shell: Diffing, clock: Clock) -> None:
+    Signoff(store, shell, repo, clock.sleep, clock).apply(["s1", "review", "--watch", *TEAM])
+
+
+def test_watch_seeds_once_tuicr_opens_and_prints_the_persons_comments(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand.steps import signoff as step
+
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    open_, closed = {"slug": SLUG, "active": True}, {"slug": SLUG, "active": False}
+    shell = Watching([], [closed], [open_], [open_], [closed], comments=[said("p1", "Rename this.")])
+    clock = Clock()
+    capsys.readouterr()
+    watch(store, repo, shell, clock)
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("done: cd ") and out[0].endswith("tuicr -r c1..c2")
+    assert out[1:] == [
+        "- src/a.py: contract site",
+        "waiting for tuicr to open",
+        "tuicr is open; seeded the missing reasons as comments",
+        "tuicr closed; your comments:",
+        "- src/a.py:1: Rename this.",
+    ]
+    assert len(shell.ran("tuicr", "review", "add")) == 1
+    assert clock.slept == [step.WATCH_POLL] * 3
+
+
+def test_watch_without_comments_says_so(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Watching([{"slug": SLUG, "active": True}], [{"slug": SLUG, "active": False}])
+    capsys.readouterr()
+    watch(store, repo, shell, Clock())
+    assert capsys.readouterr().out.splitlines()[-1] == "tuicr closed with no comment from you"
+
+
+@pytest.mark.parametrize("opens", [False, True])
+def test_watch_stops_at_its_timeout_and_exits_cleanly(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], opens: bool
+):
+    from deckhand.steps import signoff as step
+
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Watching([{"slug": SLUG, "active": True}] if opens else [])
+    clock = Clock()
+    capsys.readouterr()
+    watch(store, repo, shell, clock)
+    last = capsys.readouterr().out.splitlines()[-1]
+    wait = step.REVIEW_WAIT if opens else step.OPEN_WAIT
+    assert last.startswith("tuicr is still open" if opens else "tuicr did not open")
+    assert last.endswith("run signoff apply ACME-1 review --watch again")
+    assert clock.now >= wait and clock.now < wait + step.WATCH_POLL
+    assert len(shell.ran("tuicr", "review", "add")) == (1 if opens else 0)
