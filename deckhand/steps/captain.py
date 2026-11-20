@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import date
+from pathlib import Path
 
 from deckhand import asks, claims, config, features, fleet, git, order, queue
 from deckhand.credentials import Credentials
@@ -28,6 +29,22 @@ def _parse(args: list[str]) -> dict:
         else:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
     return found
+
+
+def _local(notes: list[str]) -> config.LocalConfig:
+    try:
+        return config.local()
+    except Refusal as error:
+        notes.append(str(error))
+        return config.LocalConfig()
+
+
+def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
+    try:
+        return features.current(store, team)
+    except (Refusal, LinearError) as error:
+        notes.append(str(error))
+        return None
 
 
 def _budget(feature: Feature, today: date) -> dict | None:
@@ -64,8 +81,8 @@ def _build_order(store: Store, feature: Feature) -> tuple[list[dict], list[str]]
     return rows, cycle
 
 
-def _policy_for(notes: list[str]) -> Callable[[dict], Policy]:
-    clones = config.local().clones
+def _policy_for(notes: list[str], clones: dict[str, Path] | None = None) -> Callable[[dict], Policy]:
+    clones = clones if clones is not None else {}
 
     def policy(story: dict) -> Policy:
         clone = next((clones[label] for label in story["labels"] if label in clones), None)
@@ -106,12 +123,14 @@ class Captain:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
+        team = team_key(parsed)
         store, read = self._app(), fleet.sessions(self._runner)
         notes = [read.note] if read.note else []
-        feature = features.current(store, team_key(parsed))
+        local = _local(notes)
+        feature = _current(store, team, notes)
         me = self._me(notes)
-        waiting = self._waiting(store, team_key(parsed), feature, me, read, notes)
-        facts = self._facts(store, feature, waiting, read, me, notes)
+        waiting = self._waiting(store, team, feature, me, read, local, notes)
+        facts = self._facts(store, feature, waiting, read, me, local, notes)
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
         elif parsed["count"]:
@@ -130,11 +149,18 @@ class Captain:
             return None
 
     def _waiting(
-        self, store: Store, team: str, feature: Feature | None, me: str | None, read: fleet.Fleet, notes: list[str]
+        self,
+        store: Store,
+        team: str,
+        feature: Feature | None,
+        me: str | None,
+        read: fleet.Fleet,
+        local: config.LocalConfig,
+        notes: list[str],
     ) -> list[queue.Item]:
         if me is None:
             return []
-        return queue.items(store, team, feature, me, read, _policy_for(notes))
+        return queue.items(store, team, feature, me, read, _policy_for(notes, local.clones))
 
     def _facts(
         self,
@@ -143,6 +169,7 @@ class Captain:
         waiting: list[queue.Item],
         read: fleet.Fleet,
         me: str | None,
+        local: config.LocalConfig,
         notes: list[str],
     ) -> dict:
         top = waiting[0] if waiting else None
@@ -150,7 +177,7 @@ class Captain:
             "notes": notes,
             "count": queue.count_line(waiting),
             "top": {"lines": top.lines, "next": top.next} if top else None,
-            "slots": {"used": fleet.slots_used(read.sessions), "cap": config.local().slot_cap},
+            "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
             "feature": feature.project["name"] if feature is not None else None,
             "budget": None,
             "order": [],
@@ -162,7 +189,7 @@ class Captain:
         if feature is not None:
             facts["budget"] = _budget(feature, self._today())
             facts["order"], facts["cycle"] = _build_order(store, feature)
-            mine = [s for s in feature.live if s["assignee"] == me]
+            mine = [s for s in feature.live if me is not None and s["assignee"] == me]
             facts["wake_due"] = [
                 s["identifier"] for s in mine if asks.wake_due(feature.records.get(s["id"], [])) is not None
             ]

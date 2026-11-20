@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks
+from deckhand import asks, config
+from deckhand.features import FEATURE_LABEL
 from deckhand.records import HAND, Record
 from deckhand.step import REGISTRY, Refusal
-from deckhand.steps.captain import Captain
+from deckhand.steps.captain import Captain, _policy_for
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import setup
 from tests.test_queue import asked
@@ -63,13 +64,58 @@ def test_top_item_in_full(clone: Path, capsys: pytest.CaptureFixture[str]):
     assert "slots 0 of 1" in lines
 
 
-def test_restart_prints_same_queue(clone: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+def test_restart_prints_same_queue(clone: Path, state: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     store = owned()
     asked(store, "s1")
-    first = output(store, [], capsys)
+    shell = Shell(row("ACME-1", "working", "busy"))
+    first = output(store, [], capsys, shell=shell)
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps(store.snapshot()))
+    restarted = FakeStore.from_snapshot(snapshot)
     assert not state.exists()
-    second = output(store, [], capsys)
-    assert first == second
+    assert output(restarted, [], capsys, shell=Shell(row("ACME-1", "working", "busy"))) == first
+    assert "question ACME-1" in first
+
+
+def test_bad_config_degrades_to_a_note(clone: Path, capsys: pytest.CaptureFixture[str]):
+    (config.config_dir() / config.FILE).write_text("nonsense = 1\n")
+    text = output(owned(), [], capsys)
+    assert "unknown key nonsense" in text.splitlines()[0]
+    assert "nothing waiting" in text
+    assert "ACME-1 Backlog viewer-1 ready" in text.splitlines()
+
+
+def test_two_open_features_degrade_to_a_note(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    store.create_project("p2", "ACME", "Beta", "", [FEATURE_LABEL])
+    store.set_project_dates("p2", "2026-11-16", "2026-11-23")
+    text = output(store, [], capsys)
+    assert "more than one feature is open" in text.splitlines()[0]
+    assert "slots 0 of 1" in text.splitlines()
+
+
+def test_missing_personal_key_degrades_to_a_note(clone: Path, capsys: pytest.CaptureFixture[str]):
+    class NoKey:
+        def viewer(self):
+            raise Refusal("no personal key")
+
+    store = owned()
+    asked(store, "s1")
+    Captain(store, Shell(), person=NoKey(), today=lambda: DAY).context(TEAM)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == ["no personal key", "nothing waiting"]
+
+
+def test_missing_clone_degrades_to_a_note():
+    notes: list[str] = []
+    policy = _policy_for(notes)({"labels": ["widgets"]})
+    assert policy.second_signoff is False
+    assert [n.startswith("no clone for widgets in ") for n in notes] == [True]
+
+
+def test_failed_fleet_read_prints_its_note(clone: Path, capsys: pytest.CaptureFixture[str]):
+    text = output(owned(), [], capsys, shell=Shell(fleet_fails=True))
+    assert text.splitlines()[0].startswith("the fleet read failed")
 
 
 def test_idle_or_done_hand_never_watched(clone: Path, capsys: pytest.CaptureFixture[str]):
