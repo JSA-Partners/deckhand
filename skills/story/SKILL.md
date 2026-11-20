@@ -28,7 +28,7 @@ Review the plan in rounds from `deckhand review context REF --stage plan`: one d
 listed lens at once, each given the stage, lens path, target path and any carried P1s, then
 deckhand:confidence on the joined list and target path. Save its output with
 `deckhand review apply REF round --stage plan --findings FILE --target HASH`. Record a fix with
-`deckhand review apply REF resolve --stage plan --accept ID`, or propose a decline with `--propose-decline ID --reason TEXT`; declining, changing what the story delivers, and a cap are the person's. Rerun the context after fixing: clean or proceeded carries on.
+`deckhand review apply REF resolve --stage plan --accept ID`, or propose a decline with `--propose-decline ID --reason TEXT`; declining, changing what the story delivers, a cap and any finding left open are the person's; never write a docs decision to excuse one. Rerun the context after fixing: clean or proceeded carries on.
 
 Build with superpowers:test-driven-development, and impeccable:impeccable when a person sees the
 change. Commit with `deckhand build apply REF commit --message FILE`. Bring main in with

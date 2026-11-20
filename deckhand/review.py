@@ -190,6 +190,21 @@ def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF
     ]
 
 
+def left_open(records: list[Record], story: str, stage: str) -> list[dict]:
+    latest = last(counted(records, f"{story}:{stage}")[0])
+    settled = accepted(records) | set(decided(records))
+    found = latest.data["findings"] if latest else []
+    return [f for f in found if f["severity"] != "P1" and not f.get("changes_delivery") and f["id"] not in settled]
+
+
+def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
+    return [
+        f"{f['id']} is a {f['severity']} the hand left open and the person has not decided it:"
+        f" decide context finding {ref} --finding {f['id']}"
+        for f in left_open(records, story, stage)
+    ]
+
+
 def next_round(rounds: list[Record], target_hash: str, declined: set[str], head: str = "") -> RoundPlan | Stop:
     latest = last(rounds)
     if latest is None:

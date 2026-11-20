@@ -76,8 +76,9 @@ def gaps(records: list[Record], story: str, head: str) -> list[str]:
     summary = held_summary(records, story, head)
     found = [] if summary else [f"no change summary is saved at {head}"]
     found += _quiz_gap(records, story, head, summary)
-    found += _plan_gap(records, story) + review.delivery_gaps(records, story, "plan")
-    found += _branch_gap(records, story, head) + review.delivery_gaps(records, story, "branch")
+    for stage in ("plan", "branch"):
+        found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
+        found += review.delivery_gaps(records, story, stage) + review.left_open_gaps(records, story, stage)
     found += _tuicr_gap(records, story, head)
     if not passing(records, story, head):
         found.append(f"checks are not passing at {head}")

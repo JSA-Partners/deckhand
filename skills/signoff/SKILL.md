@@ -20,10 +20,11 @@ Every decision runs the same way: run
 question dialog, then run `deckhand decide apply NONCE` once answered. Save
 each answer when it is given, so stopping is safe.
 
-First take what the hand left for the person. In
-`deckhand review context REF --stage plan` and its `--stage branch` twin, an
-open finding that is a P1 or changes delivery is decided with
-`deckhand decide context finding REF --finding ID`. A stage stopped at its cap
+First take what the hand left for the person. Decide each finding the `missing:`
+lines name, and each open P1 in `deckhand review context REF --stage plan` and
+its `--stage branch` twin, with `deckhand decide context finding REF --finding ID`.
+For a finding the hand left open, Decline keeps the hand's call and Accept sends
+it back, which makes the sign-off "Not yet". A stage stopped at its cap
 is decided with `deckhand decide context review-cap REF --stage branch`, or
 `--stage plan`. When the context above shows no change summary, the hand is not done: stop here.
 

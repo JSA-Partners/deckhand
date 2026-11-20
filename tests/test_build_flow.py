@@ -209,6 +209,8 @@ def test_an_identical_diff_at_a_new_head_carries_the_review_forward(
     assert (carried.subject, carried.data["head"], carried.data["carry"]) == ("s1:branch:2", "c3", True)
     assert carried.data["findings"] == first.data["findings"] and len(first.data["findings"]) == 1
     assert shown(step, capsys, "s1", "--stage", "branch")["stop"] == "clean"
+    left = finding_id(raw(severity="P2"), "branch")
+    answer(hand.state, hand.decide(), capsys, ["finding", "ACME-1", "--finding", left], "Decline")
     hand.signed_at_head()
     hand.world.pr_head = "c3"
     hand.merge()

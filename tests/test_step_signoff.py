@@ -107,8 +107,14 @@ def ready(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture
     step = decide(store, repo)
     reply(state, step, ask(step, capsys), "The idempotency key")
     branch_round(store, raw())
+    fixed(store, raw())
     checked(store, "c2")
     return store
+
+
+def fixed(store: FakeStore, *items: dict, stage: str = "branch") -> None:
+    for found in review.parse_findings(json.dumps(list(items))):
+        store.put_record("s1", review.accept_record(review.finding_id(found, stage), "hash1"))
 
 
 def sign(store: FakeStore, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], choice: str = "Sign off"):
@@ -146,6 +152,7 @@ def test_commits_after_the_last_branch_round_need_a_review(
     with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
         Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
     branch_round(store, raw(), n=2)
+    fixed(store, raw())
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
 
@@ -155,6 +162,7 @@ def test_sign_off_refuses_with_open_quiz(tmp_path: Path, repo: Path, state: Path
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     branch_round(store, raw())
+    fixed(store, raw())
     checked(store, "c2")
     step = Decide(store, runner=Shell(), repo=repo)
     with pytest.raises(Refusal, match="quiz items still open: 1"):
@@ -616,3 +624,33 @@ def test_review_names_each_file_s_reason_once(
     assert capsys.readouterr().out.splitlines()[1:] == ["- src/a.py: contract site"]
     Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4"])
     assert capsys.readouterr().out.count("- src/a.py: contract site") == 1
+
+
+def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    left, doubtful = raw(summary="Left open.", severity="P3"), raw(summary="Unsure.", line=9, confidence=0.2)
+    fixed = raw()
+    branch_round(store, fixed, left, doubtful)
+    ids = [review.finding_id(f, "branch") for f in review.parse_findings(json.dumps([fixed, left, doubtful]))]
+    store.put_record("s1", review.accept_record(ids[0], "hash1"))
+    plan = versions.held(store.records("s1"), implplan.PURPOSE, "s1")
+    plan_left = review.finding_id(plan_round(store, plan.version, raw(summary="Plan left."))[0], "plan")
+    missing = overview(store, repo, capsys)["missing"]
+    assert missing == [
+        f"{plan_left} is a P2 the hand left open and the person has not decided it:"
+        f" decide context finding REF --finding {plan_left}",
+        *(
+            f"{id} is a {severity} the hand left open and the person has not decided it:"
+            f" decide context finding REF --finding {id}"
+            for id, severity in ((ids[1], "P3"), (ids[2], "P2"))
+        ),
+        "the person has not signed off",
+    ]
+    with pytest.raises(Refusal, match="not ready for sign-off"):
+        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    for id in (plan_left, ids[1]):
+        answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", id], "Decline")
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", ids[2]], "Accept")
+    assert overview(store, repo, capsys)["missing"] == ["the person has not signed off"]
