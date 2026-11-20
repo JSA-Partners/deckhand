@@ -9,12 +9,16 @@
   `step.py` the registry, `Refusal`, and the shared TOML read
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
-  `review` and `feature-review`, `checks`, `quiz`, `signoff` and `merge`); `commit` and
-  `document` only report
+  `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
+  planning work (`spike`, `draft`) and its questions (`ask`), and the person's fleet (`hand` starts,
+  fills and wakes hands, `captain` prints the queue); `commit` and `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
-  quiz and the sign-off
+  quiz and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
+  and their slots, `claims.py` who owns a story, `asks.py` a hand's questions and wakes, `gaps.py`
+  permission gaps, `spikes.py` spike questions and answers, `order.py` the build order, `answers.py`
+  the dialog answers the hook stores, `inputs.py` the files a hand may hand in
 - `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
   setup reads and plans for a team, and a client for the app or the person
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
@@ -23,8 +27,8 @@
 - `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
   a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
   person's machine; `launch.py` the sandboxed settings a hand or the captain runs under
-- Skills: `skills/<name>/SKILL.md` with YAML frontmatter, one for a hand's work and one for each
-  session of the person's; review lenses in `skills/story/lenses/`, a project's own in its
+- Skills: `skills/<name>/SKILL.md` with YAML frontmatter: a hand's (story, spike, draft) and
+  the person's (setup, captain, feature, signoff, commit, document); review lenses in `skills/story/lenses/`, a project's own in its
   `.claude/deckhand/lenses/`; agents `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
 
@@ -91,11 +95,21 @@ install reaches them when the next fix or feature does.
 - A status is never written by deckhand; Linear moves a story from the pull request: draft to In
   Progress, ready to In Review, merged to Done
 - Every decision comes from a recorded dialog answer in the person's session, never from anything
-  else; a hand never asks, it leaves the decision for that session
+  else; a hand never asks, it records a question with `ask` and stops until a wake
+- A hand is a background session per story, draft or spike, launched only by `hand`, under settings that
+  hold no credential; every write it causes goes through `deckhand`, and a raw write fails
+- The captain holds no state: its view, the queue and the wakes are printed from records, and a
+  hand stopping only updates a count; a waiting hand frees its slot, a planning hand holds one
+- A hand does the after-merge chores it can; only the rest reach the person's queue
+- `.claude/` is Claude Code's: a hand may edit `.claude/deckhand.toml` and
+  `.claude/deckhand/lenses/`, and any other change becomes a queue item through `ask apply --edit`
+- `checks apply` runs a hand's tests and check commands with deckhand's access, a gap the README
+  names
 - Records live in issue attachments; documents hold only text a person reads
 - Never parse prose to decide; read typed records, and print prose only for people
 - Every skill calls the bare `deckhand`, its injection line included, which the plugin puts on the
-  path, so each call matches the sandbox's exempt `deckhand *` pattern
+  path, so each call matches the sandbox's exempt `deckhand *` pattern; a chained, piped or
+  prefixed call runs sandboxed and fails, and hooks keep the full plugin path
 - Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no secret
 - Do not hardcode organization, team, or repository values in code or tests; only the plugin
   manifests and the install commands carry them

@@ -1,43 +1,44 @@
 ---
 name: captain
-description: "Watch every session working the board, say what to run next and where, and put right anything the board holds that no step wrote."
+description: "Keep the hands working and bring the person one queue item at a time: sign-offs, findings, questions, planning and after-merge chores."
 disable-model-invocation: true
-allowed-tools: Bash(deckhand *) AskUserQuestion
+allowed-tools: Bash(deckhand *) AskUserQuestion SendMessage Skill(deckhand:signoff) Skill(deckhand:feature)
 ---
 
 # Captain
 
 !`deckhand captain context`
 
-The blocks above are the whole picture. Anomalies is the whole board check, every column, blocker
-and cycle; checking the board needs no hand reads, and auditing blockers reads
-`captain context --only edges`. Clear what is waiting first, longest wait first: name
-each session, what it asks, and your recommendation. A `said` row quotes the session's last words,
-which may be older than a question the transcript has not written yet; ask in that session. Then
-say what moved since they last looked and where the work stands, leading with what to run next
-and where. Then stop. An anomaly under Standing has been seen
-before; mention it only when asked.
+Above: the count of what waits, the top item in full with its `next:` lines, slots, the feature's
+days against its budget, the build order, and the hands to watch. You hold no state: every answer
+comes from a fresh context. Run each deckhand command as its own bare Bash call, never chained,
+piped or prefixed. Say any note line plainly.
 
-Rerun `deckhand captain context` for every later question. Asking about one session is `captain context --session <id>`.
+Subscribe to every hand you hear of, with SendMessage and `notify_when_idle` set: each one on the
+`watch:` line, each `started hand-REF` line, and each hand you wake or resume. A pure subscription
+carries no message.
 
-When an anomaly's fix is `captain apply --repair`, offer it and run it if the person agrees. When
-they ask for the backlog to be put in order, offer `captain apply --order`. Both write only the
-board. An edge the board is missing is written with
-`captain apply --block REF --by REF`, and taken away with `--unblock REF --by REF`, each REF
-`owner/name#M` or a bare number for this repository; both refuse a blocker that is closed. A duplicate or an abandoned story is withdrawn with
-`captain apply --withdraw REF --note "<why>"`: logged, closed as not planned, unboarded. A row
-whose fix names a story step belongs to that story's session; name it and leave it.
+Start hands with `deckhand hand apply fill`, which fills free slots up to the cap. On an idle notice
+from a hand, run `deckhand hand apply fill`, then `deckhand captain context --count`; say that one
+line, subscribe, and stop. Never show the item itself until the person asks.
 
-When asked what to merge or in which order, answer from the Merge block, first row first, and say
-which sessions must then bring their branch up to date.
+Before showing an item, wake each story on the `wake due:` line with `deckhand hand apply wake REF`.
+When it prints `send to hand-REF: ...`, send that text to that hand. `resumed`, `waits for a slot`
+and `nothing to wake` need nothing more.
 
-When the person states a priority or asks how many sessions to open, run
-`deckhand captain context --only candidates` and answer with lanes, one
-per session, each naming its repository and its `/deckhand:story REF KEY` commands in order. Two stories
-whose files overlap never run in parallel lanes. Judge a "named, no edge" pair from its `Named:` line,
-asking only when the line leaves it open.
+With the person, show the top item and answer it by its `next:` line:
 
-For the board, run `captain context --only forecast`. For one feature, run
-`deckhand epic forecast "<feature>" --json`, which names its stories;
-`epic list` names the features.
-Give its likely and early dates, never a date between.
+- `/deckhand:signoff REF` or `/deckhand:feature`: run that skill.
+- A `decide context` line: run it with `deckhand` in front, pass the JSON it prints unchanged to the
+  question dialog, then run `deckhand decide apply NONCE` once answered. Never mark an option
+  recommended; the person may answer a hand's question in their own words.
+- `hand apply start REF` restarts a stalled hand: run `deckhand hand apply start REF` if the person
+  agrees.
+- A link to a spike document: give it; the feature skill reads it with the person before the story
+  map.
+- `claude attach <id>`: give the person that command to type. A prompt is theirs; never answer it.
+
+After each answer, rerun `deckhand captain context`, wake what it lists, and show the next item.
+The person may stop after any item; every answer is already saved. When the view says
+`ready to release`, tell them the feature's last story has merged; the production release is
+theirs. A cycle in the build order is theirs to break in Linear.

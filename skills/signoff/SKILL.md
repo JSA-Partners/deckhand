@@ -4,7 +4,6 @@ description: "Walk the person through one story's sign-off, one screen at a time
 arguments: story
 argument-hint: "<story>"
 effort: high
-disable-model-invocation: true
 allowed-tools: Bash(deckhand *) Read Grep Glob AskUserQuestion
 ---
 
