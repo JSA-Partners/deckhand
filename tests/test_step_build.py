@@ -651,3 +651,14 @@ def test_a_hand_reads_its_temporary_and_worktree_files(tmp_path: Path, repo: Pat
         "feat: from the worktree",
         "feat: from the temporary directory",
     ]
+
+
+def test_context_of_a_merged_story_names_its_after_merge_work(capsys: pytest.CaptureFixture[str]):
+    from tests.test_step_decide import feature_store, released
+
+    store = released(feature_store())
+    capsys.readouterr()
+    Build(store).context(["ACME-1", *TEAM])
+    assert capsys.readouterr().out.splitlines() == [
+        "ACME-1 has merged; do its after-merge items from deckhand after context ACME-1"
+    ]

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import claims, config, features, gh, git, implplan, inputs, ops, review, tiers, versions
+from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, tiers, versions
 from deckhand.credentials import Credentials
 from deckhand.features import Phase
 from deckhand.linear.connect import connect
@@ -138,6 +138,14 @@ class StoryStep:
             )
         return feature, story, policy, clone
 
+    def merged(self, ref: str, team_key: str) -> str | None:
+        store = self._store_for_run()
+        story = features.story(store, features.owning(store, team_key, ref), ref)
+        if story["state"] != order.DONE:
+            return None
+        ref = story["identifier"]
+        return f"{ref} has merged; do its after-merge items from deckhand after context {ref}"
+
     def locate(self, ref: str, team_key: str) -> Located:
         feature, story, policy, clone = self._story(ref, team_key)
         records = feature.records.get(story["id"], [])
@@ -154,6 +162,10 @@ class Build(StoryStep):
         parsed = parse(args, USAGE)
         if len(parsed["words"]) != 1:
             raise Refusal(f"build takes one story REF; {USAGE}")
+        merged = self.merged(parsed["words"][0], team_key(parsed))
+        if merged is not None:
+            print(merged)
+            return
         store = self._store_for_run()
         at = self.locate(parsed["words"][0], team_key(parsed))
         story, policy, clone, records = at.story, at.policy, at.clone, at.records

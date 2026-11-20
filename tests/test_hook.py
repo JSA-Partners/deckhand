@@ -292,3 +292,15 @@ def test_permission_gap_recorded_after_the_feature_is_released(monkeypatch, tmp_
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
     hook_with(monkeypatch, store, ["permission"], GAP)
     assert len(store.records("s1")) == 1
+
+
+def test_permission_gap_recorded_once_the_next_feature_opens(monkeypatch, tmp_path: Path):
+    from tests.test_step_decide import feature_store, released
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = released(feature_store())
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert len(store.records("s1")) == 1

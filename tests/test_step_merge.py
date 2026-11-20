@@ -272,3 +272,14 @@ def test_second_signoff_does_not_outlive_a_void(
     second(store, repo, state, capsys, "teammate-2", "Sign off")
     merge(store, repo, gh)
     assert len(gh.ran("gh", "pr", "merge")) == 1
+
+
+def test_merge_context_of_a_merged_story_names_its_after_merge_work(capsys: pytest.CaptureFixture[str]):
+    from tests.test_step_decide import feature_store, released
+
+    store = released(feature_store())
+    capsys.readouterr()
+    Merge(store).context(["ACME-1", *TEAM])
+    assert capsys.readouterr().out.splitlines() == [
+        "ACME-1 has merged; do its after-merge items from deckhand after context ACME-1"
+    ]

@@ -40,6 +40,16 @@ def feature_store() -> FakeStore:
     return store
 
 
+def released(store: FakeStore) -> FakeStore:
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    beta = create_id("ACME:Beta", "feature")
+    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
+    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
+    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
+    return store
+
+
 def record_answer(state: Path, asked: dict, answer: str) -> None:
     answers.record(
         {
@@ -166,3 +176,15 @@ def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(Connected):
         Decide().context(["contract", P1, *TEAM])
     assert roles == ["person"]
+
+
+def test_a_question_from_a_released_story_is_decided(state: Path, capsys: pytest.CaptureFixture[str]):
+    from deckhand import asks
+
+    store = released(feature_store())
+    found = asks.parse_question(json.dumps({"question": "Drop it?", "options": ["Yes", "No"], "why": "Done."}))
+    store.put_record("s1", asks.question_record("s1", found))
+    capsys.readouterr()
+    Decide(store).context(["question", asks.question_id("Drop it?"), "--story", "ACME-1", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert [o["label"] for o in shown["tool_input"]["questions"][0]["options"]] == ["Yes", "No"]

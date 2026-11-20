@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, claims, decisions, features, git, pins, quiz, review, signoff, versions
+from deckhand import answers, asks, claims, decisions, features, git, pins, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
@@ -69,6 +69,8 @@ class Decide(StoryStep):
         store = self._store_for_run()
         if kind == signoff.AFTER:
             feature = features.owning(store, team_key(parsed), subject)
+        elif kind == asks.ANSWER and len(parsed["stories"]) == 1:
+            feature = features.owning(store, team_key(parsed), parsed["stories"][0])
         else:
             feature = features.open_feature(store, team_key(parsed))
         if feature is None:

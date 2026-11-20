@@ -10,7 +10,7 @@ from deckhand.step import Refusal
 from deckhand.steps.ask import Ask
 from deckhand.steps.decide import Decide
 from deckhand.store.fake import FakeStore
-from tests.test_step_decide import TEAM, feature_store, record_answer, state
+from tests.test_step_decide import TEAM, feature_store, record_answer, released, state
 
 __all__ = ["state"]
 
@@ -148,3 +148,9 @@ def test_ask_refuses_a_story_that_belongs_to_another_person(tmp_path: Path):
 def test_ask_refuses_an_unreadable_file(tmp_path: Path):
     with pytest.raises(Refusal, match="cannot be read"):
         Ask(feature_store()).apply(["ACME-1", "--file", str(tmp_path / "none.json"), *TEAM])
+
+
+def test_an_after_merge_hand_asks_once_the_next_feature_opens(tmp_path: Path):
+    store = released(feature_store())
+    Ask(store).apply(["ACME-1", "--file", filed(tmp_path, QUESTION), *TEAM])
+    assert [r.kind for r in store.records("s1")] == [asks.QUESTION]

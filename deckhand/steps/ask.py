@@ -39,9 +39,7 @@ def _status(answer: object) -> str:
 class Ask(StoryStep):
     def _find(self, parsed: dict) -> tuple[dict, list]:
         store = self._store_for_run()
-        feature = features.open_feature(store, team_key(parsed))
-        if feature is None:
-            raise Refusal("no feature is open")
+        feature = features.owning(store, team_key(parsed), parsed["words"][0])
         story = features.story(store, feature, parsed["words"][0])
         return story, feature.records.get(story["id"], [])
 

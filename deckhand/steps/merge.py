@@ -40,6 +40,10 @@ class Merge(StoryStep):
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
+        merged = self.merged(parsed["words"][0], team_key(parsed))
+        if merged is not None:
+            print(merged)
+            return
         at = self.locate(parsed["words"][0], team_key(parsed))
         held = signoff.signed(at.records, at.story["id"])
         if held is None:
