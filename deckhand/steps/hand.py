@@ -307,10 +307,14 @@ class Hand:
         self._retire(plan.stop)
         git.call(plan.argv, plan.cwd, self._runner)
 
-    # A resume opens a new session under the same name; a stop of an exited one fails harmlessly.
+    # A resume opens a new session under the same name; a stop that fails leaves the resume to go ahead.
     def _retire(self, session: str | None) -> None:
-        if session is not None:
+        if session is None:
+            return
+        try:
             self._runner(["claude", "stop", session], None, None)
+        except git.GitError:
+            return
 
 
 def _free_slot(read: fleet.Fleet) -> None:

@@ -102,12 +102,9 @@ def due(work: Work, feature: Feature, hands: dict[str, fleet.Session]) -> bool:
 
 def wake_due(feature: Feature, story: dict) -> Record | None:
     records = feature.records.get(story["id"], [])
-    due = asks.wake_due(records, story["id"])
+    due = asks.wake_due(records, story["id"], queue.merged_at(story))
     launch = launch_of(kind(feature, story))
     if due is None or queue.last_start(records, launch) is None:
-        return None
-    # A decision made before the merge was for the build the merge finished.
-    if story["state"] == order.DONE and due.at <= (story.get("completed_at") or ""):
         return None
     if launch == queue.DRAFT_HAND and any(r.kind in (queue.DRAFT, queue.TAKEN) for r in records):
         return None

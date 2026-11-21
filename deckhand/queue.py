@@ -189,10 +189,14 @@ def _finished(story: dict, records: list[Record], start: Record) -> bool:
     return signoff.OPEN not in statuses
 
 
+def merged_at(story: dict) -> str:
+    return (story.get("completed_at") or "") if story["state"] == order.DONE else ""
+
+
 def _waiting(story: dict, records: list[Record], second: bool) -> bool:
     if second or _for_person(story, records, 2) or signoff.after_merge_for_person(records, story["id"]):
         return True
-    return asks.wake_due(records, story["id"]) is not None
+    return asks.wake_due(records, story["id"], merged_at(story)) is not None
 
 
 def stalled(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, config, implplan, launch, queue, signoff, spikes
+from deckhand import answers, asks, config, git, implplan, launch, queue, signoff, spikes
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
@@ -301,6 +301,37 @@ def test_fill_never_wakes_a_merged_story_for_a_decision_made_before_the_merge(cl
     hand(store, shell).apply(["fill", *TEAM])
     assert shell.launched() == launched
     assert not [r for r in store.records("s1") if r.kind == asks.WAKE]
+
+
+def test_fill_restarts_a_merged_story_whose_hand_left_its_chores_open(clone: Path):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    chores(store, "s1", "drop the old table")
+    hand(store, shell).apply(["fill", *TEAM])
+    store.put_record("s1", Record(signoff.KIND, "s1", "h1", "person:session-1", {"nonce": "n1"}))
+    store.set_issue_state("s1", "Done")
+    shell.rows = [row("ACME-1", "done")]
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-1"]
+
+
+class StopFails(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:2] == ["claude", "stop"]:
+            raise git.GitError("claude stop", 124, "timed out")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_a_stop_that_fails_still_resumes_the_hand(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = building(), StopFails()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    decided(store, "s1", "n1")
+    shell.rows = [row("ACME-1", "stopped")]
+    capsys.readouterr()
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    assert capsys.readouterr().out.strip() == "resumed hand-ACME-1"
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-1"]
 
 
 def test_wake_gone_hand_resumes(clone: Path, capsys: pytest.CaptureFixture[str]):

@@ -115,10 +115,11 @@ def _waited(records: list[Record], decision: Record, story: str) -> bool:
     return decision.subject == story
 
 
-def wake_due(records: list[Record], story: str) -> Record | None:
+# A decision made before the merge was for the build the merge finished, so it is never due after.
+def wake_due(records: list[Record], story: str, merged_at: str = "") -> Record | None:
     starts = [r for r in records if r.kind == HAND_START]
     if not starts:
         return None
-    floor = max((r.at for r in records if not _person(r)), default="")
+    floor = max([merged_at, *(r.at for r in records if not _person(r))])
     due = [r for r in records if _person(r) and r.kind in WAITING and r.at > floor and _waited(records, r, story)]
     return max(due, key=lambda r: r.at, default=None)
