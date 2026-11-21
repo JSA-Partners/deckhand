@@ -313,3 +313,8 @@ def test_sandbox_write_holding_a_path_dir_refuses(
         launch.hand_settings("ACME-7", tmp_path / "clone", tmp_path / "clone", policy, local, protected)
     local = LocalConfig(sandbox_write=[str(tmp_path / "cache")])
     launch.hand_settings("ACME-7", tmp_path / "clone", tmp_path / "clone", policy, local, protected)
+
+
+def test_the_captain_opens_in_focus_view_and_a_hand_does_not(layout: dict) -> None:
+    assert layout["captain"]["viewMode"] == "focus"
+    assert "viewMode" not in layout["settings"]

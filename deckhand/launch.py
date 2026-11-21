@@ -155,6 +155,7 @@ def captain_settings(protected: Protected) -> dict[str, Any]:
     guarded = _guarded(protected, [], [])
     return {
         "env": {"DECKHAND_ROLE": "captain"},
+        "viewMode": "focus",
         "permissions": {"allow": ["Bash(deckhand *)", "SendMessage"], "deny": guarded["deny"]},
         "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"]),
     }

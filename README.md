@@ -124,7 +124,8 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 | `/deckhand:document` | Records what a branch taught in `docs/claude/` |
 
 Run setup once per machine, and again when a repository joins. Then launch the captain with the line
-it prints, which starts Claude Code under the captain's own settings. The captain runs the feature
+it prints, which starts Claude Code under the captain's own settings, in focus view: your prompt, a
+line summing up its tool calls, and its reply. The captain runs the feature
 and sign-off skills for you when an item needs them. Hands run `story`, `spike` and `draft` on
 their own; you never type those.
 
