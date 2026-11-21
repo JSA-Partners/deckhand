@@ -95,14 +95,14 @@ def _needs(entry: Entry, now: float) -> Row:
 def _hand_row(entry: Entry, now: float) -> Row:
     hand, ref = entry.hand, brief.clean(entry.ref)
     label, since = _stage(entry.story)
-    title = _clean(entry.story, "title") or ("spike" if hand.spike else "")
-    if entry.kind == standing.WORKING:
+    title = _clean(entry.story, "title") or ("spike" if hand and hand.spike else "")
+    if entry.kind == standing.WORKING and hand is not None:
         own = brief.clean(hand.status)
         state = ", ".join(part for part in (label, "" if own == "busy" else own) if part)
     else:
-        gone = brief.clean(hand.state) or "stopped"
+        gone = (brief.clean(hand.state) if hand else "") or "stopped"
         state = f"{gone} at {label}" if label else gone
-    age = _ago(since, now) or _ago(hand.started_at, now)
+    age = _ago(since, now) or (_ago(hand.started_at, now) if hand else "")
     return Row(f"story:{ref}", TONES[entry.kind], ref, title, state, age, _hand_detail(hand))
 
 
@@ -117,7 +117,8 @@ def _queued(entry: Entry, full: bool) -> Row:
 
 def _done(entry: Entry, now: float) -> Row:
     at, ref = standing.text(entry.story, "completed_at"), brief.clean(entry.ref)
-    detail = (("merged at", datetime.fromisoformat(at).astimezone().strftime("%H:%M"), ""),)
+    stamp = standing.timestamp(at) or 0.0
+    detail = (("merged at", datetime.fromtimestamp(stamp).strftime("%H:%M"), ""),)
     return Row(f"story:{ref}", "done", ref, _clean(entry.story, "title"), "merged", _ago(at, now), detail)
 
 
@@ -171,7 +172,7 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     stamp = standing.timestamp(standing.text(status, "written_at"))
     since = now - stamp if stamp is not None else None
     stale = _stale(status, since)
-    lead = brief.segment(status, since, now, g)
+    lead = brief.segment(status, since, now, g, entries)
     working = len(rows[standing.WORKING])
     updated = "" if stale else _updated(since)
     failed = read is not None and bool(read.note)

@@ -96,3 +96,30 @@ def test_a_wrong_type_anywhere_is_skipped_not_fatal(bad):
     for field in ("ref", "state", "blocked_by", "stage", "completed_at", "title", "owner"):
         status = sample(stories=[{**sample()["stories"][3], field: bad}], hands=[{"ref": bad, "state": bad}])
         standing.classify(status, standing.filed(status), TODAY)
+
+
+def test_a_started_story_with_no_live_hand_reads_stopped():
+    found = kinds(sample(items=[]), standing.live([session("x", "ACME-17")]))
+    assert found == [
+        (standing.WORKING, "ACME-17"),
+        (standing.STOPPED, "ACME-14"),
+        (standing.STOPPED, "ACME-15"),
+        (standing.QUEUED, "ACME-16"),
+        (standing.QUEUED, "ACME-18"),
+        (standing.QUEUED, "ACME-19"),
+        (standing.MERGED, "ACME-13"),
+    ]
+
+
+def test_a_failed_spike_off_the_board_surfaces():
+    spikes = [
+        fleet.Session("f", "spike-k9", "sid-f", "/w", at(9), "failed", None, None),
+        fleet.Session("g", "spike-k8", "sid-g", "/w", at(9), "done", None, None),
+    ]
+    found = kinds(sample(items=[], stories=[]), standing.live(spikes))
+    assert found == [(standing.STOPPED, "k9")]
+
+
+@pytest.mark.parametrize("at_edge", ["9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"])
+def test_a_time_out_of_range_reads_as_no_time(at_edge):
+    assert standing.timestamp(at_edge) is None

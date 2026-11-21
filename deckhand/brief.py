@@ -159,10 +159,11 @@ def colored(env: Mapping[str, str]) -> bool:
     return not env.get("NO_COLOR") and env.get("TERM") != "dumb"
 
 
-def _line_parts(status: dict, now: float, g: Glyphs) -> tuple[str, str]:
+def _line_parts(status: dict, now: float, g: Glyphs, entries: list[standing.Entry] | None) -> tuple[str, str]:
     items = standing.dicts(status, "items")
     if not items:
-        working = standing.counts(standing.classify(status, standing.filed(status)))[standing.WORKING]
+        entries = standing.classify(status, standing.filed(status)) if entries is None else entries
+        working = standing.counts(entries)[standing.WORKING]
         return f"{working} working", "nothing needs you"
     top = items[0]
     waited = _waited(top, now) if standing.timestamp(standing.text(top, "since")) is not None else ""
@@ -173,10 +174,12 @@ def _line_parts(status: dict, now: float, g: Glyphs) -> tuple[str, str]:
     return head, " ".join(part for part in (kind, ref, waited) if part)
 
 
-def segment(status: dict, since: float | None, now: float, g: Glyphs) -> tuple[str, str, str]:
+def segment(
+    status: dict, since: float | None, now: float, g: Glyphs, entries: list[standing.Entry] | None = None
+) -> tuple[str, str, str]:
     if since is None or status.get("stale_since") or since > LINE_STALE_SECONDS:
         return g.queued, f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
-    head, tail = _line_parts(status, now, g)
+    head, tail = _line_parts(status, now, g, entries)
     glyph, tone = (g.needs, "needs") if standing.dicts(status, "items") else (g.working, "working")
     return glyph, f"{head}{g.sep}{tail}", tone
 

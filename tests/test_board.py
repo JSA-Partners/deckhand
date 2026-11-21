@@ -133,17 +133,18 @@ def test_working_rows_show_the_stage_and_the_hands_own_status():
 def test_a_story_whose_hand_is_gone_reads_stopped_at_its_stage():
     sessions = [session("a1b2", "ACME-15", state="failed", status=None), LIVE[2]]
     rows = section(shown(sessions=sessions), "stopped")
-    assert [row.split()[:2] for row in rows] == [["x", "ACME-15"], ["x", "ACME-18"]]
+    assert [row.split()[:2] for row in rows] == [["x", "ACME-15"], ["x", "ACME-17"], ["x", "ACME-18"]]
     assert "failed at branch review 2/3" in rows[0]
-    assert "stopped at drafting" in rows[1]
+    assert "stopped at building" in rows[1]
+    assert "stopped at drafting" in rows[2]
     assert "ACME-15" not in "\n".join(section(shown(sessions=sessions), "queued"))
 
 
 def test_queued_rows_have_no_hand_and_no_item():
     rows = section(shown(sample(hands=[]), sessions=None), "queued")
-    assert [row.split()[1] for row in rows] == ["ACME-15", "ACME-17", "ACME-18", "ACME-19"]
+    assert [row.split()[1] for row in rows] == ["ACME-18", "ACME-19"]
     assert rows[0].endswith("waits for a slot")
-    assert rows[3].endswith("blocked by ACME-18")
+    assert rows[1].endswith("blocked by ACME-18")
 
 
 def test_a_free_slot_reads_ready():
@@ -263,3 +264,28 @@ def test_only_spikes_join_working_without_a_story_and_foreign_hands_stay_off():
     files["hands"] += [{"name": "spike-k2", "ref": "k2", "state": "working"}]
     rows = section(shown(files, sessions=None), "working")
     assert [row.split()[1] for row in rows] == ["ACME-15", "ACME-17", "k2"]
+
+
+def test_the_header_counts_the_same_hands_as_the_body():
+    lines = shown(sample(items=[]), sessions=[session("x", "ACME-17")])
+    assert texts(lines)[0].startswith(" * 1 working | nothing needs you")
+    assert rules(lines)[1] == "working 1"
+
+
+def test_a_story_past_its_start_with_no_session_reads_stopped():
+    rows = section(shown(sessions=[session("x", "ACME-17")]), "stopped")
+    assert [row.split()[1] for row in rows] == ["ACME-15"]
+    assert "stopped at branch review 2/3" in rows[0]
+
+
+EDGES = ["9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"]
+
+
+@pytest.mark.parametrize("at_edge", EDGES)
+def test_a_time_out_of_range_still_renders(at_edge):
+    stories = sample()["stories"]
+    stories[1] = stories[1] | {"completed_at": at_edge}
+    stories[3] = stories[3] | {"stage": stage("branch review", 6, 2) | {"since": at_edge}}
+    items = [sample()["items"][0] | {"since": at_edge}]
+    for status in (sample(stories=stories, items=items), sample(written_at=at_edge), sample(stale_since=at_edge)):
+        frame.text(shown(status, rows=30, keys=True, expanded="story:ACME-13"), color=True)

@@ -74,7 +74,7 @@ def test_one_waiting_with_a_head():
     assert lines(found) == [
         "## ● ACME-2 needs you",
         "**sign-off** at c2f00d123456 · waiting 14m · type `next`",
-        "◐ 1 working · ○ 1 queued · slots 1/2 · Alpha day 4 of 7",
+        "◐ 1 working · × 1 stopped · ○ 0 queued · slots 1/2 · Alpha day 4 of 7",
     ]
 
 
@@ -99,7 +99,7 @@ def test_nothing_waiting_is_only_the_quiet_line():
 def test_an_item_with_no_time_or_detail():
     found = lines(brief.text(held([item("Alpha", "planning", None)], feature=None, budget=None), NOW, brief.UNICODE))
     assert found[1] == "**planning** · type `next`"
-    assert found[2] == "◐ 0 working · ○ 3 queued · slots 1/2"
+    assert found[2] == "◐ 0 working · × 1 stopped · ○ 2 queued · slots 1/2"
 
 
 def test_ascii_glyphs():
@@ -130,7 +130,7 @@ def test_an_unreachable_empty_state_is_not_an_all_clear():
     found = lines(brief.text(stale, NOW, brief.UNICODE))
     assert found == [
         "Linear unreachable; showing the state as of 14m ago",
-        "◐ 0 working · ○ 3 queued · nothing was waiting as of 14m ago · slots 1/2 · Alpha day 4 of 7",
+        "◐ 0 working · × 1 stopped · ○ 2 queued · nothing was waiting as of 14m ago · slots 1/2 · Alpha day 4 of 7",
     ]
 
 

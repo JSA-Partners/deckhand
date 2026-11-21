@@ -8,6 +8,8 @@ from deckhand import fleet
 DONE = "Done"
 NEEDS, WORKING, STOPPED, QUEUED, MERGED = "needs you", "working", "stopped", "queued", "done today"
 ORDER = (NEEDS, WORKING, STOPPED, QUEUED, MERGED)
+NOT_STARTED = ("drafting", "planning")
+FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -51,8 +53,9 @@ def strings(found: object, key: str) -> list[str]:
 
 def timestamp(at: str) -> float | None:
     try:
-        return datetime.fromisoformat(at).timestamp() if at else None
-    except ValueError:
+        stamp = datetime.fromisoformat(at).timestamp() if at else None
+        return stamp if stamp is None or datetime.fromtimestamp(stamp) else None
+    except (ValueError, OverflowError, OSError):
         return None
 
 
@@ -78,10 +81,15 @@ def live(sessions: list[fleet.Session]) -> dict[str, Hand]:
     }
 
 
+def started(story: dict) -> bool:
+    name = text(story.get("stage"), "name")
+    return bool(name) and name not in NOT_STARTED
+
+
 def _story(story: dict, hand: Hand | None) -> str:
-    if hand is None:
-        return QUEUED
-    return WORKING if hand.live else STOPPED
+    if hand is not None and hand.live:
+        return WORKING
+    return STOPPED if hand is not None or started(story) else QUEUED
 
 
 def classify(status: dict, hands: dict[str, Hand], today: float | None = None) -> list[Entry]:
@@ -102,8 +110,9 @@ def classify(status: dict, hands: dict[str, Hand], today: float | None = None) -
         elif ref not in waiting:
             found[_story(story, hand)].append(Entry(_story(story, hand), ref, story, None, hand))
     for ref, hand in hands.items():
-        if hand.spike and hand.live and ref not in waiting and ref not in by_ref:
-            found[WORKING].append(Entry(WORKING, ref, {}, None, hand))
+        if hand.spike and ref not in waiting and ref not in by_ref and (hand.live or hand.state == FAILED):
+            kind = WORKING if hand.live else STOPPED
+            found[kind].append(Entry(kind, ref, {}, None, hand))
     return [entry for kind in ORDER for entry in found[kind]]
 
 

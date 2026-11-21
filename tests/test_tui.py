@@ -243,3 +243,14 @@ def test_a_malformed_status_file_never_kills_the_watch():
     broken["slots"] = "full"
     screen, _, _ = run(["j", "j", ENTER, "j"], Reader(broken))
     assert len(screen.frames) == 5
+
+
+def test_a_time_out_of_range_never_kills_the_watch():
+    for edge in ("9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"):
+        broken = sample()
+        broken["stories"][1]["completed_at"] = edge
+        broken["items"][0]["since"] = edge
+        screen, _, _ = run(["j"] * 8 + [ENTER], Reader(broken))
+        assert len(screen.frames) == 10
+        screen, _, _ = run([ENTER], Reader(sample(written_at=edge)))
+        assert len(screen.frames) == 2
