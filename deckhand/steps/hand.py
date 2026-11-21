@@ -234,7 +234,7 @@ class Hand:
             return
         ops.ensure_record(self._app(), story["id"], wake)
         decision = wake.data["decision"]
-        print(f"send to {name}: the person decided the {decision} you waited on; carry on with the story")
+        print(f"send to {name}: the person decided {decision} {wake.version[:8]}; carry on with the story")
 
     def _argv(
         self, name: str, ref: str, clone: Path, worktree: Path, prompt: str, resume: str | None, spike: bool = False

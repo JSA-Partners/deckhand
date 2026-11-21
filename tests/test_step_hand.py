@@ -255,8 +255,8 @@ def test_wake_once_per_decision(clone: Path, capsys: pytest.CaptureFixture[str])
     assert capsys.readouterr().out.strip() == "nothing to wake"
     decided(store, "s1", "n1")
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
-    out = capsys.readouterr().out.strip()
-    assert out.startswith("send to hand-ACME-1: ")
+    first = capsys.readouterr().out.strip()
+    assert first.startswith("send to hand-ACME-1: ")
     [wake] = [r for r in store.records("s1") if r.kind == asks.WAKE]
     assert wake.version == "n1"
     written = list(store.writes)
@@ -265,7 +265,9 @@ def test_wake_once_per_decision(clone: Path, capsys: pytest.CaptureFixture[str])
     assert store.writes == written
     decided(store, "s1", "n2")
     hand(store, shell).apply(["wake", "ACME-1", *TEAM])
-    assert capsys.readouterr().out.startswith("send to hand-ACME-1: ")
+    second = capsys.readouterr().out.strip()
+    assert second.startswith("send to hand-ACME-1: ")
+    assert second != first and "n1" in first and "n2" in second
     [wake] = [r for r in store.records("s1") if r.kind == asks.WAKE]
     assert wake.version == "n2"
     assert shell.launched() == ["hand-ACME-1"]
