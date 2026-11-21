@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
 NOTIFY_LIMIT = 200
 NOTIFY = "notify: "
+LINE_LIMIT = 50
+LINE_STALE_SECONDS = 30 * 60
+RED, GREEN, DIM, RESET = "\x1b[31m", "\x1b[32m", "\x1b[2m", "\x1b[0m"
 MARKERS = "*-+"
 DONE = "Done"
 ACTIONS = {
@@ -143,3 +147,33 @@ def notify(status: dict, now: float) -> tuple[str, list[str]] | None:
     rest += f"; {more} more {'needs' if more == 1 else 'need'} you" if more else ""
     room = NOTIFY_LIMIT - 1 - len(NOTIFY) - len(rest)
     return clean(first["ref"])[:room] + rest, [i["key"] for i in new]
+
+
+def colored(env: Mapping[str, str]) -> bool:
+    return "NO_COLOR" not in env and env.get("TERM") != "dumb"
+
+
+def _line_parts(status: dict, now: float) -> tuple[str, str]:
+    items = status["items"]
+    if not items:
+        working = sum(1 for hand in status.get("hands", []) if hand["state"] == "working")
+        return f"{working} working", "nothing needs you"
+    top = items[0]
+    waited = _waited(top, now)
+    return f"{len(items)} {'needs' if len(items) == 1 else 'need'} you", " ".join(
+        part for part in (top["kind"], clean(top["ref"]), waited) if part
+    )
+
+
+def line(status: dict | None, now: float, g: Glyphs, color: bool = False) -> str:
+    if status is None or not status.get("feature"):
+        return ""
+    since_written = elapsed(status["written_at"], now)
+    if status.get("stale_since") or since_written > LINE_STALE_SECONDS:
+        glyph, text, paint = g.queued, f"captain stale {age(since_written)}", DIM
+    else:
+        head, tail = _line_parts(status, now)
+        glyph, paint = (g.needs, RED) if status["items"] else (g.working, GREEN)
+        text = f"{head}{g.sep}{tail}"
+    shown = f"{glyph} {text}"[:LINE_LIMIT]
+    return f"{paint}{shown}{RESET}" if color else shown

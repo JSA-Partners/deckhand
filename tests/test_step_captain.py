@@ -390,3 +390,105 @@ def test_a_bad_notified_is_rewritten(clone: Path, notified: object, capsys: pyte
     path.write_text(json.dumps(json.loads(path.read_text()) | {"notified": notified}))
     assert "## ● ACME-1 needs you" in output(store, [], capsys).splitlines()
     assert written()["notified"] == []
+
+
+class Untouched:
+    def __getattr__(self, name: str):
+        raise AssertionError(f"the line touched the store: {name}")
+
+
+def seeded(state: Path, **extra) -> None:
+    found = {
+        "shape": 1,
+        "written_at": iso(int(NOW * 1000)),
+        "team": "ACME",
+        "feature": "Alpha",
+        "budget": None,
+        "slots": {"used": 0, "cap": 2},
+        "items": [
+            {"key": "k1", "kind": "sign-off", "ref": "ACME-1", "title": "t", "since": iso(int((NOW - 840) * 1000))}
+        ],
+        "stories": [],
+        "hands": [],
+        "release": False,
+        "stale_since": None,
+        "notified": [],
+    }
+    status.write(state, found | extra)
+
+
+def line_of(args: list[str], capsys: pytest.CaptureFixture[str], shell: Shell | None = None) -> str:
+    shell = shell or Shell()
+    Captain(Untouched(), shell, person=Untouched(), clock=lambda: NOW).context(["--line", *args])
+    assert shell.calls == []
+    return capsys.readouterr().out
+
+
+def test_line_reads_only_the_status_file(state: Path, capsys: pytest.CaptureFixture[str]):
+    seeded(state)
+    assert line_of([], capsys) == "● 1 needs you · sign-off ACME-1 14m\n"
+
+
+def test_line_needs_no_team_key_or_credentials(state: Path, capsys: pytest.CaptureFixture[str]):
+    seeded(state)
+    Captain(clock=lambda: NOW).context(["--line"])
+    assert capsys.readouterr().out.startswith("●")
+
+
+def test_line_prints_nothing_without_a_file(state: Path, capsys: pytest.CaptureFixture[str]):
+    assert line_of([], capsys) == ""
+
+
+def test_line_prints_nothing_when_no_feature_is_open(state: Path, capsys: pytest.CaptureFixture[str]):
+    seeded(state, feature=None)
+    assert line_of([], capsys) == ""
+
+
+def test_line_prints_nothing_for_a_damaged_file(state: Path, capsys: pytest.CaptureFixture[str]):
+    seeded(state, written_at="yesterday")
+    assert line_of([], capsys) == ""
+
+
+def test_line_prints_nothing_when_the_state_dir_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    def fails() -> Path:
+        raise Refusal("no state dir")
+
+    monkeypatch.setattr(answers, "state_dir", fails)
+    assert line_of([], capsys) == ""
+
+
+def test_line_colors_only_when_asked(state: Path, capsys: pytest.CaptureFixture[str]):
+    seeded(state)
+    assert "\x1b" not in line_of([], capsys)
+    assert line_of(["--color"], capsys).startswith("\x1b[31m")
+
+
+@pytest.mark.parametrize("env", [{"NO_COLOR": "1"}, {"TERM": "dumb"}])
+def test_line_honors_no_color_and_a_dumb_terminal(
+    env: dict[str, str], state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    seeded(state)
+    assert "\x1b" not in line_of(["--color"], capsys)
+
+
+def test_line_refuses_arguments_it_cannot_combine(capsys: pytest.CaptureFixture[str]):
+    for args in (["--line", "--json"], ["--line", "--brief"], ["--color"], ["--line", "--bogus"]):
+        with pytest.raises(Refusal):
+            Captain(Untouched(), clock=lambda: NOW).context(args)
+
+
+def test_line_prints_nothing_on_stdout_through_the_cli_when_it_breaks(
+    state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand import cli
+
+    def explode(_: Path) -> dict:
+        raise RuntimeError("secret")
+
+    monkeypatch.setattr(status, "read", explode)
+    assert cli.main(["captain", "context", "--line"]) == 0
+    assert capsys.readouterr().out == ""

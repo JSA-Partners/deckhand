@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -18,19 +19,23 @@ from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
-USAGE = "captain takes [--team-key KEY]; context [--brief] [--json]"
+USAGE = "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]]"
 
 
 def _parse(args: list[str]) -> dict:
-    found: dict = {"brief": False, "json": False}
+    found: dict = {"brief": False, "json": False, "line": False, "color": False}
     rest = iter(args)
     for arg in rest:
-        if arg in ("--brief", "--json"):
+        if arg in ("--brief", "--json", "--line", "--color"):
             found[arg[2:]] = True
         elif arg == "--team-key":
             found["team_key"] = next(rest, "")
         else:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
+    if found["color"] and not found["line"]:
+        raise Refusal(f"--color goes with --line; {USAGE}")
+    if found["line"] and (found["brief"] or found["json"]):
+        raise Refusal(f"--line cannot join --brief or --json; {USAGE}")
     return found
 
 
@@ -130,6 +135,9 @@ class Captain:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
+        if parsed["line"]:
+            self._line(parsed["color"])
+            return
         team = team_key(parsed)
         store, read = self._app(), fleet.sessions(self._runner)
         notes = [read.note] if read.note else []
@@ -162,6 +170,15 @@ class Captain:
         if not parsed["brief"]:
             print()
             _print(facts)
+
+    def _line(self, color: bool) -> None:
+        try:
+            found = status.read(answers.state_dir())
+            shown = brief.line(found, self._clock(), brief.glyphs(_encoding()), color and brief.colored(os.environ))
+            if shown:
+                print(shown)
+        except Exception:
+            return
 
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"captain has no apply; {USAGE}")

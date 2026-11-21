@@ -174,3 +174,71 @@ def test_the_notify_line_is_under_200_characters_whatever_the_ref():
 
 def test_clean_drops_control_and_separator_characters():
     assert brief.clean("a\nb\tc d​e\x7f") == "a b c d e"
+
+
+def hand(state: str) -> dict:
+    return {"name": "h", "ref": "ACME-1", "state": state, "waiting_for": None, "started_at": at(60)}
+
+
+def test_line_when_two_wait():
+    waiting = [item("SBX-14", "sign-off", 14), item("ACME-2", "finding", 30)]
+    assert brief.line(held(waiting), NOW, brief.UNICODE) == "● 2 need you · sign-off SBX-14 14m"
+
+
+def test_line_when_one_waits_with_no_time():
+    assert brief.line(held([item("ACME-2", "question", None)]), NOW, brief.UNICODE) == "● 1 needs you · question ACME-2"
+
+
+def test_line_when_only_hands_work():
+    found = held([], hands=[hand("working"), hand("working"), hand("blocked")])
+    assert brief.line(found, NOW, brief.UNICODE) == "◐ 2 working · nothing needs you"
+
+
+def test_line_is_empty_with_no_feature():
+    assert brief.line(held([], feature=None, budget=None), NOW, brief.UNICODE) == ""
+
+
+def test_line_for_a_stale_file():
+    assert brief.line(held([], written_at=at(12), stale_since=at(10)), NOW, brief.UNICODE) == "○ captain stale 12m"
+
+
+def test_line_for_an_old_file():
+    found = held([item("ACME-1", "question", 3)], written_at=at(31))
+    assert brief.line(found, NOW, brief.UNICODE) == "○ captain stale 31m"
+
+
+def test_line_stays_fresh_at_thirty_minutes():
+    assert brief.line(held([], written_at=at(30)), NOW, brief.UNICODE).startswith("◐")
+
+
+def test_line_ascii():
+    assert brief.line(held([item("ACME-2", "finding", 5)]), NOW, brief.ASCII) == "! 1 needs you | finding ACME-2 5m"
+
+
+def test_line_never_passes_fifty_characters():
+    found = held([item("ACME-" + "9" * 40, "second-sign-off", 500)])
+    assert len(brief.line(found, NOW, brief.UNICODE)) == 50
+
+
+def test_line_cleans_a_ref():
+    assert "\x1b" not in brief.line(held([item("AC\x1b[31mME", "question", 1)]), NOW, brief.UNICODE)
+
+
+def test_line_color_marks_needs_working_and_stale():
+    needs = brief.line(held([item("ACME-1", "question", 1)]), NOW, brief.UNICODE, color=True)
+    working = brief.line(held([], hands=[hand("working")]), NOW, brief.UNICODE, color=True)
+    stale = brief.line(held([], written_at=at(40)), NOW, brief.UNICODE, color=True)
+    assert needs.startswith("\x1b[31m") and needs.endswith("\x1b[0m")
+    assert working.startswith("\x1b[32m")
+    assert stale.startswith("\x1b[2m")
+
+
+def test_line_is_never_colored_without_the_flag():
+    assert "\x1b" not in brief.line(held([item("ACME-1", "question", 1)]), NOW, brief.UNICODE)
+
+
+def test_color_flag_is_dropped_for_no_color_and_a_dumb_terminal():
+    assert brief.colored({}) is True
+    assert brief.colored({"NO_COLOR": "1"}) is False
+    assert brief.colored({"NO_COLOR": ""}) is False
+    assert brief.colored({"TERM": "dumb"}) is False
