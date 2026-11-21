@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from deckhand import claims, config, features, fleet, git, order, queue, startable
+from deckhand import answers, claims, config, features, fleet, git, order, queue, stage, startable, status
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
 from deckhand.linear.connect import connect
 from deckhand.policy import Policy
+from deckhand.records import iso
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
@@ -39,12 +41,15 @@ def _local(notes: list[str]) -> config.LocalConfig:
         return config.LocalConfig()
 
 
-def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
+def _current(store: Store, team: str, notes: list[str], lost: list[LinearError]) -> Feature | None:
     try:
         return features.current(store, team)
-    except (Refusal, LinearError) as error:
+    except Refusal as error:
         notes.append(str(error))
-        return None
+    except LinearError as error:
+        notes.append(str(error))
+        lost.append(error)
+    return None
 
 
 def _budget(feature: Feature, today: date) -> dict | None:
@@ -72,9 +77,11 @@ def _build_order(store: Store, feature: Feature) -> tuple[list[dict], list[str]]
     rows = [
         {
             "ref": s["identifier"],
+            "title": s["title"],
             "state": s["state"],
             "owner": s["assignee_name"],
             "blocked_by": _blockers(s, edges, by_id),
+            "stage": stage.as_data(stage.of(s, feature.records.get(s["id"], []))),
         }
         for s in placed
     ]
@@ -107,11 +114,13 @@ class Captain:
         *,
         person: Store | None = None,
         today: Callable[[], date] = date.today,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self._store = store
         self._runner = runner
         self._person = person
         self._today = today
+        self._clock = clock
 
     def _app(self) -> Store:
         if self._store is not None:
@@ -126,11 +135,14 @@ class Captain:
         team = team_key(parsed)
         store, read = self._app(), fleet.sessions(self._runner)
         notes = [read.note] if read.note else []
+        lost: list[LinearError] = []
         local = _local(notes)
-        feature = _current(store, team, notes)
-        me = self._me(notes)
+        feature = _current(store, team, notes, lost)
+        me = self._me(notes, lost)
         waiting = self._waiting(store, team, feature, me, read, local, notes)
         facts = self._facts(store, feature, waiting, read, me, local, notes)
+        if not parsed["count"] and not lost:
+            self._write(team, facts, waiting, read, notes)
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
         elif parsed["count"]:
@@ -141,12 +153,24 @@ class Captain:
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"captain has no apply; {USAGE}")
 
-    def _me(self, notes: list[str]) -> str | None:
+    def _me(self, notes: list[str], lost: list[LinearError]) -> str | None:
         try:
             return claims.me(self._person_store())
-        except (Refusal, LinearError) as error:
+        except Refusal as error:
             notes.append(str(error))
-            return None
+        except LinearError as error:
+            notes.append(str(error))
+            lost.append(error)
+        return None
+
+    def _write(self, team: str, facts: dict, waiting: list[queue.Item], read: fleet.Fleet, notes: list[str]) -> None:
+        state = answers.state_dir()
+        written_at = iso(int(self._clock() * 1000))
+        found = status.snapshot(written_at, team, facts, waiting, read.sessions, status.read(state))
+        try:
+            status.write(state, found)
+        except OSError as error:
+            notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
 
     def _waiting(
         self,

@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config
+from deckhand import answers, asks, config, status
 from deckhand.features import FEATURE_LABEL
+from deckhand.linear.client import LinearError
 from deckhand.records import HAND, Record
 from deckhand.step import REGISTRY, Refusal
 from deckhand.steps.captain import Captain, _policy_for
@@ -19,10 +20,11 @@ from tests.test_step_hand import ME, TEAM, Shell, building, clone, row, spike_ro
 __all__ = ["clone", "state"]
 
 DAY = date(2026, 11, 17)
+NOW = 1795000000.0
 
 
 def captain(store: FakeStore, shell: Shell | None = None, today: date = DAY) -> Captain:
-    return Captain(store, shell or Shell(), person=store, today=lambda: today)
+    return Captain(store, shell or Shell(), person=store, today=lambda: today, clock=lambda: NOW)
 
 
 def output(store: FakeStore, args: list[str], capsys: pytest.CaptureFixture[str], **kwargs) -> str:
@@ -72,7 +74,8 @@ def test_restart_prints_same_queue(clone: Path, state: Path, tmp_path: Path, cap
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text(json.dumps(store.snapshot()))
     restarted = FakeStore.from_snapshot(snapshot)
-    assert not state.exists()
+    (state / status.FILE).unlink()
+    assert [p.name for p in state.iterdir()] == []
     assert output(restarted, [], capsys, shell=Shell(row("ACME-1", "working", "busy"))) == first
     assert "question ACME-1" in first
 
@@ -173,3 +176,66 @@ def test_budget_line(clone: Path, capsys: pytest.CaptureFixture[str]):
     planning = setup()
     note = output(planning, [], capsys, today=date(2026, 11, 20))
     assert "Alpha: day 4 of 7, planning has passed half of the week" in note.splitlines()
+
+
+def written() -> dict | None:
+    return status.read(answers.state_dir())
+
+
+def test_a_full_read_writes_the_status_file(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    asked(store, "s1")
+    store.relate("s1", "s2")
+    output(store, [], capsys, shell=Shell(row("ACME-1", "working", "busy")))
+    found = written()
+    assert found["written_at"] == "2026-11-18T11:06:40.000Z"
+    assert (found["team"], found["feature"], found["slots"]) == ("ACME", "Alpha", {"used": 1, "cap": 1})
+    assert [(i["kind"], i["ref"]) for i in found["items"]] == [("question", "ACME-1")]
+    assert [(s["ref"], s["title"], s["blocked_by"], s["stage"]["name"]) for s in found["stories"]] == [
+        ("ACME-1", "Orders", [], "planning"),
+        ("ACME-2", "Receipts", ["ACME-1"], "planning"),
+    ]
+    assert [(h["name"], h["ref"]) for h in found["hands"]] == [("hand-ACME-1", "ACME-1")]
+
+
+def test_the_json_read_writes_the_file_and_shows_the_stage(clone: Path, capsys: pytest.CaptureFixture[str]):
+    facts = json.loads(output(owned(), ["--json"], capsys))
+    assert facts["order"][0]["stage"]["name"] == "planning"
+    assert written()["stories"] == facts["order"]
+
+
+def test_the_count_writes_nothing(clone: Path, capsys: pytest.CaptureFixture[str]):
+    output(owned(), ["--count"], capsys)
+    assert written() is None
+
+
+def test_a_later_read_keeps_what_was_notified(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    asked(store, "s1")
+    output(store, [], capsys)
+    first = written()
+    status.write(answers.state_dir(), first | {"notified": [first["items"][0]["key"]]})
+    output(store, [], capsys)
+    assert written()["notified"] == [first["items"][0]["key"]]
+
+
+def test_linear_unreachable_keeps_the_last_file(clone: Path, capsys: pytest.CaptureFixture[str]):
+    class Unreachable:
+        def viewer(self):
+            raise LinearError("network", "could not reach Linear")
+
+    store = owned()
+    asked(store, "s1")
+    output(store, [], capsys)
+    before = written()
+    Captain(store, Shell(), person=Unreachable(), today=lambda: DAY, clock=lambda: NOW + 60).context(TEAM)
+    assert "could not reach Linear" in capsys.readouterr().out
+    assert written() == before
+
+
+def test_a_failed_write_is_a_note(clone: Path, capsys: pytest.CaptureFixture[str]):
+    answers.state_dir().parent.mkdir(parents=True, exist_ok=True)
+    answers.state_dir().write_text("not a directory")
+    text = output(owned(), [], capsys)
+    assert text.splitlines()[0].startswith(f"cannot write {answers.state_dir() / status.FILE}")
+    assert "slots 0 of 1" in text.splitlines()
