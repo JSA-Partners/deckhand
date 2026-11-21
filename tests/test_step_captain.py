@@ -655,3 +655,26 @@ def test_a_malformed_earlier_file_reads_as_no_earlier_state(
 def test_a_captain_write_with_no_feature_open_reads_back(clone: Path, capsys: pytest.CaptureFixture[str]):
     output(FakeStore(), [], capsys)
     assert written() is not None and written()["feature"] is None
+
+
+def test_the_board_refresh_survives_a_missing_program_and_a_hung_read(monkeypatch: pytest.MonkeyPatch):
+    from deckhand.steps import captain
+
+    monkeypatch.setattr(captain.sys, "argv", ["/nowhere/deckhand"])
+    assert captain._full_read()() is False
+
+    class Hung:
+        killed = False
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            Hung.killed = True
+
+    now = [0.0]
+    monkeypatch.setattr(captain.subprocess, "Popen", lambda *a, **k: Hung())
+    running = captain._full_read(lambda: now[0])
+    assert running() is True
+    now[0] = captain.REFRESH_LIMIT + 1
+    assert running() is False and Hung.killed

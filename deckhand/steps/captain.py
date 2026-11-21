@@ -39,6 +39,7 @@ from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
+REFRESH_LIMIT = 120.0
 USAGE = "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]]"
 FLAGS = ("--brief", "--json", "--line", "--color", "--board", "--watch", "--no-color")
 
@@ -291,11 +292,23 @@ def _board_command() -> str:
 
 
 # The board's r runs the captain's full read, which leaves the notified list to the captain's brief.
-def _full_read() -> Callable[[], bool]:
-    argv = [str(Path(sys.argv[0]).resolve()), "captain", "context"]
-    quiet = subprocess.DEVNULL
-    started = subprocess.Popen(argv, stdin=quiet, stdout=quiet, stderr=quiet, start_new_session=True)
-    return lambda: started.poll() is None
+def _full_read(clock: Callable[[], float] = time.monotonic) -> Callable[[], bool]:
+    argv, quiet = [str(Path(sys.argv[0]).resolve()), "captain", "context"], subprocess.DEVNULL
+    try:
+        started = subprocess.Popen(argv, stdin=quiet, stdout=quiet, stderr=quiet, start_new_session=True)
+    except OSError:
+        return lambda: False
+    deadline = clock() + REFRESH_LIMIT
+
+    def running() -> bool:
+        if started.poll() is not None:
+            return False
+        if clock() < deadline:
+            return True
+        started.kill()
+        return False
+
+    return running
 
 
 def _quiet(runner: git.Runner) -> git.Runner:

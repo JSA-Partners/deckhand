@@ -18,9 +18,19 @@ FLEET_EVERY = 5.0
 FIRST_READ = 1.0
 KEYS = {"q": "quit", "\x1b": "quit", "j": "down", "k": "up", "r": "refresh", "\r": "enter", "\n": "enter"}
 KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
+ESC, ESC_WAIT = "\x1b", 0.025
 ENTER_SCREEN, LEAVE_SCREEN = "\x1b[?1049h\x1b[?25l", "\x1b[?25h\x1b[?1049l"
 
 Refresh = Callable[[], Callable[[], bool]]
+
+
+def split_key(buffer: str) -> tuple[str, str]:
+    if not buffer.startswith(ESC) or len(buffer) == 1:
+        return buffer[:1], buffer[1:]
+    if buffer[1] not in "[O":
+        return ESC, buffer[1:]
+    end = next((n for n in range(2, len(buffer)) if buffer[n].isalpha() or buffer[n] == "~"), len(buffer) - 1)
+    return buffer[: end + 1], buffer[end + 1 :]
 
 
 class Terminal(Protocol):
@@ -90,7 +100,7 @@ class Watch:
         self._status: dict | None = None
         self._read_at = float("-inf")
         self._keys: list[str] = []
-        self._shown: list[str] | None = None
+        self._shown: tuple[int, int, list[str]] | None = None
         self.selected: str | None = None
         self.expanded: str | None = None
 
@@ -123,9 +133,9 @@ class Watch:
             found, self._g, cols, rows, self.selected, self.expanded, keys=True, refreshing=self._refreshing()
         )
         painted = [frame.paint(line, self._color) for line in lines[:rows]]
-        if painted != self._shown:
+        if (rows, cols, painted) != self._shown:
             self._term.show(painted)
-            self._shown = painted
+            self._shown = (rows, cols, painted)
 
     def handle(self, key: str | None) -> bool:
         action = KEYS.get(key or "")
@@ -157,6 +167,7 @@ class Screen:
     def __init__(self, fd: int, out) -> None:
         self._fd, self._out = fd, out
         self._saved: list | None = None
+        self._pending = ""
 
     def __enter__(self) -> Screen:
         self._saved = termios.tcgetattr(self._fd)
@@ -175,11 +186,18 @@ class Screen:
         found = os.get_terminal_size(self._out.fileno())
         return found.lines, found.columns
 
+    def _ready(self, timeout: float) -> bool:
+        return bool(select.select([self._fd], [], [], timeout)[0])
+
     def key(self, timeout: float) -> str | None:
-        ready, _, _ = select.select([self._fd], [], [], timeout)
-        if not ready:
+        if not self._pending and not self._ready(timeout):
             return None
-        return os.read(self._fd, 32).decode("utf-8", "replace")
+        if not self._pending:
+            self._pending = os.read(self._fd, 64).decode("utf-8", "replace")
+        if self._pending == ESC and self._ready(ESC_WAIT):
+            self._pending += os.read(self._fd, 64).decode("utf-8", "replace")
+        found, self._pending = split_key(self._pending)
+        return found
 
     def show(self, lines: list[str]) -> None:
         rows, _ = self.size()

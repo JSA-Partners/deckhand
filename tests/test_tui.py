@@ -287,3 +287,37 @@ def test_each_row_is_cleared_before_it_is_written_and_leftover_rows_are_cleared(
     screen.size = lambda: (4, 20)
     screen.show(["\x1b[2m--\x1b[0m one", "two"])
     assert out.getvalue() == "\x1b[1;1H\x1b[2K\x1b[2m--\x1b[0m one\x1b[2;1H\x1b[2Ktwo\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2K"
+
+
+def test_keys_read_together_come_out_one_at_a_time():
+    assert tui.split_key("jj") == ("j", "j")
+    assert tui.split_key("\x1b[B\x1b[B") == ("\x1b[B", "\x1b[B")
+    assert tui.split_key("\x1bOAk") == ("\x1bOA", "k")
+    assert tui.split_key("\x1b[1;5B") == ("\x1b[1;5B", "")
+    assert tui.split_key("\x1bq") == ("\x1b", "q")
+
+
+def test_an_arrow_split_across_reads_is_not_a_quit():
+    import os
+
+    read, write = os.pipe()
+    screen = tui.Screen(read, io.StringIO())
+    os.write(write, b"\x1b")
+    threading.Timer(0.005, lambda: os.write(write, b"[B")).start()
+    tui.ESC_WAIT, wait = 0.5, tui.ESC_WAIT
+    try:
+        assert screen.key(1) == "\x1b[B"
+        os.write(write, b"jj")
+        assert [screen.key(1), screen.key(0)] == ["j", "j"]
+        os.write(write, b"\x1b")
+        tui.ESC_WAIT = 0.01
+        assert screen.key(1) == "\x1b"
+    finally:
+        tui.ESC_WAIT = wait
+        os.close(read)
+        os.close(write)
+
+
+def test_a_resize_that_keeps_the_lines_still_redraws():
+    term, _, _ = run([(30, 140), (40, 140)], size=(30, 120))
+    assert term.shows == 3
