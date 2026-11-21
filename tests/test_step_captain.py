@@ -624,3 +624,32 @@ def test_a_teammates_started_story_is_never_a_stopped_hand(clone: Path, capsys: 
     text = output(store, ["--brief"], capsys)
     assert text.startswith("◐ 0 working · ○ 1 queued · nothing needs you")
     assert [(s["ref"], s["mine"]) for s in written()["stories"]] == [("ACME-1", True), ("ACME-2", False)]
+
+
+BAD_FILES = [
+    {"shape": 1, "notified": []},
+    {"written_at": "garbage"},
+    {"items": [{"key": "k1", "kind": "sign-off", "ref": "ACME-1", "title": "t", "since": "bad"}]},
+    {"slots": {}},
+    {"budget": {"feature": "Alpha"}},
+    {"stories": [{"ref": "ACME-1", "state": "Backlog", "stage": {"round": 1}}]},
+]
+
+
+@pytest.mark.parametrize("mode", [[], ["--brief"], ["--json"]])
+@pytest.mark.parametrize("bad", BAD_FILES)
+def test_a_malformed_earlier_file_reads_as_no_earlier_state(
+    clone: Path, bad: dict, mode: list[str], capsys: pytest.CaptureFixture[str]
+):
+    if bad.get("shape"):
+        status.write(answers.state_dir(), bad)
+    else:
+        seeded(answers.state_dir(), **bad)
+    text = output(unreachable(owned(), "relations"), mode, capsys, clock=NOW + 60)
+    shown = json.loads(text)["brief"] if mode == ["--json"] else text
+    assert shown.splitlines()[0] == "Linear unreachable; no earlier state"
+
+
+def test_a_captain_write_with_no_feature_open_reads_back(clone: Path, capsys: pytest.CaptureFixture[str]):
+    output(FakeStore(), [], capsys)
+    assert written() is not None and written()["feature"] is None

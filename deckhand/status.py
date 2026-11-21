@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from deckhand import fleet
+from deckhand import fleet, standing
 from deckhand.queue import Item
 from deckhand.records import content_hash
 
@@ -72,15 +72,76 @@ def write(state: Path, status: dict) -> None:
         raise
 
 
+def _strings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(entry, str) for entry in value)
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _maybe(value: object, kind: type) -> bool:
+    return value is None or isinstance(value, kind)
+
+
+def _when(value: object) -> bool:
+    return isinstance(value, str) and standing.timestamp(value) is not None
+
+
+def _item_ok(found: object) -> bool:
+    if not isinstance(found, dict) or not all(isinstance(found.get(key), str) for key in ("key", "kind", "ref")):
+        return False
+    return (found.get("since") is None or _when(found["since"])) and _maybe(found.get("head"), str)
+
+
+def _stage_ok(found: object) -> bool:
+    if found is None:
+        return True
+    if not isinstance(found, dict) or not isinstance(found.get("name"), str) or not _maybe(found.get("round"), int):
+        return False
+    return not found.get("round") or _count(found.get("cap"))
+
+
+def _story_ok(found: object) -> bool:
+    if not isinstance(found, dict) or not all(isinstance(found.get(key), str) for key in ("ref", "state")):
+        return False
+    return _maybe(found.get("owner"), str) and _strings(found.get("blocked_by", [])) and _stage_ok(found.get("stage"))
+
+
+def _budget_ok(found: object) -> bool:
+    if found is None:
+        return True
+    shaped = isinstance(found, dict) and isinstance(found.get("feature"), str) and "planning_note" in found
+    return shaped and _count(found.get("days_used")) and _count(found.get("budget_days"))
+
+
+def _valid(found: dict) -> bool:
+    slots, items, stories = found.get("slots"), found.get("items"), found.get("stories")
+    return (
+        found.get("shape") == SHAPE
+        and _strings(found.get("notified"))
+        and _when(found.get("written_at"))
+        and isinstance(slots, dict)
+        and _count(slots.get("used"))
+        and _count(slots.get("cap"))
+        and "feature" in found
+        and _maybe(found["feature"], str)
+        and "budget" in found
+        and _budget_ok(found["budget"])
+        and isinstance(found.get("release"), bool)
+        and isinstance(items, list)
+        and all(_item_ok(entry) for entry in items)
+        and isinstance(stories, list)
+        and all(_story_ok(entry) for entry in stories)
+    )
+
+
 def read(state: Path) -> dict | None:
     try:
         found = json.loads((state / FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(found, dict) or found.get("shape") != SHAPE:
-        return None
-    notified = found.get("notified")
-    return found if isinstance(notified, list) and all(isinstance(key, str) for key in notified) else None
+    return found if isinstance(found, dict) and _valid(found) else None
 
 
 def stale(previous: dict, at: str) -> dict:

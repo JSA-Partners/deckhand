@@ -326,8 +326,8 @@ def _budget_line(budget: dict) -> str:
 
 
 def _order_line(row: dict) -> str:
-    state = f"{row['ref']} {row['state']} {row['owner'] or 'unassigned'}"
-    return f"{state} blocked by {', '.join(row['blocked_by'])}" if row["blocked_by"] else f"{state} ready"
+    state, blockers = f"{row['ref']} {row['state']} {row.get('owner') or 'unassigned'}", row.get("blocked_by")
+    return f"{state} blocked by {', '.join(blockers)}" if blockers else f"{state} ready"
 
 
 def _print(facts: dict) -> None:

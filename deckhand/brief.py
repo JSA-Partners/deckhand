@@ -101,7 +101,7 @@ def _waited(item: dict, now: float) -> str:
 def _detail(item: dict, stories: list[dict]) -> str:
     if item.get("head"):
         return clean(item["head"])[:12]
-    return next((stage_label(s["stage"]) for s in stories if s["ref"] == item["ref"]), "")
+    return next((stage_label(s.get("stage")) for s in stories if s["ref"] == item["ref"]), "")
 
 
 def _heading(items: list[dict], now: float, g: Glyphs) -> str:
