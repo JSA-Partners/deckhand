@@ -278,6 +278,16 @@ def test_a_full_read_writes_the_status_file(clone: Path, capsys: pytest.CaptureF
     assert [(h["name"], h["ref"]) for h in found["hands"]] == [("hand-ACME-1", "ACME-1")]
 
 
+def test_a_merged_story_carries_its_completion_time(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    store.set_issue_state("s1", "Done")
+    output(store, [], capsys)
+    done, open_ = written()["stories"]
+    assert (done["ref"], open_["ref"]) == ("ACME-1", "ACME-2")
+    assert datetime.fromisoformat(done["completed_at"])
+    assert open_["completed_at"] is None
+
+
 def test_the_json_read_writes_the_file_and_shows_the_stage(clone: Path, capsys: pytest.CaptureFixture[str]):
     facts = json.loads(output(owned(), ["--json"], capsys))
     assert facts["order"][0]["stage"]["name"] == "planning"

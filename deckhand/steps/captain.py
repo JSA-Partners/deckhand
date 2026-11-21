@@ -85,6 +85,7 @@ def _build_order(store: Store, feature: Feature) -> tuple[list[dict], list[str]]
             "owner": s["assignee_name"],
             "blocked_by": _blockers(s, edges, by_id),
             "stage": stage.as_data(stage.of(s, feature.records.get(s["id"], []))),
+            "completed_at": s.get("completed_at"),
         }
         for s in placed
     ]

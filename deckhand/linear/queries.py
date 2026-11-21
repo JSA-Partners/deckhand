@@ -85,6 +85,7 @@ query ProjectIssues($id: String!, $after: String) {{
         description
         team {{ key }}
         state {{ name }}
+        completedAt
         assignee {{ id name }}
         labels{PAGE} {{ nodes {{ name }} {MORE} }}
       }}

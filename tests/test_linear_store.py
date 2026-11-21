@@ -628,6 +628,7 @@ def test_project_issues_maps_nodes_with_state() -> None:
         "description": "body",
         "team": {"key": "ACME"},
         "state": {"name": "Done"},
+        "completedAt": "2026-11-20T09:30:00.000Z",
         "assignee": {"id": "user-1", "name": "Ada"},
         "labels": {"nodes": [{"name": "deckhand"}], "pageInfo": DONE},
     }
@@ -646,10 +647,12 @@ def test_project_issues_maps_nodes_with_state() -> None:
             "assignee": "user-1",
             "assignee_name": "Ada",
             "state": "Done",
+            "completed_at": "2026-11-20T09:30:00.000Z",
         }
     ]
     assert client.calls == [("ProjectIssues", {"id": "proj-1", "after": None})]
     assert f"(first: {queries.PAGE_SIZE})" in client.documents[0]
+    assert "completedAt" in client.documents[0]
 
 
 def issue_node(number: int, assignee: dict | None = None) -> dict:
@@ -662,6 +665,7 @@ def issue_node(number: int, assignee: dict | None = None) -> dict:
         "description": "",
         "team": {"key": "ACME"},
         "state": {"name": "Done"},
+        "completedAt": None,
         "assignee": assignee,
         "labels": {"nodes": [], "pageInfo": DONE},
     }
@@ -678,6 +682,7 @@ def test_project_issues_read_across_pages() -> None:
     assert [i["number"] for i in found] == [1, 2]
     assert found[0]["assignee"] is None
     assert found[0]["assignee_name"] is None
+    assert found[0]["completed_at"] is None
     assert client.calls[1] == ("ProjectIssues", {"id": "proj-1", "after": "c1"})
 
 
@@ -691,6 +696,7 @@ def test_project_issues_label_overflow_refuses() -> None:
         "description": "",
         "team": {"key": "ACME"},
         "state": {"name": "Done"},
+        "completedAt": None,
         "assignee": None,
         "labels": {"nodes": [], "pageInfo": MORE},
     }

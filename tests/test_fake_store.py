@@ -214,8 +214,9 @@ def test_project_issues_lists_members_with_state() -> None:
     store.set_issue_state("i2", "Done")
     members = store.project_issues("p1")
     assert [(m["id"], m["state"]) for m in members] == [("i1", "Backlog"), ("i2", "Done")]
-    assert {k: v for k, v in members[1].items() if k != "state"} == store.issue("i2")
-    assert "state" not in store.issue("i2")
+    read_only = ("state", "completed_at")
+    assert {k: v for k, v in members[1].items() if k not in read_only} == store.issue("i2")
+    assert not set(read_only) & set(store.issue("i2"))
     assert store.project_issues("none") == []
 
 
@@ -265,6 +266,17 @@ def test_assign_round_trip() -> None:
     store.assign("i1", "user-2")
     assert store.issue("i1")["assignee"] == "user-2"
     assert store.writes[-1] == ("assign", "i1", "user-2")
+
+
+def test_done_stamps_completed_at_and_reopening_clears_it() -> None:
+    store = FakeStore(now=lambda: "2026-11-20T09:30:00.000Z")
+    store.create_project("p1", "ACME", "Feature", "")
+    store.create_issue("i1", "ACME", "One", "", "p1", [])
+    assert store.project_issues("p1")[0]["completed_at"] is None
+    store.set_issue_state("i1", "Done")
+    assert store.project_issues("p1")[0]["completed_at"] == "2026-11-20T09:30:00.000Z"
+    store.set_issue_state("i1", "In Progress")
+    assert store.project_issues("p1")[0]["completed_at"] is None
 
 
 def test_assigned_issue_shows_in_project_issues() -> None:

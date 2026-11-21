@@ -109,6 +109,7 @@ class FakeStore(Store):
             "assignee": None,
             "assignee_name": None,
             "state": "Backlog",
+            "completed_at": None,
         }
         self._wrote("create_issue", id)
         return id
@@ -125,10 +126,11 @@ class FakeStore(Store):
 
     @staticmethod
     def _public(issue: dict[str, Any]) -> dict[str, Any]:
-        return {key: copy.deepcopy(value) for key, value in issue.items() if key != "state"}
+        return {key: copy.deepcopy(value) for key, value in issue.items() if key not in ("state", "completed_at")}
 
     def set_issue_state(self, issue: str, state: str) -> None:
         self._issues[issue]["state"] = state
+        self._issues[issue]["completed_at"] = self._now() if state == "Done" else None
 
     def set_labels(self, issue: str, labels: list[str]) -> None:
         self._issues[issue]["labels"] = list(labels)
@@ -232,4 +234,4 @@ class FakeStore(Store):
     def project_issues(self, project: str) -> list[dict]:
         held = [i for i in self._issues.values() if i["project"] == project]
         held.sort(key=lambda i: (i["team"], i["number"]))
-        return [copy.deepcopy(i) for i in held]
+        return [copy.deepcopy(i) | {"completed_at": i.get("completed_at")} for i in held]

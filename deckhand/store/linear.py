@@ -292,6 +292,7 @@ class LinearStore(Store):
                 "labels": [label["name"] for label in _nodes(n["labels"], n["id"], "labels")],
                 **_assignee(n),
                 "state": n["state"]["name"],
+                "completed_at": n["completedAt"],
             }
             for n in nodes
         ]
