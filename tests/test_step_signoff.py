@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import implplan, review, signoff, versions
+from deckhand import asks, implplan, review, signoff, versions
 from deckhand.git import GitError
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -199,6 +199,31 @@ def test_not_ready_sign_off_offers_not_yet_and_back_and_records_not_yet_before_t
     assert not signoff.current(store.records("s1"), "s1", "c2")
 
 
+def test_an_early_not_yet_wakes_the_hand(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = signable(tmp_path, repo)
+    start = Record(asks.HAND_START, "s1", "v1", "agent:hand", {})
+    store.put_record("s1", start)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    assert asks.wake_due(store.records("s1"), "s1") is None
+    sign(store, repo, state, capsys, signoff.NOT_YET)
+    woken = asks.wake_due(store.records("s1"), "s1")
+    assert woken is not None and woken.kind == signoff.KIND
+
+
+def test_sign_off_on_a_not_ready_question_is_refused_and_writes_nothing(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    store.writes.clear()
+    with pytest.raises(Refusal, match="is not one of Not yet, Back"):
+        sign(store, repo, state, capsys, signoff.SIGN)
+    assert store.writes == []
+    assert not [r for r in store.records("s1") if r.kind == signoff.KIND]
+
+
 def test_back_on_the_sign_off_question_records_nothing(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -370,7 +395,7 @@ def _id(found: dict) -> str:
     return review.finding_id(review.parse_findings(json.dumps([found]))[0], "branch")
 
 
-def sign_off_refusal(store: FakeStore, repo: Path) -> str:
+def gaps_at_head(store: FakeStore, repo: Path) -> str:
     return gap_text(store)
 
 
@@ -380,7 +405,7 @@ def test_sign_off_waits_for_the_person_on_a_delivery_finding(
     store = ready(tmp_path, repo, state, capsys)
     delivery = raw(changes_delivery=True)
     branch_round(store, delivery, n=2)
-    assert f"{_id(delivery)} changes what the story delivers" in sign_off_refusal(store, repo)
+    assert f"{_id(delivery)} changes what the story delivers" in gaps_at_head(store, repo)
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", _id(delivery)], "Decline")
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
@@ -391,7 +416,7 @@ def test_sign_off_rechecks_the_plan_review_at_the_current_plan(
 ):
     store = ready(tmp_path, repo, state, capsys)
     submit_plan(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
-    assert "the plan review has not stopped clean at the current plan" in sign_off_refusal(store, repo)
+    assert "the plan review has not stopped clean at the current plan" in gaps_at_head(store, repo)
     record_round(Review(store, Git(BASE), repo), tmp_path)
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
@@ -401,7 +426,7 @@ def test_sign_off_needs_the_review_commit_at_the_head(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
-    assert "no tuicr review is built at c2" in sign_off_refusal(store, repo)
+    assert "no tuicr review is built at c2" in gaps_at_head(store, repo)
     Signoff(store, Diffing(), repo).apply(["s1", "review", *TEAM])
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")

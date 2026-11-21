@@ -60,7 +60,6 @@ _DESCRIPTIONS = {
     "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
     "finding": ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"],
     review.CAP_DECISION: ["carry on past the cap", "the hand reworks it and the rounds count again"],
-    signoff.KIND: [_SIGN_OFF[o] for o in _OPTIONS[signoff.KIND]],
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
     signoff.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],

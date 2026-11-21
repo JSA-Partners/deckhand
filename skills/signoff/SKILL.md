@@ -15,7 +15,7 @@ Above: the five screens of the sign-off and what is still missing. REF is $story
 person plainly. Never mark an option recommended.
 
 Every decision runs the same way: run `deckhand decide context KIND REF`, pass the JSON it
-prints unchanged to the question dialog, then run `deckhand decide apply NONCE` once answered. Stopping is safe.
+prints unchanged to the question dialog, then run `deckhand decide apply NONCE` once answered.
 
 First take what the hand left for the person. Decide each finding the `missing:`
 lines name, and each open P1 in `deckhand review context REF --stage plan` and
@@ -41,6 +41,6 @@ For the quiz screen, ask each open item with
 prints the code that answers it: show that code, then ask the item again until it is right.
 
 Last, decide `deckhand decide context sign-off REF`. While anything is missing it offers
-"Not yet" and "Back"; "Back" records nothing. The answer to this question is final: never ask
+"Not yet" and "Back"; "Back" records nothing. Run it early for hand work. The answer to this question is final: never ask
 again. On "Sign off", tell the person the hand merges it next, pinned to this head. On "Not yet",
 say in a sentence what the hand should change; any new commit needs review and sign-off again.
