@@ -9,7 +9,7 @@ import pytest
 from deckhand import answers, asks, config, status
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
-from deckhand.records import HAND, Record
+from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
 from deckhand.steps.captain import Captain, _policy_for
 from deckhand.store.fake import FakeStore
@@ -23,8 +23,8 @@ DAY = date(2026, 11, 17)
 NOW = 1795000000.0
 
 
-def captain(store: FakeStore, shell: Shell | None = None, today: date = DAY) -> Captain:
-    return Captain(store, shell or Shell(), person=store, today=lambda: today, clock=lambda: NOW)
+def captain(store: FakeStore, shell: Shell | None = None, today: date = DAY, clock: float = NOW) -> Captain:
+    return Captain(store, shell or Shell(), person=store, today=lambda: today, clock=lambda: clock)
 
 
 def output(store: FakeStore, args: list[str], capsys: pytest.CaptureFixture[str], **kwargs) -> str:
@@ -218,18 +218,73 @@ def test_a_later_read_keeps_what_was_notified(clone: Path, capsys: pytest.Captur
     assert written()["notified"] == [first["items"][0]["key"]]
 
 
-def test_linear_unreachable_keeps_the_last_file(clone: Path, capsys: pytest.CaptureFixture[str]):
+def unreachable(store: FakeStore, method: str, after: int = 0) -> FakeStore:
+    real, calls = getattr(store, method), []
+
+    def read(*args):
+        calls.append(args)
+        if len(calls) > after:
+            raise LinearError("network", "could not reach Linear")
+        return real(*args)
+
+    setattr(store, method, read)
+    return store
+
+
+READS = [("team_projects", 0), ("team_projects", 1), ("project_issues", 0), ("records", 0), ("relations", 0)]
+
+
+@pytest.mark.parametrize("mode", [[], ["--count"], ["--json"]])
+@pytest.mark.parametrize(("method", "after"), READS)
+def test_unreachable_is_never_an_all_clear(
+    clone: Path, mode: list[str], method: str, after: int, capsys: pytest.CaptureFixture[str]
+):
+    store = unreachable(owned(), method, after)
+    text = output(store, mode, capsys)
+    assert "nothing waiting" not in text
+    if mode == ["--json"]:
+        facts = json.loads(text)
+        assert (facts["unreachable"], facts["count"]) == (True, "Linear unreachable; no earlier state")
+        assert "network: could not reach Linear" in facts["notes"]
+    else:
+        assert "Linear unreachable; no earlier state" in text.splitlines()
+    assert written() is None
+
+
+def test_an_unreachable_viewer_is_never_an_all_clear(clone: Path, capsys: pytest.CaptureFixture[str]):
     class Unreachable:
         def viewer(self):
             raise LinearError("network", "could not reach Linear")
 
+    Captain(owned(), Shell(), person=Unreachable(), today=lambda: DAY, clock=lambda: NOW).context(TEAM)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == ["network: could not reach Linear", "Linear unreachable; no earlier state"]
+
+
+def test_unreachable_shows_the_last_state_and_marks_it_stale(clone: Path, capsys: pytest.CaptureFixture[str]):
     store = owned()
     asked(store, "s1")
     output(store, [], capsys)
     before = written()
-    Captain(store, Shell(), person=Unreachable(), today=lambda: DAY, clock=lambda: NOW + 60).context(TEAM)
-    assert "could not reach Linear" in capsys.readouterr().out
-    assert written() == before
+    unreachable(store, "relations")
+    lines = output(store, [], capsys, clock=NOW + 14 * 60).splitlines()
+    assert "Linear unreachable; showing the state as of 14m ago" in lines
+    assert "nothing waiting" not in lines
+    assert "Alpha: day 1 of 7" in lines
+    assert "ACME-1 Backlog viewer-1 ready" in lines
+    assert written() == before | {"stale_since": iso(int((NOW + 14 * 60) * 1000))}
+    later = output(store, ["--json"], capsys, clock=NOW + 3 * 3600)
+    assert json.loads(later)["count"] == "Linear unreachable; showing the state as of 3h ago"
+    assert written()["stale_since"] == iso(int((NOW + 14 * 60) * 1000))
+
+
+def test_a_good_read_clears_stale(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    output(store, [], capsys)
+    output(unreachable(owned(), "relations"), [], capsys, clock=NOW + 60)
+    assert written()["stale_since"] is not None
+    output(store, [], capsys, clock=NOW + 120)
+    assert written()["stale_since"] is None
 
 
 def test_a_failed_write_is_a_note(clone: Path, capsys: pytest.CaptureFixture[str]):

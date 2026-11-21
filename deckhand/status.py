@@ -74,3 +74,7 @@ def read(state: Path) -> dict | None:
         return None
     notified = found.get("notified")
     return found if isinstance(notified, list) and all(isinstance(key, str) for key in notified) else None
+
+
+def stale(previous: dict, at: str) -> dict:
+    return previous | {"stale_since": previous.get("stale_since") or at}

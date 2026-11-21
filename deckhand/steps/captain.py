@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from deckhand import answers, claims, config, features, fleet, git, order, queue, stage, startable, status
+from deckhand import answers, brief, claims, config, features, fleet, git, order, queue, stage, startable, status
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
@@ -41,14 +41,11 @@ def _local(notes: list[str]) -> config.LocalConfig:
         return config.LocalConfig()
 
 
-def _current(store: Store, team: str, notes: list[str], lost: list[LinearError]) -> Feature | None:
+def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
     try:
         return features.current(store, team)
     except Refusal as error:
         notes.append(str(error))
-    except LinearError as error:
-        notes.append(str(error))
-        lost.append(error)
     return None
 
 
@@ -135,14 +132,18 @@ class Captain:
         team = team_key(parsed)
         store, read = self._app(), fleet.sessions(self._runner)
         notes = [read.note] if read.note else []
-        lost: list[LinearError] = []
         local = _local(notes)
-        feature = _current(store, team, notes, lost)
-        me = self._me(notes, lost)
-        waiting = self._waiting(store, team, feature, me, read, local, notes)
-        facts = self._facts(store, feature, waiting, read, me, local, notes)
-        if not parsed["count"] and not lost:
-            self._write(team, facts, waiting, read, notes)
+        try:
+            feature = _current(store, team, notes)
+            me = self._me(notes)
+            waiting = self._waiting(store, team, feature, me, read, local, notes)
+            facts = self._facts(store, feature, waiting, read, me, local, notes)
+        except LinearError as error:
+            notes.append(str(error))
+            facts = self._unreachable(read, local, notes, write=not parsed["count"])
+        else:
+            if not parsed["count"]:
+                self._write(team, facts, waiting, read, notes)
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
         elif parsed["count"]:
@@ -153,24 +154,32 @@ class Captain:
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"captain has no apply; {USAGE}")
 
-    def _me(self, notes: list[str], lost: list[LinearError]) -> str | None:
+    def _me(self, notes: list[str]) -> str | None:
         try:
             return claims.me(self._person_store())
         except Refusal as error:
             notes.append(str(error))
-        except LinearError as error:
-            notes.append(str(error))
-            lost.append(error)
         return None
+
+    def _now(self) -> str:
+        return iso(int(self._clock() * 1000))
 
     def _write(self, team: str, facts: dict, waiting: list[queue.Item], read: fleet.Fleet, notes: list[str]) -> None:
         state = answers.state_dir()
-        written_at = iso(int(self._clock() * 1000))
-        found = status.snapshot(written_at, team, facts, waiting, read.sessions, status.read(state))
-        try:
-            status.write(state, found)
-        except OSError as error:
-            notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
+        _save(state, status.snapshot(self._now(), team, facts, waiting, read.sessions, status.read(state)), notes)
+
+    def _unreachable(self, read: fleet.Fleet, local: config.LocalConfig, notes: list[str], write: bool) -> dict:
+        state = answers.state_dir()
+        previous = status.read(state)
+        facts = _empty(notes, read, local) | {"unreachable": True, "count": "Linear unreachable; no earlier state"}
+        if previous is None:
+            return facts
+        if write:
+            _save(state, status.stale(previous, self._now()), notes)
+        shown = brief.age(brief.elapsed(previous["written_at"], self._clock()))
+        facts["count"] = f"Linear unreachable; showing the state as of {shown} ago"
+        held = {key: previous[key] for key in ("feature", "budget", "release")}
+        return facts | held | {"order": previous["stories"]}
 
     def _waiting(
         self,
@@ -197,18 +206,11 @@ class Captain:
         notes: list[str],
     ) -> dict:
         top = waiting[0] if waiting else None
-        facts: dict = {
-            "notes": notes,
+        facts = _empty(notes, read, local) | {
             "count": queue.count_line(waiting),
             "top": {"lines": top.lines, "next": top.next} if top else None,
-            "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
             "feature": feature.project["name"] if feature is not None else None,
-            "budget": None,
-            "order": [],
-            "cycle": [],
             "release": feature is not None and features.phase(feature) is Phase.RELEASED,
-            "watch": [s.name for s in _held(read) if fleet.busy(s)],
-            "wake_due": [],
         }
         if feature is not None:
             facts["budget"] = _budget(feature, self._today())
@@ -216,6 +218,30 @@ class Captain:
             mine = [s for s in feature.live if me is not None and s["assignee"] == me]
             facts["wake_due"] = [s["identifier"] for s in mine if startable.wake_due(feature, s) is not None]
         return facts
+
+
+def _save(state: Path, found: dict, notes: list[str]) -> None:
+    try:
+        status.write(state, found)
+    except OSError as error:
+        notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
+
+
+def _empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> dict:
+    return {
+        "notes": notes,
+        "unreachable": False,
+        "count": "",
+        "top": None,
+        "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
+        "feature": None,
+        "budget": None,
+        "order": [],
+        "cycle": [],
+        "release": False,
+        "watch": [s.name for s in _held(read) if fleet.busy(s)],
+        "wake_due": [],
+    }
 
 
 def _held(read: fleet.Fleet) -> list[fleet.Session]:
