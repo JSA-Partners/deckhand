@@ -77,6 +77,7 @@ def test_snapshot_shape():
         ],
         "release": False,
         "stale_since": None,
+        "person_unknown": False,
         "notified": [],
     }
 

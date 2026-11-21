@@ -155,3 +155,13 @@ def test_a_stale_state_reads_stale_on_every_view():
     assert "nothing was waiting as of 5m ago" in quiet_line
     assert hint == "nothing was waiting as of 5m ago"
     assert line == "○ captain stale 5m"
+
+
+def test_an_unknown_person_is_never_an_all_clear_on_any_view():
+    status = quiet() | {"person_unknown": True}
+    shown, line, _ = counts_on_every_view(status)
+    found = board.build(status, None, NOW, TODAY, brief.UNICODE)
+    assert brief.text(status, NOW, brief.UNICODE).split("\n\n")[0] == brief.UNKNOWN
+    assert "nothing needs you" not in shown
+    assert line == found.lead[0] + " " + found.lead[1] == "● personal key unreadable · run /deckhand:setup"
+    assert found.quiet == brief.UNKNOWN

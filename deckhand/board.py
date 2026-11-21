@@ -186,5 +186,5 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     working = len(rows[standing.WORKING])
     updated = "" if stale else _updated(since)
     failed = read is not None and bool(read.note)
-    quiet = brief.nothing(since, bool(stale))
+    quiet = brief.UNKNOWN if brief.unknown(status) else brief.nothing(since, bool(stale))
     return Board(True, lead, _facts(status), (str(used), str(cap)), updated, stale, sections, working, failed, quiet)

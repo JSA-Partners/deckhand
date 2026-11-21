@@ -182,7 +182,7 @@ class Captain:
             shown = status.stale(shown, self._now()) if shown is not None else None
             facts = _stale(_empty(notes, read, local), shown)
         else:
-            shown = status.snapshot(self._now(), team, facts, waiting, read.sessions, status.read(state))
+            shown = status.snapshot(self._now(), team, facts, waiting, read.sessions, status.read(state), me is None)
             alert = brief.notify(shown, self._clock()) if parsed["brief"] and not parsed["json"] else None
             shown["notified"] += alert[1] if alert else []
         if shown is not None:

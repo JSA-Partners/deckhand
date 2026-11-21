@@ -31,11 +31,17 @@ def _hands(sessions: list[fleet.Session]) -> list[dict]:
 
 
 def snapshot(
-    written_at: str, team: str, facts: dict, waiting: list[Item], sessions: list[fleet.Session], previous: dict | None
+    written_at: str,
+    team: str,
+    facts: dict,
+    waiting: list[Item],
+    sessions: list[fleet.Session],
+    previous: dict | None,
+    person_unknown: bool = False,
 ) -> dict:
     items = [_item(item) for item in waiting]
     keys = {item["key"] for item in items}
-    notified = [key for key in (previous or {}).get("notified", []) if key in keys]
+    notified = [key for key in (previous or {}).get("notified", []) if person_unknown or key in keys]
     return {
         "shape": SHAPE,
         "written_at": written_at,
@@ -48,6 +54,7 @@ def snapshot(
         "hands": _hands(sessions),
         "release": facts["release"],
         "stale_since": None,
+        "person_unknown": person_unknown,
         "notified": notified,
     }
 

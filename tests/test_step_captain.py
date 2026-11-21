@@ -182,12 +182,22 @@ def test_missing_personal_key_degrades_to_a_note(clone: Path, capsys: pytest.Cap
 
     store = owned()
     asked(store, "s1")
-    Captain(store, Shell(), person=NoKey(), today=lambda: DAY).context(TEAM)
+    output(store, [], capsys)
+    notified = written()["items"][0]["key"]
+    status.write(answers.state_dir(), written() | {"notified": [notified]})
+    Captain(store, Shell(), person=NoKey(), today=lambda: DAY, clock=lambda: NOW).context(TEAM)
     shown = paragraphs(capsys.readouterr().out)
-    assert shown[:2] == [
-        "◐ 0 working · ○ 2 queued · nothing needs you · slots 0/1 · Alpha day 1 of 7",
+    assert shown[:3] == [
+        "cannot tell what needs you: the personal Linear key could not be read; run /deckhand:setup",
+        "◐ 0 working · ○ 2 queued · slots 0/1 · Alpha day 1 of 7",
         "no personal key",
     ]
+    assert (written()["person_unknown"], written()["notified"]) == (True, [notified])
+    assert line_of([], capsys) == "● personal key unreadable · run /deckhand:setup\n"
+    out, _ = board_of([], capsys)
+    assert out.splitlines()[0].startswith(" ● personal key unreadable · run /deckhand:setup · updated")
+    assert "   cannot tell what needs you: the personal Linear key could not be read; run /deckhand:setup" in out
+    assert "nothing needs you" not in out
 
 
 def test_missing_clone_degrades_to_a_note():

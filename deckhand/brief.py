@@ -11,6 +11,9 @@ NOTIFY_LIMIT = 200
 NOTIFY = "notify: "
 LINE_LIMIT = 50
 LINE_STALE_SECONDS = 30 * 60
+SETUP = "run /deckhand:setup"
+UNKNOWN = f"cannot tell what needs you: the personal Linear key could not be read; {SETUP}"
+UNKNOWN_LINE = "personal key unreadable"
 RED, GREEN, DIM, RESET = "\x1b[31m", "\x1b[32m", "\x1b[2m", "\x1b[0m"
 PAINT = {"needs": RED, "working": GREEN, "stale": DIM}
 MARKERS = "*-+"
@@ -81,6 +84,10 @@ def unreachable_line(status: dict | None, now: float) -> str:
     return f"Linear unreachable; showing the state as of {age(elapsed(status['written_at'], now))} ago"
 
 
+def unknown(status: dict) -> bool:
+    return status.get("person_unknown") is True
+
+
 def nothing(since: float | None, stale: bool) -> str:
     if not stale:
         return "nothing needs you"
@@ -123,7 +130,7 @@ def _quiet(status: dict, now: float, g: Glyphs) -> str:
     parts = [f"{g.working} {tally[standing.WORKING]} working"]
     parts += [f"{g.stopped} {stopped} stopped"] if stopped else []
     parts.append(f"{g.queued} {tally[standing.QUEUED]} queued")
-    if not status["items"]:
+    if not status["items"] and not unknown(status):
         parts.append(nothing(elapsed(status["written_at"], now), bool(status.get("stale_since"))))
     parts.append(f"slots {status['slots']['used']}/{status['slots']['cap']}")
     budget = status.get("budget")
@@ -138,6 +145,8 @@ def text(status: dict | None, now: float, g: Glyphs, notes: list[str] = ()) -> s
     blocks = []
     if status is None or status.get("stale_since"):
         blocks.append(unreachable_line(status, now))
+    if status is not None and unknown(status):
+        blocks.append(UNKNOWN)
     if status is not None:
         items = status["items"]
         if items:
@@ -184,6 +193,8 @@ def segment(
 ) -> tuple[str, str, str]:
     if since is None or status.get("stale_since") or since > LINE_STALE_SECONDS:
         return g.queued, f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
+    if unknown(status):
+        return g.needs, f"{UNKNOWN_LINE}{g.sep}{SETUP}", "needs"
     head, tail = _line_parts(status, now, g, entries)
     glyph, tone = (g.needs, "needs") if standing.dicts(status, "items") else (g.working, "working")
     return glyph, f"{head}{g.sep}{tail}", tone
