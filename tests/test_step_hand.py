@@ -290,6 +290,19 @@ def test_fill_starts_no_hand_for_a_merged_story_whose_last_wake_followed_the_sig
     assert shell.launched() == launched
 
 
+def test_fill_never_wakes_a_merged_story_for_a_decision_made_before_the_merge(clone: Path):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    store.put_record("s1", Record(signoff.KIND, "s1", "h1", "person:session-1", {"nonce": "n1"}))
+    store.set_issue_state("s1", "Done")
+    shell.rows = [row("ACME-1", "done")]
+    launched = list(shell.launched())
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == launched
+    assert not [r for r in store.records("s1") if r.kind == asks.WAKE]
+
+
 def test_wake_gone_hand_resumes(clone: Path, capsys: pytest.CaptureFixture[str]):
     store, shell = building(), Shell()
     store.assign("s2", ME)
