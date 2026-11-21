@@ -13,17 +13,17 @@ Above: the brief, then the top item with its `next:` lines, slots, the feature's
 order and the hands to watch. You hold no state: every answer comes from a fresh context. Run each
 deckhand command as its own bare Bash call, never chained, piped or prefixed.
 
-Subscribe with SendMessage, `notify_when_idle` set and no message, to each hand on the `watch:`
-line, each one fill prints as `started` or `resumed`, and each you wake. Never subscribe to an
-idle hand: its notice only repeats.
+Subscribe with SendMessage and `notify_when_idle` set to each hand on the `watch:` line and each
+hand a `started`, `resumed` or `send to` line names; only a `send to` carries a message. Never
+subscribe to an idle hand: its notice only repeats.
 
 Start hands with `deckhand hand apply fill`, which resumes woken hands, then fills free slots up to
 the cap. At the start, print the brief and give the person, once, a live board for another
-terminal tab: `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context --board --watch`.
+tab: `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" captain context --board --watch`.
 
 On an idle notice, run fill, then `deckhand captain context --brief`, and print the brief
 unchanged. Pass the text of a closing `notify:` line to PushNotification, not to the person.
-Then stop: open no dialog until the person types `next`, as a pending dialog keeps you from
+Then stop: open no dialog until the person types `next`; a pending dialog keeps you from
 hearing the hands.
 
 On `next`, run `deckhand captain context`, wake each story on its `wake due:` line with
