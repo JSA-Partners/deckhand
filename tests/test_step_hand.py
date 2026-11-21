@@ -321,6 +321,8 @@ def test_wake_gone_hand_resumes(clone: Path, capsys: pytest.CaptureFixture[str])
     argv, cwd = shell.launches()[-1]
     assert argv[argv.index("--resume") + 1] == "sid-ACME-1"
     assert cwd == clone / ".worktrees" / "acme-1-orders"
+    called = [argv for argv, _ in shell.calls]
+    assert called.index(["claude", "stop", "id-ACME-1"]) == called.index(argv) - 1
     records = store.records("s1")
     assert asks.wake_due(records, "s1") is None
     [wake] = [r for r in records if r.kind == asks.WAKE]

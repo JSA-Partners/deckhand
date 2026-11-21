@@ -50,6 +50,7 @@ class Launch:
     argv: list[str]
     cwd: Path
     kind: str
+    stop: str | None = None
 
 
 def _parse(args: list[str]) -> dict:
@@ -256,7 +257,8 @@ class Hand:
         ref, launch_kind = story["identifier"], startable.launch_of(kind)
         resume = _resume(session) if queue.last_start(records, launch_kind) is not None else None
         argv = self._argv(fleet.hand_name(ref), ref, clone, worktree, PROMPTS[kind].format(ref), resume)
-        return Launch(story, records, clone, branch, argv, worktree, launch_kind)
+        stop = session.id if resume is not None and session is not None else None
+        return Launch(story, records, clone, branch, argv, worktree, launch_kind, stop)
 
     def _spike(self, team: str, label: str, path: str) -> None:
         question = spikes.question_of(inputs.read(path, "--file", USAGE))
@@ -288,6 +290,7 @@ class Hand:
         asked.parent.mkdir(parents=True, exist_ok=True)
         asked.write_text(question, encoding="utf-8")
         git.worktree_detached(clone, name, DEFAULT_BASE, self._runner)
+        self._retire(session.id if _resume(session) and session is not None else None)
         git.call(argv, worktree, self._runner)
         print(f"started {name}")
 
@@ -301,7 +304,13 @@ class Hand:
         newest = max((r.at for r in plan.records), default="")
         data = {"kind": plan.kind, "session": fleet.hand_name(story["identifier"])}
         ops.ensure_record(store, story["id"], Record(asks.HAND_START, story["id"], newest, HAND, data))
+        self._retire(plan.stop)
         git.call(plan.argv, plan.cwd, self._runner)
+
+    # A resume opens a new session under the same name; a stop of an exited one fails harmlessly.
+    def _retire(self, session: str | None) -> None:
+        if session is not None:
+            self._runner(["claude", "stop", session], None, None)
 
 
 def _free_slot(read: fleet.Fleet) -> None:
