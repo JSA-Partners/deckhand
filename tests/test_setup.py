@@ -506,3 +506,10 @@ def test_context_never_fails_on_a_broken_settings_file(places: Places, capsys: p
     out = capsys.readouterr().out
     assert "status line: unknown" in out
     assert "not valid JSON" in out
+
+
+def test_context_statusline_with_other_flags_prints_the_usage(capsys: pytest.CaptureFixture[str]):
+    Setup(workspace=None).context(["--statusline", "--team-key", "ACME"])
+    out = capsys.readouterr().out
+    assert "--statusline takes no other flag" in out
+    assert "status line: none" in out

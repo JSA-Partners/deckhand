@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 import shutil
 import sys
@@ -18,28 +17,7 @@ from deckhand.step import Refusal
 SEGMENT = "statusline-segment"
 WRAPPER = "statusline-wrapper"
 STATE = "statusline.json"
-SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
-
-NEWEST = r"""versions=@VERSIONS@
-version=$(ls "$versions" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-  | while read -r name; do [ -e "$versions/$name/.orphaned_at" ] || echo "$name"; done \
-  | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-[ -n "$version" ] && "$versions/$version/bin/deckhand" captain context --line "$@" </dev/null 2>/dev/null
-"""
-
-WRAP = r"""#!/bin/sh
-input=$(cat; printf x)
-input=${input%x}
-output=$(printf '%s' "$input" | /bin/sh -c @ORIGINAL@; printf 'x%s' "$?")
-status=${output##*x}
-output=${output%x*}
-printf '%s' "$output"
-case $output in *'
-'|'') ;; *) echo ;; esac
-line=$(printf '%s' "$input" | @SEGMENT@ 2>/dev/null)
-[ -n "$line" ] && printf '%s\n' "$line"
-exit "$status"
-"""
+MARK = hosts.MARK
 
 
 @dataclass(frozen=True)
@@ -118,11 +96,12 @@ def _json(path: Path, raw: bytes | None) -> dict[str, Any]:
 
 
 def _segment(places: Places, color: bool = False) -> str:
-    return shlex.quote(str(places.config / SEGMENT)) + (" --color" if color else "")
+    return f"{MARK} {shlex.quote(str(places.config / SEGMENT))}" + (" --color" if color else "")
 
 
-def _markers(places: Places) -> tuple[str, str]:
-    return str(places.config / SEGMENT), str(places.config / WRAPPER)
+def _mentions(text: str, places: Places) -> bool:
+    paths = [str(places.config / name) for name in (SEGMENT, WRAPPER)]
+    return any(path in text or shlex.quote(path) in text for path in paths)
 
 
 def _state(places: Places) -> dict[str, Any]:
@@ -133,17 +112,8 @@ def _state(places: Places) -> dict[str, Any]:
     return state if isinstance(state, dict) else {}
 
 
-def _ours(text: str, places: Places) -> bool:
-    return any(marker in text for marker in _markers(places))
-
-
-def _launcher(root: Path) -> str:
-    versions = root.parent
-    if SEMVER.match(root.name) and versions.name == "deckhand" and versions.parent.parent.name == "cache":
-        body = NEWEST.replace("@VERSIONS@", shlex.quote(str(versions)))
-    else:
-        body = f'{shlex.quote(str(root / "bin" / "deckhand"))} captain context --line "$@" </dev/null 2>/dev/null\n'
-    return "#!/bin/sh\n" + body + "exit 0\n"
+def _ours(text: str) -> bool:
+    return MARK in text
 
 
 def _set_line(plan: _Plan, places: Places, data: dict, raw: bytes | None, line: dict) -> None:
@@ -157,11 +127,15 @@ def _plan(places: Places, data: dict, raw: bytes | None) -> _Plan:
     line = current if isinstance(current, dict) else {}
     command = line.get("command") if isinstance(line.get("command"), str) else ""
     plan = _Plan(hosts.owner(command), original=current if isinstance(current, dict) else None)
-    if command and _ours(command, places):
+    if command and _ours(command):
         plan.installed = True
         owner = _state(places).get("owner") or ("claude-hud" if "claude-hud" in command else "none")
         plan.owner = "deckhand" if owner == "none" else owner
         return plan
+    if _mentions(command, places):
+        raise Refusal(
+            f"{places.settings}: statusLine already runs deckhand's {SEGMENT} or {WRAPPER}; restore it by hand"
+        )
     if plan.owner == "none":
         plan.method = "statusLine"
         new = {**line, "type": "command", "command": _segment(places, color=True), "refreshInterval": 5}
@@ -185,7 +159,7 @@ def _plan(places: Places, data: dict, raw: bytes | None) -> _Plan:
     if plan.owner in tools:
         method, path, fit, kind = tools[plan.owner]
         raw_tool = _read(path) if path is not None else None
-        installed, after = fit(raw_tool, _segment(places), lambda text: _ours(text, places))
+        installed, after = fit(raw_tool, _segment(places), _ours)
         if installed or after is not None:
             plan.method, plan.installed = method, installed
             if after is not None:
@@ -193,7 +167,7 @@ def _plan(places: Places, data: dict, raw: bytes | None) -> _Plan:
             return plan
         plan.notes.append(f"{path or 'its config'} has no lines setup can add to, so {plan.owner} is wrapped instead")
     plan.method = "wrapper"
-    _set_line(plan, places, data, raw, {**line, "command": shlex.quote(str(places.config / WRAPPER))})
+    _set_line(plan, places, data, raw, {**line, "command": f"{MARK} {shlex.quote(str(places.config / WRAPPER))}"})
     return plan
 
 
@@ -299,16 +273,21 @@ def install(places: Places, now: datetime | None = None) -> list[str]:
     now = now or datetime.now()
     _, _, plan = _inspect(places)
     places.config.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _own(places.config / SEGMENT, _launcher(places.root), 0o700)
+    _own(places.config / SEGMENT, hosts.launcher(places.root), 0o700)
     if plan.installed:
         return [f"status line: the deckhand segment is already installed ({plan.owner})"]
     if plan.method == "wrapper":
         original = (plan.original or {}).get("command", "")
-        _own(
-            places.config / WRAPPER,
-            WRAP.replace("@ORIGINAL@", shlex.quote(original)).replace("@SEGMENT@", _segment(places, color=True)),
-            0o700,
-        )
+        _own(places.config / WRAPPER, hosts.wrapper(original, _segment(places, color=True)), 0o700)
+    written = {str(edit.path) for edit in plan.edits}
+    earlier = [
+        entry
+        for entry in _state(places).get("edits", [])
+        if isinstance(entry, dict)
+        and entry.get("kind") in ("ccstatusline", "ccline")
+        and entry.get("path") not in written
+        and _ours((_read(Path(str(entry.get("path")))) or b"").decode("utf-8", "replace"))
+    ]
     state = {
         "owner": plan.owner,
         "method": plan.method,
@@ -322,7 +301,8 @@ def install(places: Places, now: datetime | None = None) -> list[str]:
                 "after": e.after.decode(),
             }
             for e in plan.edits
-        ],
+        ]
+        + earlier,
     }
     _write(places.config / STATE, (json.dumps(state, indent=2) + "\n").encode(), 0o600)
     for edit in plan.edits:
@@ -335,9 +315,9 @@ def _reverse(entry: dict, current: bytes, state: dict, places: Places) -> bytes 
     path = Path(entry["path"])
     if entry["kind"] == "settings":
         data = _json(path, current)
-        if data.get("statusLine") != state["line"]:
+        if data.get("statusLine") != state.get("line"):
             return None
-        if state["original"] is None:
+        if state.get("original") is None:
             data.pop("statusLine")
         else:
             data["statusLine"] = state["original"]
@@ -349,13 +329,32 @@ def _reverse(entry: dict, current: bytes, state: dict, places: Places) -> bytes 
     return text.replace(block, "", 1).encode() if block in text else None
 
 
+def _loaded(path: Path, raw: bytes) -> dict[str, Any]:
+    try:
+        state = json.loads(raw)
+    except ValueError:
+        state = None
+    edits = state.get("edits") if isinstance(state, dict) else None
+    valid = isinstance(edits, list) and all(
+        isinstance(e, dict)
+        and e.get("kind") in ("settings", "ccstatusline", "ccline")
+        and isinstance(e.get("path"), str)
+        and isinstance(e.get("after"), str)
+        and (e.get("before") is None or isinstance(e.get("before"), str))
+        for e in edits
+    )
+    if not valid or not isinstance(state, dict):
+        raise Refusal(f"{path} is not what setup wrote; restore from the .deckhand- backups by hand")
+    return state
+
+
 def remove(places: Places, now: datetime | None = None) -> list[str]:
     now = now or datetime.now()
     state_path = places.config / STATE
     raw = _read(state_path)
     if raw is None:
         return ["status line: nothing to remove"]
-    state = json.loads(raw)
+    state = _loaded(state_path, raw)
     restores: list[tuple[Path, bytes | None]] = []
     for entry in state["edits"]:
         path = Path(entry["path"])
@@ -369,7 +368,7 @@ def remove(places: Places, now: datetime | None = None) -> list[str]:
         reversed_ = _reverse(entry, current, state, places)
         if reversed_ is not None:
             restores.append((path, reversed_))
-        elif _ours(current.decode("utf-8", "replace"), places):
+        elif _ours(current.decode("utf-8", "replace")):
             raise Refusal(f"{path} changed since setup and still runs the deckhand segment; edit it by hand")
     lines = []
     for path, content in restores:

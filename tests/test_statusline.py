@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import subprocess
+import time
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -50,7 +51,7 @@ def places(tmp_path: Path) -> Places:
         project=tmp_path / "project",
         ccstatusline=home / ".config" / "ccstatusline" / "settings.json",
         ccline=home / ".claude" / "ccline" / "config.toml",
-        config=tmp_path / "deckhand config",
+        config=tmp_path / "deck hand's $cfg",
         root=fake_root(tmp_path),
     )
 
@@ -75,7 +76,11 @@ def snapshot(base: Path) -> dict[str, bytes]:
 
 
 def segment(places: Places) -> str:
-    return shlex.quote(str(places.config / "statusline-segment"))
+    return "DECKHAND_STATUSLINE=1 " + shlex.quote(str(places.config / "statusline-segment"))
+
+
+def wrapper(places: Places) -> str:
+    return "DECKHAND_STATUSLINE=1 " + shlex.quote(str(places.config / "statusline-wrapper"))
 
 
 def fake_node(tmp_path: Path) -> Path:
@@ -168,7 +173,7 @@ def test_claude_hud_command_of_another_shape_is_wrapped(places: Places):
     assert report.owner == "claude-hud"
     assert report.method == "wrapper"
     statusline.install(places, NOW)
-    assert settings_line(places)["command"] == shlex.quote(str(places.config / "statusline-wrapper"))
+    assert settings_line(places)["command"] == wrapper(places)
 
 
 def test_ccstatusline_gets_a_custom_command_widget_in_its_own_config(places: Places):
@@ -179,7 +184,7 @@ def test_ccstatusline_gets_a_custom_command_widget_in_its_own_config(places: Pla
     data = json.loads(places.ccstatusline.read_text())
     assert data["lines"] == [
         [{"id": "1", "type": "model", "color": "cyan"}],
-        [{"id": "deckhand-captain", "type": "custom-command", "commandPath": segment(places)}],
+        [{"id": "deckhand-captain", "type": "custom-command", "commandPath": segment(places), "timeout": 2000}],
         [],
     ]
     assert {key: data[key] for key in ("version", "colorLevel")} == {"version": 3, "colorLevel": 2}
@@ -241,7 +246,7 @@ def test_other_command_is_wrapped_and_kept_in_deckhands_config(places: Places, t
     with_command(places, original)
     statusline.install(places, NOW)
     line = settings_line(places)
-    assert line == {"type": "command", "command": shlex.quote(str(places.config / "statusline-wrapper")), "padding": 1}
+    assert line == {"type": "command", "command": wrapper(places), "padding": 1}
     state = json.loads((places.config / "statusline.json").read_text())
     assert state["original"]["command"] == original
     result = run(line["command"])
@@ -505,3 +510,80 @@ def test_wrapper_and_launcher_run_under_each_posix_shell(places: Places, tmp_pat
         [shell, str(places.config / "statusline-segment")], capture_output=True, text=True, check=False
     )
     assert launcher.stdout == "1.10.0 captain context --line\n"
+
+
+def slow_deckhand(places: Places) -> None:
+    (places.root / "bin" / "deckhand").write_text("#!/bin/sh\nexec sleep 30\n")
+
+
+def test_a_hung_segment_is_cut_off_and_never_holds_the_line(places: Places):
+    with_command(places, "printf 'my line'")
+    statusline.install(places, NOW)
+    slow_deckhand(places)
+    started = time.monotonic()
+    result = run(settings_line(places)["command"])
+    assert time.monotonic() - started < 5
+    assert (result.stdout, result.returncode) == ("my line\n", 0)
+    started = time.monotonic()
+    assert run(segment(places)).stdout == ""
+    assert time.monotonic() - started < 5
+
+
+def test_the_wrapper_never_runs_itself(places: Places):
+    with_command(places, "printf 'my line'")
+    statusline.install(places, NOW)
+    nested = run(settings_line(places)["command"], env={**os.environ, "DECKHAND_STATUSLINE_WRAPPED": "1"})
+    assert (nested.stdout, nested.returncode) == ("", 0)
+
+
+def test_a_line_that_names_deckhands_files_unmarked_is_refused(places: Places, tmp_path: Path):
+    with_command(places, shlex.quote(str(places.config / "statusline-wrapper")))
+    before = snapshot(tmp_path)
+    with pytest.raises(Refusal, match="already runs"):
+        statusline.install(places, NOW)
+    assert snapshot(tmp_path) == before
+
+
+def test_the_original_is_kept_even_when_it_holds_a_placeholder(places: Places):
+    with_command(places, "echo '@SEGMENT@'")
+    statusline.install(places, NOW)
+    assert run(settings_line(places)["command"]).stdout == f"@SEGMENT@\n{COLORED}\n"
+
+
+def test_a_half_written_newest_version_is_skipped(places: Places, tmp_path: Path):
+    root = cache_root(tmp_path, "1.0.0")
+    (root.parent / "1.1.0").mkdir()
+    statusline.install(Places(**{**places.__dict__, "root": root}), NOW)
+    assert run(segment(places)).stdout == "1.0.0 captain context --line\n"
+
+
+def test_remove_leaves_a_ccstatusline_file_without_deckhands_widget(places: Places, tmp_path: Path):
+    owner_setup(places, "ccstatusline")
+    statusline.install(places, NOW)
+    places.ccstatusline.write_text('{"lines": [[{"id": "1", "type": "model"}]]}')
+    statusline.remove(places, NOW)
+    assert places.ccstatusline.read_text() == '{"lines": [[{"id": "1", "type": "model"}]]}'
+    assert list(places.ccstatusline.parent.glob("*.deckhand-*")) != []
+    assert len(list(places.ccstatusline.parent.glob("*.deckhand-*"))) == 1
+
+
+@pytest.mark.parametrize("text", ["{broken", "[]", '{"edits": [{"path": 1}]}'])
+def test_remove_refuses_a_broken_state_file(places: Places, tmp_path: Path, text: str):
+    owner_setup(places, "other")
+    statusline.install(places, NOW)
+    (places.config / "statusline.json").write_text(text)
+    before = snapshot(tmp_path)
+    with pytest.raises(Refusal, match="statusline.json"):
+        statusline.remove(places, NOW)
+    assert snapshot(tmp_path) == before
+
+
+def test_a_reinstall_after_switching_tools_still_removes_the_old_widget(places: Places):
+    owner_setup(places, "ccstatusline")
+    widget_before = places.ccstatusline.read_bytes()
+    statusline.install(places, NOW)
+    settings_before = with_command(places, "printf 'my line'")
+    statusline.install(places, NOW)
+    statusline.remove(places, NOW)
+    assert places.ccstatusline.read_bytes() == widget_before
+    assert places.settings.read_bytes() == settings_before

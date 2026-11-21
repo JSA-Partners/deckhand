@@ -184,6 +184,10 @@ class Setup:
     def context(self, args: list[str]) -> None:
         as_json = "--json" in args
         args = [arg for arg in args if arg != "--json"]
+        if any(arg in STATUSLINE for arg in args) and args != ["--statusline"]:
+            print(f"--statusline takes no other flag on context; {USAGE}")
+            print("\n".join(_statusline_lines(_report())))
+            return
         if args == ["--statusline"]:
             report = _report()
             print(json.dumps(_statusline_facts(report), indent=2) if as_json else "\n".join(_statusline_lines(report)))

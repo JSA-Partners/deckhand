@@ -1,17 +1,74 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+MARK = "DECKHAND_STATUSLINE=1"
+GUARD = "DECKHAND_STATUSLINE_WRAPPED"
+SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 WIDGET = "deckhand-captain"
 SEPARATOR = f"{WIDGET}-separator"
 HUD_OPT_IN = "CLAUDE_HUD_ALLOW_EXTRA_CMD=1"
 HUD_ENTRIES = ("statusline.mjs", "index.js")
 OPERATORS = set("();<>|&")
+
+
+NEWEST = r"""versions=@VERSIONS@
+version=$(ls "$versions" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+  | while read -r name; do
+      [ -e "$versions/$name/.orphaned_at" ] || [ ! -x "$versions/$name/bin/deckhand" ] || echo "$name"
+    done \
+  | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+[ -n "$version" ] || exit 0
+bin="$versions/$version/bin/deckhand"
+"""
+
+BOUNDED = r"""out=$(mktemp "${TMPDIR:-/tmp}/deckhand-segment.XXXXXX") || exit 0
+"$bin" captain context --line "$@" </dev/null >"$out" 2>/dev/null &
+pid=$!
+(sleep 1; kill "$pid"; sleep 1; kill -9 "$pid") >/dev/null 2>&1 &
+watch=$!
+if wait "$pid" 2>/dev/null; then cat "$out"; fi
+kill "$watch" 2>/dev/null
+rm -f "$out"
+exit 0
+"""
+
+WRAP = r"""#!/bin/sh
+[ -n "$@GUARD@" ] && exit 0
+@GUARD@=1
+export @GUARD@
+input=$(cat; printf x)
+input=${input%x}
+output=$(printf '%s' "$input" | /bin/sh -c @ORIGINAL@; printf 'x%s' "$?")
+status=${output##*x}
+output=${output%x*}
+printf '%s' "$output"
+case $output in *'
+'|'') ;; *) echo ;; esac
+line=$(printf '%s' "$input" | @SEGMENT@ 2>/dev/null)
+[ -n "$line" ] && printf '%s\n' "$line"
+exit "$status"
+"""
+
+
+def launcher(root: Path) -> str:
+    versions = root.parent
+    if SEMVER.match(root.name) and versions.name == "deckhand" and versions.parent.parent.name == "cache":
+        body = NEWEST.replace("@VERSIONS@", shlex.quote(str(versions)))
+    else:
+        body = f"bin={shlex.quote(str(root / 'bin' / 'deckhand'))}\n"
+    return "#!/bin/sh\n" + body + BOUNDED
+
+
+def wrapper(original: str, segment: str) -> str:
+    fills = {"ORIGINAL": shlex.quote(original), "SEGMENT": segment, "GUARD": GUARD}
+    return re.sub(r"@(ORIGINAL|SEGMENT|GUARD)@", lambda match: fills[match.group(1)], WRAP)
 
 
 def owner(command: str) -> str:
@@ -94,7 +151,7 @@ def widget(raw: bytes | None, segment: str, ours: Callable[[str], bool]) -> tupl
     items = [item for row in lines for item in row if isinstance(item, dict)]
     if any(item.get("id") == WIDGET or ours(str(item.get("commandPath", ""))) for item in items):
         return True, None
-    new = {"id": WIDGET, "type": "custom-command", "commandPath": segment}
+    new = {"id": WIDGET, "type": "custom-command", "commandPath": segment, "timeout": 2000}
     empty = next((row for row in lines if not row), None)
     if empty is not None:
         empty.append(new)
@@ -105,9 +162,11 @@ def widget(raw: bytes | None, segment: str, ours: Callable[[str], bool]) -> tupl
     return False, dump(data, raw)
 
 
-def drop_widget(data: dict[str, Any], raw: bytes) -> bytes:
+def drop_widget(data: dict[str, Any], raw: bytes) -> bytes | None:
     lines = data.get("lines") if isinstance(data.get("lines"), list) else []
     ids = (WIDGET, SEPARATOR)
+    if not any(isinstance(item, dict) and item.get("id") in ids for row in lines for item in row):
+        return None
     keep = [[item for item in row if not (isinstance(item, dict) and item.get("id") in ids)] for row in lines]
     return dump({**data, "lines": keep}, raw)
 

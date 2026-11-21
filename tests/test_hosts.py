@@ -100,6 +100,10 @@ def test_drop_widget_removes_only_deckhands_items():
     }
 
 
+def test_drop_widget_reports_nothing_to_drop():
+    assert hosts.drop_widget({"lines": [[{"id": "1", "type": "model"}]]}, b"{}") is None
+
+
 def test_cmd_item_keeps_the_text_and_adds_one_line():
     raw = b'version = 2\n[[line]]\nleft = ["model"]'
     installed, after = hosts.cmd_item(raw, SEGMENT, never)
