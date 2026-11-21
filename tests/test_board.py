@@ -298,3 +298,12 @@ def test_a_teammates_story_shows_as_theirs_in_plain_text():
     row = next(line for line in lines if "ACME-20" in line.text)
     assert row.text.split() == ["-", "ACME-20", "Receipts", "Sam", "|", "checks", "5m"]
     assert {style for text, style in row.spans if text.strip()} <= {"", "bold", "dim"}
+
+
+def test_a_stale_board_says_what_was_waiting_not_an_all_clear():
+    unreachable = section(shown(sample(items=[], written_at=at(5), stale_since=at(1))), "needs you")
+    assert unreachable == ["   nothing was waiting as of 5m ago; 2 working"]
+    assert section(shown(sample(items=[], written_at=at(45))), "needs you") == [
+        "   nothing was waiting as of 45m ago; 2 working"
+    ]
+    assert section(shown(sample(items=[])), "needs you") == ["   nothing needs you; 2 working"]

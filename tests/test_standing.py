@@ -146,3 +146,12 @@ def test_a_teammates_story_with_a_hand_here_or_an_item_is_this_persons():
     assert kinds(teammates(), hands)[0] == (standing.WORKING, "ACME-20")
     waiting = teammates() | {"items": [item("k20", "second-sign-off", "ACME-20", "Receipts", 2, "next")]}
     assert kinds(waiting, {})[0] == (standing.NEEDS, "ACME-20")
+
+
+def test_a_stale_state_reads_stale_on_every_view():
+    status = quiet() | {"written_at": at(5), "stale_since": at(1)}
+    quiet_line, line, _ = counts_on_every_view(status)
+    hint = board.build(status, None, NOW, TODAY, brief.UNICODE).quiet
+    assert "nothing was waiting as of 5m ago" in quiet_line
+    assert hint == "nothing was waiting as of 5m ago"
+    assert line == "○ captain stale 5m"

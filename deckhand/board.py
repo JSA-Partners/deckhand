@@ -43,6 +43,7 @@ class Board:
     sections: tuple[Section, ...] = ()
     working: int = 0
     fleet_failed: bool = False
+    quiet: str = ""
 
     def keys(self) -> list[str]:
         return [row.key for section in self.sections for row in section.rows]
@@ -185,4 +186,5 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     working = len(rows[standing.WORKING])
     updated = "" if stale else _updated(since)
     failed = read is not None and bool(read.note)
-    return Board(True, lead, _facts(status), (str(used), str(cap)), updated, stale, sections, working, failed)
+    quiet = brief.nothing(since, bool(stale))
+    return Board(True, lead, _facts(status), (str(used), str(cap)), updated, stale, sections, working, failed, quiet)

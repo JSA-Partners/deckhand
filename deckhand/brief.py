@@ -81,6 +81,12 @@ def unreachable_line(status: dict | None, now: float) -> str:
     return f"Linear unreachable; showing the state as of {age(elapsed(status['written_at'], now))} ago"
 
 
+def nothing(since: float | None, stale: bool) -> str:
+    if not stale:
+        return "nothing needs you"
+    return f"nothing was waiting as of {age(since) if since is not None else 'an unknown time'} ago"
+
+
 def _waited(item: dict, now: float) -> str:
     return age(elapsed(item["since"], now)) if item.get("since") else ""
 
@@ -118,8 +124,7 @@ def _quiet(status: dict, now: float, g: Glyphs) -> str:
     parts += [f"{g.stopped} {stopped} stopped"] if stopped else []
     parts.append(f"{g.queued} {tally[standing.QUEUED]} queued")
     if not status["items"]:
-        stale = f"nothing was waiting as of {age(elapsed(status['written_at'], now))} ago"
-        parts.append(stale if status.get("stale_since") else "nothing needs you")
+        parts.append(nothing(elapsed(status["written_at"], now), bool(status.get("stale_since"))))
     parts.append(f"slots {status['slots']['used']}/{status['slots']['cap']}")
     budget = status.get("budget")
     if budget:

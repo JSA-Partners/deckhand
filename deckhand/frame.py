@@ -139,7 +139,7 @@ def _body(found: Board, g: Glyphs, width: int, selected: str | None, expanded: s
                 lines += _details(row, g, columns, width)
             end = len(lines) if row.key == selected else end
         if section.name == "needs you":
-            words = HINT if section.rows else f"nothing needs you; {found.working} working"
+            words = HINT if section.rows else f"{found.quiet}; {found.working} working"
             lines.append(Line(((f"   {words}", "dim"),)))
     return lines, end
 
