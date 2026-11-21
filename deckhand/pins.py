@@ -53,10 +53,14 @@ def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
     missing = signoff.gaps(records, story["id"], head)
-    if missing:
-        raise Refusal(f"{story['identifier']} is not ready for sign-off: " + "; ".join(missing))
     version = signoff.version(records, story["id"], head)
-    return Pin(story["id"], version, [story["id"]], f"head {head}", _label(story), [_label(story)])
+    label = _label(story)
+    if missing and version is None:
+        raise Refusal(f"{story['identifier']} is not ready for sign-off: " + "; ".join(missing))
+    if missing:
+        detail = f"head {head}, not ready for sign-off"
+        return Pin(story["id"], version, [story["id"]], detail, label, [label], [signoff.NOT_YET, signoff.BACK])
+    return Pin(story["id"], version, [story["id"]], f"head {head}", label, [label])
 
 
 def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:

@@ -17,6 +17,7 @@ from tests.test_step_signoff import (
     Clock,
     Gh,
     branch_round,
+    gap_text,
     overview,
     ready,
     save_summary,
@@ -168,8 +169,7 @@ def test_proceed_does_not_cover_later_commits(
     question = answer(state, Decide(store, runner=Shell(head="c1"), repo=repo), capsys, cap, "Proceed")
     assert "at c1" in question["question"]
     step = Decide(store, runner=Shell(), repo=repo)
-    with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert "the branch review has not reviewed the signed head c2" in gap_text(store)
     with pytest.raises(Refusal, match="no current sign-off"):
         merge(store, repo, Gh())
     question = answer(state, step, capsys, cap, "Proceed")

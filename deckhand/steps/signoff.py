@@ -24,7 +24,7 @@ SCREENS = ("what changed", "evidence", "findings", "tuicr", "quiz")
 ACTIONS = ("summary", "review")
 PLAN_FILE = "PLAN.md"
 WATCH_POLL = 2
-OPEN_WAIT = 600
+OPEN_WAIT = 3600
 REVIEW_WAIT = 3600
 
 

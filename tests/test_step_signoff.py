@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -121,6 +122,17 @@ def sign(store: FakeStore, repo: Path, state: Path, capsys: pytest.CaptureFixtur
     return answer(state, Decide(store, runner=Shell(), repo=repo), capsys, ["sign-off", "ACME-1"], choice)
 
 
+def gap_text(store: FakeStore, head: str = "c2") -> str:
+    return "; ".join(signoff.gaps(store.records("s1"), "s1", head))
+
+
+def not_ready_options(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str]) -> list[str]:
+    capsys.readouterr()
+    Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM, "--json"])
+    asked = json.loads(capsys.readouterr().out)
+    return [o["label"] for o in asked["tool_input"]["questions"][0]["options"]]
+
+
 def voids(store: FakeStore) -> list:
     return [r for r in store.records("s1") if r.kind == signoff.VOID]
 
@@ -149,31 +161,64 @@ def test_commits_after_the_last_branch_round_need_a_review(
     reply(state, step, ask(step, capsys), "The idempotency key")
     branch_round(store, raw(), head="c1")
     checked(store, "c2")
-    with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("the branch review has not reviewed the signed head c2", gap_text(store))
     branch_round(store, raw(), n=2)
     fixed(store, raw())
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
 
 
-def test_sign_off_refuses_with_open_quiz(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+def test_an_open_quiz_item_is_a_sign_off_gap(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     branch_round(store, raw())
     fixed(store, raw())
     checked(store, "c2")
-    step = Decide(store, runner=Shell(), repo=repo)
-    with pytest.raises(Refusal, match="quiz items still open: 1"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("quiz items still open: 1", gap_text(store))
     quizzer = decide(store, repo)
     reply(state, quizzer, ask(quizzer, capsys), "A new key")
-    with pytest.raises(Refusal, match="quiz items still open: 1"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("quiz items still open: 1", gap_text(store))
     reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_not_ready_sign_off_offers_not_yet_and_back_and_records_not_yet_before_the_quiz(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
+    sign(store, repo, state, capsys, signoff.NOT_YET)
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert held.data["answer"] == signoff.NOT_YET
+    assert not signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_back_on_the_sign_off_question_records_nothing(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    store.writes.clear()
+    sign(store, repo, state, capsys, signoff.BACK)
+    assert store.writes == []
+    assert "no sign-off recorded" in capsys.readouterr().out
+
+
+def test_a_ready_sign_off_keeps_its_options(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    capsys.readouterr()
+    Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM, "--json"])
+    asked = json.loads(capsys.readouterr().out)
+    assert [o["label"] for o in asked["tool_input"]["questions"][0]["options"]] == [signoff.SIGN, signoff.NOT_YET]
 
 
 def test_sign_off_lists_everything_missing(tmp_path: Path, repo: Path):
@@ -190,8 +235,7 @@ def test_summary_must_match_the_quiz(tmp_path: Path, repo: Path, state: Path, ca
     store = ready(tmp_path, repo, state, capsys)
     other = summary(1) | {"intents": [{"title": "Queue orders", "lines": ["retries reuse the key"]}]}
     save_summary(store, tmp_path, repo, other)
-    with pytest.raises(Refusal, match="differs from the one the quiz was written from"):
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("differs from the one the quiz was written from", gap_text(store))
 
 
 def test_a_new_local_commit_leaves_the_sign_off_behind(
@@ -212,8 +256,7 @@ def test_branch_cap_proceed_clears_the_branch_review(
     for n in (1, 2, 3):
         branch_round(store, raw(severity="P1"), n=n)
     step = Decide(store, runner=Shell(), repo=repo)
-    with pytest.raises(Refusal, match="branch review has not stopped clean"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("branch review has not stopped clean", gap_text(store))
     question = answer(state, step, capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed")
     assert question["question"].startswith("Three branch review rounds ran")
     assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch"]
@@ -328,9 +371,7 @@ def _id(found: dict) -> str:
 
 
 def sign_off_refusal(store: FakeStore, repo: Path) -> str:
-    with pytest.raises(Refusal) as refused:
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
-    return refused.value.rule
+    return gap_text(store)
 
 
 def test_sign_off_waits_for_the_person_on_a_delivery_finding(
@@ -648,8 +689,7 @@ def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
         ),
         "the person has not signed off",
     ]
-    with pytest.raises(Refusal, match="not ready for sign-off"):
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
     for id in (plan_left, ids[1]):
         answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", id], "Decline")
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", ids[2]], "Accept")
@@ -735,5 +775,4 @@ def test_a_finding_left_open_in_an_earlier_round_stays_the_persons(
     missing = "\n".join(overview(store, repo, capsys)["missing"])
     assert f"{_id(left)} is a P3 the hand left open" in missing
     assert f"{plan_left} is a P2 the hand left open" in missing
-    with pytest.raises(Refusal, match="not ready for sign-off"):
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]

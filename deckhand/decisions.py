@@ -31,7 +31,7 @@ KINDS = (
     asks.EDIT,
 )
 
-_PIN_OPTIONS = (quiz.KIND, asks.ANSWER)
+_PIN_OPTIONS = (quiz.KIND, asks.ANSWER, signoff.KIND)
 
 _OPTIONS = {
     "contract": ["Approve", "Not yet"],
@@ -50,11 +50,17 @@ _OPTIONS = {
     asks.EDIT: asks.EDIT_OPTIONS,
 }
 
+_SIGN_OFF = {
+    signoff.SIGN: "the hand merges it, pinned to this head",
+    signoff.NOT_YET: "the hand changes what you name",
+    signoff.BACK: "nothing is recorded",
+}
+
 _DESCRIPTIONS = {
     "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
     "finding": ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"],
     review.CAP_DECISION: ["carry on past the cap", "the hand reworks it and the rounds count again"],
-    signoff.KIND: ["the hand merges it, pinned to this head", "the hand changes what you name"],
+    signoff.KIND: [_SIGN_OFF[o] for o in _OPTIONS[signoff.KIND]],
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
     signoff.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
@@ -136,8 +142,9 @@ def make_question(kind: str, pin: Pin) -> Question:
         raise Refusal(f"unknown decision kind {kind!r}, one of: {', '.join(KINDS)}")
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
-    options = pin.options if kind in _PIN_OPTIONS else _OPTIONS[kind]
-    return build(kind, pin.label or pin.subject, question_text(kind, pin), options, _DESCRIPTIONS.get(kind))
+    options = (pin.options or _OPTIONS.get(kind, [])) if kind in _PIN_OPTIONS else _OPTIONS[kind]
+    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else _DESCRIPTIONS.get(kind)
+    return build(kind, pin.label or pin.subject, question_text(kind, pin), options, descriptions)
 
 
 def question_text(kind: str, pin: Pin) -> str:
@@ -191,6 +198,8 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
+    if pending.kind == signoff.KIND and answer == signoff.BACK:
+        return False
     if pending.kind in _RECORDED:
         return True
     return answer == _POSITIVE[pending.kind]
@@ -208,7 +217,7 @@ def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
         raise Refusal(f"no recorded answer for {pending.nonce} in {state / answers.FILE}")
-    options = pending.options if pending.kind in _PIN_OPTIONS else []
+    options = pending.options if pending.kind in _PIN_OPTIONS and pending.options != _OPTIONS.get(pending.kind) else []
     pin = Pin(
         pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels, options
     )

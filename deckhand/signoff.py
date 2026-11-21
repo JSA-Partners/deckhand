@@ -11,7 +11,7 @@ from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
 KIND = "sign-off"
-SIGN, NOT_YET, DONE = "Sign off", "Not yet", "Done"
+SIGN, NOT_YET, DONE, BACK = "Sign off", "Not yet", "Done", "Back"
 SUMMARY = "change-summary"
 VOID = "sign-off-void"
 TUICR = "tuicr-review"
