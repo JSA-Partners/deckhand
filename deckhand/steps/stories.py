@@ -170,7 +170,8 @@ class Stories:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        feature = features.open_feature(self._store_for_run(), team_key(parsed))
+        store = self._store_for_run()
+        feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         facts = {
@@ -178,11 +179,13 @@ class Stories:
             "stories": len(feature.stories),
             "next": planning.STORY_MAP,
             "map": SHAPE,
+            "repositories": store.repository_labels(team_key(parsed)),
         }
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
         print(f"feature: {facts['feature']}, {facts['stories']} stories")
+        print(f"repositories: {', '.join(facts['repositories']) or 'none; run /deckhand:setup'}")
         print("map: a JSON list of objects with these fields")
         for name, meaning in SHAPE.items():
             print(f"  {name}: {meaning}")
@@ -200,7 +203,10 @@ class Stories:
         known = store.repository_labels(team)
         for entry in entries:
             if entry["repository"] not in known:
-                raise Refusal(f"{entry['key']}: {entry['repository']} is not a repository label of team {team}")
+                raise Refusal(
+                    f"{entry['key']}: {entry['repository']} is not a repository label of team {team};"
+                    f" its labels: {', '.join(known) or 'none'}"
+                )
         _check_discovery(feature, entries)
         project = feature.project["id"]
         ids = {e["key"]: _story_id(feature, e["key"]) for e in entries}

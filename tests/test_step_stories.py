@@ -145,7 +145,7 @@ def test_map_refuses_cycle(tmp_path: Path):
 def test_map_refuses_unknown_repository(tmp_path: Path):
     store = setup()
     store.writes.clear()
-    with pytest.raises(Refusal, match="gadgets"):
+    with pytest.raises(Refusal, match="gadgets is not a repository label of team ACME; its labels: widgets"):
         run(store, tmp_path, [entry("a"), entry("b", repository="gadgets")])
     assert store.writes == []
 
@@ -296,6 +296,9 @@ def test_context_prints_every_field_the_map_accepts(capsys: pytest.CaptureFixtur
     for field in FIELDS:
         assert re.search(rf"^  {field}: ", shown, re.MULTILINE), field
     assert "rule, example, invariant, spike, external" in shown
+    assert "repositories: widgets" in shown.splitlines()
+    Stories(store).context([*TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["repositories"] == ["widgets"]
 
 
 def asked_spike(question: str = "Does the queue keep order?") -> str:
