@@ -4,6 +4,7 @@ import json
 
 from deckhand import answers, config, features, fleet, git, inputs, ops, planning, spikes
 from deckhand.credentials import Credentials
+from deckhand.linear.client import LinearError
 from deckhand.linear.connect import connect
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
@@ -179,13 +180,18 @@ class Stories:
             "stories": len(feature.stories),
             "next": planning.STORY_MAP,
             "map": SHAPE,
-            "repositories": store.repository_labels(team_key(parsed)),
+            "repositories": [],
         }
+        try:
+            facts["repositories"] = store.repository_labels(team_key(parsed))
+            known = ", ".join(facts["repositories"]) or "none; run /deckhand:setup"
+        except (Refusal, LinearError) as error:
+            known = f"unknown, {error}"
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
         print(f"feature: {facts['feature']}, {facts['stories']} stories")
-        print(f"repositories: {', '.join(facts['repositories']) or 'none; run /deckhand:setup'}")
+        print(f"repositories: {known}")
         print("map: a JSON list of objects with these fields")
         for name, meaning in SHAPE.items():
             print(f"  {name}: {meaning}")

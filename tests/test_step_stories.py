@@ -349,3 +349,14 @@ def test_stories_refuse_when_the_fleet_cannot_be_read_with_spikes_asked(
 
     with pytest.raises(Refusal, match="the fleet read failed"):
         Stories(store, broken).apply([*TEAM, "--file", str(path)])
+
+
+def test_context_prints_when_the_labels_cannot_be_read(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+
+    def fails(team: str) -> list[str]:
+        raise Refusal("more than 250 labels")
+
+    store.repository_labels = fails
+    Stories(store).context(TEAM)
+    assert "repositories: unknown, more than 250 labels" in capsys.readouterr().out.splitlines()
