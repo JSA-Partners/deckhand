@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import functools
 import json
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -214,7 +216,8 @@ class Captain:
         if watch and terminal and sys.stdin.isatty() and os.environ.get("TERM") != "dumb":
             from deckhand import tui
 
-            tui.watch(lambda: status.read(state), lambda: fleet.sessions(_quiet(self._runner)), self._clock, color, g)
+            fleet_read = functools.partial(fleet.sessions, _quiet(self._runner))
+            tui.watch(lambda: status.read(state), fleet_read, self._clock, color, g, _full_read)
             return
         read, now = fleet.sessions(self._runner), self._clock()
         found = board.build(status.read(state), read, now, board.midnight(now), g)
@@ -285,6 +288,14 @@ def _board_command() -> str:
     launcher = config.config_dir() / hosts.LAUNCHER
     program = launcher if os.access(launcher, os.X_OK) else Path(sys.argv[0]).resolve()
     return shlex.join([str(program), "captain", "context", "--board", "--watch"])
+
+
+# The board's r runs the captain's full read, which leaves the notified list to the captain's brief.
+def _full_read() -> Callable[[], bool]:
+    argv = [str(Path(sys.argv[0]).resolve()), "captain", "context"]
+    quiet = subprocess.DEVNULL
+    started = subprocess.Popen(argv, stdin=quiet, stdout=quiet, stderr=quiet, start_new_session=True)
+    return lambda: started.poll() is None
 
 
 def _quiet(runner: git.Runner) -> git.Runner:

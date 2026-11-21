@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from deckhand import board, fleet, frame
-from tests.test_board import NOW, TODAY, G, at, item, sample, section, shown, stage, story, texts
+from tests.test_board import CAPTAIN, NOW, TODAY, G, at, item, sample, section, shown, stage, story, texts
 
 
 def test_long_titles_end_in_an_ellipsis_and_every_row_fits():
@@ -25,7 +25,7 @@ def test_below_sixty_columns_the_title_drops():
 
 def test_below_eight_rows_only_the_header_shows_and_it_carries_the_count():
     assert texts(shown(rows=7)) == [
-        " ! 2 need you | question ACME-16 3m | updated 6s ago | Alpha | day 2 of 7 | slots 2/2"
+        " ! 2 need you | question ACME-16 3m | updated 6s ago | Alpha | day 2 of 7 | slots 2/2 | captain idle"
     ]
     assert len(shown(rows=8)) == 8
 
@@ -67,10 +67,10 @@ def test_styled_text_colors_only_when_asked():
     assert "\x1b[1;31m!\x1b[0m" in frame.text(lines, color=True)
 
 
-def test_yellow_is_only_for_stale_and_queued_is_plain():
-    painted = frame.text(shown(sessions=[]), color=True)
+def test_yellow_is_only_for_warnings_and_queued_is_plain():
+    painted = frame.text(shown(sessions=[CAPTAIN]), color=True)
     assert "\x1b[33m" not in painted and "\x1b[1;33m" not in painted
-    queued = next(line for line in shown(sessions=[]) if "ACME-19" in line.text)
+    queued = next(line for line in shown(sessions=[CAPTAIN]) if "ACME-19" in line.text)
     assert {style for text, style in queued.spans if text.strip()} <= {"", "bold", "dim"}
     stale = frame.text(shown(sample(written_at=at(45))), color=True)
     assert "\x1b[2m-\x1b[0m \x1b[1;33mstale:" in stale

@@ -4,7 +4,7 @@ import textwrap
 import unicodedata
 from dataclasses import dataclass
 
-from deckhand.board import FLEET_FAILED, START, Board, Row
+from deckhand.board import FLEET_FAILED, NO_CAPTAIN, START, Board, Row
 from deckhand.brief import Glyphs
 
 WIDTH = 110
@@ -60,17 +60,21 @@ def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - cells(text))
 
 
-def _header(found: Board, g: Glyphs) -> Line:
+def _header(found: Board, g: Glyphs, refreshing: bool) -> Line:
     if not found.read:
         return Line(((" ", ""), ("Captain", "bold")))
     glyph, words, tone = found.lead
     sep = (g.sep, "dim")
     spans: list[Span] = [(" ", ""), (glyph, tone), (" ", ""), (words, tone)]
-    if found.updated:
+    if refreshing:
+        spans += [sep, ("refreshing", "warn")]
+    elif found.updated:
         spans += [sep, (f"updated {found.updated} ago", "dim")]
     for fact in found.facts:
         spans += [sep, (fact, "")]
     spans += [sep, ("slots ", ""), (found.slots[0], "bold"), (f"/{found.slots[1]}", "dim")]
+    if found.captain:
+        spans += [sep, (found.captain, "warn" if found.captain == NO_CAPTAIN else "dim")]
     return Line(tuple(spans))
 
 
@@ -188,9 +192,10 @@ def render(
     selected: str | None = None,
     expanded: str | None = None,
     keys: bool = False,
+    refreshing: bool = False,
 ) -> list[Line]:
     width = min(cols, WIDTH)
-    top = [_header(found, g), *_banner(found, g, width), *_fleet(found, g)]
+    top = [_header(found, g, refreshing), *_banner(found, g, width), *_fleet(found, g)]
     if rows is not None and rows < SHORT:
         return [_clip(line, width, g) for line in top[:2][:rows]]
     body, end = _body(found, g, width, selected, expanded)
@@ -200,10 +205,14 @@ def render(
     return [_clip(line, width, g) for line in (*top, *body, *footer)]
 
 
+def paint(line: Line, color: bool) -> str:
+    spans = []
+    for text, style in line.spans:
+        codes = [SGR[style]] if color and style in SGR and text.strip() else []
+        codes += ["7"] if line.selected else []
+        spans.append(f"\x1b[{';'.join(codes)}m{text}\x1b[0m" if codes else text)
+    return "".join(spans)
+
+
 def text(lines: list[Line], color: bool) -> str:
-    if not color:
-        return "\n".join(line.text.rstrip() for line in lines)
-    painted = (
-        "".join(f"\x1b[{SGR[s]}m{t}\x1b[0m" if s in SGR and t.strip() else t for t, s in line.spans) for line in lines
-    )
-    return "\n".join(line.rstrip() for line in painted)
+    return "\n".join(paint(line, color).rstrip() for line in lines)

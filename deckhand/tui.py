@@ -1,27 +1,34 @@
 from __future__ import annotations
 
-import curses
-import locale
+import os
+import select
+import sys
+import termios
 import threading
+import tty
 from collections.abc import Callable
+from typing import Protocol
 
 from deckhand import board, fleet, frame
 from deckhand.brief import Glyphs
 
-TICK_MS = 250
+TICK = 0.25
 STATUS_EVERY = 2.0
 FLEET_EVERY = 5.0
 FIRST_READ = 1.0
-QUIT = (ord("q"), 27)
-DOWN = (ord("j"), curses.KEY_DOWN)
-UP = (ord("k"), curses.KEY_UP)
-ENTER = (10, 13, curses.KEY_ENTER)
-PALETTE = (
-    ("needs", curses.COLOR_RED, curses.A_BOLD),
-    ("working", curses.COLOR_GREEN, 0),
-    ("warn", curses.COLOR_YELLOW, curses.A_BOLD),
-    ("command", curses.COLOR_CYAN, 0),
-)
+KEYS = {"q": "quit", "\x1b": "quit", "j": "down", "k": "up", "r": "refresh", "\r": "enter", "\n": "enter"}
+KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
+ENTER_SCREEN, LEAVE_SCREEN = "\x1b[?1049h\x1b[?25l", "\x1b[?25h\x1b[?1049l"
+
+Refresh = Callable[[], Callable[[], bool]]
+
+
+class Terminal(Protocol):
+    def size(self) -> tuple[int, int]: ...
+
+    def key(self, timeout: float) -> str | None: ...
+
+    def show(self, lines: list[str]) -> None: ...
 
 
 class Poller:
@@ -69,27 +76,26 @@ class Poller:
 class Watch:
     def __init__(
         self,
-        screen,
+        term: Terminal,
         read_status: Callable[[], dict | None],
         poller: Poller,
         clock: Callable[[], float],
         g: Glyphs,
-        styles: dict[str, int],
+        color: bool,
+        refresh: Refresh | None = None,
     ) -> None:
-        self._screen, self._read, self._poller, self._clock, self._g = screen, read_status, poller, clock, g
-        self._styles = styles
+        self._term, self._read, self._poller, self._clock, self._g = term, read_status, poller, clock, g
+        self._color, self._refresh = color, refresh
+        self._running: Callable[[], bool] | None = None
         self._status: dict | None = None
         self._read_at = float("-inf")
         self._keys: list[str] = []
+        self._shown: list[str] | None = None
         self.selected: str | None = None
         self.expanded: str | None = None
 
     def _reread(self) -> None:
         self._status, self._read_at = self._read(), self._clock()
-
-    def _board(self) -> board.Board:
-        now = self._clock()
-        return board.build(self._status, self._poller.latest(), now, board.midnight(now), self._g)
 
     def _follow(self, keys: list[str]) -> None:
         if self.selected not in keys:
@@ -102,34 +108,37 @@ class Watch:
             at = self._keys.index(self.selected) + step
             self.selected = self._keys[max(0, min(at, len(self._keys) - 1))]
 
-    def _put(self, y: int, x: int, text: str, attr: int) -> None:
-        try:
-            self._screen.addstr(y, x, text, attr)
-        except curses.error:
-            return
+    def _refreshing(self) -> bool:
+        if self._running is not None and not self._running():
+            self._running = None
+            self._reread()
+        return self._running is not None
 
     def draw(self) -> None:
-        found = self._board()
+        now = self._clock()
+        found = board.build(self._status, self._poller.latest(), now, board.midnight(now), self._g)
         self._follow(found.keys())
-        rows, cols = self._screen.getmaxyx()
-        lines = frame.render(found, self._g, cols, rows, self.selected, self.expanded, keys=True)
-        self._screen.erase()
-        for y, line in enumerate(lines[:rows]):
-            x, reverse = 0, self._styles.get("selected", curses.A_REVERSE) if line.selected else 0
-            for text, style in line.spans:
-                self._put(y, x, text, self._styles.get(style, 0) | reverse)
-                x += frame.cells(text)
-        self._screen.refresh()
+        rows, cols = self._term.size()
+        lines = frame.render(
+            found, self._g, cols, rows, self.selected, self.expanded, keys=True, refreshing=self._refreshing()
+        )
+        painted = [frame.paint(line, self._color) for line in lines[:rows]]
+        if painted != self._shown:
+            self._term.show(painted)
+            self._shown = painted
 
-    def handle(self, key: int) -> bool:
-        if key in QUIT:
+    def handle(self, key: str | None) -> bool:
+        action = KEYS.get(key or "")
+        if action == "quit":
             return False
-        if key == ord("r"):
+        if action == "refresh":
             self._reread()
             self._poller.poke()
-        elif key in DOWN or key in UP:
-            self._move(1 if key in DOWN else -1)
-        elif key in ENTER and self.selected:
+            if self._refresh is not None and self._running is None:
+                self._running = self._refresh()
+        elif action in ("down", "up"):
+            self._move(1 if action == "down" else -1)
+        elif action == "enter" and self.selected:
             self.expanded = None if self.expanded == self.selected else self.selected
         return True
 
@@ -139,26 +148,45 @@ class Watch:
             if self._clock() - self._read_at >= STATUS_EVERY:
                 self._reread()
             self.draw()
-            if not self.handle(self._screen.getch()):
+            if not self.handle(self._term.key(TICK)):
                 return
 
 
-def _setup(screen, color: bool) -> dict[str, int]:
-    for call in (lambda: curses.curs_set(0), lambda: curses.set_escdelay(25)):
-        try:
-            call()
-        except curses.error:
-            pass
-    screen.timeout(TICK_MS)
-    styles = {"bold": curses.A_BOLD, "dim": curses.A_DIM, "done": curses.A_DIM, "stale": curses.A_DIM}
-    styles |= {"stopped": curses.A_BOLD}
-    styles |= {"needs": curses.A_BOLD, "warn": curses.A_BOLD, "selected": curses.A_REVERSE}
-    if color and curses.has_colors():
-        curses.use_default_colors()
-        for number, (style, foreground, extra) in enumerate(PALETTE, 1):
-            curses.init_pair(number, foreground, -1)
-            styles[style] = curses.color_pair(number) | extra
-    return styles
+# Plain escape codes, row by row: a curses build may repeat a non-ASCII character in a way terminals misdraw.
+class Screen:
+    def __init__(self, fd: int, out) -> None:
+        self._fd, self._out = fd, out
+        self._saved: list | None = None
+
+    def __enter__(self) -> Screen:
+        self._saved = termios.tcgetattr(self._fd)
+        tty.setcbreak(self._fd)
+        self._out.write(ENTER_SCREEN)
+        self._out.flush()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._out.write(LEAVE_SCREEN)
+        self._out.flush()
+        if self._saved is not None:
+            termios.tcsetattr(self._fd, termios.TCSADRAIN, self._saved)
+
+    def size(self) -> tuple[int, int]:
+        found = os.get_terminal_size(self._out.fileno())
+        return found.lines, found.columns
+
+    def key(self, timeout: float) -> str | None:
+        ready, _, _ = select.select([self._fd], [], [], timeout)
+        if not ready:
+            return None
+        return os.read(self._fd, 32).decode("utf-8", "replace")
+
+    def show(self, lines: list[str]) -> None:
+        rows, _ = self.size()
+        drawn = [f"\x1b[{y + 1};1H\x1b[2K{line}" for y, line in enumerate(lines)]
+        drawn += [f"\x1b[{y + 1};1H\x1b[2K" for y in range(len(lines), rows)]
+        self._out.write("".join(drawn))
+        self._out.flush()
 
 
 def watch(
@@ -167,15 +195,13 @@ def watch(
     clock: Callable[[], float],
     color: bool,
     g: Glyphs,
+    refresh: Refresh | None = None,
 ) -> None:
-    try:
-        locale.setlocale(locale.LC_ALL, "")
-    except locale.Error:
-        pass
     poller = Poller(read_fleet)
     poller.start()
     try:
-        curses.wrapper(lambda screen: Watch(screen, read_status, poller, clock, g, _setup(screen, color)).run())
+        with Screen(sys.stdin.fileno(), sys.stdout) as screen:
+            Watch(screen, read_status, poller, clock, g, color, refresh).run()
     except KeyboardInterrupt:
         return
     finally:

@@ -9,6 +9,8 @@ from deckhand.standing import Entry, Hand
 
 START = "/deckhand:captain"
 FLEET_FAILED = "hands from the file, fleet read failed"
+NO_CAPTAIN = "no captain running"
+CAPTAIN_STATES = {"busy": "working", "idle": "idle", "waiting": "waiting on you"}
 TONES = {standing.NEEDS: "needs", standing.WORKING: "working", standing.STOPPED: "stopped"}
 TONES |= {standing.QUEUED: "queued", standing.TEAM: "team", standing.MERGED: "done"}
 
@@ -44,6 +46,7 @@ class Board:
     working: int = 0
     fleet_failed: bool = False
     quiet: str = ""
+    captain: str = ""
 
     def keys(self) -> list[str]:
         return [row.key for section in self.sections for row in section.rows]
@@ -162,6 +165,15 @@ def _stale(status: dict, since: float | None) -> str:
     return ""
 
 
+def _captain(read: fleet.Fleet | None) -> str:
+    if read is None or read.note:
+        return ""
+    found = fleet.captain(read.sessions)
+    if found is None:
+        return NO_CAPTAIN
+    return f"captain {CAPTAIN_STATES.get(found.status or '', found.status)}"
+
+
 def _updated(seconds: float | None) -> str:
     if seconds is None:
         return ""
@@ -187,4 +199,5 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     updated = "" if stale else _updated(since)
     failed = read is not None and bool(read.note)
     quiet = brief.UNKNOWN if brief.unknown(status) else brief.nothing(since, bool(stale))
-    return Board(True, lead, _facts(status), (str(used), str(cap)), updated, stale, sections, working, failed, quiet)
+    slots = (str(used), str(cap))
+    return Board(True, lead, _facts(status), slots, updated, stale, sections, working, failed, quiet, _captain(read))

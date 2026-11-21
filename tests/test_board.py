@@ -65,7 +65,9 @@ def session(id: str, ref: str, state: str = "working", status: str | None = "bus
     return fleet.Session(id, f"hand-{ref}", f"sid-{id}", state=state, status=status, **fields)
 
 
+CAPTAIN = fleet.Session("cap1", "captain", "sid-cap1", "/w", at(60), "", "idle", None)
 LIVE = [
+    CAPTAIN,
     session("a1b2", "ACME-15"),
     session("c3d4", "ACME-17", status="waiting"),
     session("e5f6", "ACME-18", state="stopped", status=None),
@@ -106,14 +108,16 @@ def test_sections_come_in_order_with_their_counts():
 
 
 def test_the_header_leads_with_the_status_lines_answer():
-    assert texts(shown())[0] == " ! 2 need you | question ACME-16 3m | updated 6s ago | Alpha | day 2 of 7 | slots 2/2"
+    top = texts(shown())[0]
+    assert top == " ! 2 need you | question ACME-16 3m | updated 6s ago | Alpha | day 2 of 7 | slots 2/2 | captain idle"
     quiet = texts(shown(sample(items=[])))[0]
-    assert quiet == " * 2 working | nothing needs you | updated 6s ago | Alpha | day 2 of 7 | slots 2/2"
+    assert quiet == " * 2 working | nothing needs you | updated 6s ago | Alpha | day 2 of 7 | slots 2/2 | captain idle"
     assert quiet[1:].startswith(brief.line(sample(items=[], hands=sample()["hands"]), NOW, G))
 
 
 def test_a_stale_header_reads_like_the_stale_status_line():
-    assert texts(shown(sample(written_at=at(45))))[0] == " - captain stale 45m | Alpha | day 2 of 7 | slots 2/2"
+    head = texts(shown(sample(written_at=at(45))))[0]
+    assert head == " - captain stale 45m | Alpha | day 2 of 7 | slots 2/2 | captain idle"
 
 
 def test_needs_you_lists_the_oldest_first_with_kind_and_wait():
@@ -131,7 +135,7 @@ def test_working_rows_show_the_stage_and_the_hands_own_status():
 
 
 def test_a_story_whose_hand_is_gone_reads_stopped_at_its_stage():
-    sessions = [session("a1b2", "ACME-15", state="failed", status=None), LIVE[2]]
+    sessions = [session("a1b2", "ACME-15", state="failed", status=None), LIVE[3]]
     rows = section(shown(sessions=sessions), "stopped")
     assert [row.split()[:2] for row in rows] == [["x", "ACME-15"], ["x", "ACME-17"], ["x", "ACME-18"]]
     assert "failed at branch review 2/3" in rows[0]
@@ -307,3 +311,10 @@ def test_a_stale_board_says_what_was_waiting_not_an_all_clear():
         "   nothing was waiting as of 45m ago; 2 working"
     ]
     assert section(shown(sample(items=[])), "needs you") == ["   nothing needs you; 2 working"]
+
+
+def test_the_header_says_whether_a_captain_runs():
+    assert texts(shown(sessions=LIVE[1:], cols=110))[0].endswith("| slots 2/2 | no captain running")
+    busy = fleet.Session("cap2", "captain", "sid-cap2", "/w", at(1), "", "busy", None)
+    assert texts(shown(sessions=[*LIVE, busy], cols=110))[0].endswith("| captain working")
+    assert "captain" not in texts(shown(failed=True))[0].split("|")[-1]

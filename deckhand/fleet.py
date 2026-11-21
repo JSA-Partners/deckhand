@@ -7,7 +7,7 @@ from deckhand import git
 from deckhand.records import iso
 
 COMMAND = ["claude", "agents", "--json", "--all"]
-HAND, SPIKE = "hand-", "spike-"
+HAND, SPIKE, CAPTAIN = "hand-", "spike-", "captain"
 LIVE = ("working", "blocked")
 FAILED = ("failed", "stopped")
 PERMISSION = "permission prompt"
@@ -92,6 +92,11 @@ def hands(sessions: list[Session]) -> dict[str, Session]:
 
 def spikes(sessions: list[Session]) -> dict[str, Session]:
     return _newest(sessions, SPIKE)
+
+
+def captain(sessions: list[Session]) -> Session | None:
+    held = [s for s in sessions if s.name == CAPTAIN and s.status is not None]
+    return max(held, key=lambda s: s.started_at, default=None)
 
 
 def live(session: Session) -> bool:

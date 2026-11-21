@@ -24,10 +24,10 @@
   its review round, `status.py` the captain's status file, `standing.py` how the status file and the
   fleet sort into needs you, working, stopped, queued, team and done today, `brief.py` the brief, the
   notify text and the status line segment, `board.py` the board's sections and rows
-- `frame.py` lays the board out to a width and `tui.py` draws it full screen with curses;
-  `statusline.py` installs and removes the captain's segment in the person's status line, with a
-  backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py` what each
-  status line tool needs, and the launcher scripts
+- `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
+  escape codes; `statusline.py` installs and removes the captain's segment in the person's status
+  line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`
+  what each status line tool needs, and the launcher scripts
 - `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
   setup reads and plans for a team, and a client for the app or the person
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
