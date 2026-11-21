@@ -14,7 +14,7 @@ from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep, branch_of
 from deckhand.store import Store
-from deckhand.summary import parse_summary
+from deckhand.summary import ChangeSummary, parse_summary
 
 USAGE = (
     "signoff takes REF and [--team-key KEY] on both verbs; context [--screen 1-5] [--json],"
@@ -178,14 +178,7 @@ class Signoff(StoryStep):
         plan = versions.held(at.records, implplan.PURPOSE, sid)
         if summary is None or plan is None:
             raise Refusal(f"{at.story['identifier']} needs its plan and a change summary at {head} first")
-        base = git.merge_base(at.path, "HEAD", DEFAULT_BASE, self._runner)
-        doubtful = {
-            f["path"]
-            for f in _last_branch(at.records, at.story["id"]).get("findings", [])
-            if f["confidence"] < review.DOUBTFUL
-        }
-        diff = git.diff(at.path, base, runner=self._runner)
-        hunks = tuicr.select_hunks(diff, at.policy, doubtful, plan.data, summary)
+        base, hunks = review_hunks(at, at.path, summary, plan.data, self._runner)
         held = versions.held(at.records, signoff.TUICR, sid)
         if held is None or held.data.get("head") != head:
             sha = tuicr.review_commit(at.path, base, hunks, self._runner) if hunks else None
@@ -243,6 +236,16 @@ class Signoff(StoryStep):
             if self._clock() - start >= wait:
                 return None
             self._sleep(WATCH_POLL)
+
+
+def review_hunks(
+    at: Located, path: Path, summary: ChangeSummary, manifest: dict, runner: git.Runner
+) -> tuple[str, list[tuicr.Hunk]]:
+    base = git.merge_base(path, "HEAD", DEFAULT_BASE, runner)
+    findings = _last_branch(at.records, at.story["id"]).get("findings", [])
+    doubtful = {f["path"] for f in findings if f["confidence"] < review.DOUBTFUL}
+    diff = git.diff(path, base, runner=runner)
+    return base, tuicr.select_hunks(diff, at.policy, doubtful, manifest, summary)
 
 
 def _last_branch(records: list[Record], story: str) -> dict:

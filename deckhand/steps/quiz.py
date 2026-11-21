@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from deckhand import claims, git, inputs, ops, quiz, summary, tiers, versions
+from deckhand import claims, git, implplan, inputs, ops, quiz, summary, tiers, tuicr, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
-from deckhand.steps.build import StoryStep
-from deckhand.summary import digest, parse_summary
+from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep
+from deckhand.steps.signoff import review_hunks
+from deckhand.summary import ChangeSummary, digest, parse_summary
 
 USAGE = (
     "quiz takes REF and [--team-key KEY] on both verbs; context [--json], apply --quiz QUIZ.json --summary SUMMARY.json"
@@ -37,8 +38,7 @@ def _read(path: str, flag: str) -> str:
 
 
 class Quiz(StoryStep):
-    def _worktree(self, parsed: dict) -> tuple[dict, list[Record], tiers.Tier | None, str, Path]:
-        at = self.locate(parsed["words"][0], team_key(parsed))
+    def _worktree(self, at: Located) -> tuple[dict, list[Record], tiers.Tier | None, str, Path]:
         if at.path is None or at.head is None:
             ref = at.story["identifier"]
             raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")
@@ -47,7 +47,8 @@ class Quiz(StoryStep):
         return at.story, at.records, tier, at.head, at.path
 
     def context(self, args: list[str]) -> None:
-        story, records, tier, head, path = self._worktree(_parse(args))
+        parsed = _parse(args)
+        story, records, tier, head, path = self._worktree(self.locate(parsed["words"][0], team_key(parsed)))
         held = quiz.held_set(records, story["id"])
         facts = {
             "story": story["identifier"],
@@ -80,7 +81,8 @@ class Quiz(StoryStep):
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
-        story, _, tier, head, path = self._worktree(parsed)
+        at = self.locate(parsed["words"][0], team_key(parsed))
+        story, _, tier, head, path = self._worktree(at)
         claims.owned(story, self.viewer())
         if tier is None:
             raise Refusal(f"{story['identifier']} has no tier decided; the quiz is sized by its tier")
@@ -90,9 +92,27 @@ class Quiz(StoryStep):
         items = quiz.parse_quiz(text, quiz.quiz_size(tier, new_here))
         if git.dirty(path, self._runner):
             raise Refusal(f"{path} has uncommitted changes; commit them first so the quiz is pinned to {head}")
+        ranges = self._shown(at, path, parsed_summary)
+        for n, entry in enumerate(items, start=1):
+            where, _, line = entry.where.rpartition(":")
+            if ranges and not tuicr.shows(ranges, where, int(line)):
+                raise Refusal(
+                    f"quiz item {n} asks about {entry.where}, which the tuicr review does not show;"
+                    f" ask about {tuicr.describe_ranges(ranges)}"
+                )
         record = quiz.set_record(story["id"], head, items, digest(parsed_summary), new_here)
         ops.ensure_record(self._store_for_run(), story["id"], record)
         print(f"done: saved a quiz of {len(items)} items for {story['identifier']} at {head}")
+
+    # The person is quizzed only on code the tuicr review shows them, or on the whole diff when it shows none.
+    def _shown(self, at: Located, path: Path, summary: ChangeSummary) -> list[tuple[str, int, int]]:
+        plan = versions.held(at.records, implplan.PURPOSE, at.story["id"])
+        manifest = plan.data if plan else {"contract_sites": [], "invariant_sites": []}
+        _, hunks = review_hunks(at, path, summary, manifest, self._runner)
+        if not hunks:
+            base = git.merge_base(path, "HEAD", DEFAULT_BASE, self._runner)
+            hunks = tuicr.parse_hunks(git.diff(path, base, runner=self._runner))
+        return tuicr.shown_ranges(hunks)
 
 
 register("quiz")(Quiz)

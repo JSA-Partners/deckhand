@@ -39,7 +39,7 @@ edits. Repeat checks, push and branch review until the context stops clean, cap-
 proceeded at the pushed head.
 
 There, `deckhand quiz context REF` gives the quiz size and shapes. Write the change summary by intent
-and the quiz on the diff and what is new; save them with
+and the quiz on the hunks the tuicr review shows; save them with
 `deckhand signoff apply REF summary --summary SUMMARY.json` and
 `deckhand quiz apply REF --quiz QUIZ.json --summary SUMMARY.json`, then stop.
 

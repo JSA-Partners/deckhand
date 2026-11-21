@@ -37,6 +37,8 @@ from tests.test_step_review import answer, record_round
 from tests.test_step_signoff import Clock as MergeClock
 from tests.test_step_stories import entry, story_id
 
+SHOWN = "src/a.py:1"
+
 __all__ = ["clone", "state"]
 
 OTHER = "someone-else"
@@ -98,7 +100,7 @@ class Run:
         decided(self.store, "feature-approval", P1, "Approve", list(stories))
 
     def decide(self) -> Decide:
-        files = reader(self.clone / ".worktrees" / "acme-1-orders", {"src/queue.py": SOURCE})
+        files = reader(self.clone / ".worktrees" / "acme-1-orders", {"src/a.py": SOURCE})
         return Decide(self.store, runner=self.world, repo=self.clone, reader=files)
 
     def build_to_sign_off(self, ref: str) -> None:
@@ -114,7 +116,7 @@ class Run:
         record_round(Review(self.store, self.world, self.clone), self.tmp, ref=ref, stage="branch")
         made = self.write("change.json", summary(1))
         Signoff(self.store, self.world, self.clone).apply([ref, "summary", "--summary", made, *TEAM])
-        quizzed = self.write("quiz.json", [item()])
+        quizzed = self.write("quiz.json", [item(where=SHOWN)])
         Quiz(self.store, self.world, self.clone).apply([ref, *TEAM, "--quiz", quizzed, "--summary", made])
 
     def pass_quiz(self, ref: str) -> None:

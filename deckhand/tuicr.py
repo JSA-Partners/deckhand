@@ -144,6 +144,24 @@ def _counts(line: str) -> tuple[int, int, int, int]:
     return int(old), int(old_count or 1), int(new), int(new_count or 1)
 
 
+def shown_ranges(hunks: list[Hunk]) -> list[tuple[str, int, int]]:
+    found = []
+    for hunk in hunks:
+        if hunk.lines:
+            _, _, new, new_count = _counts(hunk.lines[0])
+            if new_count:
+                found.append((hunk.path, new, new + new_count - 1))
+    return found
+
+
+def shows(ranges: list[tuple[str, int, int]], path: str, line: int) -> bool:
+    return any(path == shown and first <= line <= last for shown, first, last in ranges)
+
+
+def describe_ranges(ranges: list[tuple[str, int, int]]) -> str:
+    return "; ".join(f"{path} lines {first}-{last}" for path, first, last in ranges)
+
+
 def _anchor(hunk: Hunk) -> tuple[int, str]:
     old_start, old_count, _, _ = _counts(hunk.lines[0])
     old = old_start

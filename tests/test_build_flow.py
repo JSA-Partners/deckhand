@@ -23,6 +23,8 @@ from tests.test_step_checks import Commands
 from tests.test_step_review import PLAN, TEAM, answer, finding_id, raw, record_round, shown, submit
 from tests.test_step_signoff import Clock, Diffing, Gh, overview, voids
 
+SHOWN = "src/a.py:1"
+
 __all__ = ["repo", "state"]
 
 
@@ -52,7 +54,7 @@ class Hand:
         return Review(self.store, self.world, self.repo)
 
     def decide(self) -> Decide:
-        files = reader(self.repo / ".worktrees" / BRANCH, {"src/queue.py": SOURCE})
+        files = reader(self.repo / ".worktrees" / BRANCH, {"src/a.py": SOURCE})
         return Decide(self.store, runner=self.world, repo=self.repo, reader=files)
 
     def plan_and_push(self) -> None:
@@ -97,10 +99,10 @@ class Hand:
         sized = json.loads(self.capsys.readouterr().out)
         assert (sized["tier"], sized["base"], sized["head"]) == (0, 0, self.world.head)
         written = self.tmp / "quiz.json"
-        written.write_text(json.dumps([item(), item(question="Another?")]))
+        written.write_text(json.dumps([item(where=SHOWN), item(where=SHOWN, question="Another?")]))
         with pytest.raises(Refusal, match="its size by tier and new_here is 1"):
             Quiz(self.store, self.world, self.repo).apply(["s1", *TEAM, "--quiz", str(written), "--summary", str(made)])
-        written.write_text(json.dumps([item()]))
+        written.write_text(json.dumps([item(where=SHOWN)]))
         Quiz(self.store, self.world, self.repo).apply(["s1", *TEAM, "--quiz", str(written), "--summary", str(made)])
 
     def pass_quiz(self) -> None:
@@ -110,7 +112,7 @@ class Hand:
         reply(self.state, step, first, "A new key")
         assert quiz.open_items(self.store.records("s1"), "s1") == [1]
         again = ask(step, self.capsys)
-        assert again["where"] == "src/queue.py:12" and again["code"]
+        assert again["where"] == SHOWN and again["code"]
         reply(self.state, step, again, "The idempotency key")
         assert quiz.passed(self.store.records("s1"), "s1", self.world.head)
 
