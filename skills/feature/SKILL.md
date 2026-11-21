@@ -10,8 +10,8 @@ allowed-tools: Bash(deckhand *) Read Write Edit Grep Glob Agent AskUserQuestion 
 !`deckhand feature context`
 
 Above: the open feature, its phase and next step. Work one feature and one screen at a time: show
-one thing, get one answer, move on. Each step offers writing it yourself or taking a draft, a
-proposal, never a decision. Keep the given option order; mark none recommended.
+one thing, get one answer, move on. Each step offers writing it yourself or taking a draft, never
+a decision. Keep the given option order; mark none recommended.
 
 Open, pick, or park a feature with `deckhand feature apply new --name N [--reference REF]`,
 `deckhand feature apply pick --project ID --weeks 1|2`, or `deckhand feature apply park --project ID`.
@@ -19,8 +19,8 @@ Shape it with superpowers:brainstorming before its Frame; use impeccable:impecca
 person sees.
 
 `deckhand plan context` lists the sections; name one to read it back. Save every answer when it is
-given with `deckhand plan apply SECTION --file PATH [--drafted]`, `--drafted` for a draft. Stopping
-is safe: every answer is already saved.
+given with `deckhand plan apply SECTION --file PATH [--drafted]`, `--drafted` for a draft, so
+stopping is safe.
 
 At Facts, offer each unverified fact a spike, its one-line question in a file:
 `deckhand hand apply spike --repository LABEL --file QUESTION.md`. Before the story map, read each
@@ -46,4 +46,5 @@ Then decide each gap `deckhand feature context` names. For the feature review, p
 target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence scores
 the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`, HASH
 the target_hash line. A P1 is a gap: fix the Contract or story and review again, or the person
-declines it. Decide the feature-approval once no gap is left.
+declines it. Decide the feature-approval once no gap is left, then do the captain's
+`next`.
