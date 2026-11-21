@@ -220,7 +220,12 @@ def current(store: Store, team: str) -> Feature | None:
     if found is not None:
         return found
     released = [f for f in held if phase(f) is Phase.RELEASED]
-    return max(released, key=lambda f: (f.project["start_date"], f.project["id"]), default=None)
+    return max(released, key=_released_at, default=None)
+
+
+def _released_at(feature: Feature) -> tuple[str, str, str]:
+    finished = max((s.get("completed_at") or "" for s in feature.stories), default="")
+    return finished, feature.project["start_date"], feature.project["id"]
 
 
 def parked(store: Store, team: str) -> list[dict]:

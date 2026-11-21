@@ -70,6 +70,21 @@ def test_current_is_the_open_feature_else_the_newest_released():
     assert found is not None and (found.project["name"], phase(found)) == ("Gamma", Phase.PLANNING)
 
 
+def test_current_is_the_last_released_when_two_started_the_same_day():
+    store = FakeStore()
+    for name in ("Later", "Earlier"):
+        id = create_id(f"ACME:{name}", "feature")
+        store.create_project(id, "ACME", name, "", [FEATURE_LABEL])
+        store.set_project_dates(id, "2026-11-16", None)
+        store.create_issue(f"s-{name}", "ACME", name, "", id, [])
+    for name in ("Earlier", "Later"):
+        store.set_issue_state(f"s-{name}", "Done")
+    for _ in range(2):
+        found = current(store, "ACME")
+        assert found is not None and found.project["name"] == "Later"
+        store._projects = dict(reversed(store._projects.items()))
+
+
 def test_renamed_project_stays_a_feature():
     store = FakeStore()
     id = create_id("ACME:Alpha", "feature")
