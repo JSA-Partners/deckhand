@@ -239,7 +239,7 @@ class Signoff(StoryStep):
 
 
 def review_hunks(
-    at: Located, path: Path, summary: ChangeSummary, manifest: dict, runner: git.Runner
+    at: Located, path: Path, summary: ChangeSummary | None, manifest: dict, runner: git.Runner
 ) -> tuple[str, list[tuicr.Hunk]]:
     base = git.merge_base(path, "HEAD", DEFAULT_BASE, runner)
     findings = _last_branch(at.records, at.story["id"]).get("findings", [])

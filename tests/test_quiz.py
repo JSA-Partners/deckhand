@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, quiz, tiers
+from deckhand import answers, implplan, quiz, tiers
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
@@ -15,6 +15,7 @@ from deckhand.steps.quiz import Quiz
 from deckhand.store.fake import FakeStore
 from deckhand.summary import SHAPE as SUMMARY_SHAPE
 from deckhand.summary import digest, parse_summary
+from tests.test_implplan import manifest
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import TEAM
 
@@ -359,3 +360,16 @@ def test_apply_takes_an_item_inside_a_shown_hunk(tmp_path: Path, repo: Path):
     store = labeled(tmp_path, repo)
     submit_diffed(store, tmp_path, repo, "src/queue.py:12")
     assert quiz.held_set(store.records("s1"), "s1") is not None
+
+
+def test_context_names_the_code_the_review_shows(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
+    store = labeled(tmp_path, repo)
+    store.put_record(
+        "s1", Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", manifest(contract_sites=["src/queue.py"]))
+    )
+    capsys.readouterr()
+    Quiz(store, Diffed(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    assert "each where falls in code the tuicr review shows: src/queue.py lines 10-13" in out
+    Quiz(store, Diffed(), repo).context(["s1", *TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["shown"] == "src/queue.py lines 10-13"

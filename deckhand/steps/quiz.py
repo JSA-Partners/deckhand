@@ -48,8 +48,13 @@ class Quiz(StoryStep):
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        story, records, tier, head, path = self._worktree(self.locate(parsed["words"][0], team_key(parsed)))
+        at = self.locate(parsed["words"][0], team_key(parsed))
+        story, records, tier, head, path = self._worktree(at)
         held = quiz.held_set(records, story["id"])
+        try:
+            shown = tuicr.describe_ranges(tuicr.shown_ranges(self._selected(at, path, None)))
+        except (Refusal, git.GitError):
+            shown = ""
         facts = {
             "story": story["identifier"],
             "worktree": str(path),
@@ -60,6 +65,7 @@ class Quiz(StoryStep):
             "summary_shape": summary.SHAPE,
             "quiz_head": held.data.get("head") if held else None,
             "open": quiz.open_items(records, story["id"]) if held else None,
+            "shown": shown,
         }
         if "--json" in args:
             print(json.dumps(facts, indent=2))
@@ -70,6 +76,8 @@ class Quiz(StoryStep):
         else:
             print(f"size: {facts['base']} for tier {tier.level}, plus one per new_here entry in the change summary")
         print(f"shape: {SHAPE}")
+        if shown:
+            print(f"each where falls in code the tuicr review shows: {shown}, and each new_here path's hunks")
         print("change summary, a JSON object:")
         for name, meaning in summary.SHAPE.items():
             print(f"- {name}: {meaning}")
@@ -105,10 +113,13 @@ class Quiz(StoryStep):
         print(f"done: saved a quiz of {len(items)} items for {story['identifier']} at {head}")
 
     # The person is quizzed only on code the tuicr review shows them, or on the whole diff when it shows none.
-    def _shown(self, at: Located, path: Path, summary: ChangeSummary) -> list[tuple[str, int, int]]:
+    def _selected(self, at: Located, path: Path, summary: ChangeSummary | None) -> list[tuicr.Hunk]:
         plan = versions.held(at.records, implplan.PURPOSE, at.story["id"])
         manifest = plan.data if plan else {"contract_sites": [], "invariant_sites": []}
-        _, hunks = review_hunks(at, path, summary, manifest, self._runner)
+        return review_hunks(at, path, summary, manifest, self._runner)[1]
+
+    def _shown(self, at: Located, path: Path, summary: ChangeSummary) -> list[tuple[str, int, int]]:
+        hunks = self._selected(at, path, summary)
         if not hunks:
             base = git.merge_base(path, "HEAD", DEFAULT_BASE, self._runner)
             hunks = tuicr.parse_hunks(git.diff(path, base, runner=self._runner))
