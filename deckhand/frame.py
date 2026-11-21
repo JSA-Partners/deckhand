@@ -101,7 +101,8 @@ def _columns(found: Board, width: int) -> tuple[int, int, int]:
     if width < NARROW:
         return ref, 0, max(4, width - fixed)
     state = min(STATE, max([8, *(cells(row.state) for row in rows)]))
-    return ref, max(8, width - fixed - state - 1), state
+    title = width - fixed - state - 1
+    return (ref, title, state) if title >= 8 else (ref, 0, width - fixed)
 
 
 def _row(row: Row, g: Glyphs, columns: tuple[int, int, int], selected: bool) -> Line:

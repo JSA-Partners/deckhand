@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from deckhand import board, fleet, frame
-from tests.test_board import NOW, TODAY, G, at, sample, section, shown, stage, story, texts
+from tests.test_board import NOW, TODAY, G, at, item, sample, section, shown, stage, story, texts
 
 
 def test_long_titles_end_in_an_ellipsis_and_every_row_fits():
@@ -74,3 +74,10 @@ def test_yellow_is_only_for_stale_and_queued_is_plain():
     assert {style for text, style in queued.spans if text.strip()} <= {"", "bold", "dim"}
     stale = frame.text(shown(sample(written_at=at(45))), color=True)
     assert "\x1b[2m-\x1b[0m \x1b[1;33mstale:" in stale
+
+
+def test_at_sixty_columns_a_long_ref_and_state_keep_the_age():
+    for ref, kind in (("SBX-140000000", "a" * 28), ("SBX-1400000000", "a" * 27), ("SBX-1400000000", "a" * 28)):
+        status = sample(items=[item("k1", kind, ref, "Print every greeting", 14, "next")], stories=[], hands=[])
+        row = section(shown(status, sessions=[], cols=60), "needs you")[0]
+        assert row.split()[-2:] == [kind, "14m"] and frame.cells(row) <= 60
