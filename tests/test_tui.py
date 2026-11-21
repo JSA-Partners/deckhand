@@ -264,7 +264,8 @@ def test_r_runs_a_full_read_shows_refreshing_and_rereads_when_it_ends():
 
         return running
 
-    term, reader, _ = run(["r", "r", None, None, None], refresh=refresh)
+    old, new = sample(), sample(written_at=at(0.05))
+    term, reader, _ = run(["r", "r", None, None, None], Reader(old, old, old, new), refresh=refresh)
     assert started == [1]
     assert "refreshing" in term.frames[1][0] and "updated" not in term.frames[1][0]
     assert "refreshing" not in term.frames[-1][0] and "updated" in term.frames[-1][0]
@@ -344,13 +345,8 @@ def test_an_old_read_refreshes_itself_every_five_minutes():
     assert started == [1, 1]
 
 
-def test_a_failed_refresh_says_so_until_one_works():
-    codes = [1, 0]
-
-    def refresh():
-        code = codes.pop(0)
-        return lambda: code
-
-    term, _, _ = run(["r", None, "r", None], refresh=refresh)
+def test_a_refresh_that_writes_nothing_says_so_until_one_does():
+    old, new = sample(), sample(written_at=at(0.05))
+    term, _, _ = run(["r", None, "r", None], Reader(old, old, old, old, new), refresh=lambda: lambda: 0)
     assert "refresh failed" in term.frames[1][0]
     assert "refresh failed" not in term.frames[-1][0]

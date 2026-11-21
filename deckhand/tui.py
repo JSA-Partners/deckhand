@@ -99,6 +99,7 @@ class Watch:
         self._color, self._refresh = color, refresh
         self._running: Callable[[], int | None] | None = None
         self._failed = False
+        self._before = ""
         self._refreshed = float("-inf")
         self._status: dict | None = None
         self._read_at = float("-inf")
@@ -123,6 +124,7 @@ class Watch:
 
     def _start_refresh(self) -> None:
         if self._refresh is not None and self._running is None:
+            self._before = standing.text(self._status, "written_at")
             self._running, self._refreshed = self._refresh(), self._clock()
 
     # Nothing else reads Linear while the captain plans a feature, so an old file refreshes itself.
@@ -134,9 +136,11 @@ class Watch:
             self._start_refresh()
 
     def _note(self) -> str:
-        if self._running is not None and (code := self._running()) is not None:
-            self._running, self._failed = None, code != 0
+        if self._running is not None and self._running() is not None:
+            self._running = None
             self._reread()
+            # A full read never fails by its exit code, so a refresh counts only when it wrote the file.
+            self._failed = standing.text(self._status, "written_at") == self._before
         if self._running is not None:
             return "refreshing"
         return "refresh failed" if self._failed else ""
