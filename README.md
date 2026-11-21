@@ -138,7 +138,8 @@ Two views follow the captain without asking it anything:
 - The board: every story of the feature, full screen, under needs you, working, stopped, queued,
   team (the stories a teammate owns) and done today. Setup writes a `deckhand` launcher in
   `~/.config/deckhand/` that runs the newest installed version, and the captain gives you the
-  command to run the board in another terminal tab.
+  command to run the board in another terminal tab. The board reads Linear itself when you press
+  `r`, and every five minutes while the captain's last read is older than that.
 
 ## How it is built
 

@@ -222,7 +222,7 @@ class Captain:
             return
         read, now = fleet.sessions(self._runner), self._clock()
         found = board.build(status.read(state), read, now, board.midnight(now), g)
-        cols = shutil.get_terminal_size((frame.WIDTH, 24)).columns if terminal else frame.WIDTH
+        cols = min(shutil.get_terminal_size((frame.WIDTH, 24)).columns, frame.WIDTH) if terminal else frame.WIDTH
         print(frame.text(frame.render(found, g, cols), color and terminal))
         if watch:
             print("deckhand: --watch needs a terminal; printed the board once", file=sys.stderr)

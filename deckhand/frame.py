@@ -194,7 +194,7 @@ def render(
     keys: bool = False,
     refreshing: bool = False,
 ) -> list[Line]:
-    width = min(cols, WIDTH)
+    width = cols
     top = [_header(found, g, refreshing), *_banner(found, g, width), *_fleet(found, g)]
     if rows is not None and rows < SHORT:
         return [_clip(line, width, g) for line in top[:2][:rows]]

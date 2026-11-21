@@ -9,13 +9,14 @@ import tty
 from collections.abc import Callable
 from typing import Protocol
 
-from deckhand import board, fleet, frame
+from deckhand import board, fleet, frame, standing
 from deckhand.brief import Glyphs
 
 TICK = 0.25
 STATUS_EVERY = 2.0
 FLEET_EVERY = 5.0
 FIRST_READ = 1.0
+AUTO_REFRESH = 300.0
 KEYS = {"q": "quit", "\x1b": "quit", "j": "down", "k": "up", "r": "refresh", "\r": "enter", "\n": "enter"}
 KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
 ESC, ESC_WAIT = "\x1b", 0.025
@@ -97,6 +98,7 @@ class Watch:
         self._term, self._read, self._poller, self._clock, self._g = term, read_status, poller, clock, g
         self._color, self._refresh = color, refresh
         self._running: Callable[[], bool] | None = None
+        self._refreshed = float("-inf")
         self._status: dict | None = None
         self._read_at = float("-inf")
         self._keys: list[str] = []
@@ -117,6 +119,18 @@ class Watch:
         if self._keys and self.selected in self._keys:
             at = self._keys.index(self.selected) + step
             self.selected = self._keys[max(0, min(at, len(self._keys) - 1))]
+
+    def _start_refresh(self) -> None:
+        if self._refresh is not None and self._running is None:
+            self._running, self._refreshed = self._refresh(), self._clock()
+
+    # Nothing else reads Linear while the captain plans a feature, so an old file refreshes itself.
+    def _refresh_if_old(self) -> None:
+        now = self._clock()
+        stamp = standing.timestamp(standing.text(self._status, "written_at"))
+        old = stamp is None or now - stamp >= AUTO_REFRESH
+        if self._status is not None and old and now - self._refreshed >= AUTO_REFRESH:
+            self._start_refresh()
 
     def _refreshing(self) -> bool:
         if self._running is not None and not self._running():
@@ -144,8 +158,7 @@ class Watch:
         if action == "refresh":
             self._reread()
             self._poller.poke()
-            if self._refresh is not None and self._running is None:
-                self._running = self._refresh()
+            self._start_refresh()
         elif action in ("down", "up"):
             self._move(1 if action == "down" else -1)
         elif action == "enter" and self.selected:
@@ -157,6 +170,7 @@ class Watch:
         while True:
             if self._clock() - self._read_at >= STATUS_EVERY:
                 self._reread()
+                self._refresh_if_old()
             self.draw()
             if not self.handle(self._term.key(TICK)):
                 return

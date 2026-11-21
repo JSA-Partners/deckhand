@@ -7,7 +7,7 @@ from tests.test_board import CAPTAIN, NOW, TODAY, G, at, item, sample, section, 
 def test_long_titles_end_in_an_ellipsis_and_every_row_fits():
     for cols in (60, 80, 100, 140):
         lines = shown(cols=cols)
-        assert all(frame.cells(line.text) <= min(cols, frame.WIDTH) for line in lines)
+        assert all(frame.cells(line.text) <= cols for line in lines)
     row = section(shown(cols=70), "working")[0]
     assert "Add a farewell banner to the g... branch review 2/3" in row
 

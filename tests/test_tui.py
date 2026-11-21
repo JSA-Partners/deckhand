@@ -5,7 +5,7 @@ import re
 import threading
 
 from deckhand import brief, fleet, frame, tui
-from tests.test_board import LIVE, NOW, sample
+from tests.test_board import LIVE, NOW, at, sample
 
 ENTER, ESC, DOWN, UP = "\r", "\x1b", "\x1b[B", "\x1b[A"
 SGR = re.compile(r"\x1b\[[0-9;]*m")
@@ -321,3 +321,24 @@ def test_an_arrow_split_across_reads_is_not_a_quit():
 def test_a_resize_that_keeps_the_lines_still_redraws():
     term, _, _ = run([(30, 140), (40, 140)], size=(30, 120))
     assert term.shows == 3
+
+
+def test_the_board_fills_a_wide_terminal():
+    term, _, _ = run([], size=(30, 160))
+    rule = next(line for line in term.frames[0] if line.startswith("-- needs you"))
+    assert len(rule) == 160
+
+
+def test_an_old_read_refreshes_itself_every_five_minutes():
+    started = []
+
+    def refresh():
+        started.append(1)
+        return lambda: False
+
+    old = Reader(sample(written_at=at(45)))
+    ticks = int(tui.AUTO_REFRESH / tui.TICK)
+    run([None] * (ticks + 2), old, refresh=refresh)
+    assert started == [1, 1]
+    run([None] * (ticks // 2), refresh=refresh)
+    assert started == [1, 1]
