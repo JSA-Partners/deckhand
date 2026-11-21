@@ -11,7 +11,8 @@
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
   `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
   planning work (`spike`, `draft`) and its questions (`ask`), and the person's fleet (`hand` starts,
-  fills and wakes hands, `captain` prints the queue); `commit` and `document` only report
+  fills and wakes hands, `captain` prints the brief, the queue, the status line segment and the
+  board); `commit` and `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
@@ -19,7 +20,13 @@
   and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
   who owns a story, `asks.py` a hand's questions and wakes, `gaps.py` permission gaps, `spikes.py`
   spike questions and answers, `order.py` the build order, `answers.py` the dialog answers the hook
-  stores, `inputs.py` the files a hand may hand in
+  stores, `inputs.py` the files a hand may hand in; `stage.py` where each story is in the build and
+  its review round, `status.py` the captain's status file, `standing.py` how the status file and the
+  fleet sort into needs you, working, stopped, queued and done today, `brief.py` the brief, the
+  notify text and the status line segment, `board.py` the board's sections and rows
+- `frame.py` lays the board out to a width and `tui.py` draws it full screen with curses;
+  `statusline.py` installs and removes the captain's segment in the person's status line, with a
+  backup, and `hosts.py` what each status line tool needs for it
 - `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
   setup reads and plans for a team, and a client for the app or the person
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
@@ -100,7 +107,9 @@ install reaches them when the next fix or feature does.
 - A hand is a background session per story, draft or spike, launched only by `hand`, under settings that
   hold no credential; every write it causes goes through `deckhand`, and a raw write fails
 - The captain holds no state: its view, the queue and the wakes are printed from records, and a
-  hand stopping only updates a count; a waiting hand frees its slot, a planning hand holds one
+  hand stopping only reprints the brief; a waiting hand frees its slot, a planning hand holds one
+- The status file is written for the brief, the status line and the board, and never decided from;
+  its notified list only keeps a notification from repeating
 - A hand does the after-merge chores it can; only the rest reach the person's queue
 - `.claude/` is Claude Code's: a hand may edit `.claude/deckhand.toml` and
   `.claude/deckhand/lenses/`, and any other change becomes a queue item through `ask apply --edit`

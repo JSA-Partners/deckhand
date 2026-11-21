@@ -58,9 +58,10 @@ flowchart TB
 | Sign-off | Shows what changed, the evidence, a targeted tuicr pass and a quiz | Sign off |
 | Merge | Merges pinned to the commit you signed, then does the after-merge chores it can | Do the ones it leaves you |
 
-You talk only to the captain. While you are away, hands keep working up to your slot cap; a hand
-that stops wakes the captain, which only updates a count. On your return it says how many items
-wait and shows the top one. Every answer is saved as it is given, so you can stop after any item.
+You talk only to the captain. While you are away, hands keep working up to your slot cap. When a
+hand stops, the captain prints a short brief of what needs you, and sends a notification when
+something new waits; type `next` and it shows the top item. Every answer is saved as it is given,
+so you can stop after any item.
 
 Hands run in Claude Code's sandbox. A hand cannot read credentials (deckhand's config, `gh`, ssh,
 git), cannot push or write to GitHub except through deckhand, cannot forge your answers,
@@ -115,7 +116,7 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 
 | Command | What it does |
 | --- | --- |
-| `/deckhand:setup` | Fits a Linear team to the process, names its repositories and clones, and prints the captain's launch line |
+| `/deckhand:setup` | Fits a Linear team to the process, names its repositories and clones, offers the status line, and prints the captain's launch line |
 | `/deckhand:captain` | Starts hands, and brings you the queue one item at a time |
 | `/deckhand:feature` | Opens, picks or parks a feature, and plans it with you a screen at a time |
 | `/deckhand:signoff REF` | Walks you through story REF's sign-off, one screen at a time |
@@ -126,6 +127,15 @@ Run setup once per machine, and again when a repository joins. Then launch the c
 it prints, which starts Claude Code under the captain's own settings. The captain runs the feature
 and sign-off skills for you when an item needs them. Hands run `story`, `spike` and `draft` on
 their own; you never type those.
+
+Two views follow the captain without asking it anything:
+
+- The status line: one segment, such as `1 needs you` with the top item's kind, story and wait, in
+  every Claude Code session. Setup adds it to Claude Code's own status line, or to claude-hud,
+  ccstatusline or CCometixLine, and puts it on a second line under any other. It backs up each
+  file first, and setup can take it out again, restoring each file as it was.
+- The board: every story of the feature, full screen, under needs you, working, stopped, queued
+  and done today. The captain gives you the command to run it in another terminal tab.
 
 ## How it is built
 
