@@ -70,4 +70,7 @@ def read(state: Path) -> dict | None:
         found = json.loads((state / FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return found if isinstance(found, dict) and found.get("shape") == SHAPE else None
+    if not isinstance(found, dict) or found.get("shape") != SHAPE:
+        return None
+    notified = found.get("notified")
+    return found if isinstance(notified, list) and all(isinstance(key, str) for key in notified) else None

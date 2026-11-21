@@ -74,8 +74,7 @@ def test_restart_prints_same_queue(clone: Path, state: Path, tmp_path: Path, cap
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text(json.dumps(store.snapshot()))
     restarted = FakeStore.from_snapshot(snapshot)
-    (state / status.FILE).unlink()
-    assert [p.name for p in state.iterdir()] == []
+    assert [p.name for p in state.iterdir()] == [status.FILE]
     assert output(restarted, [], capsys, shell=Shell(row("ACME-1", "working", "busy"))) == first
     assert "question ACME-1" in first
 
@@ -239,3 +238,14 @@ def test_a_failed_write_is_a_note(clone: Path, capsys: pytest.CaptureFixture[str
     text = output(owned(), [], capsys)
     assert text.splitlines()[0].startswith(f"cannot write {answers.state_dir() / status.FILE}")
     assert "slots 0 of 1" in text.splitlines()
+
+
+@pytest.mark.parametrize("notified", [None, [["a"]], [1], "abc"])
+def test_a_bad_notified_is_rewritten(clone: Path, notified: object, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    asked(store, "s1")
+    output(store, [], capsys)
+    path = answers.state_dir() / status.FILE
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"notified": notified}))
+    assert "1 waiting, top: question ACME-1" in output(store, [], capsys).splitlines()
+    assert written()["notified"] == []

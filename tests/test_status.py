@@ -133,6 +133,19 @@ def test_read_is_none_unless_a_current_shape(tmp_path: Path, content: bytes | No
     assert status.read(tmp_path) is None
 
 
+@pytest.mark.parametrize("notified", [None, [["a"]], [1], "abc"])
+def test_read_is_none_when_notified_is_not_a_list_of_strings(tmp_path: Path, notified: object):
+    status.write(tmp_path, snapshot([]) | {"notified": notified})
+    assert status.read(tmp_path) is None
+
+
+def test_read_is_none_without_notified(tmp_path: Path):
+    found = snapshot([])
+    del found["notified"]
+    status.write(tmp_path, found)
+    assert status.read(tmp_path) is None
+
+
 def test_read_is_none_when_unreadable(tmp_path: Path):
     (tmp_path / status.FILE).mkdir()
     assert status.read(tmp_path) is None
