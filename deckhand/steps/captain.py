@@ -184,8 +184,7 @@ class Captain:
             shown["notified"] += alert[1] if alert else []
         if shown is not None:
             _save(state, shown, notes)
-        working = [ref for ref, s in _held(read) if fleet.busy(s)]
-        facts["brief"] = brief.text(shown, working, self._clock(), brief.glyphs(_encoding()), notes)
+        facts["brief"] = brief.text(shown, self._clock(), brief.glyphs(_encoding()), notes)
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
@@ -214,8 +213,7 @@ class Captain:
             tui.watch(lambda: status.read(state), lambda: fleet.sessions(_quiet(self._runner)), self._clock, color, g)
             return
         read, now = fleet.sessions(self._runner), self._clock()
-        sessions = None if read.note else read.sessions
-        found = board.build(status.read(state), sessions, now, board.midnight(now))
+        found = board.build(status.read(state), read, now, board.midnight(now), g)
         cols = shutil.get_terminal_size((frame.WIDTH, 24)).columns if terminal else frame.WIDTH
         print(frame.text(frame.render(found, g, cols), color and terminal))
         if watch:

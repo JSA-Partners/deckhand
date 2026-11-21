@@ -11,6 +11,7 @@ from deckhand.brief import Glyphs
 TICK_MS = 250
 STATUS_EVERY = 2.0
 FLEET_EVERY = 5.0
+FIRST_READ = 1.0
 QUIT = (ord("q"), 27)
 DOWN = (ord("j"), curses.KEY_DOWN)
 UP = (ord("k"), curses.KEY_UP)
@@ -18,7 +19,6 @@ ENTER = (10, 13, curses.KEY_ENTER)
 PALETTE = (
     ("needs", curses.COLOR_RED, curses.A_BOLD),
     ("working", curses.COLOR_GREEN, 0),
-    ("queued", curses.COLOR_YELLOW, 0),
     ("warn", curses.COLOR_YELLOW, curses.A_BOLD),
     ("command", curses.COLOR_CYAN, 0),
 )
@@ -27,23 +27,32 @@ PALETTE = (
 class Poller:
     def __init__(self, read: Callable[[], fleet.Fleet], every: float = FLEET_EVERY) -> None:
         self._read, self._every = read, every
-        self._lock, self._wake, self._stop = threading.Lock(), threading.Event(), threading.Event()
+        self._lock, self._wake, self._stop, self._first = (
+            threading.Lock(),
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
         self._latest: fleet.Fleet | None = None
         self._thread = threading.Thread(target=self._loop, name="deckhand-fleet", daemon=True)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
+            self._wake.clear()
             try:
                 found = self._read()
             except Exception as error:
                 found = fleet.Fleet([], f"the fleet read failed: {type(error).__name__}")
             with self._lock:
                 self._latest = found
+            self._first.set()
             self._wake.wait(self._every)
-            self._wake.clear()
 
     def start(self) -> None:
         self._thread.start()
+
+    def wait(self, timeout: float) -> bool:
+        return self._first.wait(timeout)
 
     def latest(self) -> fleet.Fleet | None:
         with self._lock:
@@ -79,10 +88,8 @@ class Watch:
         self._status, self._read_at = self._read(), self._clock()
 
     def _board(self) -> board.Board:
-        latest = self._poller.latest()
-        sessions = latest.sessions if latest is not None and not latest.note else None
         now = self._clock()
-        return board.build(self._status, sessions, now, board.midnight(now))
+        return board.build(self._status, self._poller.latest(), now, board.midnight(now), self._g)
 
     def _follow(self, keys: list[str]) -> None:
         if self.selected not in keys:
@@ -127,6 +134,7 @@ class Watch:
         return True
 
     def run(self) -> None:
+        self._poller.wait(FIRST_READ)
         while True:
             if self._clock() - self._read_at >= STATUS_EVERY:
                 self._reread()
@@ -142,7 +150,8 @@ def _setup(screen, color: bool) -> dict[str, int]:
         except curses.error:
             pass
     screen.timeout(TICK_MS)
-    styles = {"bold": curses.A_BOLD, "dim": curses.A_DIM, "done": curses.A_DIM}
+    styles = {"bold": curses.A_BOLD, "dim": curses.A_DIM, "done": curses.A_DIM, "stale": curses.A_DIM}
+    styles |= {"stopped": curses.A_BOLD}
     styles |= {"needs": curses.A_BOLD, "warn": curses.A_BOLD, "selected": curses.A_REVERSE}
     if color and curses.has_colors():
         curses.use_default_colors()

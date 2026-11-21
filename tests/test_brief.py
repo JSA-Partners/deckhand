@@ -66,7 +66,11 @@ def lines(text: str) -> list[str]:
 
 
 def test_one_waiting_with_a_head():
-    found = brief.text(held([item("ACME-2", "sign-off", 14, head="c2f00d1234567890")]), ["ACME-3"], NOW, brief.UNICODE)
+    found = brief.text(
+        held([item("ACME-2", "sign-off", 14, head="c2f00d1234567890")], hands=[hand("working", "ACME-3")]),
+        NOW,
+        brief.UNICODE,
+    )
     assert lines(found) == [
         "## ● ACME-2 needs you",
         "**sign-off** at c2f00d123456 · waiting 14m · type `next`",
@@ -75,33 +79,31 @@ def test_one_waiting_with_a_head():
 
 
 def test_one_waiting_shows_the_story_stage():
-    found = brief.text(held([item("ACME-1", "question", 3)]), [], NOW, brief.UNICODE)
+    found = brief.text(held([item("ACME-1", "question", 3)]), NOW, brief.UNICODE)
     assert lines(found)[1] == "**question** at plan review 2/3 · waiting 3m · type `next`"
 
 
 def test_two_waiting_name_the_count_and_the_oldest():
     waiting = [item("ACME-1", "question", 3), item("ACME-2", "sign-off", 14, head="c2f00d1234567890")]
-    found = lines(brief.text(held(waiting), [], NOW, brief.UNICODE))
+    found = lines(brief.text(held(waiting), NOW, brief.UNICODE))
     assert found[0] == "## ● 2 need you · oldest ACME-2 sign-off 14m"
     assert found[1] == "**question** ACME-1 at plan review 2/3 · waiting 3m · type `next`"
     assert found[2] == "◐ 0 working · ○ 1 queued · slots 1/2 · Alpha day 4 of 7"
 
 
 def test_nothing_waiting_is_only_the_quiet_line():
-    found = brief.text(held([]), ["ACME-1"], NOW, brief.UNICODE)
+    found = brief.text(held([], hands=[hand("working")]), NOW, brief.UNICODE)
     assert lines(found) == ["◐ 1 working · ○ 2 queued · nothing needs you · slots 1/2 · Alpha day 4 of 7"]
 
 
 def test_an_item_with_no_time_or_detail():
-    found = lines(
-        brief.text(held([item("Alpha", "planning", None)], feature=None, budget=None), [], NOW, brief.UNICODE)
-    )
+    found = lines(brief.text(held([item("Alpha", "planning", None)], feature=None, budget=None), NOW, brief.UNICODE))
     assert found[1] == "**planning** · type `next`"
     assert found[2] == "◐ 0 working · ○ 3 queued · slots 1/2"
 
 
 def test_ascii_glyphs():
-    found = lines(brief.text(held([item("ACME-1", "question", 3), item("ACME-2", "finding", 5)]), [], NOW, brief.ASCII))
+    found = lines(brief.text(held([item("ACME-1", "question", 3), item("ACME-2", "finding", 5)]), NOW, brief.ASCII))
     assert found[0] == "## ! 2 need you | oldest ACME-2 finding 5m"
     assert found[2] == "\\* 0 working | - 1 queued | slots 1/2 | Alpha day 4 of 7"
     assert all(line.isascii() for line in found)
@@ -117,7 +119,7 @@ def test_glyphs_follow_the_encoding(encoding: str | None, shown: brief.Glyphs):
 
 def test_unreachable_leads_with_the_age_of_the_last_state():
     stale = held([item("ACME-1", "question", 20)], written_at=at(14), stale_since=at(10))
-    found = lines(brief.text(stale, [], NOW, brief.UNICODE, ["network: could not reach Linear"]))
+    found = lines(brief.text(stale, NOW, brief.UNICODE, ["network: could not reach Linear"]))
     assert found[0] == "Linear unreachable; showing the state as of 14m ago"
     assert found[1] == "## ● ACME-1 needs you"
     assert found[-1] == "network: could not reach Linear"
@@ -125,7 +127,7 @@ def test_unreachable_leads_with_the_age_of_the_last_state():
 
 def test_an_unreachable_empty_state_is_not_an_all_clear():
     stale = held([], written_at=at(14), stale_since=at(10))
-    found = lines(brief.text(stale, [], NOW, brief.UNICODE))
+    found = lines(brief.text(stale, NOW, brief.UNICODE))
     assert found == [
         "Linear unreachable; showing the state as of 14m ago",
         "◐ 0 working · ○ 3 queued · nothing was waiting as of 14m ago · slots 1/2 · Alpha day 4 of 7",
@@ -133,11 +135,11 @@ def test_an_unreachable_empty_state_is_not_an_all_clear():
 
 
 def test_unreachable_with_no_earlier_state():
-    assert brief.text(None, [], NOW, brief.UNICODE) == "Linear unreachable; no earlier state"
+    assert brief.text(None, NOW, brief.UNICODE) == "Linear unreachable; no earlier state"
 
 
 def test_notes_follow_the_quiet_line():
-    found = lines(brief.text(held([]), [], NOW, brief.UNICODE, ["no personal key"]))
+    found = lines(brief.text(held([]), NOW, brief.UNICODE, ["no personal key"]))
     assert found[1] == "no personal key"
 
 
@@ -176,8 +178,8 @@ def test_clean_drops_control_and_separator_characters():
     assert brief.clean("a\nb\tc d​e\x7f") == "a b c d e"
 
 
-def hand(state: str) -> dict:
-    return {"name": "h", "ref": "ACME-1", "state": state, "waiting_for": None, "started_at": at(60)}
+def hand(state: str, ref: str = "ACME-1") -> dict:
+    return {"name": f"hand-{ref}", "ref": ref, "state": state, "waiting_for": None, "started_at": at(60)}
 
 
 def test_line_when_two_wait():
@@ -190,8 +192,13 @@ def test_line_when_one_waits_with_no_time():
 
 
 def test_line_when_only_hands_work():
-    found = held([], hands=[hand("working"), hand("working"), hand("blocked")])
+    found = held([], hands=[hand("working"), hand("blocked", "ACME-2"), hand("stopped", "ACME-3")])
     assert brief.line(found, NOW, brief.UNICODE) == "◐ 2 working · nothing needs you"
+
+
+def test_line_counts_no_hand_off_the_board_and_no_finished_story():
+    found = held([], hands=[hand("working", "OTHER-9"), hand("working", "ACME-4")])
+    assert brief.line(found, NOW, brief.UNICODE) == "◐ 0 working · nothing needs you"
 
 
 def test_line_is_empty_with_no_feature():

@@ -75,7 +75,7 @@ def test_the_brief_when_two_wait(clone: Path, capsys: pytest.CaptureFixture[str]
     shown = paragraphs(output(store, ["--brief"], capsys, shell=Shell(row("ACME-2", "working", "busy"))))
     assert shown[0].startswith("## ● 2 need you · oldest ACME-1 question ")
     assert shown[1].startswith("**question** ACME-1 at planning · waiting ")
-    assert shown[2] == "◐ 1 working · ○ 0 queued · slots 1/1 · Alpha day 1 of 7"
+    assert shown[2] == "◐ 0 working · ○ 0 queued · slots 1/1 · Alpha day 1 of 7"
     assert shown[3].endswith("; 1 more needs you")
 
 
@@ -516,7 +516,7 @@ def test_board_prints_once_in_plain_text_off_a_terminal(state: Path, capsys: pyt
     out, err = board_of([], capsys, shell)
     assert "\x1b" not in out and err == ""
     lines = out.splitlines()
-    assert lines[0] == " Captain  Alpha · slots 1/2 · updated 0s ago"
+    assert lines[0] == " ● 1 needs you · sign-off ACME-1 14m · updated 0s ago · Alpha · slots 1/2"
     assert any(line.split()[:3] == ["●", "ACME-1", "t"] for line in lines)
     assert any(line.split()[:3] == ["◐", "ACME-2", "Receipts"] for line in lines)
     assert [argv[:2] for argv, _ in shell.calls] == [["claude", "agents"]]
@@ -544,7 +544,7 @@ def test_board_is_styled_on_a_terminal(state: Path, monkeypatch: pytest.MonkeyPa
 def test_watch_off_a_terminal_prints_once_and_says_why(state: Path, capsys: pytest.CaptureFixture[str]):
     seeded(state)
     out, err = board_of(["--watch"], capsys)
-    assert out.startswith(" Captain  Alpha")
+    assert out.startswith(" ● 1 needs you · sign-off ACME-1 14m")
     assert err == "deckhand: --watch needs a terminal; printed the board once\n"
 
 
@@ -574,5 +574,5 @@ def test_watch_on_a_dumb_terminal_prints_once(state: Path, monkeypatch: pytest.M
     monkeypatch.setenv("TERM", "dumb")
     monkeypatch.setattr(tui, "watch", lambda *args: pytest.fail("ran full screen on a dumb terminal"))
     out, err = board_of(["--watch"], capsys)
-    assert "\x1b" not in out and out.startswith(" Captain  Alpha")
+    assert "\x1b" not in out and out.startswith(" ● 1 needs you · sign-off ACME-1 14m")
     assert err.startswith("deckhand: --watch needs a terminal")

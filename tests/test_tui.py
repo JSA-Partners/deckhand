@@ -3,7 +3,7 @@ from __future__ import annotations
 import curses
 import threading
 
-from deckhand import brief, fleet, tui
+from deckhand import brief, fleet, frame, tui
 from tests.test_board import LIVE, NOW, sample
 
 ENTER, ESC = 10, 27
@@ -39,7 +39,8 @@ class Screen:
 
     def addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
         rows, cols = self.size
-        if y >= rows or x + len(text) > cols or (y == rows - 1 and x + len(text) == cols):
+        end = x + frame.cells(text)
+        if y >= rows or end > cols or (y == rows - 1 and end == cols):
             raise curses.error("addstr() returned ERR")
         self.cells.setdefault(y, []).append((x, text, attr))
 
@@ -53,11 +54,15 @@ class Screen:
 
 
 class Poller:
-    def __init__(self, read: fleet.Fleet | None = None) -> None:
-        self.read, self.pokes = read, 0
+    def __init__(self, read: fleet.Fleet | None = None, first: bool = True) -> None:
+        self.read, self.pokes, self.waited, self.first = read, 0, [], first
+
+    def wait(self, timeout: float) -> bool:
+        self.waited.append(timeout)
+        return self.first
 
     def latest(self) -> fleet.Fleet | None:
-        return self.read
+        return self.read if self.waited else None
 
     def poke(self) -> None:
         self.pokes += 1
@@ -88,8 +93,20 @@ def test_q_and_esc_quit_after_one_frame():
     for key in ("q", ESC):
         screen, _, _ = run([key])
         assert len(screen.frames) == 1
-        assert screen.frames[0][0].startswith(" Captain  Alpha")
+        assert screen.frames[0][0].startswith(" ! 2 need you | question ACME-16 3m")
         assert screen.frames[0][-1].startswith(" q quit  r refresh  j/k move  enter details")
+
+
+def test_the_first_frame_waits_for_the_first_fleet_read():
+    screen, _, poller = run([])
+    assert poller.waited == [tui.FIRST_READ]
+    assert "slots 2/2" in screen.frames[0][0]
+    assert any("building, waiting" in line for line in screen.frames[0])
+
+
+def test_a_first_read_that_never_lands_still_draws_from_the_file():
+    screen, _, _ = run([], poller=Poller(None, first=False))
+    assert screen.frames[0][0].startswith(" ! 2 need you")
 
 
 def test_the_first_row_starts_selected_and_j_k_and_arrows_move():
@@ -134,7 +151,8 @@ def test_resize_redraws_at_the_new_size():
     screen, _, _ = run([(40, 59), (6, 80)])
     assert len(screen.frames[1]) == 40
     assert "Print every greeting" not in "\n".join(screen.frames[1])
-    assert screen.frames[2][:2] == [" Captain  Alpha | day 2 of 7 | slots 2/2 | updated 6s ago", " ! 2 need you"]
+    assert screen.frames[2][0].startswith(" ! 2 need you | question ACME-16 3m | updated 6s ago | Alpha")
+    assert screen.frames[2][1:] == [""] * 5
 
 
 def test_drawing_into_the_last_cell_never_raises():
@@ -185,3 +203,43 @@ def test_a_failing_fleet_read_keeps_the_poller_alive():
     assert read.wait(5)
     poller.stop()
     assert len(calls) >= 2
+
+
+def test_a_poke_during_a_read_is_never_dropped():
+    calls, inside, gate, again = [], threading.Event(), threading.Event(), threading.Event()
+
+    def reader() -> fleet.Fleet:
+        calls.append(1)
+        if len(calls) == 1:
+            inside.set()
+            assert gate.wait(5)
+        else:
+            again.set()
+        return fleet.Fleet([])
+
+    poller = tui.Poller(reader, every=60)
+    poller.start()
+    assert inside.wait(5)
+    poller.poke()
+    gate.set()
+    assert again.wait(5)
+    poller.stop()
+
+
+def test_the_real_poller_says_when_the_first_read_landed():
+    gate = threading.Event()
+    poller = tui.Poller(lambda: gate.wait(5) and fleet.Fleet([]), every=60)
+    poller.start()
+    assert not poller.wait(0.05)
+    gate.set()
+    assert poller.wait(5)
+    poller.stop()
+
+
+def test_a_malformed_status_file_never_kills_the_watch():
+    broken = sample()
+    broken["stories"][7]["blocked_by"] = 7
+    broken["items"][0]["since"] = 7
+    broken["slots"] = "full"
+    screen, _, _ = run(["j", "j", ENTER, "j"], Reader(broken))
+    assert len(screen.frames) == 5

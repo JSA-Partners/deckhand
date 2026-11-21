@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from deckhand import fleet
+
+DONE = "Done"
+NEEDS, WORKING, STOPPED, QUEUED, MERGED = "needs you", "working", "stopped", "queued", "done today"
+ORDER = (NEEDS, WORKING, STOPPED, QUEUED, MERGED)
+
+
+@dataclass(frozen=True)
+class Hand:
+    ref: str
+    state: str
+    spike: bool
+    id: str = ""
+    status: str = ""
+    waiting_for: str = ""
+    started_at: str = ""
+
+    @property
+    def live(self) -> bool:
+        return self.state in fleet.LIVE
+
+
+@dataclass(frozen=True)
+class Entry:
+    kind: str
+    ref: str
+    story: dict
+    item: dict | None = None
+    hand: Hand | None = None
+
+
+def text(found: object, key: str) -> str:
+    value = found.get(key) if isinstance(found, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def dicts(found: object, key: str) -> list[dict]:
+    value = found.get(key) if isinstance(found, dict) else None
+    return [entry for entry in value if isinstance(entry, dict)] if isinstance(value, list) else []
+
+
+def strings(found: object, key: str) -> list[str]:
+    value = found.get(key) if isinstance(found, dict) else None
+    return [entry for entry in value if isinstance(entry, str)] if isinstance(value, list) else []
+
+
+def timestamp(at: str) -> float | None:
+    try:
+        return datetime.fromisoformat(at).timestamp() if at else None
+    except ValueError:
+        return None
+
+
+def filed(status: dict) -> dict[str, Hand]:
+    return {
+        text(h, "ref"): Hand(
+            text(h, "ref"),
+            text(h, "state"),
+            text(h, "name").startswith(fleet.SPIKE),
+            waiting_for=text(h, "waiting_for"),
+            started_at=text(h, "started_at"),
+        )
+        for h in dicts(status, "hands")
+    }
+
+
+def live(sessions: list[fleet.Session]) -> dict[str, Hand]:
+    held = [(ref, s, False) for ref, s in fleet.hands(sessions).items()]
+    held += [(ref, s, True) for ref, s in fleet.spikes(sessions).items()]
+    return {
+        ref: Hand(ref, s.state, spike, s.id, s.status or "", s.waiting_for or "", s.started_at)
+        for ref, s, spike in held
+    }
+
+
+def _story(story: dict, hand: Hand | None) -> str:
+    if hand is None:
+        return QUEUED
+    return WORKING if hand.live else STOPPED
+
+
+def classify(status: dict, hands: dict[str, Hand], today: float | None = None) -> list[Entry]:
+    items = sorted(dicts(status, "items"), key=lambda i: (not text(i, "since"), text(i, "since")))
+    stories = dicts(status, "stories")
+    by_ref = {text(s, "ref"): s for s in stories}
+    waiting = {text(i, "ref") for i in items}
+    found = {kind: [] for kind in ORDER}
+    found[NEEDS] = [
+        Entry(NEEDS, text(i, "ref"), by_ref.get(text(i, "ref"), {}), i, hands.get(text(i, "ref"))) for i in items
+    ]
+    for story in stories:
+        ref, hand = text(story, "ref"), hands.get(text(story, "ref"))
+        if text(story, "state") == DONE:
+            done = timestamp(text(story, "completed_at"))
+            if today is not None and done is not None and done >= today:
+                found[MERGED].append(Entry(MERGED, ref, story))
+        elif ref not in waiting:
+            found[_story(story, hand)].append(Entry(_story(story, hand), ref, story, None, hand))
+    for ref, hand in hands.items():
+        if hand.spike and hand.live and ref not in waiting and ref not in by_ref:
+            found[WORKING].append(Entry(WORKING, ref, {}, None, hand))
+    return [entry for kind in ORDER for entry in found[kind]]
+
+
+def counts(entries: list[Entry]) -> dict[str, int]:
+    return {kind: sum(entry.kind == kind for entry in entries) for kind in ORDER}

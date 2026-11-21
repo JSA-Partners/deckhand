@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from deckhand import board, brief, fleet, frame
 from deckhand.records import iso
 
@@ -70,8 +72,17 @@ LIVE = [
 ]
 
 
-def shown(status: dict | None = None, sessions: list | None = LIVE, cols: int = 100, rows: int | None = None, **kw):
-    found = board.build(sample() if status is None else status, sessions, NOW, TODAY)
+def shown(
+    status: dict | None = None,
+    sessions: list | None = LIVE,
+    cols: int = 100,
+    rows: int | None = None,
+    failed: bool = False,
+    **kw,
+):
+    read = fleet.Fleet([], "the fleet read failed: boom") if failed else None
+    read = read or (fleet.Fleet(sessions) if sessions is not None else None)
+    found = board.build(sample() if status is None else status, read, NOW, TODAY, G)
     return frame.render(found, G, cols, rows, **kw)
 
 
@@ -86,14 +97,23 @@ def section(lines: list[frame.Line], name: str) -> list[str]:
     return rest[: next((i for i, text in enumerate(rest) if not text.startswith(" ")), len(rest))]
 
 
+def rules(lines: list[frame.Line]) -> list[str]:
+    return [" ".join(text.split()[1:-1]) for text in texts(lines) if text.startswith("-- ")]
+
+
 def test_sections_come_in_order_with_their_counts():
-    rules = [text for text in texts(shown()) if text.startswith("-- ")]
-    assert [rule.split("  ")[0] + "  " + rule.split("  ")[1].split()[0] for rule in rules] == [
-        "-- needs you  2",
-        "-- working  2",
-        "-- queued  2",
-        "-- done today  1",
-    ]
+    assert rules(shown()) == ["needs you 2", "working 2", "stopped 1", "queued 1", "done today 1"]
+
+
+def test_the_header_leads_with_the_status_lines_answer():
+    assert texts(shown())[0] == " ! 2 need you | question ACME-16 3m | updated 6s ago | Alpha | day 2 of 7 | slots 2/2"
+    quiet = texts(shown(sample(items=[])))[0]
+    assert quiet == " * 2 working | nothing needs you | updated 6s ago | Alpha | day 2 of 7 | slots 2/2"
+    assert quiet[1:].startswith(brief.line(sample(items=[], hands=sample()["hands"]), NOW, G))
+
+
+def test_a_stale_header_reads_like_the_stale_status_line():
+    assert texts(shown(sample(written_at=at(45))))[0] == " - captain stale 45m | Alpha | day 2 of 7 | slots 2/2"
 
 
 def test_needs_you_lists_the_oldest_first_with_kind_and_wait():
@@ -110,17 +130,25 @@ def test_working_rows_show_the_stage_and_the_hands_own_status():
     assert rows[1].split()[-3:] == ["building,", "waiting", "1m"]
 
 
+def test_a_story_whose_hand_is_gone_reads_stopped_at_its_stage():
+    sessions = [session("a1b2", "ACME-15", state="failed", status=None), LIVE[2]]
+    rows = section(shown(sessions=sessions), "stopped")
+    assert [row.split()[:2] for row in rows] == [["x", "ACME-15"], ["x", "ACME-18"]]
+    assert "failed at branch review 2/3" in rows[0]
+    assert "stopped at drafting" in rows[1]
+    assert "ACME-15" not in "\n".join(section(shown(sessions=sessions), "queued"))
+
+
 def test_queued_rows_have_no_hand_and_no_item():
-    rows = section(shown(), "queued")
-    assert [row.split()[1] for row in rows] == ["ACME-18", "ACME-19"]
+    rows = section(shown(sample(hands=[]), sessions=None), "queued")
+    assert [row.split()[1] for row in rows] == ["ACME-15", "ACME-17", "ACME-18", "ACME-19"]
     assert rows[0].endswith("waits for a slot")
-    assert rows[1].endswith("blocked by ACME-18")
+    assert rows[3].endswith("blocked by ACME-18")
 
 
 def test_a_free_slot_reads_ready():
-    status = sample(slots={"used": 0, "cap": 3})
-    rows = section(shown(status, sessions=[]), "queued")
-    assert rows[-2].endswith("ready")
+    rows = section(shown(sample(slots={"used": 0, "cap": 3}), sessions=[]), "queued")
+    assert rows[0].endswith("ready")
 
 
 def test_done_today_counts_only_merges_since_midnight():
@@ -131,53 +159,55 @@ def test_done_today_counts_only_merges_since_midnight():
 
 def test_empty_sections_other_than_needs_you_are_left_out():
     status = sample(stories=[story("ACME-14", "Print every greeting"), story("ACME-20", "Later")], hands=[])
-    rules = [text.split("  ")[0] for text in texts(shown(status, sessions=[])) if text.startswith("-- ")]
-    assert rules == ["-- needs you", "-- queued"]
+    assert [rule.split()[0] for rule in rules(shown(status, sessions=[]))] == ["needs", "queued"]
 
 
 def test_without_a_live_read_the_file_hands_are_working_and_no_attach_shows():
     lines = shown(sessions=None, selected="story:ACME-15", expanded="story:ACME-15")
-    rows = section(lines, "working")
-    assert [row.split()[1] for row in rows[:1]] == ["ACME-15"]
+    assert [row.split()[1] for row in section(lines, "working")[:1]] == ["ACME-15"]
     assert not any("claude attach" in text for text in texts(lines))
 
 
-def test_enter_shows_the_next_command_and_the_attach_command():
+def test_a_failed_fleet_read_is_marked_in_the_header():
+    assert texts(shown(failed=True))[1] == " - hands from the file, fleet read failed"
+    assert not any("fleet read failed" in text for text in texts(shown()))
+    assert section(shown(failed=True), "working")[0].split()[1] == "ACME-15"
+
+
+def test_details_say_the_action_in_words_and_paint_only_typed_commands():
     lines = shown(selected="item:k14", expanded="item:k14")
-    rows = section(lines, "needs you")
-    assert rows[1].split() == ["next:", "signoff", "context", "--story", "ACME-14"]
+    assert section(lines, "needs you")[1].strip() == "needs your sign-off; type next in the captain"
+    assert not any("signoff context" in text for text in texts(lines))
     lines = shown(selected="story:ACME-15", expanded="story:ACME-15")
     assert section(lines, "working")[1].split() == ["hand:", "claude", "attach", "a1b2"]
+    styles = {text: style for line in lines for text, style in line.spans}
+    assert styles["claude attach a1b2"] == "command"
+    assert "command" not in {
+        style for line in shown(selected="item:k14", expanded="item:k14") for _, style in line.spans
+    }
     assert [line.selected for line in lines if "ACME-15" in line.text] == [True]
-
-
-def test_the_header_says_how_old_the_file_is():
-    status = sample(slots={"used": 1, "cap": 2})
-    assert texts(shown(status, sessions=None))[0] == " Captain  Alpha | day 2 of 7 | slots 1/2 | updated 6s ago"
-    assert texts(shown(status))[0].endswith("slots 2/2 | updated 6s ago")
 
 
 def test_an_old_file_gets_a_stale_banner():
     assert not texts(shown())[1].strip()
     banner = texts(shown(sample(written_at=at(45))))[1]
-    assert banner == " ! stale: the captain last read Linear 45m ago; run /deckhand:captain to refresh"
+    assert banner == " - stale: the captain last read Linear 45m ago; run /deckhand:captain to refresh"
 
 
 def test_an_unreachable_linear_gets_a_stale_banner():
     banner = texts(shown(sample(written_at=at(5), stale_since=at(1))))[1]
-    assert banner == " ! stale: Linear was unreachable, this is the state from 5m ago; run /deckhand:captain to retry"
+    assert banner == " - stale: Linear was unreachable, this is the state from 5m ago; run /deckhand:captain to retry"
 
 
 def test_no_status_file_teaches_how_to_start():
-    found = board.build(None, LIVE, NOW, TODAY)
+    found = board.build(None, fleet.Fleet(LIVE), NOW, TODAY, G)
     lines = texts(frame.render(found, G, 100))
     assert lines[0] == " Captain"
     assert "   no captain has run yet; start one with /deckhand:captain" in lines
 
 
 def test_nothing_waiting_says_so_with_the_working_count():
-    rows = section(shown(sample(items=[])), "needs you")
-    assert rows == ["   nothing needs you; 2 working"]
+    assert section(shown(sample(items=[])), "needs you") == ["   nothing needs you; 2 working"]
 
 
 def test_hand_and_file_text_is_cleaned():
@@ -190,10 +220,33 @@ def test_hand_and_file_text_is_cleaned():
     assert "Orders ]0;owned next" in joined
 
 
-def test_a_malformed_file_still_renders():
-    status = sample(items=[{"kind": 3}], stories=[{"ref": None, "stage": {"round": 2}}, "junk"], budget={"x": 1})
-    lines = texts(shown(status))
-    assert lines[0].startswith(" Captain  Alpha")
+BAD = [7, None, "x", [], {}, [7], {"ref": 7}, 1.5, True]
+
+
+@pytest.mark.parametrize("bad", BAD)
+def test_a_wrong_type_anywhere_still_renders(bad):
+    for key in sample():
+        frame.text(shown(sample(**{key: bad}), rows=30, keys=True), color=True)
+    for field in ("ref", "title", "state", "owner", "blocked_by", "stage", "completed_at"):
+        for at_story in (2, 3, 6, 7):
+            stories = sample()["stories"]
+            stories[at_story] = stories[at_story] | {field: bad}
+            frame.text(shown(sample(stories=stories), selected=f"story:{stories[at_story].get('ref')}"), color=False)
+    for field in ("key", "kind", "ref", "title", "since", "next", "head"):
+        items = [sample()["items"][0] | {field: bad}]
+        frame.text(shown(sample(items=items), expanded="item:k16"), color=False)
+    for field in ("name", "ref", "state", "waiting_for", "started_at"):
+        hands = [sample()["hands"][0] | {field: bad}]
+        frame.text(shown(sample(hands=hands), sessions=None), color=False)
+    stage_bad = sample()["stories"]
+    stage_bad[3] = stage_bad[3] | {"stage": {"name": "plan review", "round": bad, "cap": bad, "since": bad}}
+    frame.text(shown(sample(stories=stage_bad)), color=False)
+
+
+def test_an_integer_blocked_by_is_skipped():
+    stories = sample()["stories"]
+    stories[7] = stories[7] | {"blocked_by": 7}
+    assert section(shown(sample(stories=stories)), "queued")[0].endswith("waits for a slot")
 
 
 def test_midnight_is_local():

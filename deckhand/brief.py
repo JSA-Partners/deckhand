@@ -5,13 +5,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
+from deckhand import standing
+
 NOTIFY_LIMIT = 200
 NOTIFY = "notify: "
 LINE_LIMIT = 50
 LINE_STALE_SECONDS = 30 * 60
 RED, GREEN, DIM, RESET = "\x1b[31m", "\x1b[32m", "\x1b[2m", "\x1b[0m"
+PAINT = {"needs": RED, "working": GREEN, "stale": DIM}
 MARKERS = "*-+"
-DONE = "Done"
 ACTIONS = {
     "sign-off": "needs your sign-off",
     "second-sign-off": "needs a second sign-off",
@@ -32,13 +34,14 @@ class Glyphs:
     working: str
     queued: str
     done: str
+    stopped: str
     sep: str
     rule: str
     ellipsis: str
 
 
-UNICODE = Glyphs("●", "◐", "○", "✓", " · ", "─", "…")
-ASCII = Glyphs("!", "*", "-", "+", " | ", "-", "...")
+UNICODE = Glyphs("●", "◐", "○", "✓", "×", " · ", "─", "…")
+ASCII = Glyphs("!", "*", "-", "+", "x", " | ", "-", "...")
 
 
 def glyphs(encoding: str | None) -> Glyphs:
@@ -108,11 +111,12 @@ def _top(items: list[dict], stories: list[dict], now: float, g: Glyphs) -> str:
     return line + f"{g.sep}type `next`"
 
 
-def _quiet(status: dict, working: list[str], now: float, g: Glyphs) -> str:
-    waiting = {i["ref"] for i in status["items"]}
-    open_refs = [s["ref"] for s in status["stories"] if s["state"] != DONE]
-    queued = [ref for ref in open_refs if ref not in waiting and ref not in working]
-    parts = [f"{g.working} {len(working)} working", f"{g.queued} {len(queued)} queued"]
+def _quiet(status: dict, now: float, g: Glyphs) -> str:
+    tally = standing.counts(standing.classify(status, standing.filed(status)))
+    stopped = tally[standing.STOPPED]
+    parts = [f"{g.working} {tally[standing.WORKING]} working"]
+    parts += [f"{g.stopped} {stopped} stopped"] if stopped else []
+    parts.append(f"{g.queued} {tally[standing.QUEUED]} queued")
     if not status["items"]:
         stale = f"nothing was waiting as of {age(elapsed(status['written_at'], now))} ago"
         parts.append(stale if status.get("stale_since") else "nothing needs you")
@@ -125,7 +129,7 @@ def _quiet(status: dict, working: list[str], now: float, g: Glyphs) -> str:
     return g.sep.join(parts)
 
 
-def text(status: dict | None, working: list[str], now: float, g: Glyphs, notes: list[str] = ()) -> str:
+def text(status: dict | None, now: float, g: Glyphs, notes: list[str] = ()) -> str:
     blocks = []
     if status is None or status.get("stale_since"):
         blocks.append(unreachable_line(status, now))
@@ -133,7 +137,7 @@ def text(status: dict | None, working: list[str], now: float, g: Glyphs, notes: 
         items = status["items"]
         if items:
             blocks += [_heading(items, now, g), _top(items, status["stories"], now, g)]
-        blocks.append(_quiet(status, working, now, g))
+        blocks.append(_quiet(status, now, g))
     blocks += [clean(note) for note in notes]
     return "\n\n".join("\\" + block if block[:1] in MARKERS and block[1:2] == " " else block for block in blocks)
 
@@ -156,28 +160,30 @@ def colored(env: Mapping[str, str]) -> bool:
 
 
 def _line_parts(status: dict, now: float, g: Glyphs) -> tuple[str, str]:
-    items = status["items"]
+    items = standing.dicts(status, "items")
     if not items:
-        working = sum(1 for hand in status.get("hands", []) if hand["state"] == "working")
+        working = standing.counts(standing.classify(status, standing.filed(status)))[standing.WORKING]
         return f"{working} working", "nothing needs you"
     top = items[0]
-    waited = _waited(top, now)
+    waited = _waited(top, now) if standing.timestamp(standing.text(top, "since")) is not None else ""
     head = f"{len(items)} {'needs' if len(items) == 1 else 'need'} you"
-    ref = clean(top["ref"])
-    fixed = len(g.needs) + 1 + len(head) + len(g.sep) + len(top["kind"]) + len(waited) + 2
+    kind, ref = clean(standing.text(top, "kind")), clean(standing.text(top, "ref"))
+    fixed = len(g.needs) + 1 + len(head) + len(g.sep) + len(kind) + len(waited) + 2
     ref = ref[: max(1, LINE_LIMIT - fixed)]
-    return head, " ".join(part for part in (top["kind"], ref, waited) if part)
+    return head, " ".join(part for part in (kind, ref, waited) if part)
+
+
+def segment(status: dict, since: float | None, now: float, g: Glyphs) -> tuple[str, str, str]:
+    if since is None or status.get("stale_since") or since > LINE_STALE_SECONDS:
+        return g.queued, f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
+    head, tail = _line_parts(status, now, g)
+    glyph, tone = (g.needs, "needs") if standing.dicts(status, "items") else (g.working, "working")
+    return glyph, f"{head}{g.sep}{tail}", tone
 
 
 def line(status: dict | None, now: float, g: Glyphs, color: bool = False) -> str:
     if status is None or not status.get("feature"):
         return ""
-    since_written = elapsed(status["written_at"], now)
-    if status.get("stale_since") or since_written > LINE_STALE_SECONDS:
-        glyph, text, paint = g.queued, f"captain stale {age(since_written)}", DIM
-    else:
-        head, tail = _line_parts(status, now, g)
-        glyph, paint = (g.needs, RED) if status["items"] else (g.working, GREEN)
-        text = f"{head}{g.sep}{tail}"
+    glyph, text, tone = segment(status, elapsed(status["written_at"], now), now, g)
     shown = f"{glyph} {text}"[:LINE_LIMIT]
-    return f"{paint}{shown}{RESET}" if color else shown
+    return f"{PAINT[tone]}{shown}{RESET}" if color else shown

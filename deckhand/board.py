@@ -3,10 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from deckhand import brief, fleet
-from deckhand.order import DONE
+from deckhand import brief, fleet, standing
+from deckhand.brief import Glyphs
+from deckhand.standing import Entry, Hand
 
 START = "/deckhand:captain"
+FLEET_FAILED = "hands from the file, fleet read failed"
+TONES = {standing.NEEDS: "needs", standing.WORKING: "working", standing.STOPPED: "stopped"}
+TONES |= {standing.QUEUED: "queued", standing.MERGED: "done"}
+
+Detail = tuple[str, str, str]
 
 
 @dataclass(frozen=True)
@@ -17,7 +23,7 @@ class Row:
     title: str
     state: str
     age: str
-    detail: tuple[tuple[str, str], ...] = ()
+    detail: tuple[Detail, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -27,24 +33,16 @@ class Section:
 
 
 @dataclass(frozen=True)
-class Hand:
-    id: str
-    status: str
-    waiting_for: str
-    started_at: str
-    spike: bool
-
-
-@dataclass(frozen=True)
 class Board:
     read: bool
-    feature: str = ""
-    day: str = ""
+    lead: tuple[str, str, str] = ("", "", "")
+    facts: tuple[str, ...] = ()
     slots: tuple[str, str] = ("", "")
     updated: str = ""
     stale: str = ""
     sections: tuple[Section, ...] = ()
     working: int = 0
+    fleet_failed: bool = False
 
     def keys(self) -> list[str]:
         return [row.key for section in self.sections for row in section.rows]
@@ -54,110 +52,94 @@ def midnight(now: float) -> float:
     return datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
-def _str(value: object) -> str:
-    return brief.clean(value) if isinstance(value, str) else ""
+def _clean(found: object, key: str) -> str:
+    return brief.clean(standing.text(found, key))
 
 
-def _dicts(found: dict, key: str) -> list[dict]:
-    value = found.get(key)
-    return [entry for entry in value if isinstance(entry, dict)] if isinstance(value, list) else []
+def _ago(at: str, now: float) -> str:
+    stamp = standing.timestamp(at)
+    return brief.age(max(0.0, now - stamp)) if stamp is not None else ""
 
 
-def _seconds(at: object, now: float) -> float | None:
-    try:
-        return brief.elapsed(at, now) if isinstance(at, str) else None
-    except ValueError:
-        return None
+def _number(found: object, key: str) -> int | None:
+    value = found.get(key) if isinstance(found, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _ago(at: object, now: float) -> str:
-    seconds = _seconds(at, now)
-    return brief.age(max(0.0, seconds)) if seconds is not None else ""
+def _stage(story: dict) -> tuple[str, str]:
+    stage = story.get("stage")
+    name = _clean(stage, "name")
+    if not name:
+        return "", ""
+    round, cap = _number(stage, "round"), _number(stage, "cap")
+    return (f"{name} {round}/{cap}" if round and cap else name), standing.text(stage, "since")
 
 
-def _updated(seconds: float) -> str:
-    return f"{max(0, int(seconds))}s" if seconds < 60 else brief.age(seconds)
-
-
-def _stage(found: dict) -> tuple[str, object]:
-    stage = found.get("stage")
-    if not isinstance(stage, dict) or not isinstance(stage.get("name"), str):
-        return "", None
-    label = brief.stage_label(stage) if stage.get("cap") else stage["name"]
-    return brief.clean(label), stage.get("since")
-
-
-def _filed(hand: dict) -> Hand:
-    spike = _str(hand.get("name")).startswith(fleet.SPIKE)
-    return Hand("", "", _str(hand.get("waiting_for")), _str(hand.get("started_at")), spike)
-
-
-def _held(status: dict, sessions: list[fleet.Session] | None) -> dict[str, Hand]:
-    if sessions is None:
-        return {_str(h.get("ref")): _filed(h) for h in _dicts(status, "hands") if h.get("state") in fleet.LIVE}
-    found = [(ref, s, False) for ref, s in fleet.hands(sessions).items()]
-    found += [(ref, s, True) for ref, s in fleet.spikes(sessions).items()]
-    return {
-        brief.clean(ref): Hand(_str(s.id), _str(s.status), _str(s.waiting_for), s.started_at, spike)
-        for ref, s, spike in found
-        if fleet.live(s)
-    }
-
-
-def _hand_detail(hand: Hand | None) -> tuple[tuple[str, str], ...]:
+def _hand_detail(hand: Hand | None) -> tuple[Detail, ...]:
     if hand is None:
         return ()
-    waiting = (("waiting for", hand.waiting_for),) if hand.waiting_for else ()
-    return waiting + ((("hand", f"claude attach {hand.id}"),) if hand.id else ())
+    waiting = (("waiting for", brief.clean(hand.waiting_for), ""),) if hand.waiting_for else ()
+    return waiting + ((("hand", f"claude attach {brief.clean(hand.id)}", "command"),) if hand.id else ())
 
 
-def _needs(items: list[dict], by_ref: dict[str, dict], held: dict[str, Hand], now: float) -> list[Row]:
-    rows = []
-    for item in sorted(items, key=lambda i: (not isinstance(i.get("since"), str), _str(i.get("since")))):
-        ref = _str(item.get("ref"))
-        title = _str(item.get("title")) or _str(by_ref.get(ref, {}).get("title"))
-        nexts = item.get("next") if isinstance(item.get("next"), list) else []
-        detail = tuple(("next", _str(command)) for command in nexts if isinstance(command, str))
-        key = f"item:{_str(item.get('key')) or ref + _str(item.get('kind'))}"
-        age = _ago(item.get("since"), now)
-        rows.append(Row(key, "needs", ref, title, _str(item.get("kind")), age, detail + _hand_detail(held.get(ref))))
-    return rows
+def _needs(entry: Entry, now: float) -> Row:
+    item, ref = entry.item or {}, brief.clean(entry.ref)
+    kind = _clean(item, "kind")
+    action = f"{brief.ACTIONS.get(kind, 'needs you')}; type next in the captain"
+    key = f"item:{_clean(item, 'key') or ref + kind}"
+    title = _clean(item, "title") or _clean(entry.story, "title")
+    detail = (("", action, ""), *_hand_detail(entry.hand))
+    return Row(key, "needs", ref, title, kind, _ago(standing.text(item, "since"), now), detail)
 
 
-def _working(story: dict, ref: str, hand: Hand, now: float) -> Row:
-    label, since = _stage(story)
-    state = ", ".join(part for part in (label, "" if hand.status == "busy" else hand.status) if part)
+def _hand_row(entry: Entry, now: float) -> Row:
+    hand, ref = entry.hand, brief.clean(entry.ref)
+    label, since = _stage(entry.story)
+    title = _clean(entry.story, "title") or ("spike" if hand.spike else "")
+    if entry.kind == standing.WORKING:
+        own = brief.clean(hand.status)
+        state = ", ".join(part for part in (label, "" if own == "busy" else own) if part)
+    else:
+        gone = brief.clean(hand.state) or "stopped"
+        state = f"{gone} at {label}" if label else gone
     age = _ago(since, now) or _ago(hand.started_at, now)
-    return Row(f"story:{ref}", "working", ref, _str(story.get("title")), state, age, _hand_detail(hand))
+    return Row(f"story:{ref}", TONES[entry.kind], ref, title, state, age, _hand_detail(hand))
 
 
-def _queued(story: dict, ref: str, full: bool) -> Row:
-    blockers = [_str(b) for b in story.get("blocked_by") or [] if isinstance(b, str)]
+def _queued(entry: Entry, full: bool) -> Row:
+    story, ref = entry.story, brief.clean(entry.ref)
+    blockers = [brief.clean(b) for b in standing.strings(story, "blocked_by")]
     state = f"blocked by {', '.join(blockers)}" if blockers else "waits for a slot" if full else "ready"
     label, _ = _stage(story)
-    detail = (("owner", _str(story.get("owner")) or "unassigned"),) + ((("stage", label),) if label else ())
-    return Row(f"story:{ref}", "queued", ref, _str(story.get("title")), state, "", detail)
+    detail = (("owner", _clean(story, "owner") or "unassigned", ""),) + ((("stage", label, ""),) if label else ())
+    return Row(f"story:{ref}", "queued", ref, _clean(story, "title"), state, "", detail)
 
 
-def _done(story: dict, ref: str, now: float) -> Row:
-    at = story["completed_at"]
-    detail = (("merged at", datetime.fromisoformat(at).astimezone().strftime("%H:%M")),)
-    return Row(f"story:{ref}", "done", ref, _str(story.get("title")), "merged", _ago(at, now), detail)
+def _done(entry: Entry, now: float) -> Row:
+    at, ref = standing.text(entry.story, "completed_at"), brief.clean(entry.ref)
+    detail = (("merged at", datetime.fromisoformat(at).astimezone().strftime("%H:%M"), ""),)
+    return Row(f"story:{ref}", "done", ref, _clean(entry.story, "title"), "merged", _ago(at, now), detail)
 
 
-def _slots(status: dict, sessions: list[fleet.Session] | None) -> tuple[int, int]:
-    slots = status.get("slots") if isinstance(status.get("slots"), dict) else {}
-    used, cap = slots.get("used"), slots.get("cap")
-    used = fleet.slots_used(sessions) if sessions is not None else used
-    return (used if isinstance(used, int) else 0), (cap if isinstance(cap, int) else 0)
+def _row(entry: Entry, now: float, full: bool) -> Row:
+    if entry.kind == standing.NEEDS:
+        return _needs(entry, now)
+    if entry.kind == standing.QUEUED:
+        return _queued(entry, full)
+    return _done(entry, now) if entry.kind == standing.MERGED else _hand_row(entry, now)
 
 
-def _day(status: dict) -> str:
+def _slots(status: dict, read: fleet.Fleet | None) -> tuple[int, int]:
+    slots = status.get("slots")
+    used = fleet.slots_used(read.sessions) if read is not None and not read.note else _number(slots, "used")
+    return used or 0, _number(slots, "cap") or 0
+
+
+def _facts(status: dict) -> tuple[str, ...]:
     budget = status.get("budget")
-    if not isinstance(budget, dict):
-        return ""
-    used, days = budget.get("days_used"), budget.get("budget_days")
-    return f"day {used} of {days}" if isinstance(used, int) and isinstance(days, int) else ""
+    used, days = _number(budget, "days_used"), _number(budget, "budget_days")
+    day = f"day {used} of {days}" if used is not None and days is not None else ""
+    return tuple(part for part in (_clean(status, "feature"), day) if part)
 
 
 def _stale(status: dict, since: float | None) -> str:
@@ -169,30 +151,28 @@ def _stale(status: dict, since: float | None) -> str:
     return ""
 
 
-def build(status: dict | None, sessions: list[fleet.Session] | None, now: float, today: float) -> Board:
-    if status is None:
+def _updated(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    return f"{max(0, int(seconds))}s" if seconds < 60 else brief.age(seconds)
+
+
+def build(status: dict | None, read: fleet.Fleet | None, now: float, today: float, g: Glyphs) -> Board:
+    if not isinstance(status, dict):
         return Board(False)
-    items, stories = _dicts(status, "items"), _dicts(status, "stories")
-    by_ref = {_str(s.get("ref")): s for s in stories}
-    held = _held(status, sessions)
-    used, cap = _slots(status, sessions)
-    waiting = {_str(i.get("ref")) for i in items}
-    working, queued, done = [], [], []
-    for found in stories:
-        ref = _str(found.get("ref"))
-        if found.get("state") == DONE:
-            completed = _seconds(found.get("completed_at"), now)
-            if completed is not None and now - completed >= today:
-                done.append(_done(found, ref, now))
-        elif ref in held and ref not in waiting:
-            working.append(_working(found, ref, held[ref], now))
-        elif ref not in waiting:
-            queued.append(_queued(found, ref, used >= cap))
-    spikes = [ref for ref, hand in held.items() if hand.spike and ref not in by_ref and ref not in waiting]
-    working += [_working({"title": "spike"}, ref, held[ref], now) for ref in spikes]
-    since = _seconds(status.get("written_at"), now)
-    named = (("needs you", _needs(items, by_ref, held, now)), ("working", working), ("queued", queued))
-    sections = tuple(Section(n, tuple(r)) for n, r in (*named, ("done today", done)) if r or n == "needs you")
-    updated = _updated(since) if since is not None else ""
-    feature, slots = _str(status.get("feature")), (str(used), str(cap))
-    return Board(True, feature, _day(status), slots, updated, _stale(status, since), sections, len(working))
+    live = read is not None and not read.note
+    hands = standing.live(read.sessions) if live else standing.filed(status)
+    entries = standing.classify(status, hands, today)
+    used, cap = _slots(status, read)
+    rows: dict[str, list[Row]] = {kind: [] for kind in standing.ORDER}
+    for entry in entries:
+        rows[entry.kind].append(_row(entry, now, used >= cap))
+    sections = tuple(Section(k, tuple(r)) for k, r in rows.items() if r or k == standing.NEEDS)
+    stamp = standing.timestamp(standing.text(status, "written_at"))
+    since = now - stamp if stamp is not None else None
+    stale = _stale(status, since)
+    lead = brief.segment(status, since, now, g)
+    working = len(rows[standing.WORKING])
+    updated = "" if stale else _updated(since)
+    failed = read is not None and bool(read.note)
+    return Board(True, lead, _facts(status), (str(used), str(cap)), updated, stale, sections, working, failed)
