@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import board, brief, fleet
+from deckhand import board, brief, fleet, frame
 from deckhand.records import iso
 
 NOW = 1795000000.0
@@ -72,14 +72,14 @@ LIVE = [
 
 def shown(status: dict | None = None, sessions: list | None = LIVE, cols: int = 100, rows: int | None = None, **kw):
     found = board.build(sample() if status is None else status, sessions, NOW, TODAY)
-    return board.render(found, G, cols, rows, **kw)
+    return frame.render(found, G, cols, rows, **kw)
 
 
-def texts(lines: list[board.Line]) -> list[str]:
+def texts(lines: list[frame.Line]) -> list[str]:
     return [line.text.rstrip() for line in lines]
 
 
-def section(lines: list[board.Line], name: str) -> list[str]:
+def section(lines: list[frame.Line], name: str) -> list[str]:
     found = texts(lines)
     start = next(i for i, text in enumerate(found) if text.startswith(f"-- {name}  "))
     rest = found[start + 1 :]
@@ -151,40 +151,6 @@ def test_enter_shows_the_next_command_and_the_attach_command():
     assert [line.selected for line in lines if "ACME-15" in line.text] == [True]
 
 
-def test_long_titles_end_in_an_ellipsis_and_every_row_fits():
-    for cols in (60, 80, 100, 140):
-        lines = shown(cols=cols)
-        assert all(board.cells(line.text) <= min(cols, board.WIDTH) for line in lines)
-    row = section(shown(cols=70), "working")[0]
-    assert "Add a farewell banner to the gr... branch review 2/3" in row
-
-
-def test_wide_characters_count_two_cells():
-    status = sample(items=[], stories=[story("ACME-15", "日本語" * 20, stage=stage("building", 1))])
-    lines = shown(status, cols=80)
-    assert all(board.cells(line.text) <= 80 for line in lines)
-
-
-def test_below_sixty_columns_the_title_drops():
-    assert section(shown(cols=59), "needs you")[0].split() == ["!", "ACME-14", "sign-off", "14m"]
-    assert "Print every greeting" in section(shown(cols=60), "needs you")[0]
-
-
-def test_below_eight_rows_only_the_header_and_the_count_show():
-    lines = texts(shown(rows=7))
-    assert len(lines) == 2
-    assert lines[0].startswith(" Captain  Alpha")
-    assert lines[1] == " ! 2 need you"
-    assert len(shown(rows=8)) == 8
-
-
-def test_a_short_screen_scrolls_to_keep_the_selection_in_view():
-    lines = shown(rows=12, keys=True, selected="story:ACME-13")
-    assert any(line.selected and "ACME-13" in line.text for line in lines)
-    assert len(lines) == 12
-    assert texts(lines)[-1].startswith(" q quit")
-
-
 def test_the_header_says_how_old_the_file_is():
     status = sample(slots={"used": 1, "cap": 2})
     assert texts(shown(status, sessions=None))[0] == " Captain  Alpha | day 2 of 7 | slots 1/2 | updated 6s ago"
@@ -202,15 +168,9 @@ def test_an_unreachable_linear_gets_a_stale_banner():
     assert banner == " ! stale: Linear was unreachable, this is the state from 5m ago; run /deckhand:captain to retry"
 
 
-def test_the_banner_wraps_on_a_narrow_screen():
-    lines = texts(shown(sample(written_at=at(45)), cols=50))
-    assert lines[1].startswith(" ! stale:")
-    assert lines[2].startswith("   ") and "refresh" in " ".join(lines[1:4])
-
-
 def test_no_status_file_teaches_how_to_start():
     found = board.build(None, LIVE, NOW, TODAY)
-    lines = texts(board.render(found, G, 100))
+    lines = texts(frame.render(found, G, 100))
     assert lines[0] == " Captain"
     assert "   no captain has run yet; start one with /deckhand:captain" in lines
 
@@ -234,12 +194,6 @@ def test_a_malformed_file_still_renders():
     status = sample(items=[{"kind": 3}], stories=[{"ref": None, "stage": {"round": 2}}, "junk"], budget={"x": 1})
     lines = texts(shown(status))
     assert lines[0].startswith(" Captain  Alpha")
-
-
-def test_styled_text_colors_only_when_asked():
-    lines = shown()
-    assert "\x1b[" not in board.text(lines, color=False)
-    assert "\x1b[1;31m!\x1b[0m" in board.text(lines, color=True)
 
 
 def test_midnight_is_local():

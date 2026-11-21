@@ -9,7 +9,22 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from deckhand import answers, board, brief, claims, config, features, fleet, git, order, queue, stage, startable, status
+from deckhand import (
+    answers,
+    board,
+    brief,
+    claims,
+    config,
+    features,
+    fleet,
+    frame,
+    git,
+    order,
+    queue,
+    stage,
+    startable,
+    status,
+)
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
@@ -201,8 +216,8 @@ class Captain:
         read, now = fleet.sessions(self._runner), self._clock()
         sessions = None if read.note else read.sessions
         found = board.build(status.read(state), sessions, now, board.midnight(now))
-        cols = shutil.get_terminal_size((board.WIDTH, 24)).columns if terminal else board.WIDTH
-        print(board.text(board.render(found, g, cols), color and terminal))
+        cols = shutil.get_terminal_size((frame.WIDTH, 24)).columns if terminal else frame.WIDTH
+        print(frame.text(frame.render(found, g, cols), color and terminal))
         if watch:
             print("deckhand: --watch needs a terminal; printed the board once", file=sys.stderr)
 

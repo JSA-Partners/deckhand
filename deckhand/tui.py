@@ -5,7 +5,7 @@ import locale
 import threading
 from collections.abc import Callable
 
-from deckhand import board, fleet
+from deckhand import board, fleet, frame
 from deckhand.brief import Glyphs
 
 TICK_MS = 250
@@ -105,13 +105,13 @@ class Watch:
         found = self._board()
         self._follow(found.keys())
         rows, cols = self._screen.getmaxyx()
-        lines = board.render(found, self._g, cols, rows, self.selected, self.expanded, keys=True)
+        lines = frame.render(found, self._g, cols, rows, self.selected, self.expanded, keys=True)
         self._screen.erase()
         for y, line in enumerate(lines[:rows]):
             x, reverse = 0, self._styles.get("selected", curses.A_REVERSE) if line.selected else 0
             for text, style in line.spans:
                 self._put(y, x, text, self._styles.get(style, 0) | reverse)
-                x += board.cells(text)
+                x += frame.cells(text)
         self._screen.refresh()
 
     def handle(self, key: int) -> bool:
