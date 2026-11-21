@@ -266,7 +266,7 @@ def test_document_not_found_is_none() -> None:
 
 def test_put_record_uses_fixed_url_per_kind_and_subject() -> None:
     client = FakeClient(AttachmentCreate={"attachmentCreate": {"success": True, "attachment": {"id": "a"}}})
-    store = LinearStore(client)
+    store = LinearStore(client, now=lambda: "2026-11-19T10:00:00.000Z")
     first = record()
     store.put_record(UUID, first)
     store.put_record(UUID, Record("approval", "plan", "v2", "captain", {"ok": False}))
@@ -279,7 +279,7 @@ def test_put_record_uses_fixed_url_per_kind_and_subject() -> None:
                 "issueId": UUID,
                 "url": "https://deckhand.invalid/record/approval/plan",
                 "title": "deckhand approval",
-                "metadata": {"record": first.to_json()},
+                "metadata": {"record": first.to_json(), "written": "2026-11-19T10:00:00.000Z"},
             }
         },
     )
@@ -330,6 +330,20 @@ def test_records_carry_the_attachment_time() -> None:
     node = {**attachment(record("plan")), "updatedAt": "2026-11-19T10:00:00.123Z"}
     client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [node], "pageInfo": DONE}}})
     assert LinearStore(client).records(UUID)[0].at == "2026-11-19T10:00:00.123Z"
+
+
+def test_records_carry_the_write_time_over_the_attachment_time() -> None:
+    node = {**attachment(record("plan")), "updatedAt": "2026-11-19T10:00:00.000Z"}
+    node["metadata"]["written"] = "2026-11-19T12:30:00.000Z"
+    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [node], "pageInfo": DONE}}})
+    assert LinearStore(client).records(UUID)[0].at == "2026-11-19T12:30:00.000Z"
+
+
+def test_put_record_stamps_the_local_clock_by_default() -> None:
+    client = FakeClient(AttachmentCreate={"attachmentCreate": {"success": True, "attachment": {"id": "a"}}})
+    LinearStore(client).put_record(UUID, record())
+    written = client.calls[0][1]["input"]["metadata"]["written"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", written)
 
 
 def test_records_refuses_a_malformed_record_naming_issue_and_url() -> None:

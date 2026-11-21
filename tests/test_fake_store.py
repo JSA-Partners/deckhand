@@ -229,6 +229,18 @@ def test_records_carry_the_time_of_the_write() -> None:
     assert store.records("i1")[0].at == "2026-11-19T10:05:00.000Z"
 
 
+def test_a_record_put_again_reports_the_later_write_time() -> None:
+    clock = iter(["2026-11-19T10:00:00.000Z", "2026-11-19T10:05:00.000Z"])
+    store = FakeStore(now=lambda: next(clock))
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    store.put_record("i1", Record("approval", "plan", "1", "captain", {"ok": False}))
+    assert store.records("i1")[0].at == "2026-11-19T10:05:00.000Z"
+    assert store._attachments["i1"]["https://deckhand.invalid/record/approval/plan"]["updatedAt"] == (
+        "2026-11-19T10:00:00.000Z"
+    )
+
+
 def test_the_default_clock_writes_linears_form() -> None:
     store = FakeStore()
     make_issue(store)

@@ -164,16 +164,19 @@ class FakeStore(Store):
 
     def put_record(self, issue: str, record: Record) -> None:
         url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"
-        attachment = {"url": url, "metadata": {"record": record.to_json()}, "updatedAt": self._now()}
-        self._attachments.setdefault(issue, {})[url] = attachment
+        now = self._now()
+        held = self._attachments.setdefault(issue, {})
+        created = held[url]["updatedAt"] if url in held else now
+        held[url] = {"url": url, "metadata": {"record": record.to_json(), "written": now}, "updatedAt": created}
         self._wrote("put_record", issue, record.kind, record.subject)
 
     def records(self, issue: str) -> list[Record]:
         held = self._attachments.get(issue, {})
-        return [
-            replace(Record.from_json(held[url]["metadata"]["record"]), at=held[url]["updatedAt"])
-            for url in sorted(held)
-        ]
+        found = []
+        for url in sorted(held):
+            meta = held[url]["metadata"]
+            found.append(replace(Record.from_json(meta["record"]), at=meta.get("written", held[url]["updatedAt"])))
+        return found
 
     def assign(self, issue: str, user: str) -> None:
         self._issues[issue]["assignee"] = user

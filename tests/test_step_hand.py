@@ -271,6 +271,23 @@ def test_wake_once_per_decision(clone: Path, capsys: pytest.CaptureFixture[str])
     assert shell.launched() == ["hand-ACME-1"]
 
 
+def test_fill_starts_no_hand_for_a_merged_story_whose_last_wake_followed_the_sign_off(clone: Path):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    decided(store, "s1", "n1")
+    shell.rows = [row("ACME-1", "stopped")]
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    store.put_record("s1", Record(signoff.KIND, "s1", "h1", "person:session-1", {}))
+    hand(store, shell).apply(["wake", "ACME-1", *TEAM])
+    store.set_issue_state("s1", "Done")
+    assert asks.wake_due(store.records("s1"), "s1") is None
+    shell.rows = [row("ACME-1", "done")]
+    launched = list(shell.launched())
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == launched
+
+
 def test_wake_gone_hand_resumes(clone: Path, capsys: pytest.CaptureFixture[str]):
     store, shell = building(), Shell()
     store.assign("s2", ME)
