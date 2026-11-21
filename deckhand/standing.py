@@ -7,7 +7,8 @@ from deckhand import fleet
 
 DONE = "Done"
 NEEDS, WORKING, STOPPED, QUEUED, MERGED = "needs you", "working", "stopped", "queued", "done today"
-ORDER = (NEEDS, WORKING, STOPPED, QUEUED, MERGED)
+TEAM = "team"
+ORDER = (NEEDS, WORKING, STOPPED, QUEUED, TEAM, MERGED)
 NOT_STARTED = ("drafting", "planning")
 FAILED = "failed"
 
@@ -87,9 +88,11 @@ def started(story: dict) -> bool:
 
 
 def _story(story: dict, hand: Hand | None) -> str:
-    if hand is not None and hand.live:
-        return WORKING
-    return STOPPED if hand is not None or started(story) else QUEUED
+    if hand is not None:
+        return WORKING if hand.live else STOPPED
+    if story.get("mine") is False:
+        return TEAM
+    return STOPPED if started(story) else QUEUED
 
 
 def classify(status: dict, hands: dict[str, Hand], today: float | None = None) -> list[Entry]:

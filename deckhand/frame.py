@@ -14,6 +14,7 @@ AGE = 5
 REF = 14
 STATE = 28
 FIRST = f"no captain has run yet; start one with {START}"
+PLAIN = ("queued", "team")
 HINT = "type next in the captain to take them in turn"
 SGR = {"bold": "1", "dim": "2", "needs": "1;31", "working": "32", "stopped": "1", "done": "2", "stale": "2"}
 SGR |= {"warn": "1;33", "command": "36"}
@@ -106,8 +107,8 @@ def _columns(found: Board, width: int) -> tuple[int, int, int]:
 def _row(row: Row, g: Glyphs, columns: tuple[int, int, int], selected: bool) -> Line:
     ref, title, state = columns
     tone, age = row.tone, fit(row.age, AGE, "")
-    paint = "" if tone == "queued" else tone
-    spans: list[Span] = [(" ", ""), (getattr(g, tone), paint), (" ", "")]
+    paint = "" if tone in PLAIN else tone
+    spans: list[Span] = [(" ", ""), (g.queued if tone == "team" else getattr(g, tone), paint), (" ", "")]
     spans.append((_pad(fit(row.ref, ref, g.ellipsis), ref), "bold"))
     if title:
         spans += [(" ", ""), (_pad(fit(row.title, title, g.ellipsis), title), "")]

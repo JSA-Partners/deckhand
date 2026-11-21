@@ -134,10 +134,10 @@ Two views follow the captain without asking it anything:
   your Claude Code status line. On your yes, setup adds it to Claude Code's own, or to claude-hud,
   ccstatusline or CCometixLine, and puts it on a second line under any other. It backs up each
   file first, and setup can take it out again, removing only what it added.
-- The board: every story of the feature, full screen, under needs you, working, stopped, queued
-  and done today. Setup writes a `deckhand` launcher in `~/.config/deckhand/` that runs the newest
-  installed version, and the captain gives you the command to run the board in another terminal
-  tab.
+- The board: every story of the feature, full screen, under needs you, working, stopped, queued,
+  team (the stories a teammate owns) and done today. Setup writes a `deckhand` launcher in
+  `~/.config/deckhand/` that runs the newest installed version, and the captain gives you the
+  command to run the board in another terminal tab.
 
 ## How it is built
 

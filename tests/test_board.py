@@ -289,3 +289,12 @@ def test_a_time_out_of_range_still_renders(at_edge):
     items = [sample()["items"][0] | {"since": at_edge}]
     for status in (sample(stories=stories, items=items), sample(written_at=at_edge), sample(stale_since=at_edge)):
         frame.text(shown(status, rows=30, keys=True, expanded="story:ACME-13"), color=True)
+
+
+def test_a_teammates_story_shows_as_theirs_in_plain_text():
+    stories = [story("ACME-20", "Receipts", owner="Sam", mine=False, stage=stage("checks", 5))]
+    lines = shown(sample(items=[], stories=stories, hands=[]), sessions=[])
+    assert rules(lines) == ["needs you 0", "team 1"]
+    row = next(line for line in lines if "ACME-20" in line.text)
+    assert row.text.split() == ["-", "ACME-20", "Receipts", "Sam", "|", "checks", "5m"]
+    assert {style for text, style in row.spans if text.strip()} <= {"", "bold", "dim"}

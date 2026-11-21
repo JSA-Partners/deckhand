@@ -10,7 +10,7 @@ from deckhand.standing import Entry, Hand
 START = "/deckhand:captain"
 FLEET_FAILED = "hands from the file, fleet read failed"
 TONES = {standing.NEEDS: "needs", standing.WORKING: "working", standing.STOPPED: "stopped"}
-TONES |= {standing.QUEUED: "queued", standing.MERGED: "done"}
+TONES |= {standing.QUEUED: "queued", standing.TEAM: "team", standing.MERGED: "done"}
 
 Detail = tuple[str, str, str]
 
@@ -115,6 +115,13 @@ def _queued(entry: Entry, full: bool) -> Row:
     return Row(f"story:{ref}", "queued", ref, _clean(story, "title"), state, "", detail)
 
 
+def _team(entry: Entry, now: float, g: Glyphs) -> Row:
+    story, ref = entry.story, brief.clean(entry.ref)
+    label, since = _stage(story)
+    state = g.sep.join(part for part in (_clean(story, "owner") or "a teammate", label) if part)
+    return Row(f"story:{ref}", "team", ref, _clean(story, "title"), state, _ago(since, now))
+
+
 def _done(entry: Entry, now: float) -> Row:
     at, ref = standing.text(entry.story, "completed_at"), brief.clean(entry.ref)
     stamp = standing.timestamp(at) or 0.0
@@ -122,11 +129,13 @@ def _done(entry: Entry, now: float) -> Row:
     return Row(f"story:{ref}", "done", ref, _clean(entry.story, "title"), "merged", _ago(at, now), detail)
 
 
-def _row(entry: Entry, now: float, full: bool) -> Row:
+def _row(entry: Entry, now: float, full: bool, g: Glyphs) -> Row:
     if entry.kind == standing.NEEDS:
         return _needs(entry, now)
     if entry.kind == standing.QUEUED:
         return _queued(entry, full)
+    if entry.kind == standing.TEAM:
+        return _team(entry, now, g)
     return _done(entry, now) if entry.kind == standing.MERGED else _hand_row(entry, now)
 
 
@@ -167,7 +176,7 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     used, cap = _slots(status, read)
     rows: dict[str, list[Row]] = {kind: [] for kind in standing.ORDER}
     for entry in entries:
-        rows[entry.kind].append(_row(entry, now, used >= cap))
+        rows[entry.kind].append(_row(entry, now, used >= cap, g))
     sections = tuple(Section(k, tuple(r)) for k, r in rows.items() if r or k == standing.NEEDS)
     stamp = standing.timestamp(standing.text(status, "written_at"))
     since = now - stamp if stamp is not None else None

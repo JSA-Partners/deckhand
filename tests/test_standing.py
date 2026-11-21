@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from deckhand import board, brief, fleet, standing
-from tests.test_board import NOW, TODAY, at, sample, session
+from tests.test_board import NOW, TODAY, at, item, sample, session, stage, story
 
 
 def filed_hand(name: str, ref: str, state: str) -> dict:
@@ -93,7 +93,7 @@ def test_the_brief_the_status_line_and_the_board_agree():
 def test_a_wrong_type_anywhere_is_skipped_not_fatal(bad):
     for key in ("items", "stories", "hands", "slots", "budget", "written_at", "stale_since", "feature"):
         standing.classify(sample(**{key: bad}), standing.filed(sample(**{key: bad})), TODAY)
-    for field in ("ref", "state", "blocked_by", "stage", "completed_at", "title", "owner"):
+    for field in ("ref", "state", "blocked_by", "stage", "completed_at", "title", "owner", "mine"):
         status = sample(stories=[{**sample()["stories"][3], field: bad}], hands=[{"ref": bad, "state": bad}])
         standing.classify(status, standing.filed(status), TODAY)
 
@@ -123,3 +123,26 @@ def test_a_failed_spike_off_the_board_surfaces():
 @pytest.mark.parametrize("at_edge", ["9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"])
 def test_a_time_out_of_range_reads_as_no_time(at_edge):
     assert standing.timestamp(at_edge) is None
+
+
+def teammates() -> dict:
+    stories = [
+        story("ACME-20", "Receipts", owner="Sam", mine=False, stage=stage("checks", 5)),
+        story("ACME-21", "Refunds", "Backlog", owner="Sam", mine=False),
+    ]
+    return sample(items=[], stories=stories, hands=[])
+
+
+def test_a_teammates_story_is_theirs_not_stopped_or_queued():
+    assert kinds(teammates(), standing.filed(teammates())) == [(standing.TEAM, "ACME-20"), (standing.TEAM, "ACME-21")]
+    quiet_line, line, sections = counts_on_every_view(teammates())
+    assert quiet_line.startswith("◐ 0 working · ○ 0 queued · nothing needs you")
+    assert line == "◐ 0 working · nothing needs you"
+    assert sections == {"needs you": 0, "team": 2}
+
+
+def test_a_teammates_story_with_a_hand_here_or_an_item_is_this_persons():
+    hands = standing.live([session("x", "ACME-20")])
+    assert kinds(teammates(), hands)[0] == (standing.WORKING, "ACME-20")
+    waiting = teammates() | {"items": [item("k20", "second-sign-off", "ACME-20", "Receipts", 2, "next")]}
+    assert kinds(waiting, {})[0] == (standing.NEEDS, "ACME-20")

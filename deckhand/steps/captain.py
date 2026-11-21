@@ -96,7 +96,7 @@ def _blockers(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict])
     return sorted(s["identifier"] for s in held if s["state"] != order.DONE)
 
 
-def _build_order(store: Store, feature: Feature) -> tuple[list[dict], list[str]]:
+def _build_order(store: Store, feature: Feature, me: str | None) -> tuple[list[dict], list[str]]:
     edges = order.edges(store, feature)
     by_id = {s["id"]: s for s in feature.live}
     placed, cycle = order.build_order(feature.live, edges)
@@ -106,6 +106,7 @@ def _build_order(store: Store, feature: Feature) -> tuple[list[dict], list[str]]
             "title": s["title"],
             "state": s["state"],
             "owner": s["assignee_name"],
+            "mine": me is None or s["assignee"] in (None, me),
             "blocked_by": _blockers(s, edges, by_id),
             "stage": stage.as_data(stage.of(s, feature.records.get(s["id"], []))),
             "completed_at": s.get("completed_at"),
@@ -267,7 +268,7 @@ class Captain:
         }
         if feature is not None:
             facts["budget"] = _budget(feature, self._today())
-            facts["order"], facts["cycle"] = _build_order(store, feature)
+            facts["order"], facts["cycle"] = _build_order(store, feature, me)
             mine = [s for s in feature.live if me is not None and s["assignee"] == me]
             facts["wake_due"] = [s["identifier"] for s in mine if startable.wake_due(feature, s) is not None]
         return facts

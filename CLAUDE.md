@@ -22,7 +22,7 @@
   spike questions and answers, `order.py` the build order, `answers.py` the dialog answers the hook
   stores, `inputs.py` the files a hand may hand in; `stage.py` where each story is in the build and
   its review round, `status.py` the captain's status file, `standing.py` how the status file and the
-  fleet sort into needs you, working, stopped, queued and done today, `brief.py` the brief, the
+  fleet sort into needs you, working, stopped, queued, team and done today, `brief.py` the brief, the
   notify text and the status line segment, `board.py` the board's sections and rows
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen with curses;
   `statusline.py` installs and removes the captain's segment in the person's status line, with a

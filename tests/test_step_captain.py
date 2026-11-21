@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, config, status
+from deckhand import answers, asks, checks, config, status
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
 from deckhand.records import HAND, Record, iso
@@ -605,3 +605,12 @@ def test_without_a_launcher_the_board_line_names_this_deckhand(
 def test_the_brief_and_the_json_carry_no_board_line(clone: Path, capsys: pytest.CaptureFixture[str]):
     assert "board:" not in output(owned(), ["--brief"], capsys)
     assert "board:" not in output(owned(), ["--json"], capsys)
+
+
+def test_a_teammates_started_story_is_never_a_stopped_hand(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    store.assign("s2", "someone-else")
+    store.put_record("s2", Record(checks.KIND, "s2", "v1", HAND, {}))
+    text = output(store, ["--brief"], capsys)
+    assert text.startswith("◐ 0 working · ○ 1 queued · nothing needs you")
+    assert [(s["ref"], s["mine"]) for s in written()["stories"]] == [("ACME-1", True), ("ACME-2", False)]
