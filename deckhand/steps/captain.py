@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from deckhand import answers, brief, claims, config, features, fleet, git, order, queue, stage, startable, status
+from deckhand import answers, board, brief, claims, config, features, fleet, git, order, queue, stage, startable, status
 from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
@@ -19,14 +20,15 @@ from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
-USAGE = "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]]"
+USAGE = "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]]"
+FLAGS = ("--brief", "--json", "--line", "--color", "--board", "--watch", "--no-color")
 
 
 def _parse(args: list[str]) -> dict:
-    found: dict = {"brief": False, "json": False, "line": False, "color": False}
+    found: dict = {flag[2:]: False for flag in FLAGS}
     rest = iter(args)
     for arg in rest:
-        if arg in ("--brief", "--json", "--line", "--color"):
+        if arg in FLAGS:
             found[arg[2:]] = True
         elif arg == "--team-key":
             found["team_key"] = next(rest, "")
@@ -36,6 +38,10 @@ def _parse(args: list[str]) -> dict:
         raise Refusal(f"--color goes with --line; {USAGE}")
     if found["line"] and (found["brief"] or found["json"]):
         raise Refusal(f"--line cannot join --brief or --json; {USAGE}")
+    if (found["watch"] or found["no-color"]) and not found["board"]:
+        raise Refusal(f"--watch and --no-color go with --board; {USAGE}")
+    if found["board"] and (found["brief"] or found["json"] or found["line"]):
+        raise Refusal(f"--board cannot join --brief, --json or --line; {USAGE}")
     return found
 
 
@@ -139,6 +145,9 @@ class Captain:
         if parsed["line"]:
             self._line(parsed["color"])
             return
+        if parsed["board"]:
+            self._board(parsed["watch"], not parsed["no-color"] and brief.colored(os.environ))
+            return
         team = team_key(parsed)
         store, read = self._app(), fleet.sessions(self._runner)
         notes = [read.note] if read.note else []
@@ -180,6 +189,22 @@ class Captain:
                 print(shown)
         except Exception:
             return
+
+    def _board(self, watch: bool, color: bool) -> None:
+        state, g = answers.state_dir(), brief.glyphs(_encoding())
+        terminal = sys.stdout.isatty()
+        if watch and terminal and sys.stdin.isatty() and os.environ.get("TERM") != "dumb":
+            from deckhand import tui
+
+            tui.watch(lambda: status.read(state), lambda: fleet.sessions(_quiet(self._runner)), self._clock, color, g)
+            return
+        read, now = fleet.sessions(self._runner), self._clock()
+        sessions = None if read.note else read.sessions
+        found = board.build(status.read(state), sessions, now, board.midnight(now))
+        cols = shutil.get_terminal_size((board.WIDTH, 24)).columns if terminal else board.WIDTH
+        print(board.text(board.render(found, g, cols), color and terminal))
+        if watch:
+            print("deckhand: --watch needs a terminal; printed the board once", file=sys.stderr)
 
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"captain has no apply; {USAGE}")
@@ -237,6 +262,10 @@ def _save(state: Path, found: dict, notes: list[str]) -> None:
         status.write(state, found)
     except OSError as error:
         notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
+
+
+def _quiet(runner: git.Runner) -> git.Runner:
+    return lambda argv, cwd, stdin: runner(argv, cwd, "" if stdin is None else stdin)
 
 
 def _encoding() -> str | None:

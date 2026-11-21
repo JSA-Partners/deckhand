@@ -33,10 +33,12 @@ class Glyphs:
     queued: str
     done: str
     sep: str
+    rule: str
+    ellipsis: str
 
 
-UNICODE = Glyphs("●", "◐", "○", "✓", " · ")
-ASCII = Glyphs("!", "*", "-", "+", " | ")
+UNICODE = Glyphs("●", "◐", "○", "✓", " · ", "─", "…")
+ASCII = Glyphs("!", "*", "-", "+", " | ", "-", "...")
 
 
 def glyphs(encoding: str | None) -> Glyphs:
