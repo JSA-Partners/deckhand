@@ -401,11 +401,3 @@ def test_spike_hand_on_a_prompt_is_shown(state: Path):
     )
     found = [i for i in waiting(store, me=OTHER, sessions=(blocked,)) if i.kind == "prompt"]
     assert [(i.rank, i.ref, i.next) for i in found] == [(4, key, ["claude attach id-s"])]
-
-
-def test_count_line():
-    store = alpha()
-    asked(store, "s1")
-    summarized(store, "s2", "c2")
-    assert queue.count_line(waiting(store)) == "2 waiting, top: sign-off ACME-2"
-    assert queue.count_line([]) == "nothing waiting"

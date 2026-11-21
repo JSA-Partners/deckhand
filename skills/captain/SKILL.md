@@ -19,7 +19,7 @@ Subscribe to every hand you hear of, with SendMessage and `notify_when_idle` set
 resume. A pure subscription carries no message.
 
 Start hands with `deckhand hand apply fill`, which resumes woken hands before it fills free slots
-up to the cap. On an idle notice from a hand, run it, then `deckhand captain context --count`; say
+up to the cap. On an idle notice from a hand, run it, then `deckhand captain context --brief`; say
 that one line, subscribe, and stop. Never show the item itself until the person asks.
 
 Before showing an item, wake each story on the `wake due:` line with `deckhand hand apply wake REF`.

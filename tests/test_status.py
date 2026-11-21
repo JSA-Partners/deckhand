@@ -55,6 +55,7 @@ def test_snapshot_shape():
                 "title": "Orders",
                 "since": "2026-11-20T09:30:00.000Z",
                 "next": ["decide context question q1 --story ACME-1"],
+                "head": None,
             }
         ],
         "stories": [ROW],

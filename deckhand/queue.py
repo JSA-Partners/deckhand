@@ -41,11 +41,12 @@ class Item:
     unblocks: int
     lines: list[str]
     next: list[str]
+    head: str = ""
 
 
-def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], next: list[str]) -> Item:
-    head = f"{story['identifier']} {story['title']}"
-    return Item(kind, rank, story["identifier"], story["title"], at, 0, [head, *lines], next)
+def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], next: list[str], head: str = "") -> Item:
+    first = f"{story['identifier']} {story['title']}"
+    return Item(kind, rank, story["identifier"], story["title"], at, 0, [first, *lines], next, head)
 
 
 def _signoff(story: dict, records: list[Record]) -> list[Item]:
@@ -59,7 +60,7 @@ def _signoff(story: dict, records: list[Record]) -> list[Item]:
     if version is None or (sign is not None and sign.version == version):
         return []
     next = [f"{SIGNOFF_SKILL} {story['identifier']}"]
-    return [_story_item(signoff.KIND, 0, story, summary.at, [f"ready to sign off at {head[:12]}"], next)]
+    return [_story_item(signoff.KIND, 0, story, summary.at, [f"ready to sign off at {head[:12]}"], next, head)]
 
 
 def second_due(story: dict, records: list[Record], policy_for: Callable[[dict], Policy]) -> Record | None:
@@ -79,7 +80,7 @@ def _second(story: dict, records: list[Record], policy_for: Callable[[dict], Pol
     head = signoff.signed_head(sign)
     lines = [f"signed off at {head[:12]} by {story['assignee_name']}; a second sign-off is due"]
     next = [f"decide context second-sign-off {story['identifier']}"]
-    return [_story_item(signoff.SECOND, 0, story, sign.at, lines, next)]
+    return [_story_item(signoff.SECOND, 0, story, sign.at, lines, next, head)]
 
 
 def _finding_line(records: list[Record], finding: str) -> tuple[str, str]:
@@ -313,9 +314,3 @@ def _feature_items(
     if not building:
         found += _planning(store, feature) + _spikes(store, feature, read)
     return found
-
-
-def count_line(items: list[Item]) -> str:
-    if not items:
-        return "nothing waiting"
-    return f"{len(items)} waiting, top: {items[0].kind} {items[0].ref}"

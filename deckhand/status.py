@@ -19,7 +19,7 @@ def item_key(item: Item) -> str:
 
 def _item(item: Item) -> dict:
     keys = {"key": item_key(item), "kind": item.kind, "ref": item.ref, "title": item.title}
-    return keys | {"since": item.at or None, "next": item.next}
+    return keys | {"since": item.at or None, "next": item.next, "head": item.head or None}
 
 
 def _hands(sessions: list[fleet.Session]) -> list[dict]:

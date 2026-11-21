@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from collections.abc import Callable
 from datetime import date
@@ -17,14 +18,14 @@ from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
-USAGE = "captain takes [--team-key KEY]; context [--count] [--json]"
+USAGE = "captain takes [--team-key KEY]; context [--brief] [--json]"
 
 
 def _parse(args: list[str]) -> dict:
-    found: dict = {"count": False, "json": False}
+    found: dict = {"brief": False, "json": False}
     rest = iter(args)
     for arg in rest:
-        if arg in ("--count", "--json"):
+        if arg in ("--brief", "--json"):
             found[arg[2:]] = True
         elif arg == "--team-key":
             found["team_key"] = next(rest, "")
@@ -133,6 +134,7 @@ class Captain:
         store, read = self._app(), fleet.sessions(self._runner)
         notes = [read.note] if read.note else []
         local = _local(notes)
+        state, alert = answers.state_dir(), None
         try:
             feature = _current(store, team, notes)
             me = self._me(notes)
@@ -140,15 +142,25 @@ class Captain:
             facts = self._facts(store, feature, waiting, read, me, local, notes)
         except LinearError as error:
             notes.append(str(error))
-            facts = self._unreachable(read, local, notes, write=not parsed["count"])
+            shown = status.read(state)
+            shown = status.stale(shown, self._now()) if shown is not None else None
+            facts = _stale(_empty(notes, read, local), shown)
         else:
-            if not parsed["count"]:
-                self._write(team, facts, waiting, read, notes)
+            shown = status.snapshot(self._now(), team, facts, waiting, read.sessions, status.read(state))
+            alert = brief.notify(shown, self._clock()) if parsed["brief"] and not parsed["json"] else None
+            shown["notified"] += alert[1] if alert else []
+        if shown is not None:
+            _save(state, shown, notes)
+        working = [ref for ref, s in _held(read) if fleet.busy(s)]
+        facts["brief"] = brief.text(shown, working, self._clock(), brief.glyphs(_encoding()), notes)
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
-        elif parsed["count"]:
-            print(facts["count"])
-        else:
+            return
+        print(facts["brief"])
+        if alert:
+            print(f"\nnotify: {alert[0]}")
+        if not parsed["brief"]:
+            print()
             _print(facts)
 
     def apply(self, args: list[str]) -> None:
@@ -163,23 +175,6 @@ class Captain:
 
     def _now(self) -> str:
         return iso(int(self._clock() * 1000))
-
-    def _write(self, team: str, facts: dict, waiting: list[queue.Item], read: fleet.Fleet, notes: list[str]) -> None:
-        state = answers.state_dir()
-        _save(state, status.snapshot(self._now(), team, facts, waiting, read.sessions, status.read(state)), notes)
-
-    def _unreachable(self, read: fleet.Fleet, local: config.LocalConfig, notes: list[str], write: bool) -> dict:
-        state = answers.state_dir()
-        previous = status.read(state)
-        facts = _empty(notes, read, local) | {"unreachable": True, "count": "Linear unreachable; no earlier state"}
-        if previous is None:
-            return facts
-        if write:
-            _save(state, status.stale(previous, self._now()), notes)
-        shown = brief.age(brief.elapsed(previous["written_at"], self._clock()))
-        facts["count"] = f"Linear unreachable; showing the state as of {shown} ago"
-        held = {key: previous[key] for key in ("feature", "budget", "release")}
-        return facts | held | {"order": previous["stories"]}
 
     def _waiting(
         self,
@@ -207,7 +202,6 @@ class Captain:
     ) -> dict:
         top = waiting[0] if waiting else None
         facts = _empty(notes, read, local) | {
-            "count": queue.count_line(waiting),
             "top": {"lines": top.lines, "next": top.next} if top else None,
             "feature": feature.project["name"] if feature is not None else None,
             "release": feature is not None and features.phase(feature) is Phase.RELEASED,
@@ -227,11 +221,19 @@ def _save(state: Path, found: dict, notes: list[str]) -> None:
         notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
 
 
+def _encoding() -> str | None:
+    return getattr(sys.stdout, "encoding", None) or getattr(sys.__stdout__, "encoding", None)
+
+
+def _stale(facts: dict, shown: dict | None) -> dict:
+    held = {key: shown[key] for key in ("feature", "budget", "release")} | {"order": shown["stories"]} if shown else {}
+    return facts | held | {"unreachable": True}
+
+
 def _empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> dict:
     return {
         "notes": notes,
         "unreachable": False,
-        "count": "",
         "top": None,
         "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
         "feature": None,
@@ -239,13 +241,13 @@ def _empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> di
         "order": [],
         "cycle": [],
         "release": False,
-        "watch": [s.name for s in _held(read) if fleet.busy(s)],
+        "watch": [s.name for _, s in _held(read) if fleet.busy(s)],
         "wake_due": [],
     }
 
 
-def _held(read: fleet.Fleet) -> list[fleet.Session]:
-    return [s for _, s in [*sorted(fleet.hands(read.sessions).items()), *sorted(fleet.spikes(read.sessions).items())]]
+def _held(read: fleet.Fleet) -> list[tuple[str, fleet.Session]]:
+    return [*sorted(fleet.hands(read.sessions).items()), *sorted(fleet.spikes(read.sessions).items())]
 
 
 def _budget_line(budget: dict) -> str:
@@ -259,9 +261,6 @@ def _order_line(row: dict) -> str:
 
 
 def _print(facts: dict) -> None:
-    for note in facts["notes"]:
-        print(note)
-    print(facts["count"])
     if facts["top"] is not None:
         for line in facts["top"]["lines"]:
             print(line)

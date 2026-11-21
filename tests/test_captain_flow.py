@@ -45,6 +45,10 @@ ASKED = {"question": "Which queue?", "options": ["Redis", "SQS"], "why": "Both f
 CHORES = ["drop the old table", "rotate the secret"]
 
 
+def top(shown: list[str]) -> list[str]:
+    return shown[len(shown) - shown[::-1].index("") :]
+
+
 class Run:
     def __init__(self, tmp_path: Path, clone: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> None:
         self.tmp, self.clone, self.state, self.capsys = tmp_path, clone, state, capsys
@@ -144,11 +148,11 @@ def test_a_feature_runs_from_spike_to_the_last_story(
         ("planning", ["the feature has no stories"]),
         ("spike", [f"spike answered, read it: Spike: {QUESTION}"]),
     ]
-    assert run.captain()[0] == "2 waiting, top: planning Alpha"
-    assert run.captain(person=FakeStore(viewer=OTHER))[0] == "2 waiting, top: planning Alpha"
+    assert run.captain()[0].startswith("## ● 2 need you · oldest Alpha planning ")
+    assert run.captain(person=FakeStore(viewer=OTHER))[0].startswith("## ● 2 need you · oldest Alpha planning ")
 
     Stories(store, shell).apply([*TEAM, "--file", story_map])
-    assert run.captain()[0] == "1 waiting, top: planning Alpha"
+    assert run.captain()[0] == "## ● Alpha needs you"
     a, b, c = story_id("a"), story_id("b"), story_id("c")
     run.approve(a, b, c)
     assert features.phase(features.open_feature(store, "ACME")) is Phase.BUILDING
@@ -161,21 +165,24 @@ def test_a_feature_runs_from_spike_to_the_last_story(
 
     Ask(store).apply(["ACME-3", "--file", run.write("ask.json", ASKED), *TEAM])
     shell.rows = [row("ACME-1", "working", "busy"), row("ACME-3", "blocked", "waiting")]
-    assert run.captain()[:2] == ["1 waiting, top: question ACME-3", "ACME-3 Refunds"]
+    shown = run.captain()
+    assert (shown[0], top(shown)[0]) == ("## ● ACME-3 needs you", "ACME-3 Refunds")
     run.build_to_sign_off("ACME-1")
     shell.rows = [row("ACME-1", "blocked", "waiting"), row("ACME-3", "blocked", "waiting")]
     shown = run.captain()
-    assert shown[:3] == ["2 waiting, top: sign-off ACME-1", "ACME-1 Orders", "ready to sign off at c2"]
+    assert shown[0].startswith("## ● 2 need you")
+    assert shown[2].startswith("**sign-off** ACME-1 at c2 · waiting ")
+    assert top(shown)[:2] == ["ACME-1 Orders", "ready to sign off at c2"]
     assert "next: /deckhand:signoff ACME-1" in shown
 
     run.pass_quiz("ACME-1")
     Signoff(store, run.world, clone).apply(["ACME-1", "review", *TEAM])
     answer(state, run.decide(), capsys, ["sign-off", "ACME-1"], "Sign off")
     assert signoff.current(store.records(a), a, "c2")
-    assert run.captain()[0] == "1 waiting, top: question ACME-3"
+    assert run.captain()[0] == "## ● ACME-3 needs you"
     answer(state, run.decide(), capsys, ["question", asks.question_id("Which queue?"), "--story", "ACME-3"], "SQS")
     shown = run.captain()
-    assert (shown[0], "wake due: ACME-1, ACME-3" in shown) == ("nothing waiting", True)
+    assert ("nothing needs you" in shown[0], "wake due: ACME-1, ACME-3" in shown) == (True, True)
 
     assert run.hand("wake", "ACME-1")[0].startswith("send to hand-ACME-1: ")
     shell.rows = [row("ACME-1", "working", "busy"), row("ACME-3", "blocked", "waiting")]
@@ -194,7 +201,7 @@ def test_a_feature_runs_from_spike_to_the_last_story(
     After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
     shell.rows = [row("ACME-1", "done"), row("ACME-3", "working", "busy")]
     shown = run.captain()
-    assert shown[:3] == ["1 waiting, top: after-merge ACME-1", "ACME-1 Orders", "item 2: rotate the secret"]
+    assert (shown[0], top(shown)[:2]) == ("## ● ACME-1 needs you", ["ACME-1 Orders", "item 2: rotate the secret"])
     unclaimed = store.issue(b)
     assert run.hand("fill") == ["started hand-ACME-2", "no slot is free: 2 of 2 in use"]
     assert shell.launched()[3:] == ["hand-ACME-2"]
@@ -204,8 +211,8 @@ def test_a_feature_runs_from_spike_to_the_last_story(
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text(json.dumps(store.snapshot()))
     assert run.captain(store=FakeStore.from_snapshot(snapshot)) == first
-    assert first[0] == "1 waiting, top: after-merge ACME-1"
-    assert run.captain(person=FakeStore(viewer=OTHER))[0] == "nothing waiting"
+    assert first[0] == "## ● ACME-1 needs you"
+    assert "nothing needs you" in run.captain(person=FakeStore(viewer=OTHER))[0]
 
     claims.claim(store, unclaimed, OTHER)
     assert (store.issue(b)["assignee"], store.issue(c)["assignee"]) == (OTHER, ME)
