@@ -15,6 +15,7 @@ from deckhand.cli import main
 from deckhand.config import LocalConfig
 from deckhand.linear.client import LinearError
 from deckhand.linear.workspace import Workspace
+from deckhand.statusline import Places
 from deckhand.step import Refusal
 from deckhand.steps import setup as setup_step
 from deckhand.steps.setup import Setup
@@ -97,6 +98,25 @@ class FakeLinear:
             team["autoArchivePeriod"] = data["autoArchivePeriod"]
             team["autoCloseParentIssues"] = data["autoCloseParentIssues"]
         return {name[0].lower() + name[1:]: {"success": True}}
+
+
+@pytest.fixture(autouse=True)
+def places(tmp_path: Path) -> Places:
+    home = tmp_path / "home"
+    return Places(
+        settings=home / ".claude" / "settings.json",
+        managed=tmp_path / "managed",
+        project=tmp_path / "project",
+        ccstatusline=home / ".config" / "ccstatusline" / "settings.json",
+        ccline=home / ".claude" / "ccline" / "config.toml",
+        config=Path(os.environ["DECKHAND_CONFIG_DIR"]),
+        root=tmp_path / "plugin",
+    )
+
+
+@pytest.fixture(autouse=True)
+def isolated_places(monkeypatch: pytest.MonkeyPatch, places: Places) -> None:
+    monkeypatch.setattr(Places, "here", classmethod(lambda cls: places))
 
 
 def make(linear: FakeLinear) -> Setup:
@@ -346,7 +366,9 @@ def test_context_json_prints_the_same_facts(capsys: pytest.CaptureFixture[str]):
 def test_context_json_for_a_missing_team(capsys: pytest.CaptureFixture[str]):
     setup = make(FakeLinear("ACME"))
     setup.context(["--team-key", "NOPE", "--json"])
-    assert json.loads(capsys.readouterr().out) == {"team": {"key": "NOPE", "found": False}}
+    facts = json.loads(capsys.readouterr().out)
+    assert facts["team"] == {"key": "NOPE", "found": False}
+    assert facts["statusline"]["owner"] == "none"
 
 
 def test_apply_refuses_json():
@@ -413,4 +435,74 @@ def test_setup_refuses_bad_local_flags_before_any_write(extra: list[str], rule: 
 
 def test_parse_returns_every_flag(tmp_path: Path):
     parsed = setup_step._parse(["--team-key", "ACME", "--clone", f"widgets={tmp_path}", "--slot-cap", "2"])
-    assert parsed == {"team_key": "ACME", "repositories": {}, "clones": {"widgets": tmp_path}, "slot_cap": 2}
+    assert parsed == {
+        "team_key": "ACME",
+        "repositories": {},
+        "clones": {"widgets": tmp_path},
+        "slot_cap": 2,
+        "statusline": None,
+    }
+
+
+def test_statusline_apply_installs_without_linear(places: Places, capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME")
+    make(linear).apply(["--statusline"])
+    out = capsys.readouterr().out
+    assert linear.writes == []
+    line = json.loads(places.settings.read_text())["statusLine"]
+    assert line["command"].endswith("statusline-segment --color")
+    assert f"wrote {places.settings}" in out
+    assert "launch" not in out and "claude --settings" not in out
+
+
+def test_statusline_remove_restores_the_settings(places: Places, capsys: pytest.CaptureFixture[str]):
+    places.settings.parent.mkdir(parents=True)
+    places.settings.write_bytes(b'{"statusLine": {"type": "command", "command": "printf mine"}}')
+    setup = make(FakeLinear("ACME"))
+    setup.apply(["--statusline"])
+    setup.apply(["--statusline-remove"])
+    assert places.settings.read_bytes() == b'{"statusLine": {"type": "command", "command": "printf mine"}}'
+    assert f"restored {places.settings}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--statusline", "--team-key", "ACME"],
+        ["--team-key", "ACME", "--statusline-remove"],
+        ["--statusline", "--statusline-remove"],
+    ],
+)
+def test_statusline_takes_no_other_flag(places: Places, args: list[str]):
+    linear = FakeLinear("ACME")
+    with pytest.raises(Refusal, match="--statusline"):
+        make(linear).apply(args)
+    assert linear.writes == []
+    assert not places.settings.exists()
+
+
+def test_context_reports_the_status_line_even_without_a_team(places: Places, capsys: pytest.CaptureFixture[str]):
+    places.settings.parent.mkdir(parents=True)
+    places.settings.write_text('{"statusLine": {"type": "command", "command": "npx -y ccstatusline@latest"}}')
+    make(FakeLinear("ACME")).context([])
+    out = capsys.readouterr().out
+    assert "--team-key KEY" in out
+    assert "status line: ccstatusline" in out
+    assert "wrapper" in out
+
+
+def test_context_statusline_alone_skips_linear(places: Places, capsys: pytest.CaptureFixture[str]):
+    Setup(workspace=None).context(["--statusline"])
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "status line: none"
+    assert f"would write {places.settings}" in out
+    assert not places.settings.exists()
+
+
+def test_context_never_fails_on_a_broken_settings_file(places: Places, capsys: pytest.CaptureFixture[str]):
+    places.settings.parent.mkdir(parents=True)
+    places.settings.write_text("{broken")
+    make(FakeLinear("ACME")).context(["--statusline"])
+    out = capsys.readouterr().out
+    assert "status line: unknown" in out
+    assert "not valid JSON" in out
