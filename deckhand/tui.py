@@ -22,7 +22,7 @@ KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
 ESC, ESC_WAIT = "\x1b", 0.025
 ENTER_SCREEN, LEAVE_SCREEN = "\x1b[?1049h\x1b[?25l", "\x1b[?25h\x1b[?1049l"
 
-Refresh = Callable[[], Callable[[], bool]]
+Refresh = Callable[[], Callable[[], int | None]]
 
 
 def split_key(buffer: str) -> tuple[str, str]:
@@ -97,7 +97,8 @@ class Watch:
     ) -> None:
         self._term, self._read, self._poller, self._clock, self._g = term, read_status, poller, clock, g
         self._color, self._refresh = color, refresh
-        self._running: Callable[[], bool] | None = None
+        self._running: Callable[[], int | None] | None = None
+        self._failed = False
         self._refreshed = float("-inf")
         self._status: dict | None = None
         self._read_at = float("-inf")
@@ -132,20 +133,20 @@ class Watch:
         if self._status is not None and old and now - self._refreshed >= AUTO_REFRESH:
             self._start_refresh()
 
-    def _refreshing(self) -> bool:
-        if self._running is not None and not self._running():
-            self._running = None
+    def _note(self) -> str:
+        if self._running is not None and (code := self._running()) is not None:
+            self._running, self._failed = None, code != 0
             self._reread()
-        return self._running is not None
+        if self._running is not None:
+            return "refreshing"
+        return "refresh failed" if self._failed else ""
 
     def draw(self) -> None:
         now = self._clock()
         found = board.build(self._status, self._poller.latest(), now, board.midnight(now), self._g)
         self._follow(found.keys())
         rows, cols = self._term.size()
-        lines = frame.render(
-            found, self._g, cols, rows, self.selected, self.expanded, keys=True, refreshing=self._refreshing()
-        )
+        lines = frame.render(found, self._g, cols, rows, self.selected, self.expanded, keys=True, note=self._note())
         painted = [frame.paint(line, self._color) for line in lines[:rows]]
         if (rows, cols, painted) != self._shown:
             self._term.show(painted)

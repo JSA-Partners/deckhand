@@ -60,14 +60,14 @@ def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - cells(text))
 
 
-def _header(found: Board, g: Glyphs, refreshing: bool) -> Line:
+def _header(found: Board, g: Glyphs, note: str) -> Line:
     if not found.read:
         return Line(((" ", ""), ("Captain", "bold")))
     glyph, words, tone = found.lead
     sep = (g.sep, "dim")
     spans: list[Span] = [(" ", ""), (glyph, tone), (" ", ""), (words, tone)]
-    if refreshing:
-        spans += [sep, ("refreshing", "warn")]
+    if note:
+        spans += [sep, (note, "warn")]
     elif found.updated:
         spans += [sep, (f"updated {found.updated} ago", "dim")]
     for fact in found.facts:
@@ -192,10 +192,10 @@ def render(
     selected: str | None = None,
     expanded: str | None = None,
     keys: bool = False,
-    refreshing: bool = False,
+    note: str = "",
 ) -> list[Line]:
     width = cols
-    top = [_header(found, g, refreshing), *_banner(found, g, width), *_fleet(found, g)]
+    top = [_header(found, g, note), *_banner(found, g, width), *_fleet(found, g)]
     if rows is not None and rows < SHORT:
         return [_clip(line, width, g) for line in top[:2][:rows]]
     body, end = _body(found, g, width, selected, expanded)

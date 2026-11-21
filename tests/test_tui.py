@@ -258,9 +258,9 @@ def test_r_runs_a_full_read_shows_refreshing_and_rereads_when_it_ends():
     def refresh():
         started.append(1)
 
-        def running() -> bool:
+        def running() -> int | None:
             left[0] -= 1
-            return left[0] > 0
+            return None if left[0] > 0 else 0
 
         return running
 
@@ -334,7 +334,7 @@ def test_an_old_read_refreshes_itself_every_five_minutes():
 
     def refresh():
         started.append(1)
-        return lambda: False
+        return lambda: 0
 
     old = Reader(sample(written_at=at(45)))
     ticks = int(tui.AUTO_REFRESH / tui.TICK)
@@ -342,3 +342,15 @@ def test_an_old_read_refreshes_itself_every_five_minutes():
     assert started == [1, 1]
     run([None] * (ticks // 2), refresh=refresh)
     assert started == [1, 1]
+
+
+def test_a_failed_refresh_says_so_until_one_works():
+    codes = [1, 0]
+
+    def refresh():
+        code = codes.pop(0)
+        return lambda: code
+
+    term, _, _ = run(["r", None, "r", None], refresh=refresh)
+    assert "refresh failed" in term.frames[1][0]
+    assert "refresh failed" not in term.frames[-1][0]

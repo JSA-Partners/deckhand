@@ -599,8 +599,22 @@ def test_the_full_view_names_the_installed_board_launcher(
     launcher.write_text("#!/bin/sh\n")
     launcher.chmod(0o700)
     shown = output(owned(), [], capsys).splitlines()
-    assert shown[-1] == f"board: {shlex.quote(str(launcher))} captain context --board --watch"
+    places = [f"DECKHAND_CONFIG_DIR={config.config_dir()}", f"DECKHAND_STATE_DIR={answers.state_dir()}"]
+    expected = shlex.join(["env", *places, str(launcher), "captain", "context", "--board", "--watch"])
+    assert shown[-1] == f"board: {expected}"
     assert shown.count(shown[-1]) == 1
+
+
+def test_the_board_line_carries_no_folders_at_their_defaults(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand.steps import captain
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("DECKHAND_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("DECKHAND_STATE_DIR", raising=False)
+    monkeypatch.setattr(sys, "argv", ["/opt/deckhand/bin/deckhand"])
+    assert captain._board_command() == "/opt/deckhand/bin/deckhand captain context --board --watch"
 
 
 def test_without_a_launcher_the_board_line_names_this_deckhand(
@@ -611,7 +625,7 @@ def test_without_a_launcher_the_board_line_names_this_deckhand(
     program.write_text("#!/bin/sh\n")
     monkeypatch.setattr(sys, "argv", [str(program.parent / ".." / "bin" / "deckhand"), "captain", "context"])
     shown = output(owned(), [], capsys).splitlines()
-    assert shown[-1] == f"board: {shlex.quote(str(program.resolve()))} captain context --board --watch"
+    assert shown[-1].endswith(f" {shlex.quote(str(program.resolve()))} captain context --board --watch")
 
 
 def test_the_brief_and_the_json_carry_no_board_line(clone: Path, capsys: pytest.CaptureFixture[str]):
@@ -661,7 +675,7 @@ def test_the_board_refresh_survives_a_missing_program_and_a_hung_read(monkeypatc
     from deckhand.steps import captain
 
     monkeypatch.setattr(captain.sys, "argv", ["/nowhere/deckhand"])
-    assert captain._full_read()() is False
+    assert captain._full_read()() == captain.NOT_RUN
 
     class Hung:
         killed = False
@@ -672,9 +686,12 @@ def test_the_board_refresh_survives_a_missing_program_and_a_hung_read(monkeypatc
         def kill(self):
             Hung.killed = True
 
+        def wait(self):
+            return -9
+
     now = [0.0]
     monkeypatch.setattr(captain.subprocess, "Popen", lambda *a, **k: Hung())
     running = captain._full_read(lambda: now[0])
-    assert running() is True
+    assert running() is None
     now[0] = captain.REFRESH_LIMIT + 1
-    assert running() is False and Hung.killed
+    assert running() == -9 and Hung.killed

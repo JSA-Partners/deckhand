@@ -40,6 +40,8 @@ from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 REFRESH_LIMIT = 120.0
+NOT_RUN = 127
+PLACES = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
 USAGE = "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]]"
 FLAGS = ("--brief", "--json", "--line", "--color", "--board", "--watch", "--no-color")
 
@@ -288,27 +290,28 @@ def _save(state: Path, found: dict, notes: list[str]) -> None:
 def _board_command() -> str:
     launcher = config.config_dir() / hosts.LAUNCHER
     program = launcher if os.access(launcher, os.X_OK) else Path(sys.argv[0]).resolve()
-    return shlex.join([str(program), "captain", "context", "--board", "--watch"])
+    places = [f"{name}={os.environ[name]}" for name in PLACES if os.environ.get(name)]
+    prefix = ["env", *places] if places else []
+    return shlex.join([*prefix, str(program), "captain", "context", "--board", "--watch"])
 
 
 # The board's r runs the captain's full read, which leaves the notified list to the captain's brief.
-def _full_read(clock: Callable[[], float] = time.monotonic) -> Callable[[], bool]:
+def _full_read(clock: Callable[[], float] = time.monotonic) -> Callable[[], int | None]:
     argv, quiet = [str(Path(sys.argv[0]).resolve()), "captain", "context"], subprocess.DEVNULL
     try:
         started = subprocess.Popen(argv, stdin=quiet, stdout=quiet, stderr=quiet, start_new_session=True)
     except OSError:
-        return lambda: False
+        return lambda: NOT_RUN
     deadline = clock() + REFRESH_LIMIT
 
-    def running() -> bool:
-        if started.poll() is not None:
-            return False
-        if clock() < deadline:
-            return True
-        started.kill()
-        return False
+    def done() -> int | None:
+        code = started.poll()
+        if code is None and clock() >= deadline:
+            started.kill()
+            return started.wait()
+        return code
 
-    return running
+    return done
 
 
 def _quiet(runner: git.Runner) -> git.Runner:
