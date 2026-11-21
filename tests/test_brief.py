@@ -217,7 +217,9 @@ def test_line_ascii():
 
 def test_line_never_passes_fifty_characters():
     found = held([item("ACME-" + "9" * 40, "second-sign-off", 500)])
-    assert len(brief.line(found, NOW, brief.UNICODE)) == 50
+    shown = brief.line(found, NOW, brief.UNICODE)
+    assert len(shown) == 50
+    assert shown.startswith("\u25cf 1 needs you \u00b7 second-sign-off ACME-") and shown.endswith(" 8h 20m")
 
 
 def test_line_cleans_a_ref():
@@ -240,5 +242,5 @@ def test_line_is_never_colored_without_the_flag():
 def test_color_flag_is_dropped_for_no_color_and_a_dumb_terminal():
     assert brief.colored({}) is True
     assert brief.colored({"NO_COLOR": "1"}) is False
-    assert brief.colored({"NO_COLOR": ""}) is False
+    assert brief.colored({"NO_COLOR": ""}) is True
     assert brief.colored({"TERM": "dumb"}) is False

@@ -150,19 +150,21 @@ def notify(status: dict, now: float) -> tuple[str, list[str]] | None:
 
 
 def colored(env: Mapping[str, str]) -> bool:
-    return "NO_COLOR" not in env and env.get("TERM") != "dumb"
+    return not env.get("NO_COLOR") and env.get("TERM") != "dumb"
 
 
-def _line_parts(status: dict, now: float) -> tuple[str, str]:
+def _line_parts(status: dict, now: float, g: Glyphs) -> tuple[str, str]:
     items = status["items"]
     if not items:
         working = sum(1 for hand in status.get("hands", []) if hand["state"] == "working")
         return f"{working} working", "nothing needs you"
     top = items[0]
     waited = _waited(top, now)
-    return f"{len(items)} {'needs' if len(items) == 1 else 'need'} you", " ".join(
-        part for part in (top["kind"], clean(top["ref"]), waited) if part
-    )
+    head = f"{len(items)} {'needs' if len(items) == 1 else 'need'} you"
+    ref = clean(top["ref"])
+    fixed = len(g.needs) + 1 + len(head) + len(g.sep) + len(top["kind"]) + len(waited) + 2
+    ref = ref[: max(1, LINE_LIMIT - fixed)]
+    return head, " ".join(part for part in (top["kind"], ref, waited) if part)
 
 
 def line(status: dict | None, now: float, g: Glyphs, color: bool = False) -> str:
@@ -172,7 +174,7 @@ def line(status: dict | None, now: float, g: Glyphs, color: bool = False) -> str
     if status.get("stale_since") or since_written > LINE_STALE_SECONDS:
         glyph, text, paint = g.queued, f"captain stale {age(since_written)}", DIM
     else:
-        head, tail = _line_parts(status, now)
+        head, tail = _line_parts(status, now, g)
         glyph, paint = (g.needs, RED) if status["items"] else (g.working, GREEN)
         text = f"{head}{g.sep}{tail}"
     shown = f"{glyph} {text}"[:LINE_LIMIT]
