@@ -64,7 +64,7 @@ def test_the_brief_when_one_waits(clone: Path, capsys: pytest.CaptureFixture[str
         "## ● ACME-1 needs you",
         "**question** at planning · waiting 14m · type `next`",
         "◐ 0 working · ○ 1 queued · slots 0/1 · Alpha day 1 of 7",
-        "notify: ACME-1 has a question for you (waiting 14m): Orders",
+        "notify: ACME-1 has a question for you (waiting 14m)",
     ]
 
 
@@ -89,7 +89,7 @@ def test_the_brief_falls_back_to_ascii(clone: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="ascii"))
     captain(owned()).context(["--brief", *TEAM])
     sys.stdout.flush()
-    assert raw.getvalue() == b"* 0 working | - 2 queued | nothing needs you | slots 0/1 | Alpha day 1 of 7\n"
+    assert raw.getvalue() == b"\\* 0 working | - 2 queued | nothing needs you | slots 0/1 | Alpha day 1 of 7\n"
 
 
 def test_notify_once_per_item(clone: Path, capsys: pytest.CaptureFixture[str]):
@@ -310,23 +310,28 @@ def unreachable(store: FakeStore, method: str, after: int = 0) -> FakeStore:
 READS = [("team_projects", 0), ("team_projects", 1), ("project_issues", 0), ("records", 0), ("relations", 0)]
 
 
+@pytest.mark.parametrize("earlier", [False, True])
 @pytest.mark.parametrize("mode", [[], ["--brief"], ["--json"]])
 @pytest.mark.parametrize(("method", "after"), READS)
 def test_unreachable_is_never_an_all_clear(
-    clone: Path, mode: list[str], method: str, after: int, capsys: pytest.CaptureFixture[str]
+    clone: Path, earlier: bool, mode: list[str], method: str, after: int, capsys: pytest.CaptureFixture[str]
 ):
+    if earlier:
+        output(owned(), [], capsys)
+    before = written()
     store = unreachable(owned(), method, after)
-    text = output(store, mode, capsys)
-    assert "nothing waiting" not in text
+    text = output(store, mode, capsys, clock=NOW + 14 * 60)
+    shown = json.loads(text)["brief"] if mode == ["--json"] else text
+    line = "Linear unreachable; showing the state as of 14m ago" if earlier else "Linear unreachable; no earlier state"
+    assert "nothing needs you" not in shown
+    assert shown.splitlines()[0] == line
+    assert ("nothing was waiting as of 14m ago" in shown) is earlier
+    assert "notify:" not in text
     if mode == ["--json"]:
         facts = json.loads(text)
         assert facts["unreachable"] is True
-        assert facts["brief"].startswith("Linear unreachable; no earlier state")
         assert "network: could not reach Linear" in facts["notes"]
-    else:
-        assert text.splitlines()[0] == "Linear unreachable; no earlier state"
-        assert "notify:" not in text
-    assert written() is None
+    assert written() == (before | {"stale_since": iso(int((NOW + 14 * 60) * 1000))} if earlier else None)
 
 
 def test_an_unreachable_viewer_is_never_an_all_clear(clone: Path, capsys: pytest.CaptureFixture[str]):

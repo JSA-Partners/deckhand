@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tomllib
 
 import pytest
@@ -460,3 +462,20 @@ def test_hand_with_a_config_path_that_is_a_file_is_not_refused(recorders, tmp_pa
     monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(path))
     assert main(["ask", "context"]) == 0
     assert "sandbox" not in capsys.readouterr().err
+
+
+def test_text_the_stdout_cannot_encode_is_replaced(registry, monkeypatch):
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="ascii"))
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            print("Café ●")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    sys.stdout.flush()
+    assert raw.getvalue() == b"Caf? ?\n"

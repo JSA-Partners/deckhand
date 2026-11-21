@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 NOTIFY_LIMIT = 200
+NOTIFY = "notify: "
+MARKERS = "*-+"
 DONE = "Done"
 ACTIONS = {
     "sign-off": "needs your sign-off",
@@ -100,12 +102,14 @@ def _top(items: list[dict], stories: list[dict], now: float, g: Glyphs) -> str:
     return line + f"{g.sep}type `next`"
 
 
-def _quiet(status: dict, working: list[str], g: Glyphs) -> str:
+def _quiet(status: dict, working: list[str], now: float, g: Glyphs) -> str:
     waiting = {i["ref"] for i in status["items"]}
     open_refs = [s["ref"] for s in status["stories"] if s["state"] != DONE]
     queued = [ref for ref in open_refs if ref not in waiting and ref not in working]
     parts = [f"{g.working} {len(working)} working", f"{g.queued} {len(queued)} queued"]
-    parts += [] if status["items"] else ["nothing needs you"]
+    if not status["items"]:
+        stale = f"nothing was waiting as of {age(elapsed(status['written_at'], now))} ago"
+        parts.append(stale if status.get("stale_since") else "nothing needs you")
     parts.append(f"slots {status['slots']['used']}/{status['slots']['cap']}")
     budget = status.get("budget")
     if budget:
@@ -123,9 +127,9 @@ def text(status: dict | None, working: list[str], now: float, g: Glyphs, notes: 
         items = status["items"]
         if items:
             blocks += [_heading(items, now, g), _top(items, status["stories"], now, g)]
-        blocks.append(_quiet(status, working, g))
+        blocks.append(_quiet(status, working, now, g))
     blocks += [clean(note) for note in notes]
-    return "\n\n".join(blocks)
+    return "\n\n".join("\\" + block if block[:1] in MARKERS and block[1:2] == " " else block for block in blocks)
 
 
 def notify(status: dict, now: float) -> tuple[str, list[str]] | None:
@@ -134,13 +138,8 @@ def notify(status: dict, now: float) -> tuple[str, list[str]] | None:
         return None
     first = new[0]
     waited = _waited(first, now)
-    head = f"{clean(first['ref'])} {ACTIONS.get(first['kind'], 'needs you')}" + (
-        f" (waiting {waited})" if waited else ""
-    )
     more = len(new) - 1
-    tail = f"; {more} more {'needs' if more == 1 else 'need'} you" if more else ""
-    title = clean(first.get("title") or "")
-    room = NOTIFY_LIMIT - 1 - len(head) - len(tail) - 2
-    if title and title != first["ref"] and room > 0:
-        head += f": {title[:room]}"
-    return head + tail, [i["key"] for i in new]
+    rest = f" {ACTIONS.get(first['kind'], 'needs you')}" + (f" (waiting {waited})" if waited else "")
+    rest += f"; {more} more {'needs' if more == 1 else 'need'} you" if more else ""
+    room = NOTIFY_LIMIT - 1 - len(NOTIFY) - len(rest)
+    return clean(first["ref"])[:room] + rest, [i["key"] for i in new]

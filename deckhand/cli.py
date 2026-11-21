@@ -30,6 +30,8 @@ def _sandboxed() -> bool:
 
 
 def main(argv: list[str]) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     _load_steps()
     hand = hand_role()
     if hand and _sandboxed():

@@ -158,7 +158,7 @@ class Captain:
             return
         print(facts["brief"])
         if alert:
-            print(f"\nnotify: {alert[0]}")
+            print(f"\n{brief.NOTIFY}{alert[0]}")
         if not parsed["brief"]:
             print()
             _print(facts)
