@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import sys
 import time
@@ -19,6 +20,7 @@ from deckhand import (
     fleet,
     frame,
     git,
+    hosts,
     order,
     queue,
     stage,
@@ -194,6 +196,7 @@ class Captain:
         if not parsed["brief"]:
             print()
             _print(facts)
+            print(f"board: {_board_command()}")
 
     def _line(self, color: bool) -> None:
         try:
@@ -275,6 +278,12 @@ def _save(state: Path, found: dict, notes: list[str]) -> None:
         status.write(state, found)
     except OSError as error:
         notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
+
+
+def _board_command() -> str:
+    launcher = config.config_dir() / hosts.LAUNCHER
+    program = launcher if os.access(launcher, os.X_OK) else Path(sys.argv[0]).resolve()
+    return shlex.join([str(program), "captain", "context", "--board", "--watch"])
 
 
 def _quiet(runner: git.Runner) -> git.Runner:

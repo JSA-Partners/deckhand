@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -576,3 +577,31 @@ def test_watch_on_a_dumb_terminal_prints_once(state: Path, monkeypatch: pytest.M
     out, err = board_of(["--watch"], capsys)
     assert "\x1b" not in out and out.startswith(" ● 1 needs you · sign-off ACME-1 14m")
     assert err.startswith("deckhand: --watch needs a terminal")
+
+
+def test_the_full_view_names_the_installed_board_launcher(
+    clone: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    launcher = config.config_dir() / "deckhand"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o700)
+    shown = output(owned(), [], capsys).splitlines()
+    assert shown[-1] == f"board: {shlex.quote(str(launcher))} captain context --board --watch"
+    assert shown.count(shown[-1]) == 1
+
+
+def test_without_a_launcher_the_board_line_names_this_deckhand(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    program = tmp_path / "plug in" / "bin" / "deckhand"
+    program.parent.mkdir(parents=True)
+    program.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(sys, "argv", [str(program.parent / ".." / "bin" / "deckhand"), "captain", "context"])
+    shown = output(owned(), [], capsys).splitlines()
+    assert shown[-1] == f"board: {shlex.quote(str(program.resolve()))} captain context --board --watch"
+
+
+def test_the_brief_and_the_json_carry_no_board_line(clone: Path, capsys: pytest.CaptureFixture[str]):
+    assert "board:" not in output(owned(), ["--brief"], capsys)
+    assert "board:" not in output(owned(), ["--json"], capsys)

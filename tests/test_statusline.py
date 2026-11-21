@@ -138,7 +138,7 @@ def test_absent_settings_file_is_created_and_removed_again(places: Places):
     assert settings_line(places)["command"] == f"{segment(places)} --color"
     statusline.remove(places, NOW)
     assert not places.settings.exists()
-    assert not places.config.exists() or list(places.config.iterdir()) == []
+    assert [path.name for path in places.config.iterdir()] == [statusline.LAUNCHER]
 
 
 def test_claude_hud_posix_command_gets_extra_cmd_and_opt_in(places: Places, tmp_path: Path):
@@ -587,3 +587,44 @@ def test_a_reinstall_after_switching_tools_still_removes_the_old_widget(places: 
     statusline.remove(places, NOW)
     assert places.ccstatusline.read_bytes() == widget_before
     assert places.settings.read_bytes() == settings_before
+
+
+def launch(places: Places, *args: str, stdin: str = "") -> subprocess.CompletedProcess[str]:
+    command = [str(places.config / statusline.LAUNCHER), *args]
+    return subprocess.run(command, input=stdin, capture_output=True, text=True, check=False)
+
+
+def test_the_launcher_runs_the_newest_version_with_every_argument(places: Places, tmp_path: Path):
+    root = cache_root(tmp_path, "1.2.0", "1.10.0")
+    places = Places(**{**places.__dict__, "root": root})
+    assert statusline.launch(places) == [f"wrote {places.config / statusline.LAUNCHER}"]
+    assert statusline.launch(places) == []
+    found = launch(places, "captain", "context", "--board", "--watch", "it's")
+    assert (found.stdout, found.returncode) == ("1.10.0 captain context --board --watch it's\n", 0)
+    cache_root(tmp_path, "1.11.0")
+    assert launch(places, "x").stdout == "1.11.0 x\n"
+
+
+def test_the_launcher_keeps_stdin_and_has_no_time_bound(places: Places):
+    (places.root / "bin" / "deckhand").write_text('#!/bin/sh\nsleep 1.5\nread line\necho "$line $*"\n')
+    statusline.launch(places)
+    started = time.monotonic()
+    found = launch(places, "a", "b", stdin="typed\n")
+    assert (found.stdout, found.returncode) == ("typed a b\n", 0)
+    assert time.monotonic() - started >= 1.5
+
+
+def test_the_launcher_says_so_when_no_version_is_installed(places: Places, tmp_path: Path):
+    root = cache_root(tmp_path, "1.0.0")
+    places = Places(**{**places.__dict__, "root": root})
+    statusline.launch(places)
+    (root / ".orphaned_at").write_text("1")
+    found = launch(places, "captain")
+    assert (found.stdout, found.returncode) == ("", 1)
+    assert found.stderr == "deckhand: no installed deckhand plugin was found\n"
+
+
+def test_installing_the_status_line_writes_the_launcher_too(places: Places):
+    with_command(places, "printf 'my line'")
+    statusline.install(places, NOW)
+    assert launch(places, "captain", "context", "--line").stdout == PLAIN + "\n"

@@ -257,5 +257,7 @@ class Setup:
                 path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
                 print(f"wrote {path}")
+        for line in statusline.launch(Places.here()):
+            print(line)
         print(_launch_line())
         sys.stdout.flush()

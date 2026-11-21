@@ -407,6 +407,8 @@ def test_setup_writes_config_once(tmp_path: Path, capsys: pytest.CaptureFixture[
     launch_line = f'claude --settings {config_dir / "captain-settings.json"} --name captain "/deckhand:captain"'
     assert out.splitlines()[-1] == launch_line
     assert f"wrote {config_dir / 'config.toml'}" in out
+    assert f"wrote {config_dir / 'deckhand'}" in out
+    assert os.access(config_dir / "deckhand", os.X_OK)
     first = local_files(config_dir)
     setup.apply(args)
     out = capsys.readouterr().out

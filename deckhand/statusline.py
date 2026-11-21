@@ -15,6 +15,7 @@ from deckhand import config, hosts
 from deckhand.step import Refusal
 
 SEGMENT = "statusline-segment"
+LAUNCHER = hosts.LAUNCHER
 WRAPPER = "statusline-wrapper"
 STATE = "statusline.json"
 MARK = hosts.MARK
@@ -269,11 +270,21 @@ def _own(path: Path, text: str, mode: int) -> None:
         _write(path, text.encode(), mode)
 
 
+def launch(places: Places) -> list[str]:
+    path, text = places.config / LAUNCHER, hosts.command(places.root)
+    if _read(path) == text.encode():
+        return []
+    places.config.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _write(path, text.encode(), 0o700)
+    return [f"wrote {path}"]
+
+
 def install(places: Places, now: datetime | None = None) -> list[str]:
     now = now or datetime.now()
     _, _, plan = _inspect(places)
     places.config.mkdir(mode=0o700, parents=True, exist_ok=True)
     _own(places.config / SEGMENT, hosts.launcher(places.root), 0o700)
+    launch(places)
     if plan.installed:
         return [f"status line: the deckhand segment is already installed ({plan.owner})"]
     if plan.method == "wrapper":

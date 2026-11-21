@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 MARK = "DECKHAND_STATUSLINE=1"
+LAUNCHER = "deckhand"
 GUARD = "DECKHAND_STATUSLINE_WRAPPED"
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 WIDGET = "deckhand-captain"
@@ -24,9 +25,13 @@ version=$(ls "$versions" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
       [ -e "$versions/$name/.orphaned_at" ] || [ ! -x "$versions/$name/bin/deckhand" ] || echo "$name"
     done \
   | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-[ -n "$version" ] || exit 0
+[ -n "$version" ] || { @MISSING@; }
 bin="$versions/$version/bin/deckhand"
 """
+QUIET = "exit 0"
+MISSING = 'echo "deckhand: no installed deckhand plugin was found" >&2; exit 1'
+PASS = 'exec "$bin" "$@"\n'
+
 
 BOUNDED = r"""out=$(mktemp "${TMPDIR:-/tmp}/deckhand-segment.XXXXXX") || exit 0
 "$bin" captain context --line "$@" </dev/null >"$out" 2>/dev/null &
@@ -57,13 +62,19 @@ exit "$status"
 """
 
 
-def launcher(root: Path) -> str:
+def _resolve(root: Path, missing: str) -> str:
     versions = root.parent
     if SEMVER.match(root.name) and versions.name == "deckhand" and versions.parent.parent.name == "cache":
-        body = NEWEST.replace("@VERSIONS@", shlex.quote(str(versions)))
-    else:
-        body = f"bin={shlex.quote(str(root / 'bin' / 'deckhand'))}\n"
-    return "#!/bin/sh\n" + body + BOUNDED
+        return NEWEST.replace("@VERSIONS@", shlex.quote(str(versions))).replace("@MISSING@", missing)
+    return f"bin={shlex.quote(str(root / 'bin' / 'deckhand'))}\n"
+
+
+def launcher(root: Path) -> str:
+    return "#!/bin/sh\n" + _resolve(root, QUIET) + BOUNDED
+
+
+def command(root: Path) -> str:
+    return "#!/bin/sh\n" + _resolve(root, MISSING) + PASS
 
 
 def wrapper(original: str, segment: str) -> str:
