@@ -10,9 +10,9 @@
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
   `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
-  planning work (`spike`, `draft`) and its questions (`ask`), and the person's fleet (`hand` starts,
-  fills and wakes hands, `captain` prints the brief, the queue, the status line segment and the
-  board); `commit` and `document` only report
+  planning work (`spike`, `draft`) and its questions (`ask`), and the person's fleet (`hand`
+  starts, fills and wakes hands, `captain` prints the brief, the queue, the status line segment
+  and the board); `commit` and `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
@@ -26,7 +26,8 @@
   notify text and the status line segment, `board.py` the board's sections and rows
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen with curses;
   `statusline.py` installs and removes the captain's segment in the person's status line, with a
-  backup, and `hosts.py` what each status line tool needs for it
+  backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py` what each
+  status line tool needs, and the launcher scripts
 - `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
   setup reads and plans for a team, and a client for the app or the person
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the

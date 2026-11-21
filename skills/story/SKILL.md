@@ -35,7 +35,8 @@ change. Commit with `deckhand build apply REF commit --message FILE`. Bring main
 `deckhand build apply REF sync`, resolve any conflict it names, and commit. Then run `deckhand checks apply REF` and `deckhand build apply REF push`.
 
 Review the branch the same way with `--stage branch`, then run deckhand:document and commit its
-edits. Repeat checks, push and branch review until the context stops clean, cap-clear or proceeded at the pushed head.
+edits. Repeat checks, push and branch review until the context stops clean, cap-clear or
+proceeded at the pushed head.
 
 There, `deckhand quiz context REF` gives the quiz size and shapes. Write the change summary by intent
 and the quiz on the diff and what is new; save them with
