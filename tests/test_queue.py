@@ -342,7 +342,7 @@ def proceed(store: FakeStore, stage: str, latest: Record, at: str) -> None:
 
 def test_branch_cap_waits_for_the_person_at_the_checked_head():
     store = alpha()
-    latest = rounds(store, "branch", raw(severity="P3"))
+    latest = rounds(store, "branch", raw(severity="P1"))
     store.put_record("s1", Record("checks", "s1", "h4", "agent:checks", {"head": "h4", "passed": True}))
     [item] = waiting(store)
     assert (item.kind, item.rank, item.at) == ("finding", 1, latest.at)
@@ -355,12 +355,21 @@ def test_branch_cap_waits_for_the_person_at_the_checked_head():
 
 def test_plan_cap_waits_for_the_person_at_the_plan_version():
     store = alpha()
-    latest = rounds(store, "plan")
+    latest = rounds(store, "plan", raw(severity="P1"))
     store.put_record("s1", Record(implplan.PURPOSE, "s1", "plan-v4", "agent:implplan", manifest()))
     [item] = waiting(store)
     assert (item.kind, item.next) == ("finding", ["decide context review-cap ACME-1 --stage plan"])
     proceed(store, "plan", latest, "plan-v4")
     assert waiting(store) == []
+
+
+@pytest.mark.parametrize("stage", ["plan", "branch"])
+def test_cap_without_an_open_p1_raises_no_item(stage: str):
+    store = alpha()
+    rounds(store, stage, raw(severity="P2"), raw(severity="P3", summary="Other."))
+    store.put_record("s1", Record(implplan.PURPOSE, "s1", "plan-v4", "agent:implplan", manifest()))
+    store.put_record("s1", Record("checks", "s1", "h4", "agent:checks", {"head": "h4", "passed": True}))
+    assert [i for i in waiting(store) if i.next and "review-cap" in i.next[0]] == []
 
 
 def test_finding_that_changes_delivery_waits_for_the_person():

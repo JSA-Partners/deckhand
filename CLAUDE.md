@@ -117,7 +117,8 @@ install reaches them when the next fix or feature does.
 - The build happens in the story's worktree; a branch is never checked out by hand, and the clone
   stays on main
 - Review rounds are computed from records: never rerun on an unchanged target, scope a revision to
-  its diff, stop when the last round holds no accepted P1, and leave the cap to the person
+  its diff, stop when the last round holds no accepted P1, and leave the cap to the person only
+  while a P1 is open
 - Findings are ordered by confidence and never deleted; a doubtful one is folded, and only the
   person declines one
 - Sign-off, the change summary, the quiz and the checks are pinned to one head; merging is pinned to

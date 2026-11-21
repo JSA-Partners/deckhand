@@ -216,7 +216,7 @@ def next_round(rounds: list[Record], target_hash: str, declined: set[str], head:
             return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
         return Stop("unchanged") if open_p1(latest, declined) else Stop("clean")
     if reviewed_count(rounds) >= CAP:
-        return Stop("cap")
+        return Stop("cap") if open_p1(latest, declined) else Stop("cap-clear")
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
 
 
@@ -259,11 +259,9 @@ def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     return [r for r in rounds if _n(r) > cut], cut
 
 
-def at_cap(rounds: list[Record], declined: set[str], at: str) -> bool:
+def at_cap(rounds: list[Record], declined: set[str]) -> bool:
     latest = last(rounds)
-    if latest is None or reviewed_count(rounds) < CAP:
-        return False
-    return bool(open_p1(latest, declined)) or reviewed(latest) != at
+    return latest is not None and reviewed_count(rounds) >= CAP and bool(open_p1(latest, declined))
 
 
 def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
@@ -271,7 +269,7 @@ def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
     latest = last(held)
     if latest is None:
         return False
-    if reviewed(latest) == at and not open_p1(latest, declined(records)):
+    if not open_p1(latest, declined(records)) and (reviewed(latest) == at or reviewed_count(held) >= CAP):
         return True
     pinned = cap_version(latest, at)
     return any(r.version == pinned for r in _cap_answers(records, cap_subject(story, stage), PROCEED))

@@ -40,10 +40,8 @@ def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str, head
     held, _ = review.counted(records, f"{story['id']}:{stage}")
     plan = versions.held(records, implplan.PURPOSE, story["id"])
     at = head if stage == "branch" else plan.version if plan else ""
-    if not review.at_cap(held, review.declined(records), at):
-        raise Refusal(
-            f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open or a later revision"
-        )
+    if not review.at_cap(held, review.declined(records)):
+        raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
     latest = review.last(held)
     open_count = len(review.open_p1(latest, review.declined(records)))
     detail = f"{review.reviewed_count(held)} rounds, {open_count} P1 open, at {at[:12]}"

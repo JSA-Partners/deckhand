@@ -122,7 +122,7 @@ def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
         at = plan.version
     else:
         at = checked.version if checked is not None else review.reviewed(latest)
-    if not review.at_cap(held, review.declined(records), at) or review.cleared(records, story["id"], stage, at):
+    if not review.at_cap(held, review.declined(records)) or review.cleared(records, story["id"], stage, at):
         return []
     lines = [f"the {stage} review reached its cap of {review.CAP} rounds"]
     next = [f"decide context review-cap {story['identifier']} --stage {stage}"]

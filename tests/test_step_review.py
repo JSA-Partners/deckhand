@@ -440,6 +440,17 @@ def test_proceed_at_the_cap_ends_the_review(
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "proceeded"
 
 
+def test_the_cap_without_an_open_p1_ends_the_review_on_its_own(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    for n in (1, 2, 3):
+        record_round(step, tmp_path, raw(severity="P2", summary=f"Gap {n}."))
+        submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap-clear"
+
+
 def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path):
     store = setup()
     approve_everything(store)
