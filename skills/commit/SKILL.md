@@ -4,12 +4,12 @@ description: Commit the staged changes with a message that matches the project's
 arguments: flag
 model: sonnet
 effort: medium
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(git commit *)
+allowed-tools: Bash(deckhand *) Bash(git commit *)
 ---
 
 # Commit $flag
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" commit context`
+!`deckhand commit context`
 
 The context above is everything you need; do not run git to gather more. If nothing is staged, say so and stop: this skill never stages.
 

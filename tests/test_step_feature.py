@@ -11,6 +11,7 @@ from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.feature import Feature
 from deckhand.store.fake import FakeStore
+from tests.test_step_decide import Connected, roles_connected
 
 TEAM = ["--team-key", "ACME"]
 TODAY = date(2026, 11, 20)
@@ -170,3 +171,10 @@ def test_pick_and_park_refuse_another_teams_feature_and_a_hand_made_project(acti
         with pytest.raises(Refusal, match="not a feature of team ACME"):
             step(store).apply([action[0], *TEAM, "--project", project, *action[1:]])
     assert store.writes == []
+
+
+def test_feature_writes_as_person(monkeypatch: pytest.MonkeyPatch):
+    roles = roles_connected(monkeypatch)
+    with pytest.raises(Connected):
+        Feature().apply(["new", *TEAM, "--name", "Alpha"])
+    assert roles == ["person"]

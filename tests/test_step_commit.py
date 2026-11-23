@@ -78,3 +78,39 @@ def test_a_long_diff_is_truncated(repo: Path, capsys: pytest.CaptureFixture[str]
 def test_apply_refuses(repo: Path):
     with pytest.raises(Refusal, match="no apply"):
         Commit(cwd=repo).apply([])
+
+
+def nested_in_a_hand_worktree(repo: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    worktree = repo / ".worktrees" / "story"
+    git(repo, "worktree", "add", "-q", "-b", "story", str(worktree))
+    nested = worktree / "nested"
+    nested.mkdir()
+    git(nested, "init", "-q")
+    config = repo.parent / "hand-config"
+    config.mkdir()
+    (config / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config))
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    return worktree, nested
+
+
+def test_a_hand_reads_git_only_in_a_listed_worktree(repo: Path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    worktree, nested = nested_in_a_hand_worktree(repo, monkeypatch)
+    monkeypatch.chdir(nested)
+    with pytest.raises(Refusal, match="a hand runs deckhand only from its story worktree"):
+        Commit().context([])
+    monkeypatch.chdir(worktree)
+    Commit().context([])
+    assert capsys.readouterr().out.startswith("Nothing is staged.")
+
+
+def test_a_hand_context_never_echoes_a_config_file(repo: Path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    worktree, _ = nested_in_a_hand_worktree(repo, monkeypatch)
+    secret = repo.parent / "hand-config" / "credentials"
+    secret.write_text("commit lin_api_secretvalue\n")
+    (worktree / "CLAUDE.md").symlink_to(secret)
+    (worktree / "internal" / "auth" / "a.go").write_text("b\n")
+    git(worktree, "add", "internal/auth/a.go")
+    monkeypatch.chdir(worktree)
+    Commit().context([])
+    assert "lin_api_secretvalue" not in capsys.readouterr().out

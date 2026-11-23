@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from deckhand import implplan, review, signoff, versions
+from deckhand import asks, implplan, review, signoff, versions
 from deckhand.git import GitError
 from deckhand.records import Record
 from deckhand.step import Refusal
+from deckhand.steps.checks import Checks
 from deckhand.steps.decide import Decide
+from deckhand.steps.merge import Merge
+from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
-from deckhand.steps.signoff import Merge, Signoff
+from deckhand.steps.signoff import SCREENS, Signoff
 from deckhand.store.fake import FakeStore
 from tests.test_implplan import BASE, Git
 from tests.test_quiz import ask, decide, item, reply, submit, summary
@@ -26,10 +30,15 @@ __all__ = ["repo", "state"]
 
 class Gh(Shell):
     def __init__(
-        self, pr_head: str = "c2", buckets: list[list[str]] | None = None, moved: bool = False, behind: bool = False
+        self,
+        pr_head: str = "c2",
+        buckets: list[list[str]] | None = None,
+        moved: bool = False,
+        behind: bool = False,
+        draft: bool = True,
     ) -> None:
         super().__init__()
-        self.pr_head, self.moved, self.behind = pr_head, moved, behind
+        self.pr_head, self.moved, self.behind, self.draft = pr_head, moved, behind, draft
         self.buckets = buckets if buckets is not None else [["pass"]]
 
     def __call__(self, argv, cwd=None, stdin=None):
@@ -38,7 +47,9 @@ class Gh(Shell):
             return subprocess.CompletedProcess(argv, 0 if self.behind else 1, "", "")
         if argv[:3] == ["gh", "pr", "list"]:
             self.argvs.append(argv)
-            found = [{"number": 7, "url": "https://example.test/pull/7", "isDraft": True, "headRefOid": self.pr_head}]
+            found = [
+                {"number": 7, "url": "https://example.test/pull/7", "isDraft": self.draft, "headRefOid": self.pr_head}
+            ]
             return subprocess.CompletedProcess(argv, 0, json.dumps(found), "")
         if argv[:3] == ["gh", "pr", "checks"]:
             self.argvs.append(argv)
@@ -83,6 +94,7 @@ def built(store: FakeStore, head: str = "c2") -> None:
 
 def signable(tmp_path: Path, repo: Path, tuicr: bool = True) -> FakeStore:
     store = labeled(tmp_path, repo)
+    store.assign("s1", store.viewer()["id"])
     record_round(Review(store, Git(BASE), repo), tmp_path)
     if tuicr:
         built(store)
@@ -96,17 +108,29 @@ def ready(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture
     step = decide(store, repo)
     reply(state, step, ask(step, capsys), "The idempotency key")
     branch_round(store, raw())
+    fixed(store, raw())
     checked(store, "c2")
     return store
+
+
+def fixed(store: FakeStore, *items: dict, stage: str = "branch") -> None:
+    for found in review.parse_findings(json.dumps(list(items))):
+        store.put_record("s1", review.accept_record(review.finding_id(found, stage), "hash1"))
 
 
 def sign(store: FakeStore, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], choice: str = "Sign off"):
     return answer(state, Decide(store, runner=Shell(), repo=repo), capsys, ["sign-off", "ACME-1"], choice)
 
 
-def merge(store: FakeStore, repo: Path, gh: Gh, clock: Clock | None = None) -> None:
-    clock = clock or Clock()
-    Merge(store, gh, repo, clock.sleep, clock).apply(["s1", *TEAM])
+def gap_text(store: FakeStore, head: str = "c2") -> str:
+    return "; ".join(signoff.gaps(store.records("s1"), "s1", head))
+
+
+def not_ready_options(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str]) -> list[str]:
+    capsys.readouterr()
+    Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM, "--json"])
+    asked = json.loads(capsys.readouterr().out)
+    return [o["label"] for o in asked["tool_input"]["questions"][0]["options"]]
 
 
 def voids(store: FakeStore) -> list:
@@ -117,77 +141,6 @@ def overview(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str]) -
     capsys.readouterr()
     Signoff(store, Shell(), repo).context(["s1", *TEAM, "--json"])
     return json.loads(capsys.readouterr().out)
-
-
-def test_merge_pins_signed_head(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
-    store = ready(tmp_path, repo, state, capsys)
-    question = sign(store, repo, state, capsys)
-    assert [o["label"] for o in question["options"]] == ["Sign off", "Not yet"]
-    assert "head c2" in question["question"]
-    gh = Gh(buckets=[["pending"], ["pass"]])
-    clock = Clock()
-    merge(store, repo, gh, clock)
-    [merged] = gh.ran("gh", "pr", "merge")
-    assert merged == ["gh", "pr", "merge", "7", "--repo", "acme/widgets", "--squash", "--match-head-commit", "c2"]
-    assert gh.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets"]]
-    assert "--auto" not in merged and clock.slept == [15]
-    assert voids(store) == []
-
-
-def test_merge_refuses_when_head_moved(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    assert overview(store, repo, capsys)["missing"] == []
-    gh = Gh(pr_head="c3")
-    with pytest.raises(Refusal, match="void, head moved"):
-        merge(store, repo, gh)
-    assert gh.ran("gh", "pr", "merge") == [] and gh.ran("gh", "pr", "ready") == []
-    [void] = voids(store)
-    nonce = signoff.signed(store.records("s1"), "s1").data["nonce"]
-    assert (void.subject, void.data["head"]) == (f"s1:{nonce}", "c2")
-    assert overview(store, repo, capsys)["missing"] == ["the sign-off at c2 is void: " + void.data["reason"]]
-    with pytest.raises(Refusal, match="no current sign-off"):
-        merge(store, repo, Gh())
-
-
-def test_a_fresh_sign_off_after_a_void_is_current(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    with pytest.raises(Refusal, match="checks failed"):
-        merge(store, repo, Gh(buckets=[["fail"]]))
-    assert not signoff.current(store.records("s1"), "s1", "c2")
-    sign(store, repo, state, capsys)
-    assert signoff.current(store.records("s1"), "s1", "c2")
-    gh = Gh()
-    merge(store, repo, gh)
-    assert len(gh.ran("gh", "pr", "merge")) == 1
-
-
-def test_unpushed_signed_head_refuses_without_a_void(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    before = list(store.writes)
-    gh = Gh(pr_head="c1", behind=True)
-    with pytest.raises(Refusal, match="push the signed head first"):
-        merge(store, repo, gh)
-    assert store.writes == before and gh.ran("gh", "pr", "ready") == [] and gh.ran("gh", "pr", "merge") == []
-    assert ["git", "merge-base", "--is-ancestor", "c1", "c2"] in gh.argvs
-
-
-def test_checks_failing_after_pending_void_the_sign_off(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    gh, clock = Gh(buckets=[["pending"], ["fail"]]), Clock()
-    with pytest.raises(Refusal, match="checks failed: check 0"):
-        merge(store, repo, gh, clock)
-    assert clock.slept == [15] and gh.ran("gh", "pr", "merge") == []
-    assert [v.data["reason"] for v in voids(store)] == ["checks failed: check 0"]
 
 
 def test_overview_without_a_worktree_lists_it_as_missing(
@@ -208,63 +161,89 @@ def test_commits_after_the_last_branch_round_need_a_review(
     reply(state, step, ask(step, capsys), "The idempotency key")
     branch_round(store, raw(), head="c1")
     checked(store, "c2")
-    with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("the branch review has not reviewed the signed head c2", gap_text(store))
     branch_round(store, raw(), n=2)
+    fixed(store, raw())
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
 
 
-def test_merge_refuses_when_github_finds_the_head_moved(
+def test_an_open_quiz_item_is_a_sign_off_gap(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    with pytest.raises(Refusal, match="void, head moved"):
-        merge(store, repo, Gh(moved=True))
-    assert [v.data["head"] for v in voids(store)] == ["c2"]
-
-
-def test_merge_refuses_on_failed_checks(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    gh = Gh(buckets=[["pass", "fail"]])
-    with pytest.raises(Refusal, match="checks failed: check 1"):
-        merge(store, repo, gh)
-    assert gh.ran("gh", "pr", "merge") == []
-    assert [v.data["reason"] for v in voids(store)] == ["checks failed: check 1"]
-    assert "void" in overview(store, repo, capsys)["missing"][0]
-
-
-def test_pending_checks_stop_after_a_hundred_seconds_without_a_record(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    before = list(store.writes)
-    gh, clock = Gh(buckets=[["pending"]]), Clock()
-    capsys.readouterr()
-    merge(store, repo, gh, clock)
-    assert "checks pending, run merge apply ACME-1 again" in capsys.readouterr().out
-    assert clock.now == 100 and gh.ran("gh", "pr", "merge") == [] and store.writes == before
-
-
-def test_sign_off_refuses_with_open_quiz(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     branch_round(store, raw())
+    fixed(store, raw())
     checked(store, "c2")
-    step = Decide(store, runner=Shell(), repo=repo)
-    with pytest.raises(Refusal, match="quiz items still open: 1"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("quiz items still open: 1", gap_text(store))
     quizzer = decide(store, repo)
     reply(state, quizzer, ask(quizzer, capsys), "A new key")
-    with pytest.raises(Refusal, match="quiz items still open: 1"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("quiz items still open: 1", gap_text(store))
     reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_not_ready_sign_off_offers_not_yet_and_back_and_records_not_yet_before_the_quiz(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
+    sign(store, repo, state, capsys, signoff.NOT_YET)
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert held.data["answer"] == signoff.NOT_YET
+    assert not signoff.current(store.records("s1"), "s1", "c2")
+
+
+def test_an_early_not_yet_wakes_the_hand(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = signable(tmp_path, repo)
+    start = Record(asks.HAND_START, "s1", "v1", "agent:hand", {})
+    store.put_record("s1", start)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    assert asks.wake_due(store.records("s1"), "s1") is None
+    sign(store, repo, state, capsys, signoff.NOT_YET)
+    woken = asks.wake_due(store.records("s1"), "s1")
+    assert woken is not None and woken.kind == signoff.KIND
+
+
+def test_sign_off_on_a_not_ready_question_is_refused_and_writes_nothing(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    store.writes.clear()
+    with pytest.raises(Refusal, match="is not one of Not yet, Back"):
+        sign(store, repo, state, capsys, signoff.SIGN)
+    assert store.writes == []
+    assert not [r for r in store.records("s1") if r.kind == signoff.KIND]
+
+
+def test_back_on_the_sign_off_question_records_nothing(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    save_summary(store, tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    store.writes.clear()
+    sign(store, repo, state, capsys, signoff.BACK)
+    assert store.writes == []
+    assert "no sign-off recorded" in capsys.readouterr().out
+
+
+def test_a_ready_sign_off_keeps_its_options(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    capsys.readouterr()
+    Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM, "--json"])
+    asked = json.loads(capsys.readouterr().out)
+    assert [o["label"] for o in asked["tool_input"]["questions"][0]["options"]] == [signoff.SIGN, signoff.NOT_YET]
 
 
 def test_sign_off_lists_everything_missing(tmp_path: Path, repo: Path):
@@ -281,19 +260,7 @@ def test_summary_must_match_the_quiz(tmp_path: Path, repo: Path, state: Path, ca
     store = ready(tmp_path, repo, state, capsys)
     other = summary(1) | {"intents": [{"title": "Queue orders", "lines": ["retries reuse the key"]}]}
     save_summary(store, tmp_path, repo, other)
-    with pytest.raises(Refusal, match="differs from the one the quiz was written from"):
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
-
-
-def test_not_yet_after_sign_off_is_not_current(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    sign(store, repo, state, capsys, "Not yet")
-    assert overview(store, repo, capsys)["missing"] == ["the person answered Not yet"]
-    with pytest.raises(Refusal, match="no current sign-off"):
-        merge(store, repo, Gh())
+    assert re.search("differs from the one the quiz was written from", gap_text(store))
 
 
 def test_a_new_local_commit_leaves_the_sign_off_behind(
@@ -304,7 +271,7 @@ def test_a_new_local_commit_leaves_the_sign_off_behind(
     capsys.readouterr()
     Signoff(store, Shell(head="c3"), repo).context(["s1", *TEAM, "--json"])
     missing = json.loads(capsys.readouterr().out)["missing"]
-    assert "the sign-off is for c2, not the head c3" in missing and "checks are not passing at c3" in missing
+    assert "the head moved to c3" in missing and "checks are not passing at c3" in missing
 
 
 def test_branch_cap_proceed_clears_the_branch_review(
@@ -314,8 +281,7 @@ def test_branch_cap_proceed_clears_the_branch_review(
     for n in (1, 2, 3):
         branch_round(store, raw(severity="P1"), n=n)
     step = Decide(store, runner=Shell(), repo=repo)
-    with pytest.raises(Refusal, match="branch review has not stopped clean"):
-        step.context(["sign-off", "ACME-1", *TEAM])
+    assert re.search("branch review has not stopped clean", gap_text(store))
     question = answer(state, step, capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed")
     assert question["question"].startswith("Three branch review rounds ran")
     assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch"]
@@ -323,29 +289,27 @@ def test_branch_cap_proceed_clears_the_branch_review(
     assert signoff.current(store.records("s1"), "s1", "c2")
 
 
-def test_proceed_does_not_cover_later_commits(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = signable(tmp_path, repo)
-    save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
-    quizzer = decide(store, repo)
-    reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
-    checked(store, "c2")
-    for n in (1, 2, 3):
-        branch_round(store, raw(severity="P1"), n=n, head="c1")
-    cap = ["review-cap", "ACME-1", "--stage", "branch"]
-    question = answer(state, Decide(store, runner=Shell(head="c1"), repo=repo), capsys, cap, "Proceed")
-    assert "at c1" in question["question"]
-    step = Decide(store, runner=Shell(), repo=repo)
-    with pytest.raises(Refusal, match="the branch review has not reviewed the signed head c2"):
-        step.context(["sign-off", "ACME-1", *TEAM])
-    with pytest.raises(Refusal, match="no current sign-off"):
-        merge(store, repo, Gh())
-    question = answer(state, step, capsys, cap, "Proceed")
-    assert "at c2" in question["question"]
+def test_standing_names_void_reason(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
     sign(store, repo, state, capsys)
-    merge(store, repo, Gh())
+    assert signoff.standing(store.records("s1"), "s1", "c3") == "the head moved to c3"
+    with pytest.raises(Refusal, match="checks failed"):
+        Merge(store, Gh(buckets=[["fail"]]), repo, Clock().sleep, Clock()).apply(["s1", *TEAM])
+    voided = "the sign-off at c2 is void: checks failed: check 0"
+    assert signoff.standing(store.records("s1"), "s1", "c3") == voided
+
+
+def test_cap_question_skips_carry_rounds(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
+    for n in (1, 2, 3):
+        branch_round(store, raw(severity="P1"), n=n)
+    last = review.last(review.rounds_of(store.records("s1"), "s1:branch"))
+    carry = review.RoundPlan(4, scoped=True, base_hash="hash3", carry=True)
+    store.put_record("s1", review.carry_record("s1", "branch", carry, last, "c2"))
+    question = answer(
+        state, Decide(store, Shell(), repo), capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed"
+    )
+    assert "3 rounds, 1 P1 open" in question["question"]
 
 
 def test_findings_screen_folds_doubtful_and_shows_declines(
@@ -431,10 +395,8 @@ def _id(found: dict) -> str:
     return review.finding_id(review.parse_findings(json.dumps([found]))[0], "branch")
 
 
-def sign_off_refusal(store: FakeStore, repo: Path) -> str:
-    with pytest.raises(Refusal) as refused:
-        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
-    return refused.value.rule
+def gaps_at_head(store: FakeStore, repo: Path) -> str:
+    return gap_text(store)
 
 
 def test_sign_off_waits_for_the_person_on_a_delivery_finding(
@@ -443,7 +405,7 @@ def test_sign_off_waits_for_the_person_on_a_delivery_finding(
     store = ready(tmp_path, repo, state, capsys)
     delivery = raw(changes_delivery=True)
     branch_round(store, delivery, n=2)
-    assert f"{_id(delivery)} changes what the story delivers" in sign_off_refusal(store, repo)
+    assert f"{_id(delivery)} changes what the story delivers" in gaps_at_head(store, repo)
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", _id(delivery)], "Decline")
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
@@ -454,7 +416,7 @@ def test_sign_off_rechecks_the_plan_review_at_the_current_plan(
 ):
     store = ready(tmp_path, repo, state, capsys)
     submit_plan(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
-    assert "the plan review has not stopped clean at the current plan" in sign_off_refusal(store, repo)
+    assert "the plan review has not stopped clean at the current plan" in gaps_at_head(store, repo)
     record_round(Review(store, Git(BASE), repo), tmp_path)
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
@@ -464,7 +426,7 @@ def test_sign_off_needs_the_review_commit_at_the_head(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
-    assert "no tuicr review is built at c2" in sign_off_refusal(store, repo)
+    assert "no tuicr review is built at c2" in gaps_at_head(store, repo)
     Signoff(store, Diffing(), repo).apply(["s1", "review", *TEAM])
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
@@ -491,21 +453,21 @@ def test_a_rerun_after_a_failed_add_seeds_only_the_missing_reason(
 ):
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
     shell = Diffing(sessions=[{"slug": SLUG}], diff=TWO_HUNKS)
-    shell.fail_add = 2
+    shell.fail_add = 1
     with pytest.raises(GitError):
         Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     shell.fail_add = None
-    before = len(shell.ran("tuicr", "review", "add"))
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
-    [rerun] = shell.ran("tuicr", "review", "add")[before:]
-    assert rerun[rerun.index("--line") + 1] == "10"
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    [_, rerun] = shell.ran("tuicr", "review", "add")
+    assert rerun[rerun.index("--line") + 1] == "1"
 
 
 def test_a_session_holding_every_reason_is_left_alone_and_shows_none_as_the_persons(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
-    held = [said("t1", "contract site"), said("t2", "contract site"), said("p1", "Why?")]
+    held = [said("t1", "contract site"), said("p1", "Why?")]
     shell = Diffing(sessions=[{"slug": SLUG}], comments=held, diff=TWO_HUNKS)
     capsys.readouterr()
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
@@ -597,6 +559,15 @@ def test_findings_screen_lists_the_open_findings_of_the_last_plan_round(
     assert len(section) == 4
 
 
+def test_screen_3_prints_manifest_path(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys)
+    saved = review.text_path(state, "s1", "planhash")
+    plan_round(store, "planhash", raw(path=str(saved), summary="Kept open."))
+    lines = screen(store, repo, capsys, 3)
+    [shown] = [line for line in lines if "Kept open." in line]
+    assert "PLAN.md:3" in shown and str(state) not in "\n".join(lines)
+
+
 def test_findings_screen_shows_the_plan_round_before_any_branch_round(
     tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -627,3 +598,206 @@ def test_review_apply_prints_each_selected_hunk_and_its_reason(
     held = versions.held(store.records("s1"), signoff.TUICR, "s1")
     out = capsys.readouterr().out.splitlines()
     assert out[1:] == [f"- {h['path']}: {h['reason']}" for h in held.data["hunks"]] and len(out) > 1
+
+
+def test_sign_off_of_a_story_in_another_repository_refuses(tmp_path: Path, repo: Path):
+    store = signable(tmp_path, repo)
+    store.set_labels("s1", ["gadgets"])
+    with pytest.raises(Refusal, match="another repository"):
+        Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
+
+
+@pytest.mark.parametrize(
+    "step,args",
+    [
+        (Review, ["s1", "round", "--stage", "branch", "--target", "t", "--findings", "f.json"]),
+        (Checks, ["s1"]),
+        (Quiz, ["s1", "--quiz", "q.json", "--summary", "s.json"]),
+        (Signoff, ["s1", "summary", "--summary", "s.json"]),
+        (Merge, ["s1"]),
+    ],
+)
+def test_every_hand_write_refuses_a_story_another_holds(tmp_path: Path, repo: Path, step: type, args: list[str]):
+    store = signable(tmp_path, repo)
+    store.assign("s1", "bob")
+    store.writes.clear()
+    with pytest.raises(Refusal, match="^ACME-1 belongs to bob$"):
+        step(store, Shell(), repo, me=lambda: "ann").apply([*args, *TEAM])
+    assert store.writes == []
+
+
+def two_signers(repo: Path) -> None:
+    (repo / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\nsecond_signoff = true\n')
+
+
+def second(store: FakeStore, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], by: str, choice: str):
+    step = Decide(store, runner=Shell(), repo=repo, me=lambda: by)
+    return answer(state, step, capsys, ["second-sign-off", "ACME-1"], choice)
+
+
+def test_second_signoff_needs_another_person(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    two_signers(repo)
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    owner = store.viewer()["id"]
+    assert signoff.current(store.records("s1"), "s1", "c2")
+    assert not signoff.current(store.records("s1"), "s1", "c2", second=True)
+    assert overview(store, repo, capsys)["missing"] == ["waiting for a second sign-off"]
+    written = list(store.writes)
+    with pytest.raises(Refusal, match=f"ACME-1 belongs to {owner}; a second sign-off comes from someone else"):
+        second(store, repo, state, capsys, owner, "Sign off")
+    assert store.writes == written
+    question = second(store, repo, state, capsys, "teammate-2", "Sign off")
+    assert [o["label"] for o in question["options"]] == ["Sign off", "Not yet"]
+    [held] = [r for r in store.records("s1") if r.kind == signoff.SECOND]
+    assert (held.version, held.data["by"]) == (
+        signoff.second_version(signoff.signed(store.records("s1"), "s1")),
+        "teammate-2",
+    )
+    assert signoff.current(store.records("s1"), "s1", "c2", second=True)
+    assert overview(store, repo, capsys)["missing"] == []
+
+
+def test_second_signer_screens_from_records(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    (repo / ".worktrees" / BRANCH).rmdir()
+
+    def shown(n: int) -> list[str]:
+        capsys.readouterr()
+        Signoff(store, Gh(), repo).context(["s1", "--screen", str(n), *TEAM])
+        return capsys.readouterr().out.splitlines()
+
+    for n in (1, 2, 3, 5):
+        out = shown(n)
+        assert out[0] == f"{n} {SCREENS[n - 1]} for ACME-1 at c2"
+        assert not any("no worktree" in line or "not this head" in line for line in out)
+    assert "checks: passed at this head" in shown(2)
+    assert shown(4)[1:] == ["run gh pr diff 7 --repo acme/widgets in a terminal"]
+
+
+def test_review_names_each_file_s_reason_once(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing(sessions=[{"slug": SLUG}], diff=TWO_HUNKS)
+    capsys.readouterr()
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    assert capsys.readouterr().out.splitlines()[1:] == ["- src/a.py: contract site"]
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4"])
+    assert capsys.readouterr().out.count("- src/a.py: contract site") == 1
+
+
+def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    left, doubtful = raw(summary="Left open.", severity="P3"), raw(summary="Unsure.", line=9, confidence=0.2)
+    fixed = raw()
+    branch_round(store, fixed, left, doubtful)
+    ids = [review.finding_id(f, "branch") for f in review.parse_findings(json.dumps([fixed, left, doubtful]))]
+    store.put_record("s1", review.accept_record(ids[0], "hash1"))
+    plan = versions.held(store.records("s1"), implplan.PURPOSE, "s1")
+    plan_left = review.finding_id(plan_round(store, plan.version, raw(summary="Plan left."))[0], "plan")
+    missing = overview(store, repo, capsys)["missing"]
+    assert missing == [
+        f"{plan_left} is a P2 the hand left open and the person has not decided it:"
+        f" decide context finding REF --finding {plan_left}",
+        *(
+            f"{id} is a {severity} the hand left open and the person has not decided it:"
+            f" decide context finding REF --finding {id}"
+            for id, severity in ((ids[1], "P3"), (ids[2], "P2"))
+        ),
+        "the person has not signed off",
+    ]
+    assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
+    for id in (plan_left, ids[1]):
+        answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", id], "Decline")
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", ids[2]], "Accept")
+    assert overview(store, repo, capsys)["missing"] == ["the person has not signed off"]
+
+
+class Watching(Diffing):
+    def __init__(self, *listings: list[dict], comments: list[dict] | None = None) -> None:
+        super().__init__(comments=comments)
+        self.listings = list(listings)
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:3] == ["tuicr", "review", "list"] and self.listings:
+            self.sessions = self.listings.pop(0) if len(self.listings) > 1 else self.listings[0]
+        return super().__call__(argv, cwd, stdin)
+
+
+def watch(store: FakeStore, repo: Path, shell: Diffing, clock: Clock) -> None:
+    Signoff(store, shell, repo, clock.sleep, clock).apply(["s1", "review", "--watch", *TEAM])
+
+
+def test_watch_seeds_once_tuicr_opens_and_prints_the_persons_comments(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand.steps import signoff as step
+
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    open_, closed = {"slug": SLUG, "active": True}, {"slug": SLUG, "active": False}
+    shell = Watching([], [closed], [open_], [open_], [closed], comments=[said("p1", "Rename this.")])
+    clock = Clock()
+    capsys.readouterr()
+    watch(store, repo, shell, clock)
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("done: cd ") and out[0].endswith("tuicr -r c1..c2")
+    assert out[1:] == [
+        "- src/a.py: contract site",
+        "waiting for tuicr to open",
+        "tuicr is open; seeded the missing reasons as comments",
+        "tuicr closed; your comments:",
+        "- src/a.py:1: Rename this.",
+    ]
+    assert len(shell.ran("tuicr", "review", "add")) == 1
+    assert clock.slept == [step.WATCH_POLL] * 3
+
+
+def test_watch_without_comments_says_so(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Watching([{"slug": SLUG, "active": True}], [{"slug": SLUG, "active": False}])
+    capsys.readouterr()
+    watch(store, repo, shell, Clock())
+    assert capsys.readouterr().out.splitlines()[-1] == "tuicr closed with no comment from you"
+
+
+@pytest.mark.parametrize("opens", [False, True])
+def test_watch_stops_at_its_timeout_and_exits_cleanly(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], opens: bool
+):
+    from deckhand.steps import signoff as step
+
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Watching([{"slug": SLUG, "active": True}] if opens else [])
+    clock = Clock()
+    capsys.readouterr()
+    watch(store, repo, shell, clock)
+    last = capsys.readouterr().out.splitlines()[-1]
+    wait = step.REVIEW_WAIT if opens else step.OPEN_WAIT
+    assert last.startswith("tuicr is still open" if opens else "tuicr did not open")
+    assert last.endswith("run signoff apply ACME-1 review --watch again")
+    assert clock.now >= wait and clock.now < wait + step.WATCH_POLL
+    assert len(shell.ran("tuicr", "review", "add")) == (1 if opens else 0)
+
+
+def test_a_finding_left_open_in_an_earlier_round_stays_the_persons(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    left = raw(summary="Left open.", severity="P3")
+    branch_round(store, raw(), left)
+    branch_round(store, n=2)
+    plan = versions.held(store.records("s1"), implplan.PURPOSE, "s1")
+    plan_left = review.finding_id(plan_round(store, "older", raw(summary="Plan left."))[0], "plan")
+    store.put_record("s1", review.round_record("s1", "plan", review.RoundPlan(3, True, ""), plan.version, []))
+    missing = "\n".join(overview(store, repo, capsys)["missing"])
+    assert f"{_id(left)} is a P3 the hand left open" in missing
+    assert f"{plan_left} is a P2 the hand left open" in missing
+    assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]

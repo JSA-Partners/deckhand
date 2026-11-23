@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, planning, review
+from deckhand import answers, asks, features, planning, review
 from deckhand.features import FEATURE_LABEL
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -18,7 +18,9 @@ from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import FeatureReview, Review
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import P1, approve_everything, decided, load, sat, setup
-from tests.test_implplan import BASE, Git, manifest
+from tests.test_implplan import BASE, Git, manifest, repo
+
+__all__ = ["repo"]
 
 TEAM = ["--team-key", "ACME"]
 PLAN = "# Plan\n\n- [ ] queue the order\n"
@@ -28,14 +30,6 @@ PLAN = "# Plan\n\n- [ ] queue the order\n"
 def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
     return tmp_path / "state"
-
-
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    found = tmp_path / "repo"
-    (found / ".claude").mkdir(parents=True)
-    (found / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\n')
-    return found
 
 
 def raw(**over: object) -> dict:
@@ -137,7 +131,7 @@ def test_agent_decline_refuses(tmp_path: Path, repo: Path):
     record_round(step, tmp_path, p1, delivery)
     before = list(store.writes)
     resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
-    with pytest.raises(Refusal, match="only the person declines a finding"):
+    with pytest.raises(Refusal, match="only the person declines a finding.*--propose-decline"):
         step.apply([*resolve, "--decline", finding_id(p1)])
     with pytest.raises(Refusal, match="changes what the story delivers"):
         step.apply([*resolve, "--accept", finding_id(p1), "--accept", finding_id(delivery)])
@@ -148,6 +142,31 @@ def test_agent_decline_refuses(tmp_path: Path, repo: Path):
     [accept] = [r for r in store.records("s1") if r.kind == review.HAND_ACCEPT]
     assert (accept.subject, accept.author, accept.data["answer"]) == (finding_id(p1), "agent:review", "Accept")
     assert review.declined(store.records("s1")) == set()
+
+
+def test_decline_proposal_awaits_person(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    p1 = raw(severity="P1")
+    record_round(step, tmp_path, p1)
+    resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
+    before = list(store.writes)
+    with pytest.raises(Refusal, match="--reason"):
+        step.apply([*resolve, "--propose-decline", finding_id(p1)])
+    with pytest.raises(Refusal, match="not a finding of the last round"):
+        step.apply([*resolve, "--propose-decline", "000000000000", "--reason", "noise"])
+    assert store.writes == before
+    step.apply([*resolve, "--propose-decline", finding_id(p1), "--reason", "The plan already orders these."])
+    [proposal] = [r for r in store.records("s1") if r.kind == "decline-proposal"]
+    assert (proposal.subject, proposal.author) == (finding_id(p1), "agent:review")
+    assert proposal.data["reason"] == "The plan already orders these."
+    assert review.declined(store.records("s1")) == set()
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] != "clean"
+    assert [r.subject for r in asks.open_proposals(store.records("s1"))] == [finding_id(p1)]
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(p1)], "Decline")
+    assert asks.open_proposals(store.records("s1")) == []
+    with pytest.raises(Refusal, match="already decided"):
+        step.apply([*resolve, "--propose-decline", finding_id(p1), "--reason", "again"])
 
 
 def test_person_decline_through_decide(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
@@ -419,3 +438,23 @@ def test_proceed_at_the_cap_ends_the_review(
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap"
     answer(state, Decide(store), capsys, ["review-cap", "ACME-1", "--stage", "plan"], "Proceed")
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "proceeded"
+
+
+def test_the_cap_without_an_open_p1_ends_the_review_on_its_own(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    for n in (1, 2, 3):
+        record_round(step, tmp_path, raw(severity="P2", summary=f"Gap {n}."))
+        submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap-clear"
+
+
+def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path):
+    store = setup()
+    approve_everything(store)
+    store.set_labels("s1", ["gadgets"])
+    with pytest.raises(Refusal, match="another repository"):
+        submit(store, tmp_path, repo)
+    assert [r for r in store.records("s1") if r.kind == "implplan"] == []

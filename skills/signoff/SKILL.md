@@ -1,49 +1,46 @@
 ---
 name: signoff
 description: "Walk the person through one story's sign-off, one screen at a time, from what changed to the quiz, and record their decision."
-arguments: story team_key
-argument-hint: "<story> <team-key>"
+arguments: story
+argument-hint: "<story>"
 effort: high
-disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(deckhand *) Read Grep Glob AskUserQuestion
+allowed-tools: Bash(deckhand *) Read Grep Glob AskUserQuestion
 ---
 
 # Sign-off $story
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" signoff context $story --team-key "$team_key"`
+!`deckhand signoff context $story`
 
 Above: the five screens of the sign-off and what is still missing. REF is $story. Talk to the
-person plainly, one screen at a time: show it, wait for them, move on. Never mark an option
-recommended.
+person plainly. Never mark an option recommended.
 
-Every decision runs the same way: run
-`deckhand decide context KIND REF --team-key "$team_key"`, pass the JSON it prints unchanged to the
-question dialog, then run `deckhand decide apply NONCE --team-key "$team_key"` once answered. Save
-each answer when it is given, so stopping is safe.
+Every decision runs the same way: run `deckhand decide context KIND REF`, pass the JSON it
+prints unchanged to the question dialog, then run `deckhand decide apply NONCE` once answered.
 
-First take what the hand left for the person. In
-`deckhand review context REF --stage plan --team-key "$team_key"` and its `--stage branch` twin, an
-open finding that is a P1 or changes delivery is decided with
-`deckhand decide context finding REF --finding ID --team-key "$team_key"`. A stage stopped at its cap
-is decided with `deckhand decide context review-cap REF --stage branch --team-key "$team_key"`, or
+First take what the hand left for the person. Decide each finding the `missing:`
+lines name, and each open P1 in `deckhand review context REF --stage plan` and
+its `--stage branch` twin, with `deckhand decide context finding REF --finding ID`.
+For a finding the hand left open, Decline keeps the hand's call and Accept sends
+it back, which makes the sign-off "Not yet". A stage stopped at its cap
+is decided with `deckhand decide context review-cap REF --stage branch`, or
 `--stage plan`. When the context above shows no change summary, the hand is not done: stop here.
 
-Then show each screen in order with
-`deckhand signoff context REF --screen 1 --team-key "$team_key"`, and 2 to 5 the same way: what
-changed, evidence, findings, tuicr, quiz.
+Then show screens 1 to 3 in one reply, each from `deckhand signoff context REF --screen N`:
+what changed, evidence, findings. Tuicr and the quiz stay separate steps, each waiting for the
+person.
 
-For the tuicr screen, run `deckhand signoff apply REF review --team-key "$team_key"` first. It builds
-a commit of the selected hunks and prints the tuicr command; give it to the person as a plain
-message, with each hunk's reason. Once tuicr is open, run the same apply again to seed the reasons as
-comments. When they are done, show screen 4 again and, for each comment it lists as theirs, ask the
-person whether it is work for the hand. A comment they call work for the hand means they answer
-"Not yet" to the sign-off.
+For the tuicr screen, run `deckhand signoff apply REF review --watch` in the
+background. Its first lines are the tuicr command and each file's reason: give them to the person
+as a plain message. It seeds the reasons once tuicr opens and ends when tuicr closes, printing the
+person's own comments. The person need not report opening or closing tuicr. Ask about each comment
+whether it is work for the hand; if one is, say so before the sign-off question. With none, go on
+to the quiz. On a timeout line, run it again.
 
 For the quiz screen, ask each open item with
-`deckhand decide context quiz REF --item 1 --team-key "$team_key"`, then 2 and on. A wrong answer
+`deckhand decide context quiz REF --item 1`, then 2 and on. A wrong answer
 prints the code that answers it: show that code, then ask the item again until it is right.
 
-Last, run `deckhand signoff context REF --team-key "$team_key"` again. With nothing missing, decide
-`deckhand decide context sign-off REF --team-key "$team_key"`. On "Sign off", tell the person the
-hand merges it next, pinned to this head. On "Not yet", say in a sentence what the hand should
-change; any new commit needs review and sign-off again.
+Last, decide `deckhand decide context sign-off REF`. While anything is missing it offers
+"Not yet" and "Back"; "Back" records nothing. Run it early for hand work. The answer to this question is final: never ask
+again. On "Sign off", tell the person the hand merges it next, pinned to this head. On "Not yet",
+say in a sentence what the hand should change; any new commit needs review and sign-off again.

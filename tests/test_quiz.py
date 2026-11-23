@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from deckhand import answers, quiz, tiers
+from deckhand import answers, implplan, quiz, tiers
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
@@ -14,6 +15,7 @@ from deckhand.steps.quiz import Quiz
 from deckhand.store.fake import FakeStore
 from deckhand.summary import SHAPE as SUMMARY_SHAPE
 from deckhand.summary import digest, parse_summary
+from tests.test_implplan import manifest
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import TEAM
 
@@ -277,3 +279,97 @@ def test_only_a_person_answer_grades_an_item():
     assert quiz.open_items([held, by_agent], "s1") == [1]
     by_person = Record(quiz.KIND, quiz.subject("s1", 1), held.version, "person:pat", {"correct": True})
     assert quiz.open_items([held, by_person], "s1") == []
+
+
+def test_a_located_question_ends_in_one_question_mark(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "A new key")
+    text = ask(step, capsys)["tool_input"]["questions"][0]["question"]
+    assert "reuse (the code is at src/queue.py:12)? [" in text
+    assert text.count("?") == 1
+
+
+def test_a_wrong_answer_prints_the_code_that_answers_it(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    submit(store, tmp_path, repo, [item()])
+    step = decide(store, repo)
+    reply(state, step, ask(step, capsys), "A new key")
+    printed = capsys.readouterr().out.splitlines()
+    assert printed[0].endswith("wrong, the item stays open")
+    assert printed[1] == "where: src/queue.py:12"
+    assert "> 12 line 12" in printed
+
+
+@pytest.mark.parametrize(
+    "text,end", [("Goodbye\n", "the file ends with a newline"), ("Goodbye", "the file ends without a newline")]
+)
+def test_the_code_shows_how_the_file_ends(text: str, end: str):
+    shown = quiz.code_at(Path("/w"), "goodbye.txt:1", lambda _: text)
+    assert shown == ["> 1 Goodbye", f"  end of file: {end}"]
+    assert quiz.code_at(Path("/w"), "src/queue.py:12", lambda _: SOURCE)[-1] == "  17 line 17"
+
+
+DIFF = """diff --git a/src/queue.py b/src/queue.py
+--- a/src/queue.py
++++ b/src/queue.py
+@@ -10,3 +10,4 @@ def charge():
+ line 10
+ line 11
++line 12
+ line 13
+diff --git a/tests/test_queue.py b/tests/test_queue.py
+--- a/tests/test_queue.py
++++ b/tests/test_queue.py
+@@ -4,2 +4,3 @@
+ line 4
++line 5
+ line 6
+"""
+
+
+class Diffed(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(argv, 0, DIFF, "")
+        return super().__call__(argv, cwd, stdin)
+
+
+def submit_diffed(store: FakeStore, tmp_path: Path, repo: Path, where: str) -> None:
+    found, made = tmp_path / "quiz.json", tmp_path / "summary.json"
+    found.write_text(json.dumps([item(where=where)]))
+    made.write_text(json.dumps(summary(1)))
+    Quiz(store, Diffed(), repo).apply(["s1", *TEAM, "--quiz", str(found), "--summary", str(made)])
+
+
+@pytest.mark.parametrize("where", ["tests/test_queue.py:5", "src/queue.py:40"])
+def test_apply_refuses_an_item_outside_the_code_the_review_shows(tmp_path: Path, repo: Path, where: str):
+    store = labeled(tmp_path, repo)
+    written = list(store.writes)
+    with pytest.raises(Refusal, match=rf"quiz item 1 asks about {re.escape(where)}.*src/queue.py lines 10-13"):
+        submit_diffed(store, tmp_path, repo, where)
+    assert store.writes == written
+
+
+def test_apply_takes_an_item_inside_a_shown_hunk(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    submit_diffed(store, tmp_path, repo, "src/queue.py:12")
+    assert quiz.held_set(store.records("s1"), "s1") is not None
+
+
+def test_context_names_the_code_the_review_shows(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
+    store = labeled(tmp_path, repo)
+    store.put_record(
+        "s1", Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", manifest(contract_sites=["src/queue.py"]))
+    )
+    capsys.readouterr()
+    Quiz(store, Diffed(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    assert "each where falls in code the tuicr review shows: src/queue.py lines 10-13" in out
+    Quiz(store, Diffed(), repo).context(["s1", *TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["shown"] == "src/queue.py lines 10-13"

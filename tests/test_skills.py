@@ -36,11 +36,10 @@ def test_frontmatter_and_one_injection(path: Path) -> None:
     assert len(INJECTION.findall(body)) == 1
 
 
-INJECTED = re.compile(r'^!`"\$\{CLAUDE_PLUGIN_ROOT\}/bin/deckhand" ([^\s`]+) ([^\s`]+)', re.MULTILINE)
-UNPORTED = {"captain"}
+INJECTED = re.compile(r"^!`deckhand ([^\s`]+) ([^\s`]+)", re.MULTILINE)
 
 
-@pytest.mark.parametrize("path", [p for p in FILES if p.parent.name not in UNPORTED], ids=lambda p: p.parent.name)
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.parent.name)
 def test_injection_runs_a_registered_command(path: Path) -> None:
     _load_steps()
     _, body = split(path)
@@ -49,24 +48,34 @@ def test_injection_runs_a_registered_command(path: Path) -> None:
     assert verb in VERBS, f"{command} {verb}"
 
 
-STEP_SKILLS = ("feature", "story", "signoff")
+WORD_LIMITS = {
+    "captain": 400,
+    "draft": 300,
+    "feature": 400,
+    "setup": 400,
+    "signoff": 400,
+    "spike": 300,
+    "story": 450,
+}
+STEP_SKILLS = tuple(WORD_LIMITS)
 
 
 @pytest.mark.parametrize("name", STEP_SKILLS)
-def test_step_skill_exists_and_stays_short(name: str) -> None:
+def test_step_skill_exists_and_stays_under_its_limit(name: str) -> None:
     path = SKILLS / name / "SKILL.md"
     assert path.exists()
     _, body = split(path)
-    assert len(body.split()) < 400
+    assert len(body.split()) < WORD_LIMITS[name]
 
 
 def named_commands(body: str) -> list[list[str]]:
-    spans = re.findall(r"`(deckhand [^`]*)`", " ".join(body.split()))
+    prose = re.sub(r"^!`.*$", "", body, flags=re.MULTILINE)
+    spans = re.findall(r"`(deckhand [^`]*)`", " ".join(prose.split()))
     return [shlex.split(re.sub(r"[\[\]]|\.\.\.", "", span))[1:] for span in spans]
 
 
 def parser(module: ModuleType) -> Callable[[list[str]], dict]:
-    parse = getattr(module, "_parse", None) or module.parse
+    parse = getattr(module, "_parse", None) or getattr(module, "_arguments", None) or module.parse
     if len(inspect.signature(parse).parameters) == 2:
         return lambda args: parse(args, module.USAGE)
     return parse

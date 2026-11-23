@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from deckhand import git
+from deckhand import git, inputs
 from deckhand.step import Refusal, register
 
 USAGE = "document context [DIR] audits the docs, docs/claude by default; the editor writes them"
@@ -25,7 +25,7 @@ class Audit:
         self.dates: dict[Path, datetime | None] = {}
 
     def text(self, doc: Path) -> str:
-        return FENCE.sub("", doc.read_text(encoding="utf-8", errors="replace"))
+        return FENCE.sub("", inputs.read_or_none(doc) or "")
 
     def name(self, path: Path) -> str:
         return str(path.relative_to(self.root))
@@ -121,7 +121,10 @@ class Document:
     def context(self, args: list[str]) -> None:
         if len(args) > 1:
             raise Refusal(f"document context takes at most one directory; {USAGE}")
-        print(report(self._cwd or Path.cwd(), args[0] if args else DEFAULT_DIR, self._runner), end="")
+        print(
+            report(self._cwd or git.working_directory(self._runner), args[0] if args else DEFAULT_DIR, self._runner),
+            end="",
+        )
 
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"document has no apply; {USAGE}")

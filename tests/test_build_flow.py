@@ -12,15 +12,18 @@ from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.checks import Checks
 from deckhand.steps.decide import Decide
+from deckhand.steps.merge import Merge
 from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
-from deckhand.steps.signoff import Merge, Signoff
+from deckhand.steps.signoff import Signoff
 from tests.test_feature_approval import approve_everything, load, setup
 from tests.test_quiz import SOURCE, ask, item, reader, reply, summary
 from tests.test_step_build import BRANCH, repo, state
 from tests.test_step_checks import Commands
 from tests.test_step_review import PLAN, TEAM, answer, finding_id, raw, record_round, shown, submit
 from tests.test_step_signoff import Clock, Diffing, Gh, overview, voids
+
+SHOWN = "src/a.py:1"
 
 __all__ = ["repo", "state"]
 
@@ -44,13 +47,14 @@ class Hand:
         self.world.head = "c1"
         self.store = setup()
         self.store.set_labels("s1", ["widgets"])
+        self.store.assign("s1", self.store.viewer()["id"])
         approve_everything(self.store)
 
     def review(self) -> Review:
         return Review(self.store, self.world, self.repo)
 
     def decide(self) -> Decide:
-        files = reader(self.repo / ".worktrees" / BRANCH, {"src/queue.py": SOURCE})
+        files = reader(self.repo / ".worktrees" / BRANCH, {"src/a.py": SOURCE})
         return Decide(self.store, runner=self.world, repo=self.repo, reader=files)
 
     def plan_and_push(self) -> None:
@@ -95,10 +99,10 @@ class Hand:
         sized = json.loads(self.capsys.readouterr().out)
         assert (sized["tier"], sized["base"], sized["head"]) == (0, 0, self.world.head)
         written = self.tmp / "quiz.json"
-        written.write_text(json.dumps([item(), item(question="Another?")]))
+        written.write_text(json.dumps([item(where=SHOWN), item(where=SHOWN, question="Another?")]))
         with pytest.raises(Refusal, match="its size by tier and new_here is 1"):
             Quiz(self.store, self.world, self.repo).apply(["s1", *TEAM, "--quiz", str(written), "--summary", str(made)])
-        written.write_text(json.dumps([item()]))
+        written.write_text(json.dumps([item(where=SHOWN)]))
         Quiz(self.store, self.world, self.repo).apply(["s1", *TEAM, "--quiz", str(written), "--summary", str(made)])
 
     def pass_quiz(self) -> None:
@@ -108,7 +112,7 @@ class Hand:
         reply(self.state, step, first, "A new key")
         assert quiz.open_items(self.store.records("s1"), "s1") == [1]
         again = ask(step, self.capsys)
-        assert again["where"] == "src/queue.py:12" and again["code"]
+        assert again["where"] == SHOWN and again["code"]
         reply(self.state, step, again, "The idempotency key")
         assert quiz.passed(self.store.records("s1"), "s1", self.world.head)
 
@@ -158,7 +162,8 @@ def test_a_head_that_moves_after_sign_off_voids_it(
     hand.world.pr_head = "c3"
     with pytest.raises(Refusal, match="void, head moved"):
         hand.merge()
-    assert hand.world.ran("gh", "pr", "merge") == [] and hand.world.ran("gh", "pr", "ready") == []
+    assert hand.world.ran("gh", "pr", "merge") == []
+    assert hand.world.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"]]
     [void] = voids(hand.store)
     assert void.data["head"] == "c2"
     assert not signoff.current(hand.store.records("s1"), "s1", "c2")
@@ -177,7 +182,8 @@ def test_a_local_commit_after_sign_off_voids_it(
     hand.world.head = "c3"
     with pytest.raises(Refusal, match="void, head moved: the worktree is at c3"):
         hand.merge()
-    assert hand.world.ran("gh", "pr", "merge") == [] and hand.world.ran("gh", "pr", "ready") == []
+    assert hand.world.ran("gh", "pr", "merge") == []
+    assert hand.world.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets", "--undo"]]
     [void] = voids(hand.store)
     assert void.data["head"] == "c2"
     assert not signoff.current(hand.store.records("s1"), "s1", "c2")
@@ -205,6 +211,8 @@ def test_an_identical_diff_at_a_new_head_carries_the_review_forward(
     assert (carried.subject, carried.data["head"], carried.data["carry"]) == ("s1:branch:2", "c3", True)
     assert carried.data["findings"] == first.data["findings"] and len(first.data["findings"]) == 1
     assert shown(step, capsys, "s1", "--stage", "branch")["stop"] == "clean"
+    left = finding_id(raw(severity="P2"), "branch")
+    answer(hand.state, hand.decide(), capsys, ["finding", "ACME-1", "--finding", left], "Decline")
     hand.signed_at_head()
     hand.world.pr_head = "c3"
     hand.merge()

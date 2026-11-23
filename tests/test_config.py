@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import config
 from deckhand.config import LocalConfig
 from deckhand.step import Refusal
 
@@ -68,3 +69,32 @@ def test_missing_file_gives_defaults(tmp_path):
 
     assert config.clones == {}
     assert config.slot_cap == 1
+
+
+def test_config_reads_team_key_and_sandbox_write(tmp_path):
+    path = write_config(tmp_path, 'team_key = "ACME"\nsandbox_write = ["~/.cache/uv"]\n')
+
+    config = LocalConfig.load(path)
+
+    assert (config.team_key, config.sandbox_write) == ("ACME", ["~/.cache/uv"])
+
+
+def test_team_key_and_sandbox_write_default_empty(tmp_path):
+    config = LocalConfig.load(tmp_path / "missing.toml")
+
+    assert (config.team_key, config.sandbox_write) == ("", [])
+
+
+def test_sandbox_write_must_be_strings(tmp_path):
+    path = write_config(tmp_path, "sandbox_write = [1]\n")
+
+    with pytest.raises(Refusal, match="sandbox_write must be a list of strings"):
+        LocalConfig.load(path)
+
+
+def test_local_reads_the_config_dir_from_the_environment(tmp_path, monkeypatch):
+    write_config(tmp_path, 'team_key = "ACME"\n')
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
+
+    assert config.config_dir() == tmp_path
+    assert config.local().team_key == "ACME"

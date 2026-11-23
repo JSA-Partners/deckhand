@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
-from deckhand import features, ops, planning
+from deckhand import answers, config, features, fleet, git, inputs, ops, planning, spikes
 from deckhand.credentials import Credentials
+from deckhand.linear.client import LinearError
 from deckhand.linear.connect import connect
 from deckhand.records import Record
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
-USAGE = "stories takes --team-key KEY on both verbs, --json on context only, and --file MAP.json on apply"
+USAGE = "stories takes [--team-key KEY] on both verbs, --json on context only, and --file MAP.json on apply"
 MISSED_BY = ("rule", "example", "invariant", "spike", "external")
 _LISTS = ("depends_on", "unknowns", "new_here")
 _REQUIRED = ("key", "title", "outcome", "repository")
@@ -32,10 +31,6 @@ SHAPE = {
 }
 
 
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
-
-
 def _parse(args: list[str]) -> dict:
     found: dict = {"json": False}
     rest = iter(args)
@@ -46,18 +41,12 @@ def _parse(args: list[str]) -> dict:
             found[arg[2:].replace("-", "_")] = next(rest, "")
         else:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     return found
 
 
 def _read_map(path: str) -> list[dict]:
-    if not path:
-        raise Refusal(f"--file is required; {USAGE}")
     try:
-        entries = json.loads(Path(path).read_text())
-    except OSError:
-        raise Refusal(f"{path}: cannot be read") from None
+        entries = json.loads(inputs.read(path, "--file", USAGE))
     except ValueError:
         raise Refusal(f"{path}: not valid JSON") from None
     if not isinstance(entries, list):
@@ -160,17 +149,30 @@ def _discovery(entry: dict) -> dict:
 
 @register("stories")
 class Stories:
-    def __init__(self, store: Store | None = None) -> None:
+    def __init__(self, store: Store | None = None, runner: git.Runner = git.run) -> None:
         self._store = store
+        self._runner = runner
 
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+
+    def _refuse_running_spike(self, feature: features.Feature) -> None:
+        asked = spikes.keys(answers.state_dir(), feature.project["id"])
+        if not asked:
+            return
+        read = fleet.sessions(self._runner)
+        if read.note:
+            raise Refusal(read.note)
+        for key, session in sorted(fleet.spikes(read.sessions).items()):
+            if key in asked and fleet.live(session):
+                raise Refusal(f"spike {key} is still running")
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        feature = features.open_feature(self._store_for_run(), parsed["team_key"])
+        store = self._store_for_run()
+        feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         facts = {
@@ -178,11 +180,18 @@ class Stories:
             "stories": len(feature.stories),
             "next": planning.STORY_MAP,
             "map": SHAPE,
+            "repositories": [],
         }
+        try:
+            facts["repositories"] = store.repository_labels(team_key(parsed))
+            known = ", ".join(facts["repositories"]) or "none; run /deckhand:setup"
+        except (Refusal, LinearError) as error:
+            known = f"unknown, {error}"
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
         print(f"feature: {facts['feature']}, {facts['stories']} stories")
+        print(f"repositories: {known}")
         print("map: a JSON list of objects with these fields")
         for name, meaning in SHAPE.items():
             print(f"  {name}: {meaning}")
@@ -192,14 +201,18 @@ class Stories:
         entries = _read_map(parsed.get("file", ""))
         _check_graph(entries)
         store = self._store_for_run()
-        team = parsed["team_key"]
+        team = team_key(parsed)
         feature = features.open_feature(store, team)
         if feature is None:
             raise Refusal("no feature is open")
+        self._refuse_running_spike(feature)
         known = store.repository_labels(team)
         for entry in entries:
             if entry["repository"] not in known:
-                raise Refusal(f"{entry['key']}: {entry['repository']} is not a repository label of team {team}")
+                raise Refusal(
+                    f"{entry['key']}: {entry['repository']} is not a repository label of team {team};"
+                    f" its labels: {', '.join(known) or 'none'}"
+                )
         _check_discovery(feature, entries)
         project = feature.project["id"]
         ids = {e["key"]: _story_id(feature, e["key"]) for e in entries}

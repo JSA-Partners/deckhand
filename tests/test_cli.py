@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import io
 import json
+import os
+import shutil
+import subprocess
+import sys
 import tomllib
 
 import pytest
 
 from deckhand import __version__
-from deckhand.cli import main
+from deckhand.cli import _load_steps, main
 from deckhand.step import REGISTRY, Refusal, register
 from tests.conftest import ROOT
 
@@ -282,3 +287,195 @@ def test_context_git_error_prints_its_reason_at_exit_0(registry, capsys):
     assert (
         captured.out == "deckhand: probe context: git diff failed (exit 128): fatal: bad revision\nremote: [redacted]\n"
     )
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.seen: list[list[str]] = []
+
+    def context(self, args):
+        return None
+
+    def apply(self, args):
+        self.seen.append(args)
+
+
+@pytest.fixture
+def recorders(registry):
+    _load_steps()
+    found: dict[str, Recorder] = {}
+    for name in ("setup", "feature", "stories", "hand", "decide", "signoff", "hook", "draft", "build", "ask", "spike"):
+        found[name] = registry[name] = Recorder()
+    return found
+
+
+def refused(argv: list[str], capsys) -> bool:
+    code = main(argv)
+    err = capsys.readouterr().err
+    return code == 1 and err == f"deckhand: a hand cannot run {argv[0]} apply; leave it for the person's captain\n"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["setup", "apply", "--team-key", "ACME"],
+        ["feature", "apply", "new", "--name", "N"],
+        ["stories", "apply", "--file", "map.json"],
+        ["hand", "apply", "start", "ACME-1"],
+        ["nonesuch", "apply", "ACME-1"],
+        ["decide", "apply", "nonce"],
+        ["signoff", "apply", "ACME-1", "review"],
+        ["signoff", "apply", "ACME-1", "--team-key", "ACME", "summary"],
+        ["hook", "apply", "answer"],
+        ["draft", "apply", "ACME-1", "take"],
+        ["draft", "apply", "ACME-1", "--file", "d.md", "take"],
+    ],
+)
+def test_hand_role_refuses_person_applies(argv, recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert refused(argv, capsys)
+    assert all(not r.seen for r in recorders.values())
+
+
+def test_hand_role_refuses_another_story(recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert refused(["build", "apply", "ACME-2", "push"], capsys)
+    assert refused(["build", "apply", "--team-key", "ACME-1", "ACME-2", "push"], capsys)
+    monkeypatch.setenv("DECKHAND_STORY", "")
+    assert refused(["build", "apply", "", "push"], capsys)
+    assert recorders["build"].seen == []
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert main(["build", "apply", "ACME-1", "push"]) == 0
+    assert main(["signoff", "apply", "ACME-1", "summary", "--summary", "s.json"]) == 0
+    assert main(["draft", "apply", "ACME-1", "--file", "d.md"]) == 0
+    assert main(["hook", "apply", "session"]) == 0
+    assert main(["build", "context", "ACME-2"]) == 0
+    assert recorders["build"].seen == [["ACME-1", "push"]]
+    assert recorders["signoff"].seen and recorders["draft"].seen and recorders["hook"].seen
+
+
+def test_spike_hand_cannot_ask(recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_SPIKE", "0123456789ab")
+    assert refused(["ask", "apply", "0123456789ab", "--file", "q.json"], capsys)
+    assert refused(["build", "apply", "0123456789ab", "push"], capsys)
+    assert refused(["spike", "apply", "ffffffffffff", "--file", "a.md"], capsys)
+    assert main(["spike", "apply", "0123456789ab", "--file", "a.md"]) == 0
+    assert main(["hook", "apply", "permission"]) == 0
+    assert recorders["ask"].seen == [] and recorders["build"].seen == []
+    assert recorders["spike"].seen == [["0123456789ab", "--file", "a.md"]]
+
+
+def test_a_story_hand_cannot_answer_a_spike(recorders, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert refused(["spike", "apply", "ACME-1", "--file", "a.md"], capsys)
+    assert recorders["spike"].seen == []
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not on PATH")
+@pytest.mark.parametrize("planted", [".python-version", "uv.toml"])
+def test_the_entry_point_ignores_a_planted_interpreter_and_uv_config(planted, tmp_path):
+    plugin = tmp_path / "plugin"
+    shutil.copytree(ROOT / "bin", plugin / "bin")
+    shutil.copytree(ROOT / "deckhand", plugin / "deckhand", ignore=shutil.ignore_patterns("__pycache__"))
+    work = tmp_path / "work"
+    work.mkdir()
+    marker = tmp_path / "marker"
+    python = tmp_path / "python"
+    python.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+    python.chmod(0o755)
+    text = {".python-version": f"{python}\n", "uv.toml": "this is not toml\n"}[planted]
+    (work / planted).write_text(text)
+    outside = {k: v for k, v in os.environ.items() if not k.startswith("UV") and k != "VIRTUAL_ENV"}
+    fresh = {**outside, "UV_CACHE_DIR": str(tmp_path / "cache")}
+    done = subprocess.run(
+        [os.path.join("..", "plugin", "bin", "deckhand"), "nonesuch"],
+        cwd=work,
+        env=fresh,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert not marker.exists()
+    assert (done.returncode, done.stderr) == (2, "deckhand: unknown command 'nonesuch'\n")
+
+
+SANDBOX_REFUSAL = (
+    "deckhand: deckhand ran inside the sandbox: run it as one bare command, not after export, ; , | or a loop\n"
+)
+
+
+@pytest.fixture
+def unreadable_config(tmp_path, monkeypatch):
+    if os.geteuid() == 0:
+        pytest.skip("root reads every directory")
+    config = tmp_path / "config"
+    config.mkdir()
+    config.chmod(0o000)
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config))
+    yield config
+    config.chmod(0o700)
+
+
+@pytest.mark.parametrize("argv", [["build", "context", "ACME-1"], ["build", "apply", "ACME-1", "push"]])
+def test_hand_with_an_unreadable_config_dir_refuses_and_runs_no_step(
+    argv, recorders, unreadable_config, monkeypatch, capsys
+):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert main(argv) == 1
+    assert capsys.readouterr().err == SANDBOX_REFUSAL
+    assert all(not r.seen for r in recorders.values())
+
+
+def test_outside_the_hand_role_an_unreadable_config_dir_is_not_refused(
+    recorders, unreadable_config, monkeypatch, capsys
+):
+    monkeypatch.delenv("DECKHAND_ROLE", raising=False)
+    assert main(["build", "apply", "ACME-1", "push"]) == 0
+    assert recorders["build"].seen == [["ACME-1", "push"]]
+    assert capsys.readouterr().err == ""
+
+
+def test_hand_with_a_readable_config_dir_dispatches(recorders, tmp_path, monkeypatch):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    assert main(["build", "apply", "ACME-1", "push"]) == 0
+    assert recorders["build"].seen == [["ACME-1", "push"]]
+
+
+def test_hand_with_a_missing_config_dir_is_not_refused(recorders, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path / "absent"))
+    assert main(["ask", "context"]) == 0
+    assert "sandbox" not in capsys.readouterr().err
+
+
+def test_hand_with_a_config_path_that_is_a_file_is_not_refused(recorders, tmp_path, monkeypatch, capsys):
+    path = tmp_path / "config"
+    path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(path))
+    assert main(["ask", "context"]) == 0
+    assert "sandbox" not in capsys.readouterr().err
+
+
+def test_text_the_stdout_cannot_encode_is_replaced(registry, monkeypatch):
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="ascii"))
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            print("Café ●")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    sys.stdout.flush()
+    assert raw.getvalue() == b"Caf? ?\n"

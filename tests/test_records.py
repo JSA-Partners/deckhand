@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from deckhand.records import Record, content_hash
+from deckhand.records import Record, content_hash, iso
 
 
 def _record(**overrides):
@@ -70,3 +70,16 @@ def test_wrong_field_type_refused(field, value):
     payload[field] = value
     with pytest.raises(ValueError, match=field):
         Record.from_json(json.dumps(payload))
+
+
+def test_record_at_not_in_json_or_equality():
+    stamped = _record(at="2026-11-19T10:00:00.000Z")
+    assert stamped == _record()
+    assert stamped.to_json() == _record().to_json()
+    assert "at" not in json.loads(stamped.to_json())
+    assert Record.from_json(stamped.to_json()).at == ""
+
+
+def test_iso_writes_linears_form_from_unix_milliseconds():
+    assert iso(0) == "1970-01-01T00:00:00.000Z"
+    assert iso(1763546400123) == "2025-11-19T10:00:00.123Z"

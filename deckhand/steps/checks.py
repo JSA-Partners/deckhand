@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import git, versions
+from deckhand import claims, git, ops, signoff, versions
 from deckhand.checks import KIND, passing
 from deckhand.records import Record
-from deckhand.step import Refusal, register
-from deckhand.steps.build import StoryStep, branch_of, parse
+from deckhand.step import Refusal, register, team_key
+from deckhand.steps.build import StoryStep, parse
 from deckhand.store import Store
 
-USAGE = "checks takes REF and --team-key KEY on both verbs; context [--json], apply runs the commands"
+USAGE = "checks takes REF and [--team-key KEY] on both verbs; context [--json], apply runs the commands"
 TAIL_LINES = 20
 TIMEOUT = 600
 
@@ -21,7 +22,15 @@ Checker = Callable[[str, Path], subprocess.CompletedProcess[str]]
 
 def run_command(command: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
+        return subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            env={**os.environ, "PATH": git.trusted_path()},
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT,
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(command, -1, "", f"timed out after {TIMEOUT} seconds")
 
@@ -33,22 +42,21 @@ class Checks(StoryStep):
         runner: git.Runner = git.run,
         repo: Path | None = None,
         checker: Checker = run_command,
+        *,
+        me: Callable[[], str] | None = None,
     ) -> None:
-        super().__init__(store, runner, repo)
+        super().__init__(store, runner, repo, me=me)
         self._checker = checker
 
     def _worktree(self, args: list[str]) -> tuple[dict, list[Record], str, list[str], Path]:
         parsed = parse(args, USAGE)
         if len(parsed["words"]) != 1:
             raise Refusal(f"checks takes one story REF; {USAGE}")
-        clone = self._clone()
-        feature, story, policy = self._story(parsed["words"][0], parsed["team_key"], clone)
-        records = feature.records.get(story["id"], [])
-        branch = branch_of(records, story)
-        path = git.worktree_path(clone, branch) if branch else None
-        if path is None or not path.is_dir():
-            raise Refusal(f"{story['identifier']} has no worktree; run build apply {story['identifier']} worktree")
-        return story, records, git.head(path, self._runner), policy.checks, path
+        at = self.locate(parsed["words"][0], team_key(parsed))
+        if at.path is None or at.head is None:
+            ref = at.story["identifier"]
+            raise Refusal(f"{ref} has no worktree; run build apply {ref} worktree")
+        return at.story, at.records, at.head, at.policy.checks, at.path
 
     def context(self, args: list[str]) -> None:
         story, records, head, commands, path = self._worktree(args)
@@ -72,7 +80,8 @@ class Checks(StoryStep):
         print("passed at this head" if facts["passed_at_head"] else "no passing record for this head")
 
     def apply(self, args: list[str]) -> None:
-        story, _, head, commands, path = self._worktree(args)
+        story, records, head, commands, path = self._worktree(args)
+        claims.owned(story, self.viewer())
         if git.dirty(path, self._runner):
             raise Refusal(f"{path} has uncommitted changes; commit them first so the pass is pinned to {head}")
         failed, tail = None, ""
@@ -82,11 +91,20 @@ class Checks(StoryStep):
                 failed, tail = command, git.stderr_tail(f"{done.stdout}\n{done.stderr}", TAIL_LINES)
                 break
         data = {"head": head, "passed": failed is None, "command": failed, "tail": tail if failed else None}
-        self._store_for_run().put_record(story["id"], Record(KIND, story["id"], head, "agent:checks", data))
+        store = self._store_for_run()
+        store.put_record(story["id"], Record(KIND, story["id"], head, "agent:checks", data))
         if failed:
-            # The failure is recorded first so the record exists, then refused so the hand sees it.
-            raise Refusal(f"{failed} failed at {head}; fix it and run checks again:\n{tail}")
+            _void(store, story["id"], records, head, failed)
+            raise Refusal(f"{failed} failed at {head}; the failure is recorded. Fix it and run checks again:\n{tail}")
         print(f"done: {len(commands) or 'no'} checks passed for {story['identifier']} at {head}")
+
+
+def _void(store: Store, story: str, records: list[Record], head: str, failed: str) -> None:
+    sign = signoff.signed(records, story)
+    if sign is None or sign.data.get("answer") != signoff.SIGN or signoff.signed_head(sign) != head:
+        return
+    if signoff.voided(records, story, sign) is None:
+        ops.ensure_record(store, story, signoff.void_record(story, sign, f"checks failed: {failed}", "agent:checks"))
 
 
 register("checks")(Checks)

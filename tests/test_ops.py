@@ -142,13 +142,16 @@ def run(store: FakeStore, operations: list[tuple]) -> None:
             ensure_relation(store, issue, create_id(rest[0], "issue"))
 
 
+AT = "2026-11-19T10:00:00.000Z"
+
+
 @settings(max_examples=200, deadline=None, derandomize=True)
 @given(operations=st.lists(operation, max_size=8), k=st.integers(min_value=1, max_value=30))
 def test_rerun_converges(operations: list[tuple], k: int) -> None:
-    clean = FakeStore()
+    clean = FakeStore(now=lambda: AT)
     run(clean, operations)
 
-    broken = FakeStore()
+    broken = FakeStore(now=lambda: AT)
     broken.fail_after_write(k)
     try:
         run(broken, operations)

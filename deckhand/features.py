@@ -143,12 +143,30 @@ def review_text(store: Store, feature: Feature) -> str | None:
     return "\n\n".join(parts) + "\n"
 
 
+def contract_approved(store: Store, feature: Feature) -> bool:
+    project = feature.project["id"]
+    version = versions.version_for(store, feature, "contract", project)
+    return bool(feature.live) and all(
+        _gap(feature, s, "contract", project, version, ("", "")) is None for s in feature.live
+    )
+
+
 def story(store: Store, feature: Feature, ref: str) -> dict:
     found = ops.issue_id_or_none(store, ref)
     held = next((s for s in feature.live if s["id"] == found), None)
     if held is None:
         raise Refusal(f"{ref} is not a story of {feature.project['name']}")
     return held
+
+
+def owning(store: Store, team: str, ref: str) -> Feature:
+    found = ops.issue_id_or_none(store, ref)
+    issue = store.issue(found) if found else None
+    held = issue is not None and issue["project"] and issue["team"] == team
+    project = store.project(issue["project"]) if held else None
+    if project is None or not is_feature(project):
+        raise Refusal(f"{ref} is not a story of any feature of {team}")
+    return load(store, project)
 
 
 def crosses_repositories(store: Store, feature: Feature, story: dict) -> bool:
@@ -177,16 +195,37 @@ def team_features(store: Store, team: str) -> list[dict]:
     return [p for p in store.team_projects(team) if is_feature(p)]
 
 
+def started(store: Store, team: str) -> list[Feature]:
+    return [load(store, p) for p in team_features(store, team) if p["start_date"]]
+
+
+def _one_open(found: list[Feature]) -> Feature | None:
+    held = [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
+    if len(held) > 1:
+        raise Refusal("more than one feature is open: " + ", ".join(describe(f.project) for f in held))
+    return held[0] if held else None
+
+
 def open_features(store: Store, team: str) -> list[Feature]:
-    found = [load(store, p) for p in team_features(store, team) if p["start_date"]]
-    return [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
+    return [f for f in started(store, team) if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
 
 
 def open_feature(store: Store, team: str) -> Feature | None:
-    found = open_features(store, team)
-    if len(found) > 1:
-        raise Refusal("more than one feature is open: " + ", ".join(describe(f.project) for f in found))
-    return found[0] if found else None
+    return _one_open(started(store, team))
+
+
+def current(store: Store, team: str) -> Feature | None:
+    held = started(store, team)
+    found = _one_open(held)
+    if found is not None:
+        return found
+    released = [f for f in held if phase(f) is Phase.RELEASED]
+    return max(released, key=_released_at, default=None)
+
+
+def _released_at(feature: Feature) -> tuple[str, str, str]:
+    finished = max((s.get("completed_at") or "" for s in feature.stories), default="")
+    return finished, feature.project["start_date"], feature.project["id"]
 
 
 def parked(store: Store, team: str) -> list[dict]:

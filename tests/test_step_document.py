@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from deckhand.step import Refusal
 from deckhand.steps.document import Document
+from tests.test_step_commit import nested_in_a_hand_worktree
 
 TIMES = itertools.count(1_700_000_000, 60)
 
@@ -90,3 +92,13 @@ def test_docs_naming_a_file_this_branch_changed_are_listed(repo: Path, capsys: p
     commit(repo, "change app")
     out = shown(repo, capsys)
     assert "Docs naming a file this branch changed:\n  docs/claude/a.md: `app.py`" in out
+
+
+def test_a_hand_audits_only_from_a_listed_worktree(repo: Path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    worktree, nested = nested_in_a_hand_worktree(repo, monkeypatch)
+    monkeypatch.chdir(nested)
+    with pytest.raises(Refusal, match="a hand runs deckhand only from its story worktree"):
+        Document().context([])
+    monkeypatch.chdir(worktree)
+    Document().context([])
+    assert capsys.readouterr().out == "No docs directory at docs/claude.\n"

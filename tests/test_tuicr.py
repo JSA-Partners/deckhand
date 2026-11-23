@@ -216,13 +216,28 @@ def test_seed_comments_argv() -> None:
 
 def test_seed_comments_numbers_lines_in_the_trimmed_commit() -> None:
     fake = Tuicr()
-    first = tuicr.Hunk("f", "H", ["@@ -1,1 +1,3 @@", " a", "+b", "+c"], "r1")
     second = tuicr.Hunk("f", "H", ["@@ -10,1 +12,2 @@", " j", "+k"], "r2")
     tuicr.seed_comments("s", [second], None, fake)
     assert fake.calls[0][0][fake.calls[0][0].index("--line") + 1] == "11"
-    fake.calls.clear()
-    tuicr.seed_comments("s", [first, second], None, fake)
-    assert fake.calls[1][0][fake.calls[1][0].index("--line") + 1] == "13"
+
+
+def test_seed_comments_seeds_one_reason_per_file_at_its_first_hunk() -> None:
+    fake = Tuicr()
+    hunks = [
+        tuicr.Hunk("f", "H", ["@@ -1,1 +1,3 @@", " a", "+b", "+c"], "contract site"),
+        tuicr.Hunk("f", "H", ["@@ -10,1 +12,2 @@", " j", "+k"], "contract site"),
+        tuicr.Hunk("f", "H", ["@@ -20,1 +23,2 @@", " t", "+u"], "contract site"),
+        tuicr.Hunk("g", "H", ["@@ -1 +1 @@", "-x", "+y"], "invariant site"),
+    ]
+    assert tuicr.seed_comments("s", hunks, None, fake) == 2
+    [(first, _, _), (second, _, _)] = fake.calls
+    assert first[first.index("--target-file") :] == [
+        "--target-file", "f", "--line", "2", "--side", "new", "--username", "deckhand", "contract site",
+    ]  # fmt: skip
+    assert second[second.index("--target-file") + 1] == "g"
+    reasons = [{"path": h.path, "reason": h.reason} for h in hunks]
+    held = [{"path": "f", "content": "contract site"}, {"path": "f", "content": "contract site", "id": "p"}]
+    assert tuicr.persons(held, reasons) == [held[1]]
 
 
 def test_session_is_found_by_the_last_commit_of_the_range() -> None:
@@ -240,13 +255,13 @@ def test_comments_reads_the_session_comments() -> None:
     assert fake.calls[0][0] == ["tuicr", "review", "comments", "--session", SLUG, "--repo", "/work"]
 
 
-def test_seed_comments_skips_reasons_already_present_and_keeps_the_line_shift() -> None:
+def test_seed_comments_skips_reasons_already_present() -> None:
     fake = Tuicr()
     first = tuicr.Hunk("f", "H", ["@@ -1,1 +1,3 @@", " a", "+b", "+c"], "r1")
-    second = tuicr.Hunk("f", "H", ["@@ -10,1 +12,2 @@", " j", "+k"], "r2")
-    assert tuicr.seed_comments("s", [first, second], None, fake, [{"path": "f", "content": "r1"}]) == 1
+    other = tuicr.Hunk("g", "H", ["@@ -10,1 +12,2 @@", " j", "+k"], "r2")
+    assert tuicr.seed_comments("s", [first, other], None, fake, [{"path": "f", "content": "r1"}]) == 1
     [(argv, _, _)] = fake.calls
-    assert argv[argv.index("--line") + 1] == "13" and argv[-1] == "r2"
+    assert argv[argv.index("--line") + 1] == "11" and argv[-1] == "r2"
 
 
 def test_a_slug_without_a_commit_range_matches_no_review_commit() -> None:

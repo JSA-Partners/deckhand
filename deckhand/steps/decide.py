@@ -1,29 +1,24 @@
 from __future__ import annotations
 
 import json
-import os
+from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, decisions, features, git, quiz, review, signoff, versions
-from deckhand.credentials import Credentials
-from deckhand.linear.connect import connect
+from deckhand import answers, asks, claims, decisions, features, git, pins, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
-from deckhand.step import Refusal, register
-from deckhand.steps.build import WORKTREE
+from deckhand.step import Refusal, hand_role, register, team_key
+from deckhand.steps.build import WORKTREE, StoryStep
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "decide takes --team-key KEY on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
+    "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
     " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
-    " quiz takes a story and --item N, review-cap takes a story and --stage plan|branch,"
-    " sign-off takes a story;"
+    " quiz and after-merge take a story and --item N, question takes its id and one --story,"
+    " config-edit takes a story and --item ID,"
+    " review-cap takes a story and --stage plan|branch,"
+    " sign-off and second-sign-off take a story;"
     " apply NONCE"
 )
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def _parse(args: list[str]) -> dict:
@@ -42,10 +37,6 @@ def _parse(args: list[str]) -> dict:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
-    if "item" in found:
-        if not found["item"].isdigit() or int(found["item"]) < 1:
-            raise Refusal(f"--item takes a quiz item number from 1; {USAGE}")
-        found["item"] = int(found["item"])
     return found
 
 
@@ -54,38 +45,41 @@ def read_text(path: Path) -> str:
 
 
 @register("decide")
-class Decide:
+class Decide(StoryStep):
     def __init__(
         self,
         store: Store | None = None,
         runner: git.Runner = git.run,
         repo: Path | None = None,
         reader: quiz.Reader = read_text,
+        *,
+        me: Callable[[], str] | None = None,
     ) -> None:
-        self._store = store
-        self._runner = runner
-        self._repo = repo
+        super().__init__(store, runner, repo, me=me)
         self._reader = reader
 
-    def _store_for_run(self, parsed: dict) -> Store:
-        if self._store is not None:
-            return self._store
-        if not parsed.get("team_key"):
-            raise Refusal(f"--team-key is required; {USAGE}")
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+    def _store_for_run(self) -> Store:
+        return self._store if self._store is not None else claims.person_store()
 
     def context(self, args: list[str]) -> None:
+        if hand_role():
+            raise Refusal("a hand never decides; record a question with ask apply REF --file QUESTION.json and stop")
         parsed = _parse(args)
         if len(parsed["words"]) != 2:
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
-        store = self._store_for_run(parsed)
-        feature = features.open_feature(store, parsed.get("team_key", ""))
+        store = self._store_for_run()
+        if kind == signoff.AFTER:
+            feature = features.owning(store, team_key(parsed), subject)
+        elif kind == asks.ANSWER and len(parsed["stories"]) == 1:
+            feature = features.owning(store, team_key(parsed), parsed["stories"][0])
+        else:
+            feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
-        head = self._head(store, feature, subject) if wants_head else ""
-        pin = decisions.pin(
+        head = self._head(subject, team_key(parsed)) if wants_head else ""
+        pin = pins.pin(
             store,
             feature,
             kind,
@@ -109,26 +103,25 @@ class Decide:
         print(f"nonce: {question.nonce}")
         print(json.dumps(tool_input, indent=2))
 
-    def _head(self, store: Store, feature: features.Feature, ref: str) -> str:
-        story = features.story(store, feature, ref)
-        held = versions.held(feature.records.get(story["id"], []), WORKTREE, story["id"])
-        name = held.data.get("branch") if held else None
-        clone = self._repo or git.clone_root(Path.cwd(), self._runner)
-        path = git.worktree_path(clone, name) if isinstance(name, str) and name else None
-        if path is None or not path.is_dir():
-            raise Refusal(f"{story['identifier']} has no worktree on this machine to sign off")
-        return git.head(path, self._runner)
+    def _head(self, ref: str, team_key: str) -> str:
+        at = self.locate(ref, team_key)
+        if at.head is None:
+            raise Refusal(f"{at.story['identifier']} has no worktree on this machine to sign off")
+        return at.head
 
     def _missed_code(self, feature: features.Feature, pin: decisions.Pin) -> dict:
         story, _, n = pin.subject.rpartition(":")
-        records = feature.records.get(story, [])
-        if not quiz.missed(records, story, int(n)):
+        labels = next((other["labels"] for other in feature.live if other["id"] == story), [])
+        return self._code(feature.records.get(story, []), story, int(n), labels)
+
+    def _code(self, records: list, story: str, n: int, labels: list[str]) -> dict:
+        if not quiz.missed(records, story, n):
             return {}
         held = quiz.held_set(records, story)
-        where = quiz.items_of(held)[int(n) - 1].where
+        where = quiz.items_of(held)[n - 1].where
         worktree = versions.held(records, WORKTREE, story)
         try:
-            clone = self._repo or git.clone_root(Path.cwd(), self._runner)
+            clone = self._clone(labels)
         except git.GitError:
             clone = None
         branch = worktree.data.get("branch") if worktree else None
@@ -144,13 +137,19 @@ class Decide:
         nonce = parsed["words"][0]
         state = answers.state_dir()
         pending = decisions.load_pending(nonce, state)
-        store = self._store_for_run(parsed)
-        if decisions.decide(store, pending, state):
+        store = self._store_for_run()
+        if decisions.decide(store, pending, state, self.viewer()):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == quiz.KIND:
-                held = versions.held(store.records(pending.stories[0]), quiz.KIND, pending.subject)
+                records = store.records(pending.stories[0])
+                held = versions.held(records, quiz.KIND, pending.subject)
                 verdict = "right" if held and held.data.get("correct") else "wrong, the item stays open"
                 print(f"done: recorded quiz answer for {pending.subject}: {verdict}")
+                story, _, n = pending.subject.rpartition(":")
+                shown = self._code(records, story, int(n), store.issue(story)["labels"])
+                if shown:
+                    print(f"where: {shown['where']}")
+                    print("\n".join(shown["code"]))
                 return
             print(f"done: recorded {pending.kind} for {pending.subject} on {len(pending.stories)} stories")
             return

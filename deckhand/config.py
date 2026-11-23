@@ -1,17 +1,29 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from deckhand.step import Refusal, read_toml
 
-KEYS = frozenset({"clones", "slot_cap"})
+FILE = "config.toml"
+KEYS = frozenset({"clones", "slot_cap", "team_key", "sandbox_write"})
+
+
+def config_dir() -> Path:
+    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
+
+
+def local() -> LocalConfig:
+    return LocalConfig.load(config_dir() / FILE)
 
 
 @dataclass(frozen=True)
 class LocalConfig:
     clones: dict[str, Path] = field(default_factory=dict)
     slot_cap: int = 1
+    team_key: str = ""
+    sandbox_write: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> LocalConfig:
@@ -30,7 +42,15 @@ class LocalConfig:
         slot_cap = table.get("slot_cap", 1)
         if isinstance(slot_cap, bool) or not isinstance(slot_cap, int) or slot_cap < 1:
             raise Refusal(f"{path}: slot_cap must be a positive integer")
+        team_key = table.get("team_key", "")
+        if not isinstance(team_key, str):
+            raise Refusal(f"{path}: team_key must be a string")
+        sandbox_write = table.get("sandbox_write", [])
+        if not isinstance(sandbox_write, list) or not all(isinstance(item, str) for item in sandbox_write):
+            raise Refusal(f"{path}: sandbox_write must be a list of strings")
         return cls(
             clones={label: Path(clone).expanduser() for label, clone in clones.items()},
             slot_cap=slot_cap,
+            team_key=team_key,
+            sandbox_write=sandbox_write,
         )

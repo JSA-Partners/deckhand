@@ -22,6 +22,14 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "state"
 
 
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    found = tmp_path / "repo"
+    (found / ".claude").mkdir(parents=True)
+    (found / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\n')
+    return found
+
+
 def manifest(**over: object) -> dict:
     found: dict = {
         "files": [{"path": "src/a.py", "change": "modify"}, {"path": "src/new.py", "change": "create"}],
@@ -38,9 +46,11 @@ class Git:
         self.paths = paths
         self.head = head
         self.argvs: list[list[str]] = []
+        self.calls: list[tuple[list[str], Path | None]] = []
 
     def __call__(self, argv, cwd=None, stdin=None):
         self.argvs.append(argv)
+        self.calls.append((argv, cwd))
         if argv[1] == "rev-parse":
             return subprocess.CompletedProcess(argv, 0 if self.head else 128, "", "fatal: bad ref")
         out = "base1\n" if argv[1] == "merge-base" else "\n".join(sorted(self.paths))
@@ -54,16 +64,16 @@ def files(tmp_path: Path, data: object) -> list[str]:
     return ["s1", *TEAM, "--plan", str(plan), "--manifest", str(found)]
 
 
-def step(store: FakeStore, git: Git | None = None) -> ImplPlan:
-    return ImplPlan(store, git or Git(BASE), Path("/worktree"))
+def step(store: FakeStore, repo: Path, git: Git | None = None) -> ImplPlan:
+    return ImplPlan(store, git or Git(BASE), repo)
 
 
-def test_criterion_without_test_refuses(tmp_path: Path):
+def test_criterion_without_test_refuses(tmp_path: Path, repo: Path):
     store = setup()
     approve_everything(store)
     args = files(tmp_path, manifest(criteria=[{"text": "an order is queued", "tests": []}]))
     with pytest.raises(Refusal, match="an order is queued"):
-        step(store).apply(args)
+        step(store, repo).apply(args)
     assert [d for d in store._documents.values() if d["title"] == "Implementation plan"] == []
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []
 
@@ -88,13 +98,13 @@ def test_a_good_manifest_passes():
     assert implplan.plan_checks(manifest(), BASE) == []
 
 
-def test_plan_saved_with_manifest_record(tmp_path: Path):
+def test_plan_saved_with_manifest_record(tmp_path: Path, repo: Path):
     store = setup()
     approve_everything(store)
     git = Git(BASE)
     args = files(tmp_path, manifest(after_merge=["drop the old queue"]))
-    step(store, git).apply(args)
-    step(store, git).apply(args)
+    step(store, repo, git).apply(args)
+    step(store, repo, git).apply(args)
     docs = [d for d in store._documents.values() if d["title"] == "Implementation plan"]
     assert [d["parent"] for d in docs] == ["s1"]
     assert docs[0]["body"] == "# Plan\n\n- [ ] one\n"
@@ -114,16 +124,16 @@ def test_version_changes_with_plan_or_manifest():
     assert one != implplan.version(b"a", manifest(contract_sites=[]))
 
 
-def test_refuses_before_feature_approval(tmp_path: Path):
+def test_refuses_before_feature_approval(tmp_path: Path, repo: Path):
     store = setup()
     with pytest.raises(Refusal, match="planning"):
-        step(store).apply(files(tmp_path, manifest()))
+        step(store, repo).apply(files(tmp_path, manifest()))
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []
 
 
-def test_refuses_when_no_feature_is_open(tmp_path: Path):
+def test_refuses_when_no_feature_is_open(tmp_path: Path, repo: Path):
     with pytest.raises(Refusal, match="no feature is open"):
-        step(FakeStore()).apply(files(tmp_path, manifest()))
+        step(FakeStore(), repo).apply(files(tmp_path, manifest()))
 
 
 @pytest.mark.parametrize(
@@ -144,35 +154,35 @@ def test_refuses_when_no_feature_is_open(tmp_path: Path):
         (manifest(after_merge="x"), "after_merge must be a list"),
     ],
 )
-def test_manifest_refusals_name_the_first_bad_entry(tmp_path: Path, data: object, message: str):
+def test_manifest_refusals_name_the_first_bad_entry(tmp_path: Path, data: object, message: str, repo: Path):
     store = setup()
     approve_everything(store)
     with pytest.raises(Refusal, match=message):
-        step(store).apply(files(tmp_path, data))
+        step(store, repo).apply(files(tmp_path, data))
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []
 
 
-def test_context_names_the_manifest_shape_and_never_fails(capsys: pytest.CaptureFixture[str]):
-    step(FakeStore()).context(["s1", *TEAM])
+def test_context_names_the_manifest_shape_and_never_fails(capsys: pytest.CaptureFixture[str], repo: Path):
+    step(FakeStore(), repo).context(["s1", *TEAM])
     assert "files" in capsys.readouterr().out
 
 
-def test_missing_origin_head_refuses_with_the_fix(tmp_path: Path):
+def test_missing_origin_head_refuses_with_the_fix(tmp_path: Path, repo: Path):
     store = setup()
     approve_everything(store)
     with pytest.raises(Refusal, match="git remote set-head origin --auto"):
-        step(store, Git(BASE, head=False)).apply(files(tmp_path, manifest()))
+        step(store, repo, Git(BASE, head=False)).apply(files(tmp_path, manifest()))
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []
 
 
 @pytest.mark.parametrize("name", ["plan", "manifest"])
-def test_non_utf8_input_refuses_naming_the_file(tmp_path: Path, name: str):
+def test_non_utf8_input_refuses_naming_the_file(tmp_path: Path, name: str, repo: Path):
     store = setup()
     approve_everything(store)
     args = files(tmp_path, manifest())
     (tmp_path / ("plan.md" if name == "plan" else "manifest.json")).write_bytes(b"\xff\xfe bad")
     with pytest.raises(Refusal, match="not valid UTF-8") as caught:
-        step(store).apply(args)
+        step(store, repo).apply(args)
     assert (tmp_path / ("plan.md" if name == "plan" else "manifest.json")).name in caught.value.rule
 
 

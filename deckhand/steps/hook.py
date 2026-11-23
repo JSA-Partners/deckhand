@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import sys
 
-from deckhand import answers, decisions
+from deckhand import answers, decisions, features, gaps, ops
 from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, hand_role, register, team_key
+from deckhand.steps.build import StoryStep
+from deckhand.steps.captain import Captain
+from deckhand.store import Store
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
-USAGE = "hook apply answer|ask reads one hook event as JSON on stdin"
+USAGE = "hook apply answer|ask|permission reads one hook event as JSON on stdin; hook apply session reads none"
 
 
 def _read() -> dict:
@@ -31,10 +37,9 @@ def _deckhand_items(hook_input: dict) -> list[dict]:
     return found
 
 
-# A description reads 'kind: subject'; the subject is a title the person wrote.
 def _recommended(items: list[dict]) -> bool:
     return any(
-        RECOMMENDED.search(f"{o.get('label', '')}\n{str(o.get('description', '')).partition(':')[0]}")
+        RECOMMENDED.search(f"{o.get('label', '')}\n{o.get('description', '')}")
         for item in items
         for o in item.get("options") or []
     )
@@ -61,15 +66,49 @@ def _denied(hook_input: dict) -> bool:
 
 
 @register("hook")
-class Hook:
+class Hook(StoryStep):
+    def __init__(self, store: Store | None = None, captain: Captain | None = None) -> None:
+        super().__init__(store)
+        self._captain = captain
+
+    def _session(self) -> None:
+        if os.environ.get("DECKHAND_ROLE") != "captain":
+            return
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            (self._captain or Captain()).context([])
+        print(buffer.getvalue(), end="")
+
+    def _permission(self, hook_input: dict) -> None:
+        ref = os.environ.get("DECKHAND_STORY", "")
+        if not hand_role() or not ref:
+            return
+        store = self._store_for_run()
+        feature = features.owning(store, team_key({}), ref)
+        story = features.story(store, feature, ref)
+        command = (hook_input.get("tool_input") or {}).get("command")
+        fields = (
+            hook_input.get("hook_event_name"),
+            hook_input.get("tool_name"),
+            command,
+            hook_input.get("reason") or hook_input.get("message"),
+        )
+        event, tool, command, reason = (field if isinstance(field, str) else "" for field in fields)
+        ops.ensure_record(store, story["id"], gaps.record(story["id"], event, tool, command, reason))
+
     def context(self, args: list[str]) -> None:
         print(USAGE)
 
     def apply(self, args: list[str]) -> None:
         action = args[0] if args else ""
         try:
+            if action == "session":
+                self._session()
+                return
             hook_input = _read()
-            if action == "answer":
+            if action == "permission":
+                self._permission(hook_input)
+            elif action == "answer":
                 answers.record(hook_input, answers.state_dir())
             elif action == "ask" and _denied(hook_input):
                 print(

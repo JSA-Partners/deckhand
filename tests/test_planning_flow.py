@@ -20,7 +20,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.tiers import NONE, OPTIONS
 from tests.test_skills import named_commands, split
 
-TEAM = ["--team-key", "ACME"]
+TEAM: list[str] = []
 TODAY = date(2026, 11, 20)
 ITEM = "Keep orders in one table"
 CONCURRENCY, _, DATA_RULE, _ = OPTIONS
@@ -29,6 +29,9 @@ CONCURRENCY, _, DATA_RULE, _ = OPTIONS
 class Session:
     def __init__(self, store: FakeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         self.store, self.tmp, self.monkeypatch, self.capsys = store, tmp_path, monkeypatch, capsys
+        (tmp_path / "config").mkdir()
+        (tmp_path / "config" / "config.toml").write_text('team_key = "ACME"\n')
+        monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path / "config"))
         cli.main(["hook", "context"])
         for name, step in (
             ("feature", Feature(store, lambda: TODAY)),

@@ -3,6 +3,8 @@ from __future__ import annotations
 PAGE_SIZE = 250
 PAGE = f"(first: {PAGE_SIZE})"
 MORE = "pageInfo { hasNextPage }"
+CURSOR = "pageInfo { hasNextPage endCursor }"
+AFTER = f"(first: {PAGE_SIZE}, after: $after)"
 PROJECT_LABEL_LIMIT = 10
 PROJECT_LABEL_PAGE = f"(first: {PROJECT_LABEL_LIMIT})"
 PROJECT_LABELS_FIELD = f"labels{PROJECT_LABEL_PAGE} {{ nodes {{ name }} {MORE} }}"
@@ -32,6 +34,7 @@ query Issue($id: String!) {{
     description
     team {{ key }}
     project {{ id }}
+    assignee {{ id name }}
     labels{PAGE} {{ nodes {{ id name }} {MORE} }}
   }}
 }}
@@ -70,9 +73,9 @@ mutation ProjectLabelCreate($input: ProjectLabelCreateInput!) {
 """
 
 PROJECT_ISSUES = f"""
-query ProjectIssues($id: String!) {{
+query ProjectIssues($id: String!, $after: String) {{
   project(id: $id) {{
-    issues{PAGE} {{
+    issues{AFTER} {{
       nodes {{
         id
         identifier
@@ -82,9 +85,11 @@ query ProjectIssues($id: String!) {{
         description
         team {{ key }}
         state {{ name }}
+        completedAt
+        assignee {{ id name }}
         labels{PAGE} {{ nodes {{ name }} {MORE} }}
       }}
-      {MORE}
+      {CURSOR}
     }}
   }}
 }}
@@ -103,9 +108,21 @@ mutation ProjectUpdate($id: String!, $input: ProjectUpdateInput!) {
 """
 
 ISSUE_ATTACHMENTS = f"""
-query IssueAttachments($id: String!) {{
-  issue(id: $id) {{ attachments{PAGE} {{ nodes {{ url metadata }} {MORE} }} }}
+query IssueAttachments($id: String!, $after: String) {{
+  issue(id: $id) {{ attachments{AFTER} {{ nodes {{ url metadata updatedAt }} {CURSOR} }} }}
 }}
+"""
+
+PROJECT_DOCUMENTS = f"""
+query ProjectDocuments($id: String!, $after: String) {{
+  project(id: $id) {{ documents{AFTER} {{ nodes {{ id title url updatedAt }} {CURSOR} }} }}
+}}
+"""
+
+VIEWER = """
+query Viewer {
+  viewer { id name }
+}
 """
 
 ISSUE_RELATIONS = f"""

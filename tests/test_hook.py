@@ -150,22 +150,146 @@ def test_hook_ask_denies_a_deckhand_question_that_carries_answers(monkeypatch, t
     assert deny(capsys)
 
 
-def test_recommended_in_a_story_title_does_not_deny(monkeypatch, tmp_path: Path, capsys):
-    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
-    pending_for(tmp_path, "abcd1234", "Q?", ["Approve", "Not yet"])
-    title = "contract: ACME-1 Show recommended products"
-    options = [{"label": label, "description": title} for label in ("Approve", "Not yet")]
-    payload = asked("dh abcd1234", [])
-    payload["tool_input"]["questions"][0]["options"] = options
-    assert run(monkeypatch, ["ask"], payload) == 0
-    assert capsys.readouterr().out == ""
-
-
 def test_recommended_in_a_fixed_description_still_denies(monkeypatch, tmp_path: Path, capsys):
     monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
     pending_for(tmp_path, "abcd1234", "Q?", ["Approve", "Not yet"])
-    options = [{"label": "Approve", "description": "recommended: ACME-1"}, {"label": "Not yet"}]
+    options = [{"label": "Approve", "description": "ACME-1: recommended"}, {"label": "Not yet"}]
     payload = asked("dh abcd1234", [])
     payload["tool_input"]["questions"][0]["options"] = options
     assert run(monkeypatch, ["ask"], payload) == 0
     assert deny(capsys)
+
+
+def hook_with(monkeypatch: pytest.MonkeyPatch, store, args: list[str], payload: object, captain=None) -> int:
+    from deckhand.steps.hook import Hook
+
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    monkeypatch.setattr("sys.stdin", io.StringIO(text))
+    Hook(store, captain).apply(args)
+    return 0
+
+
+GAP = {
+    "hook_event_name": "PermissionDenied",
+    "tool_name": "Bash",
+    "tool_input": {"command": "gh pr list"},
+    "reason": "not allowed",
+}
+
+
+def test_session_hook_prints_captain_context_only_for_captain(monkeypatch, capsys, tmp_path: Path):
+    from tests.test_step_captain import captain, owned
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = owned()
+    expected = captain(store)
+    expected.context(["--team-key", "ACME"])
+    want = capsys.readouterr().out
+    assert want
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    hook_with(monkeypatch, store, ["session"], {"hook_event_name": "SessionStart"}, captain(store))
+    out = capsys.readouterr()
+    assert (out.out, out.err) == (want, "")
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    hook_with(monkeypatch, store, ["session"], {}, captain(store))
+    assert capsys.readouterr().out == ""
+    monkeypatch.delenv("DECKHAND_ROLE")
+    hook_with(monkeypatch, store, ["session"], {}, captain(store))
+    assert capsys.readouterr().out == ""
+
+
+def test_permission_gap_recorded_for_hand(monkeypatch, capsys, tmp_path: Path):
+    from deckhand import gaps
+    from tests.test_step_decide import feature_store
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    [held] = store.records("s1")
+    want = gaps.record("s1", "PermissionDenied", "Bash", "gh pr list", "not allowed")
+    assert held.to_json() == want.to_json()
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert len(store.records("s1")) == 1
+    hook_with(monkeypatch, store, ["permission"], {"hook_event_name": "PermissionRequest"})
+    assert len(store.records("s1")) == 2
+    assert capsys.readouterr().err == ""
+
+
+def test_permission_hook_silent_outside_hands(monkeypatch, capsys):
+    from tests.test_step_decide import feature_store
+
+    store = feature_store()
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert store.records("s1") == []
+    assert capsys.readouterr().out == ""
+
+
+def test_permission_hook_never_decides(monkeypatch, capsys, tmp_path: Path):
+    from tests.test_step_decide import feature_store
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert capsys.readouterr().out == ""
+    hook_with(monkeypatch, store, ["permission"], "not json")
+    hook_with(monkeypatch, store, ["permission"], [])
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert len(out.err.splitlines()) == 2
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-99")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert capsys.readouterr().out == ""
+
+
+def test_hooks_json_uses_the_full_path_form():
+    from tests.conftest import ROOT
+
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    want = {
+        "SessionStart": ("startup|resume|compact|clear", "session"),
+        "PermissionRequest": ("*", "permission"),
+        "PermissionDenied": ("*", "permission"),
+    }
+    for event, (matcher, action) in want.items():
+        [entry] = hooks[event]
+        assert entry["matcher"] == matcher
+        [command] = entry["hooks"]
+        assert command["command"] == f'"${{CLAUDE_PLUGIN_ROOT}}/bin/deckhand" hook apply {action}'
+
+
+def test_permission_gap_recorded_after_the_feature_is_released(monkeypatch, tmp_path: Path):
+    from tests.test_step_decide import feature_store
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = feature_store()
+    store.set_issue_state("s1", "Done")
+    store.set_issue_state("s2", "Done")
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert len(store.records("s1")) == 1
+
+
+def test_permission_gap_recorded_once_the_next_feature_opens(monkeypatch, tmp_path: Path):
+    from tests.test_step_decide import feature_store, released
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = released(feature_store())
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert len(store.records("s1")) == 1

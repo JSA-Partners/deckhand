@@ -59,6 +59,12 @@ def test_mark_ready_argv() -> None:
     assert fake.argvs == [["gh", "pr", "ready", "7", "--repo", REPO]]
 
 
+def test_mark_draft_argv() -> None:
+    fake = Fake()
+    gh.mark_draft(7, REPO, fake)
+    assert fake.argvs == [["gh", "pr", "ready", "7", "--repo", REPO, "--undo"]]
+
+
 def rows(*pairs: tuple[str, str]) -> tuple[int, str, str]:
     return 0, json.dumps([{"name": n, "bucket": b} for n, b in pairs]), ""
 

@@ -144,10 +144,28 @@ def _counts(line: str) -> tuple[int, int, int, int]:
     return int(old), int(old_count or 1), int(new), int(new_count or 1)
 
 
-def _anchor(hunk: Hunk, shift: int) -> tuple[int, str]:
+def shown_ranges(hunks: list[Hunk]) -> list[tuple[str, int, int]]:
+    found = []
+    for hunk in hunks:
+        if hunk.lines:
+            _, _, new, new_count = _counts(hunk.lines[0])
+            if new_count:
+                found.append((hunk.path, new, new + new_count - 1))
+    return found
+
+
+def shows(ranges: list[tuple[str, int, int]], path: str, line: int) -> bool:
+    return any(path == shown and first <= line <= last for shown, first, last in ranges)
+
+
+def describe_ranges(ranges: list[tuple[str, int, int]]) -> str:
+    return "; ".join(f"{path} lines {first}-{last}" for path, first, last in ranges)
+
+
+def _anchor(hunk: Hunk) -> tuple[int, str]:
     old_start, old_count, _, _ = _counts(hunk.lines[0])
     old = old_start
-    new = old_start + shift + (1 if old_count == 0 else 0)
+    new = old_start + (1 if old_count == 0 else 0)
     first_removed = None
     for line in hunk.lines[1:]:
         if line.startswith("+"):
@@ -161,33 +179,43 @@ def _anchor(hunk: Hunk, shift: int) -> tuple[int, str]:
     return first_removed or old_start, "old"
 
 
+def file_reasons(pairs: list[tuple[str, str]]) -> dict[str, str]:
+    found: dict[str, list[str]] = {}
+    for path, reason in pairs:
+        held = found.setdefault(path, [])
+        if reason not in held:
+            held.append(reason)
+    return {path: "; ".join(reasons) for path, reasons in found.items()}
+
+
+# The first selected hunk of a file starts the trimmed commit's file, so it needs no line shift.
 def seed_comments(
     session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run, present: list[dict] | None = None
 ) -> int:
     held = Counter((c.get("path"), c.get("content")) for c in present or [])
-    shifts: dict[str, int] = {}
-    added = 0
+    reasons = file_reasons([(hunk.path, hunk.reason) for hunk in hunks])
+    firsts: dict[str, Hunk] = {}
     for hunk in hunks:
+        firsts.setdefault(hunk.path, hunk)
+    added = 0
+    for path, hunk in firsts.items():
         argv = ["tuicr", "review", "add", "--session", session]
         if repo is not None:
             argv += ["--repo", str(repo)]
-        argv += ["--target-file", hunk.path]
+        argv += ["--target-file", path]
         if hunk.lines:
-            shift = shifts.get(hunk.path, 0)
-            line, side = _anchor(hunk, shift)
-            _, old_count, _, new_count = _counts(hunk.lines[0])
-            shifts[hunk.path] = shift + new_count - old_count
+            line, side = _anchor(hunk)
             argv += ["--line", str(line), "--side", side]
-        if held[(hunk.path, hunk.reason)]:
-            held[(hunk.path, hunk.reason)] -= 1
+        if held[(path, reasons[path])]:
+            held[(path, reasons[path])] -= 1
             continue
-        call([*argv, "--username", USERNAME, hunk.reason], None, runner)
+        call([*argv, "--username", USERNAME, reasons[path]], None, runner)
         added += 1
     return added
 
 
 def persons(comments: list[dict], reasons: list[dict]) -> list[dict]:
-    seeded = Counter((r.get("path"), r.get("reason")) for r in reasons)
+    seeded = Counter(file_reasons([(str(r.get("path")), str(r.get("reason"))) for r in reasons]).items())
     found = []
     for comment in comments:
         key = (comment.get("path"), comment.get("content"))

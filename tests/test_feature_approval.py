@@ -20,15 +20,15 @@ TEAM = ["--team-key", "ACME"]
 STATE_CHART = "A flow or an entity with several states"
 
 
-def setup() -> FakeStore:
-    store = FakeStore()
+def setup(store: FakeStore | None = None) -> FakeStore:
+    store = store if store is not None else FakeStore()
     store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     feature = load(store)
     for name in planning.SECTIONS:
         planning.save_section(store, feature, name, f"The {name} of Alpha.", False)
-    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, [])
-    store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", P1, [])
+    store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, ["widgets"])
+    store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", P1, ["widgets"])
     return store
 
 

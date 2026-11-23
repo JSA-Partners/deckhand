@@ -1,27 +1,21 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
 
-from deckhand import answers, features, ops, sitting, tiers, versions
+from deckhand import answers, config, features, inputs, ops, sitting, tiers, versions
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "sitting takes REF and --team-key KEY on both verbs; context [--contract NAME ...] [--json],"
+    "sitting takes REF and [--team-key KEY] on both verbs; context [--contract NAME ...] [--json],"
     " apply --file ANSWERS.md"
 )
 TITLE = "Sitting"
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def _parse(args: list[str]) -> dict:
@@ -40,8 +34,6 @@ def _parse(args: list[str]) -> dict:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
             found["words"].append(arg)
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     if len(found["words"]) != 1:
         raise Refusal(f"sitting takes one story REF; {USAGE}")
     return found
@@ -56,10 +48,10 @@ class Sitting:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
 
     def _story(self, store: Store, parsed: dict) -> tuple[features.Feature, dict]:
-        feature = features.open_feature(store, parsed["team_key"])
+        feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
         return feature, features.story(store, feature, parsed["words"][0])
@@ -106,10 +98,7 @@ class Sitting:
             raise Refusal(f"--file is required; {USAGE}")
         store = self._store_for_run()
         _, story = self._story(store, parsed)
-        try:
-            body = Path(parsed["file"]).read_text().strip()
-        except OSError:
-            raise Refusal(f"{parsed['file']}: cannot be read") from None
+        body = inputs.read(parsed["file"], "--file", USAGE).strip()
         if not body:
             raise Refusal(f"{parsed['file']} is empty")
         ops.ensure_document(store, story["id"], "sitting", story["id"], TITLE, body)

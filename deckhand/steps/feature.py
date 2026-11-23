@@ -1,27 +1,18 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from datetime import date, timedelta
-from pathlib import Path
 
-from deckhand import features, ops, planning
-from deckhand.credentials import Credentials
+from deckhand import claims, features, ops, planning
 from deckhand.features import Phase
-from deckhand.linear.connect import connect
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
 
 USAGE = (
-    "feature takes --team-key KEY on both verbs, --json on context only, and on apply one of: new --name N"
+    "feature takes [--team-key KEY] on both verbs, --json on context only, and on apply one of: new --name N"
     " [--reference REF ...], pick --project ID --weeks 1|2, park --project ID"
 )
-
-
-def _config_dir() -> Path:
-    return Path(os.environ.get("DECKHAND_CONFIG_DIR") or Path.home() / ".config" / "deckhand")
 
 
 def _parse(args: list[str]) -> dict:
@@ -40,8 +31,6 @@ def _parse(args: list[str]) -> dict:
             found["action"] = arg
         else:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
-    if not found.get("team_key"):
-        raise Refusal(f"--team-key is required; {USAGE}")
     return found
 
 
@@ -60,7 +49,7 @@ class Feature:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(_config_dir()), "app"))
+        return claims.person_store()
 
     def _facts(self, store: Store, team: str) -> dict:
         today = self._today()
@@ -103,7 +92,7 @@ class Feature:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        facts = self._facts(self._store_for_run(), parsed["team_key"])
+        facts = self._facts(self._store_for_run(), team_key(parsed))
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
@@ -148,7 +137,7 @@ class Feature:
         name = parsed.get("name", "").strip()
         if not name:
             raise Refusal(f"--name is required; {USAGE}")
-        team = parsed["team_key"]
+        team = team_key(parsed)
         id = ops.ensure_project(
             self._store_for_run(),
             features.key(team, name),
@@ -164,7 +153,7 @@ class Feature:
         if action == "pick" and parsed.get("weeks") not in ("1", "2"):
             raise Refusal(f"--weeks must be 1 or 2, not {parsed.get('weeks', '')!r}")
         store = self._store_for_run()
-        team = parsed["team_key"]
+        team = team_key(parsed)
         wanted = parsed.get("project", "")
         project = next((p for p in features.team_features(store, team) if p["id"] == wanted), None)
         if project is None:

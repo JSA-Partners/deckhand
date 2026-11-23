@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -213,6 +214,90 @@ def test_project_issues_lists_members_with_state() -> None:
     store.set_issue_state("i2", "Done")
     members = store.project_issues("p1")
     assert [(m["id"], m["state"]) for m in members] == [("i1", "Backlog"), ("i2", "Done")]
-    assert {k: v for k, v in members[1].items() if k != "state"} == store.issue("i2")
-    assert "state" not in store.issue("i2")
+    read_only = ("state", "completed_at")
+    assert {k: v for k, v in members[1].items() if k not in read_only} == store.issue("i2")
+    assert not set(read_only) & set(store.issue("i2"))
     assert store.project_issues("none") == []
+
+
+def test_records_carry_the_time_of_the_write() -> None:
+    clock = iter(["2026-11-19T10:00:00.000Z", "2026-11-19T10:05:00.000Z"])
+    store = FakeStore(now=lambda: next(clock))
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    assert store.records("i1")[0].at == "2026-11-19T10:00:00.000Z"
+    store.put_record("i1", approval("2"))
+    assert store.records("i1")[0].at == "2026-11-19T10:05:00.000Z"
+
+
+def test_a_record_put_again_reports_the_later_write_time() -> None:
+    clock = iter(["2026-11-19T10:00:00.000Z", "2026-11-19T10:05:00.000Z"])
+    store = FakeStore(now=lambda: next(clock))
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    store.put_record("i1", Record("approval", "plan", "1", "captain", {"ok": False}))
+    assert store.records("i1")[0].at == "2026-11-19T10:05:00.000Z"
+    assert store._attachments["i1"]["https://deckhand.invalid/record/approval/plan"]["updatedAt"] == (
+        "2026-11-19T10:00:00.000Z"
+    )
+
+
+def test_the_default_clock_writes_linears_form() -> None:
+    store = FakeStore()
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", store.records("i1")[0].at)
+
+
+def test_the_default_clock_orders_writes_made_in_one_millisecond() -> None:
+    store = FakeStore()
+    make_issue(store)
+    for n in range(50):
+        store.put_record("i1", Record("approval", f"i1:{n}", "1", "person:p", {}))
+    times = [r.at for r in sorted(store.records("i1"), key=lambda r: int(r.subject.split(":")[1]))]
+    assert times == sorted(set(times))
+
+
+def test_assign_round_trip() -> None:
+    store = FakeStore()
+    make_issue(store)
+    assert store.issue("i1")["assignee"] is None
+    assert store.issue("i1")["assignee_name"] is None
+    store.assign("i1", "user-2")
+    assert store.issue("i1")["assignee"] == "user-2"
+    assert store.writes[-1] == ("assign", "i1", "user-2")
+
+
+def test_done_stamps_completed_at_and_reopening_clears_it() -> None:
+    store = FakeStore(now=lambda: "2026-11-20T09:30:00.000Z")
+    store.create_project("p1", "ACME", "Feature", "")
+    store.create_issue("i1", "ACME", "One", "", "p1", [])
+    assert store.project_issues("p1")[0]["completed_at"] is None
+    store.set_issue_state("i1", "Done")
+    assert store.project_issues("p1")[0]["completed_at"] == "2026-11-20T09:30:00.000Z"
+    store.set_issue_state("i1", "In Progress")
+    assert store.project_issues("p1")[0]["completed_at"] is None
+
+
+def test_assigned_issue_shows_in_project_issues() -> None:
+    store = FakeStore()
+    store.create_issue("i1", "ACME", "T", "", "p1", [])
+    store.assign("i1", "user-2")
+    assert store.project_issues("p1")[0]["assignee"] == "user-2"
+
+
+def test_viewer() -> None:
+    assert FakeStore(viewer="user-9").viewer()["id"] == "user-9"
+
+
+def test_project_documents_listed() -> None:
+    clock = iter(["2026-11-19T10:00:00.000Z", "2026-11-19T11:00:00.000Z", "2026-11-19T12:00:00.000Z"])
+    store = FakeStore(now=lambda: next(clock))
+    store.put_document("d2", "p1", "Two", "b")
+    store.put_document("d1", "p1", "One", "b")
+    store.put_document("d3", "i1", "Other", "b")
+    assert store.project_documents("p1") == [
+        {"id": "d1", "title": "One", "url": "https://linear.invalid/document/d1", "at": "2026-11-19T11:00:00.000Z"},
+        {"id": "d2", "title": "Two", "url": "https://linear.invalid/document/d2", "at": "2026-11-19T10:00:00.000Z"},
+    ]
+    assert "at" not in store.document("d1")

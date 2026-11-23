@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from pathlib import Path
+
+from deckhand import fleet, standing
+from deckhand.queue import Item
+from deckhand.records import content_hash
+
+FILE = "captain.json"
+SHAPE = 1
+
+
+def item_key(item: Item) -> str:
+    return content_hash(json.dumps([item.kind, item.ref, item.at, item.next]))[:12]
+
+
+def _item(item: Item) -> dict:
+    keys = {"key": item_key(item), "kind": item.kind, "ref": item.ref, "title": item.title}
+    return keys | {"since": item.at or None, "next": item.next, "head": item.head or None}
+
+
+def _hands(sessions: list[fleet.Session]) -> list[dict]:
+    held = [*sorted(fleet.hands(sessions).items()), *sorted(fleet.spikes(sessions).items())]
+    return [
+        {"name": s.name, "ref": ref, "state": s.state, "waiting_for": s.waiting_for, "started_at": s.started_at}
+        for ref, s in held
+    ]
+
+
+def snapshot(
+    written_at: str,
+    team: str,
+    facts: dict,
+    waiting: list[Item],
+    sessions: list[fleet.Session],
+    previous: dict | None,
+    person_unknown: bool = False,
+) -> dict:
+    items = [_item(item) for item in waiting]
+    keys = {item["key"] for item in items}
+    notified = [key for key in (previous or {}).get("notified", []) if person_unknown or key in keys]
+    return {
+        "shape": SHAPE,
+        "written_at": written_at,
+        "team": team,
+        "feature": facts["feature"],
+        "budget": facts["budget"],
+        "slots": facts["slots"],
+        "items": items,
+        "stories": facts["order"],
+        "hands": _hands(sessions),
+        "release": facts["release"],
+        "stale_since": None,
+        "person_unknown": person_unknown,
+        "notified": notified,
+    }
+
+
+def write(state: Path, status: dict) -> None:
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    state.chmod(0o700)
+    fd, temp = tempfile.mkstemp(dir=state, prefix=f".{FILE}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(status, handle, indent=2)
+        os.replace(temp, state / FILE)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise
+
+
+def _strings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(entry, str) for entry in value)
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _maybe(value: object, kind: type) -> bool:
+    return value is None or isinstance(value, kind)
+
+
+def _when(value: object) -> bool:
+    return isinstance(value, str) and standing.timestamp(value) is not None
+
+
+def _item_ok(found: object) -> bool:
+    if not isinstance(found, dict) or not all(isinstance(found.get(key), str) for key in ("key", "kind", "ref")):
+        return False
+    return (found.get("since") is None or _when(found["since"])) and _maybe(found.get("head"), str)
+
+
+def _stage_ok(found: object) -> bool:
+    if found is None:
+        return True
+    if not isinstance(found, dict) or not isinstance(found.get("name"), str) or not _maybe(found.get("round"), int):
+        return False
+    return not found.get("round") or _count(found.get("cap"))
+
+
+def _story_ok(found: object) -> bool:
+    if not isinstance(found, dict) or not all(isinstance(found.get(key), str) for key in ("ref", "state")):
+        return False
+    return _maybe(found.get("owner"), str) and _strings(found.get("blocked_by", [])) and _stage_ok(found.get("stage"))
+
+
+def _budget_ok(found: object) -> bool:
+    if found is None:
+        return True
+    shaped = isinstance(found, dict) and isinstance(found.get("feature"), str) and "planning_note" in found
+    return shaped and _count(found.get("days_used")) and _count(found.get("budget_days"))
+
+
+def _valid(found: dict) -> bool:
+    slots, items, stories = found.get("slots"), found.get("items"), found.get("stories")
+    return (
+        found.get("shape") == SHAPE
+        and _strings(found.get("notified"))
+        and _when(found.get("written_at"))
+        and isinstance(slots, dict)
+        and _count(slots.get("used"))
+        and _count(slots.get("cap"))
+        and "feature" in found
+        and _maybe(found["feature"], str)
+        and "budget" in found
+        and _budget_ok(found["budget"])
+        and isinstance(found.get("release"), bool)
+        and isinstance(items, list)
+        and all(_item_ok(entry) for entry in items)
+        and isinstance(stories, list)
+        and all(_story_ok(entry) for entry in stories)
+    )
+
+
+def read(state: Path) -> dict | None:
+    try:
+        found = json.loads((state / FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return found if isinstance(found, dict) and _valid(found) else None
+
+
+def stale(previous: dict, at: str) -> dict:
+    return previous | {"stale_since": previous.get("stale_since") or at}

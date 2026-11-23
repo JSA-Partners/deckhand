@@ -3,11 +3,14 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
-from deckhand.records import Record
+from deckhand.records import Record, iso
 from deckhand.ref import Ref
 from deckhand.store import Store
 
@@ -17,12 +20,27 @@ def _branch_name(team: str, number: int, title: str) -> str:
     return f"{team.lower()}-{number}-{slug}"
 
 
+DOCUMENT_URL = "https://linear.invalid/document/"
+
+
 class WriteFailed(Exception):
     pass
 
 
-class FakeStore(Store):
+class _Clock:
     def __init__(self) -> None:
+        self._last = 0
+
+    # Linear stamps sequential writes in order; the wall clock repeats within one millisecond.
+    def __call__(self) -> str:
+        self._last = max(self._last + 1, time.time_ns() // 1_000_000)
+        return iso(self._last)
+
+
+class FakeStore(Store):
+    def __init__(self, now: Callable[[], str] | None = None, viewer: str = "viewer-1") -> None:
+        self._now = now or _Clock()
+        self._viewer = viewer
         self._issues: dict[str, dict[str, Any]] = {}
         self._projects: dict[str, dict[str, Any]] = {}
         self._documents: dict[str, dict[str, Any]] = {}
@@ -88,7 +106,10 @@ class FakeStore(Store):
             "description": description,
             "project": project,
             "labels": list(labels),
+            "assignee": None,
+            "assignee_name": None,
             "state": "Backlog",
+            "completed_at": None,
         }
         self._wrote("create_issue", id)
         return id
@@ -105,10 +126,11 @@ class FakeStore(Store):
 
     @staticmethod
     def _public(issue: dict[str, Any]) -> dict[str, Any]:
-        return {key: copy.deepcopy(value) for key, value in issue.items() if key != "state"}
+        return {key: copy.deepcopy(value) for key, value in issue.items() if key not in ("state", "completed_at")}
 
     def set_issue_state(self, issue: str, state: str) -> None:
         self._issues[issue]["state"] = state
+        self._issues[issue]["completed_at"] = self._now() if state == "Done" else None
 
     def set_labels(self, issue: str, labels: list[str]) -> None:
         self._issues[issue]["labels"] = list(labels)
@@ -128,22 +150,43 @@ class FakeStore(Store):
         return sorted(self._repositories.get(team, []))
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
-        self._documents[id] = {"id": id, "parent": parent, "title": title, "body": body}
+        self._documents[id] = {"id": id, "parent": parent, "title": title, "body": body, "at": self._now()}
         self._wrote("put_document", id)
 
     def document(self, id: str) -> dict | None:
         found = self._documents.get(id)
-        return dict(found) if found else None
+        return {key: value for key, value in found.items() if key != "at"} if found else None
+
+    def project_documents(self, project: str) -> list[dict]:
+        held = [d for d in self._documents.values() if d["parent"] == project]
+        return [
+            {"id": d["id"], "title": d["title"], "url": f"{DOCUMENT_URL}{d['id']}", "at": d["at"]}
+            for d in sorted(held, key=lambda d: d["id"])
+        ]
 
     def put_record(self, issue: str, record: Record) -> None:
         url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"
-        attachment = {"url": url, "metadata": {"record": record.to_json()}}
-        self._attachments.setdefault(issue, {})[url] = attachment
+        now = self._now()
+        held = self._attachments.setdefault(issue, {})
+        created = held[url]["updatedAt"] if url in held else now
+        held[url] = {"url": url, "metadata": {"record": record.to_json(), "written": now}, "updatedAt": created}
         self._wrote("put_record", issue, record.kind, record.subject)
 
     def records(self, issue: str) -> list[Record]:
         held = self._attachments.get(issue, {})
-        return [Record.from_json(held[url]["metadata"]["record"]) for url in sorted(held)]
+        found = []
+        for url in sorted(held):
+            meta = held[url]["metadata"]
+            found.append(replace(Record.from_json(meta["record"]), at=meta.get("written", held[url]["updatedAt"])))
+        return found
+
+    def assign(self, issue: str, user: str) -> None:
+        self._issues[issue]["assignee"] = user
+        self._issues[issue]["assignee_name"] = user
+        self._wrote("assign", issue, user)
+
+    def viewer(self) -> dict:
+        return {"id": self._viewer, "name": self._viewer}
 
     def relate(self, blocker: str, blocked: str) -> None:
         self._relations.append([blocker, blocked])
@@ -191,4 +234,4 @@ class FakeStore(Store):
     def project_issues(self, project: str) -> list[dict]:
         held = [i for i in self._issues.values() if i["project"] == project]
         held.sort(key=lambda i: (i["team"], i["number"]))
-        return [copy.deepcopy(i) for i in held]
+        return [copy.deepcopy(i) | {"completed_at": i.get("completed_at")} for i in held]

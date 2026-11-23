@@ -171,7 +171,7 @@ def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: st
     return Record(KIND, f"{story}:{stage}:{plan.n}", target, "agent:review", data)
 
 
-def _reviewed_count(rounds: list[Record]) -> int:
+def reviewed_count(rounds: list[Record]) -> int:
     return sum(not r.data.get("carry") for r in rounds)
 
 
@@ -190,6 +190,23 @@ def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF
     ]
 
 
+def left_open(records: list[Record], story: str, stage: str) -> list[dict]:
+    held, _ = counted(records, f"{story}:{stage}")
+    settled = accepted(records) | set(decided(records))
+    found = {f["id"]: f for r in held for f in r.data["findings"]}
+    return [
+        f for id, f in found.items() if f["severity"] != "P1" and not f.get("changes_delivery") and id not in settled
+    ]
+
+
+def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
+    return [
+        f"{f['id']} is a {f['severity']} the hand left open and the person has not decided it:"
+        f" decide context finding {ref} --finding {f['id']}"
+        for f in left_open(records, story, stage)
+    ]
+
+
 def next_round(rounds: list[Record], target_hash: str, declined: set[str], head: str = "") -> RoundPlan | Stop:
     latest = last(rounds)
     if latest is None:
@@ -198,8 +215,8 @@ def next_round(rounds: list[Record], target_hash: str, declined: set[str], head:
         if head and latest.data.get("head") and latest.data["head"] != head:
             return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
         return Stop("unchanged") if open_p1(latest, declined) else Stop("clean")
-    if _reviewed_count(rounds) >= CAP:
-        return Stop("cap")
+    if reviewed_count(rounds) >= CAP:
+        return Stop("cap") if open_p1(latest, declined) else Stop("cap-clear")
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
 
 
@@ -242,11 +259,9 @@ def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     return [r for r in rounds if _n(r) > cut], cut
 
 
-def at_cap(rounds: list[Record], declined: set[str], at: str) -> bool:
+def at_cap(rounds: list[Record], declined: set[str]) -> bool:
     latest = last(rounds)
-    if latest is None or _reviewed_count(rounds) < CAP:
-        return False
-    return bool(open_p1(latest, declined)) or reviewed(latest) != at
+    return latest is not None and reviewed_count(rounds) >= CAP and bool(open_p1(latest, declined))
 
 
 def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
@@ -254,7 +269,7 @@ def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
     latest = last(held)
     if latest is None:
         return False
-    if reviewed(latest) == at and not open_p1(latest, declined(records)):
+    if not open_p1(latest, declined(records)) and (reviewed(latest) == at or reviewed_count(held) >= CAP):
         return True
     pinned = cap_version(latest, at)
     return any(r.version == pinned for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
@@ -265,7 +280,7 @@ def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
     latest = last(rounds)
     if latest is None:
         return ["the feature review has not run"]
-    if reviewed(latest) != at and _reviewed_count(rounds) < CAP:
+    if reviewed(latest) != at and reviewed_count(rounds) < CAP:
         return ["the feature review has not reviewed the current contract and stories; run a feature round"]
     found = open_p1(latest, declined(records))
     return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]

@@ -1,20 +1,37 @@
 ---
 name: setup
-description: "Link this repository to its GitHub project, set squash merges, fix its fields, and list what the API cannot do."
+description: "Fit a Linear team to the story process, name its repositories and clones on this machine, set the slot cap, and print the line that launches the captain."
 disable-model-invocation: true
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Bash(gh project *) AskUserQuestion
+allowed-tools: Bash(deckhand *) AskUserQuestion
 ---
 
 # Setup
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" setup context`
+!`deckhand setup context`
 
-Settle which project this repository works against, then apply.
+Above: what setup found for the team in config and what it would change, or what setup needs.
+Without a team, ask the person for its key: the prefix of their Linear team's issue ids.
+When it names a missing credentials file, tell the person which file and stop; it holds a secret,
+so they write it themselves, owner-only, and never paste it here.
 
-- Exactly one linked project: say which one and run `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" setup apply`. Offer to work against a different one instead with `--project N`.
-- Otherwise ask which open project to use, offering to create one with `gh project create --owner <owner> --title <name>` when there is none, and run `"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" setup apply --project N`. Add `--owner O` when the project belongs to someone other than the repository owner, `@me` for your own.
+Then settle, one question at a time:
 
-When several projects stay linked afterwards, tell the user to pin the number they chose in the `env` block of `.claude/settings.json` as `DECKHAND_PROJECT`, so every later command resolves the same project.
+- Each repository the team works in, with a short label: `--repository LABEL=owner/name`. The label
+  becomes a Linear label in the Repository group.
+- Where each one is cloned on this machine: `--clone LABEL=PATH`, an existing directory.
+- How many hands may run at once: `--slot-cap N`, a positive number. Each hand is a Claude Code
+  session; start low.
 
-Tell the person what setup did and what the checklist says is left, each with its page and click,
-in plain words, and which of those actions is permanent. Say "setup complete" when nothing is left.
+Run `deckhand setup context --team-key KEY --repository LABEL=owner/name` with every flag settled,
+show the person the planned changes and the files it would write, and on their yes run
+`deckhand setup apply --team-key KEY --repository LABEL=owner/name` with the same flags. A rerun
+changes only what differs, so running it again is safe.
+
+The context also names the tool that draws the person's status line and how setup would add the
+captain's one-line segment to it. Ask whether they want it, with what it would change; on their
+yes run `deckhand setup apply --statusline`. It backs up each file first, and a rerun changes
+nothing. `deckhand setup apply --statusline-remove` puts every file back as it was. When managed
+settings block the status line, say so and leave it.
+
+Say what setup did, then give the launch line it printed last, as a plain message the person
+copies to a terminal. The captain runs in that session, under its own settings; this one is done.

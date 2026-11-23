@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
+import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -37,7 +41,7 @@ def test_dirty_reads_porcelain_status() -> None:
     fake = Fake((0, " M a.py\n", ""), (0, "", ""))
     assert git.dirty(WT, fake) is True
     assert git.dirty(WT, fake) is False
-    assert fake.argvs[0] == ["git", "status", "--porcelain"]
+    assert fake.argvs[0] == ["git", "status", "--porcelain", "--ignore-submodules=all"]
 
 
 def test_diff_with_and_without_paths() -> None:
@@ -187,3 +191,167 @@ def test_clone_root_outside_a_repository_names_the_rule() -> None:
     fake = Fake((128, "", "fatal: not a git repository (or any of the parent directories): .git\n"))
     with pytest.raises(Refusal, match="run deckhand from the clone or a story worktree"):
         git.clone_root(Path("/tmp/scratch"), fake)
+
+
+def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+
+    def recorded(argv, **kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "abc\n", "")
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    git.head(WT)
+    git.run(["sh", "-c", "true"], WT)
+    search = git.trusted_path()
+    assert seen == [
+        [
+            shutil.which("git", path=search),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+            "rev-parse",
+            "HEAD",
+        ],
+        [shutil.which("sh", path=search), "-c", "true"],
+    ]
+
+
+def test_a_call_without_a_directory_runs_in_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    where: list[Path | None] = []
+
+    def recorded(argv, **kwargs):
+        where.append(kwargs["cwd"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    git.run(["gh", "pr", "list", "--repo", "acme/widgets"])
+    git.run(["git", "status"], WT)
+    assert where == [Path.home(), WT]
+
+
+def plant_git(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    marker = directory / "planted-ran"
+    fake = directory / "git"
+    fake.write_text(f"#!/bin/sh\ntouch '{marker}'\necho planted\n")
+    fake.chmod(0o755)
+    return marker
+
+
+@pytest.fixture
+def real_path() -> str:
+    found = shutil.which("git")
+    assert found is not None
+    return os.environ["PATH"]
+
+
+def test_planted_git_in_temp_dir_never_runs(tmp_path: Path, real_path: str, monkeypatch: pytest.MonkeyPatch):
+    temp = tmp_path / "temp"
+    marker = plant_git(temp)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f"{temp}{os.pathsep}{real_path}")
+    done = git.run(["git", "--version"])
+    assert not marker.exists()
+    assert done.stdout.startswith("git version")
+
+
+@pytest.mark.parametrize("entry", ["", "."])
+def test_empty_or_dot_path_entry_ignored(tmp_path: Path, real_path: str, monkeypatch: pytest.MonkeyPatch, entry: str):
+    work = tmp_path / "work"
+    marker = plant_git(work)
+    elsewhere = tmp_path / "elsewhere-temp"
+    elsewhere.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(elsewhere))
+    monkeypatch.setenv("TMPDIR", str(elsewhere))
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PATH", f"{entry}{os.pathsep}{real_path}")
+    done = git.run(["git", "--version"], work)
+    assert not marker.exists()
+    assert done.stdout.startswith("git version")
+
+
+def test_child_gets_the_cleaned_path(tmp_path: Path, real_path: str, monkeypatch: pytest.MonkeyPatch):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f".{os.pathsep}relative/bin{os.pathsep}{temp}{os.pathsep}{real_path}")
+    printed = git.run(["sh", "-c", 'printf %s "$PATH"']).stdout
+    assert printed == git.trusted_path()
+    assert printed and not {".", "relative/bin", str(temp)} & set(printed.split(os.pathsep))
+
+
+def test_program_on_no_trusted_entry_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    temp = tmp_path / "temp"
+    plant_git(temp)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f".{os.pathsep}{temp}")
+    with pytest.raises(git.GitError, match="trusted PATH"):
+        git.run(["git", "--version"])
+
+
+def test_worktree_detached_adds_a_headless_worktree_once(tmp_path: Path) -> None:
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    for argv in (
+        ["git", "init", "-q", "-b", "main"],
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"],
+    ):
+        subprocess.run(argv, cwd=clone, check=True)
+    first = git.worktree_detached(clone, "spike-abc", "main")
+    second = git.worktree_detached(clone, "spike-abc", "main")
+    assert first == second == clone / ".worktrees" / "spike-abc"
+    listing = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"], cwd=clone, capture_output=True, text=True
+    ).stdout
+    assert listing.count("worktree ") == 2
+    assert "detached" in listing
+
+
+def test_worktree_detached_never_makes_a_branch() -> None:
+    fake = Fake((0, "", ""))
+    git.worktree_detached(Path("/nowhere"), "spike-abc", "origin/HEAD", fake)
+    assert fake.argvs == [["git", "worktree", "add", "--detach", "/nowhere/.worktrees/spike-abc", "origin/HEAD"]]
+
+
+def test_two_commits_in_one_worktree_take_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clone = repo_with_story(tmp_path, monkeypatch)
+    worktree = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "story", str(worktree)], cwd=clone, check=True)
+    parked, release, entered = threading.Event(), threading.Event(), threading.Event()
+    calls: list[tuple[str, list[str]]] = []
+    failures: list[BaseException] = []
+
+    def runner(argv, cwd=None, stdin=None):
+        name = threading.current_thread().name
+        calls.append((name, argv[:2]))
+        if name == "A" and argv[:2] == ["git", "add"]:
+            parked.set()
+            release.wait(5)
+        if name == "B" and argv[:2] == ["git", "ls-tree"]:
+            entered.set()
+        return git.run(argv, cwd, stdin)
+
+    def commit(message: str) -> None:
+        try:
+            git.commit_all(worktree, message, runner)
+        except BaseException as problem:
+            failures.append(problem)
+
+    (worktree / "one.txt").write_text("1\n")
+    first = threading.Thread(target=commit, args=("feat: one\n",), name="A")
+    first.start()
+    assert parked.wait(5)
+    (worktree / "two.txt").write_text("2\n")
+    second = threading.Thread(target=commit, args=("feat: two\n",), name="B")
+    second.start()
+    assert not entered.wait(0.5)
+    assert [argv for name, argv in calls if name == "B"] == [["git", "rev-parse"]]
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert failures == []
+    assert calls.index(("A", ["git", "commit"])) < calls.index(("B", ["git", "ls-tree"]))
+    log = subprocess.run(["git", "log", "--format=%s"], cwd=worktree, check=True, capture_output=True, text=True)
+    assert log.stdout.split("\n")[:3] == ["feat: two", "feat: one", "base"]

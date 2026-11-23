@@ -1,27 +1,82 @@
 from __future__ import annotations
 
+import fcntl
+import os
 import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
-from deckhand.step import Refusal
+from deckhand import config
+from deckhand.step import Refusal, hand_role
 
 TIMEOUT = 120
 TAIL_LINES = 5
 TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
 
+UNHOOKED = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+# Without it, status and worktree diffs run git inside a nested repository a hand configured.
+UNNESTED = "--ignore-submodules=all"
+GITLINK = "160000"
+NESTED = "a commit takes no nested repository: {}; remove it or list it in .gitignore"
+
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
+
+
+UNTRUSTED = (
+    "{} is on no trusted PATH directory; deckhand skips empty, relative, temp, state, clone and worktree entries"
+)
+
+
+# A directory a hand can write must never supply a program deckhand runs outside the sandbox.
+def _untrusted_roots(extra: Iterable[Path] = ()) -> list[Path]:
+    from deckhand import answers
+
+    roots = [Path(tempfile.gettempdir()), Path("/tmp"), answers.state_dir()]
+    if os.environ.get("TMPDIR"):
+        roots.append(Path(os.environ["TMPDIR"]))
+    roots += [*config.local().clones.values(), *extra]
+    return [root.expanduser().resolve() for root in roots]
+
+
+def _trusted(directory: Path, untrusted: list[Path]) -> bool:
+    resolved = directory.resolve()
+    return not any(resolved.is_relative_to(root) for root in untrusted)
+
+
+def trusted_path(extra: Iterable[Path] = ()) -> str:
+    untrusted = _untrusted_roots(extra)
+    kept: list[str] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if os.path.isabs(entry) and entry not in kept and _trusted(Path(entry), untrusted):
+            kept.append(entry)
+    return os.pathsep.join(kept)
+
+
+def _program(name: str, search: str) -> str:
+    if os.path.isabs(name):
+        found = name if _trusted(Path(name).parent, _untrusted_roots()) else None
+    else:
+        found = shutil.which(name, path=search) if search and os.sep not in name else None
+    if found is None:
+        raise GitError(name, -1, UNTRUSTED.format(name))
+    return found
 
 
 def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     command = " ".join(argv[:2])
+    search = trusted_path()
+    program = _program(argv[0], search)
+    full = [program, *UNHOOKED, *argv[1:]] if argv[0] == "git" else [program, *argv[1:]]
     try:
         return subprocess.run(
-            argv,
-            cwd=cwd,
+            full,
+            env={**os.environ, "PATH": search},
+            # Without a directory, gh and claude would run git in a repository a hand may have planted.
+            cwd=cwd or Path.home(),
             input=stdin,
             capture_output=True,
             text=True,
@@ -56,6 +111,20 @@ def call(argv: list[str], cwd: Path | None, runner: Runner, stdin: str | None = 
     return done.stdout
 
 
+def working_directory(runner: Runner = run) -> Path:
+    cwd = Path.cwd()
+    if not hand_role():
+        return cwd
+    for clone in config.local().clones.values():
+        listing = runner(["git", "worktree", "list", "--porcelain"], clone, None)
+        listed = [
+            Path(line[len("worktree ") :]) for line in listing.stdout.splitlines() if line.startswith("worktree ")
+        ]
+        if listing.returncode == 0 and any(path.is_dir() and path.samefile(cwd) for path in listed):
+            return cwd
+    raise Refusal(f"a hand runs deckhand only from its story worktree, not {cwd}")
+
+
 def worktree_path(clone: Path, branch: str) -> Path:
     return clone / ".worktrees" / branch
 
@@ -72,6 +141,13 @@ def worktree_add(clone: Path, branch: str, base: str, runner: Runner = run) -> P
     return path
 
 
+def worktree_detached(clone: Path, name: str, base: str, runner: Runner = run) -> Path:
+    path = worktree_path(clone, name)
+    if not path.exists():
+        call(["git", "worktree", "add", "--detach", str(path), base], clone, runner)
+    return path
+
+
 def clone_root(cwd: Path, runner: Runner = run) -> Path:
     try:
         common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()
@@ -85,7 +161,7 @@ def head(worktree: Path, runner: Runner = run) -> str:
 
 
 def dirty(worktree: Path, runner: Runner = run) -> bool:
-    return bool(call(["git", "status", "--porcelain"], worktree, runner).strip())
+    return bool(call(["git", "status", "--porcelain", UNNESTED], worktree, runner).strip())
 
 
 def diff(worktree: Path, base: str, paths: list[str] | None = None, runner: Runner = run) -> str:
@@ -114,6 +190,97 @@ def merge_base(repo: Path, a: str, b: str, runner: Runner = run) -> str:
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str, runner: Runner = run) -> bool:
     return runner(["git", "merge-base", "--is-ancestor", ancestor, descendant], repo, None).returncode == 0
+
+
+def unmerged(worktree: Path, runner: Runner = run) -> list[str]:
+    return call(["git", "diff", "--name-only", "--diff-filter=U", UNNESTED], worktree, runner).splitlines()
+
+
+def merging(worktree: Path, runner: Runner = run) -> bool:
+    return runner(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], worktree, None).returncode == 0
+
+
+def commit_all(worktree: Path, message: str, runner: Runner = run) -> None:
+    # A second commit must never stage onto a gitlink the first has staged and not yet removed.
+    with _locked(worktree, runner):
+        _refuse_strays(worktree, runner)
+        try:
+            _stage(worktree, runner)
+        finally:
+            _refuse_strays(worktree, runner)
+        call(["git", "commit", "-F", "-"], worktree, runner, stdin=message)
+
+
+def _stage(worktree: Path, runner: Runner) -> None:
+    argv = ["git", "status", "--porcelain=v2", "-z", "--no-renames", "--untracked-files=all", UNNESTED]
+    paths, nested = [], []
+    for record in call(argv, worktree, runner).split("\0"):
+        if record.startswith("1 "):
+            paths.append(record.split(" ", 8)[8])
+        elif record.startswith("u "):
+            paths.append(record.split(" ", 10)[10])
+        elif record.startswith("? "):
+            (nested if record.endswith("/") else paths).append(record[2:].rstrip("/"))
+    if nested:
+        raise Refusal(NESTED.format(", ".join(nested)))
+    links = {path for path, meta in _entries(["ls-files", "-s"], worktree, runner) if meta.startswith(GITLINK)}
+    # A pathspec that reaches an index gitlink makes git add run status inside that repository.
+    chosen = [path for path in paths if not any(_overlaps(path, link) for link in links)]
+    if chosen:
+        pathspecs = "".join(f":(literal){path}\0" for path in chosen)
+        call(["git", "add", "--pathspec-from-file=-", "--pathspec-file-nul"], worktree, runner, stdin=pathspecs)
+
+
+def _overlaps(path: str, link: str) -> bool:
+    return path == link or path.startswith(f"{link}/") or link.startswith(f"{path}/")
+
+
+def _refuse_strays(worktree: Path, runner: Runner) -> None:
+    head = dict(_entries(["ls-tree", "-r", "HEAD"], worktree, runner))
+    known = {(path, meta.split()[2]) for path, meta in head.items() if meta.startswith(GITLINK)}
+    if merging(worktree, runner):
+        merged = _entries(["ls-tree", "-r", "MERGE_HEAD"], worktree, runner)
+        known |= {(path, meta.split()[2]) for path, meta in merged if meta.startswith(GITLINK)}
+    strays = {}
+    for path, meta in _entries(["ls-files", "-s"], worktree, runner):
+        mode, sha, stage = meta.split()
+        if mode == GITLINK and stage == "0" and (path, sha) not in known:
+            strays[path] = sha
+    if not strays:
+        return
+    lines = []
+    for path, sha in sorted(strays.items()):
+        lines.append(f"0 {'0' * len(sha)}\t{path}")
+        if path in head:
+            mode, _, blob = head[path].split()
+            lines.append(f"{mode} {blob} 0\t{path}")
+    call(["git", "update-index", "-z", "--index-info"], worktree, runner, stdin="".join(f"{line}\0" for line in lines))
+    raise Refusal(NESTED.format(", ".join(sorted(strays))))
+
+
+def _entries(argv: list[str], worktree: Path, runner: Runner) -> list[tuple[str, str]]:
+    records = call(["git", argv[0], "-z", *argv[1:]], worktree, runner).split("\0")
+    return [(path, meta) for meta, _, path in (record.partition("\t") for record in records) if path]
+
+
+# Commits alone take it: a merge stages no hand pathspec, and git's index.lock already guards it.
+@contextmanager
+def _locked(worktree: Path, runner: Runner) -> Iterator[None]:
+    gitdir = Path(call(["git", "rev-parse", "--path-format=absolute", "--git-dir"], worktree, runner).strip())
+    with (gitdir / "deckhand-commit.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def merge_from(worktree: Path, base: str, runner: Runner = run) -> list[str]:
+    call(["git", "fetch", "--no-recurse-submodules", "origin"], worktree, runner)
+    done = runner(["git", "merge", "--no-edit", base], worktree, None)
+    if done.returncode == 0:
+        return []
+    conflicts = unmerged(worktree, runner)
+    if not conflicts:
+        raise GitError("git merge", done.returncode, stderr_tail(done.stderr))
+    return conflicts
 
 
 def push(worktree: Path, branch: str, runner: Runner = run) -> None:

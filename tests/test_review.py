@@ -62,11 +62,12 @@ def test_revision_after_a_clean_round_is_scoped():
     assert review.next_round(rounds, "h2", set()) == RoundPlan(2, scoped=True, base_hash="h1")
 
 
-def test_revision_after_a_clean_third_round_goes_to_the_person():
+def test_revision_after_a_clean_third_round_passes_at_the_cap():
     rounds = [done(1, "h1", raw(severity="P1")), done(2, "h2", raw(severity="P1")), done(3, "h3")]
     assert review.next_round(rounds, "h3", set()) == Stop("clean")
-    assert review.next_round(rounds, "h4", set()) == Stop("cap")
-    assert review.at_cap(rounds, set(), "h4") and not review.at_cap(rounds, set(), "h3")
+    assert review.next_round(rounds, "h4", set()) == Stop("cap-clear")
+    assert not review.at_cap(rounds, set()) and not review.at_cap(rounds, set())
+    assert review.cleared(rounds, "s1", "plan", "h4")
 
 
 def test_declined_p1_is_not_accepted():
@@ -76,6 +77,22 @@ def test_declined_p1_is_not_accepted():
     assert review.next_round(rounds, "h1", declined) == Stop("clean")
     assert review.next_round(rounds, "h1", {"other"}) == Stop("unchanged")
     assert review.next_round(rounds, "h2", declined) == RoundPlan(2, scoped=True, base_hash="h1")
+
+
+def test_cap_with_only_p2_and_p3_passes_on_its_own_while_the_target_moves():
+    rounds = [done(n, f"h{n}", raw(severity="P2", summary=f"Gap {n}."), raw(severity="P3")) for n in (1, 2, 3)]
+    assert review.next_round(rounds, "h4", set()) == Stop("cap-clear")
+    assert not review.at_cap(rounds, set())
+    assert review.cleared(rounds, "s1", "plan", "h4")
+
+
+def test_cap_with_an_open_p1_waits_for_the_person():
+    p1 = raw(severity="P1")
+    rounds = [done(n, f"h{n}", p1) for n in (1, 2, 3)]
+    assert review.next_round(rounds, "h4", set()) == Stop("cap")
+    assert review.at_cap(rounds, set())
+    assert not review.cleared(rounds, "s1", "plan", "h4")
+    assert review.next_round(rounds, "h4", {id_of(p1)}) == Stop("cap-clear")
 
 
 def test_cap_after_three():
@@ -170,8 +187,8 @@ def test_a_carried_round_keeps_the_findings_at_the_new_head_and_never_counts_to_
     assert carried.data["findings"] == rounds[-1].data["findings"]
     assert (carried.data["head"], carried.data["carry"]) == ("c4", True)
     rounds.append(carried)
-    assert review.at_cap(rounds, set(), "c4")
-    assert not review.at_cap(rounds, {id_of(p1, "branch")}, "c4")
+    assert review.at_cap(rounds, set())
+    assert not review.at_cap(rounds, {id_of(p1, "branch")})
     early = [done(1, "h1", p1, stage="branch", head="c1")]
     early.append(review.carry_record("s1", "branch", RoundPlan(2, True, "h1", carry=True), early[0], "c2"))
     early.append(done(3, "h3", p1, stage="branch", head="c3"))

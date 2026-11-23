@@ -2,12 +2,12 @@
 name: document
 description: "Capture what an implementation taught that the code cannot say into the project's docs/claude/ topic files, or pass audit to fix what the stale report lists instead."
 arguments: mode topic
-allowed-tools: Bash("${CLAUDE_PLUGIN_ROOT}/bin/deckhand" *) Read Write Edit Grep Glob Bash(git diff *) Bash(git log *)
+allowed-tools: Bash(deckhand *) Read Write Edit Grep Glob Bash(git diff *) Bash(git log *)
 ---
 
 # Document $mode $topic
 
-!`"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" document context`
+!`deckhand document context`
 
 Read `${CLAUDE_SKILL_DIR}/reference.md` for the file types and shape.
 

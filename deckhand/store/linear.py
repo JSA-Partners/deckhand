@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
 from deckhand.linear.workspace import GROUP
-from deckhand.records import Record
+from deckhand.records import Record, iso
 from deckhand.ref import Ref
 from deckhand.step import Refusal
 from deckhand.store import Store
 
 RECORD_URL = "https://deckhand.invalid/record/"
+
+
+def _now() -> str:
+    return iso(time.time_ns() // 1_000_000)
 
 
 def _missing(error: LinearError) -> bool:
@@ -36,9 +43,26 @@ def _project(node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _assignee(node: dict[str, Any]) -> dict[str, Any]:
+    owner = node["assignee"]
+    return {"assignee": owner["id"] if owner else None, "assignee_name": owner["name"] if owner else None}
+
+
 class LinearStore(Store):
-    def __init__(self, client: LinearClient) -> None:
+    def __init__(self, client: LinearClient, now: Callable[[], str] = _now) -> None:
         self._client = client
+        self._now = now
+
+    def _paged(self, query: str, variables: dict[str, Any], path: tuple[str, str]) -> list[dict[str, Any]]:
+        entity, connection = path
+        nodes: list[dict[str, Any]] = []
+        after = None
+        while True:
+            page = self._client.query(query, {**variables, "after": after})[entity][connection]
+            nodes += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                return nodes
+            after = page["pageInfo"]["endCursor"]
 
     def _team_id(self, key: str) -> str:
         nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
@@ -120,6 +144,7 @@ class LinearStore(Store):
             "description": node["description"],
             "project": node["project"]["id"] if node["project"] else None,
             "labels": [label["name"] for label in _nodes(node["labels"], id, "labels")],
+            **_assignee(node),
         }
 
     def issue_by_ref(self, ref: Ref) -> dict | None:
@@ -176,23 +201,23 @@ class LinearStore(Store):
             "issueId": self._uuid(issue),
             "url": f"{RECORD_URL}{record.kind}/{record.subject}",
             "title": f"deckhand {record.kind}",
-            "metadata": {"record": record.to_json()},
+            "metadata": {"record": record.to_json(), "written": self._now()},
         }
         self._client.query(queries.ATTACHMENT_CREATE, {"input": attachment})
 
     def records(self, issue: str) -> list[Record]:
         try:
-            data = self._client.query(queries.ISSUE_ATTACHMENTS, {"id": issue})
+            attachments = self._paged(queries.ISSUE_ATTACHMENTS, {"id": issue}, ("issue", "attachments"))
         except LinearError as error:
             if _missing(error):
                 return []
             raise
-        attachments = _nodes(data["issue"]["attachments"], issue, "attachments")
         held = [n for n in attachments if n["url"].startswith(RECORD_URL)]
         found = []
         for node in sorted(held, key=lambda n: n["url"]):
             try:
-                found.append(Record.from_json(node["metadata"]["record"]))
+                meta = node["metadata"]
+                found.append(replace(Record.from_json(meta["record"]), at=meta.get("written", node["updatedAt"])))
             except (KeyError, TypeError, ValueError) as error:
                 raise Refusal(f"{issue} holds a malformed record at {node['url']}: {error}") from None
         return found
@@ -249,7 +274,7 @@ class LinearStore(Store):
 
     def project_issues(self, project: str) -> list[dict]:
         try:
-            node = self._client.query(queries.PROJECT_ISSUES, {"id": project})["project"]
+            nodes = self._paged(queries.PROJECT_ISSUES, {"id": project}, ("project", "issues"))
         except LinearError as error:
             if _missing(error):
                 return []
@@ -265,7 +290,25 @@ class LinearStore(Store):
                 "description": n["description"],
                 "project": project,
                 "labels": [label["name"] for label in _nodes(n["labels"], n["id"], "labels")],
+                **_assignee(n),
                 "state": n["state"]["name"],
+                "completed_at": n["completedAt"],
             }
-            for n in _nodes(node["issues"], project, "issues")
+            for n in nodes
         ]
+
+    def project_documents(self, project: str) -> list[dict]:
+        try:
+            nodes = self._paged(queries.PROJECT_DOCUMENTS, {"id": project}, ("project", "documents"))
+        except LinearError as error:
+            if _missing(error):
+                return []
+            raise
+        return [{"id": n["id"], "title": n["title"], "url": n["url"], "at": n["updatedAt"]} for n in nodes]
+
+    def assign(self, issue: str, user: str) -> None:
+        self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": {"assigneeId": user}})
+
+    def viewer(self) -> dict:
+        node = self._client.query(queries.VIEWER, {})["viewer"]
+        return {"id": node["id"], "name": node["name"]}

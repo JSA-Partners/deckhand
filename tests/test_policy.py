@@ -152,3 +152,28 @@ def test_extra_lenses_refuses_a_path_for_a_name(tmp_path, name):
 
     assert str(path) in refused.value.rule
     assert name in refused.value.rule
+
+
+def test_second_signoff_off_by_default(tmp_path):
+    path = write_policy(tmp_path, 'repository_label = "acme/widgets"\n')
+    assert Policy.load(tmp_path).second_signoff is False
+    path.write_text('repository_label = "acme/widgets"\nsecond_signoff = true\n', encoding="utf-8")
+    assert Policy.load(tmp_path).second_signoff is True
+    path.write_text('repository_label = "acme/widgets"\nsecond_signoff = "yes"\n', encoding="utf-8")
+    with pytest.raises(Refusal, match="second_signoff must be true or false"):
+        Policy.load(tmp_path)
+
+
+def test_policy_sandbox_domains(tmp_path):
+    path = write_policy(tmp_path, 'repository_label = "acme/widgets"\n')
+    assert Policy.load(tmp_path).sandbox_domains == []
+    path.write_text('repository_label = "acme/widgets"\n\n[sandbox]\ndomains = ["github.com", "*.npmjs.org"]\n')
+    assert Policy.load(tmp_path).sandbox_domains == ["github.com", "*.npmjs.org"]
+    for bad, rule in (
+        ('[sandbox]\ndomains = "github.com"\n', "sandbox.domains must be a list of strings"),
+        ('[sandbox]\nhosts = ["github.com"]\n', "unknown key sandbox.hosts"),
+        ('sandbox = ["github.com"]\n', "sandbox must be a table"),
+    ):
+        path.write_text(f'repository_label = "acme/widgets"\n{bad}')
+        with pytest.raises(Refusal, match=rule):
+            Policy.load(tmp_path)

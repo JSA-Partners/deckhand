@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from deckhand.step import Refusal
-from deckhand.steps.checks import Checks
+from deckhand.steps.checks import Checks, run_command
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
@@ -57,7 +59,9 @@ def test_failing_check_is_recorded_then_refused_and_stops(tmp_path: Path, repo: 
     configured(repo, "make lint", "make types")
     output = "\n".join(f"line {n}" for n in range(30)) + "\ntoken ghp_abc123secret\n"
     commands = Commands(failing="make lint", output=output)
-    with pytest.raises(Refusal, match="make lint failed"):
+    with pytest.raises(
+        Refusal, match=r"make lint failed at \S+; the failure is recorded\. Fix it and run checks again"
+    ):
         run(store, repo, commands)
     assert [c for c, _ in commands.ran] == ["make lint"]
     data = held(store).data
@@ -133,3 +137,32 @@ def test_dirty_worktree_refuses_and_records_nothing(tmp_path: Path, repo: Path):
     with pytest.raises(Refusal, match="uncommitted"):
         Checks(store, Shell(dirty=True), repo, commands).apply(["s1", *TEAM])
     assert commands.ran == [] and store.writes == before
+
+
+def test_check_commands_run_on_the_trusted_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    (temp / "git").write_text("#!/bin/sh\necho planted\n")
+    (temp / "git").chmod(0o755)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    monkeypatch.setenv("PATH", f"{temp}{os.pathsep}{os.environ['PATH']}")
+    done = run_command("git --version", tmp_path)
+    assert done.stdout.startswith("git version")
+
+
+def test_a_failing_check_at_the_signed_head_voids_the_sign_off(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand import signoff
+    from tests.test_step_signoff import ready, sign, voids
+
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    assert signoff.current(store.records("s1"), "s1", "c2")
+    configured(repo, "make test")
+    with pytest.raises(Refusal, match="make test failed"):
+        run(store, repo, Commands(failing="make test"))
+    [void] = voids(store)
+    assert void.data["reason"] == "checks failed: make test"
+    run(store, repo, Commands())
+    assert not signoff.current(store.records("s1"), "s1", "c2")

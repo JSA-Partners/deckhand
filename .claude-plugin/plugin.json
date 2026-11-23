@@ -1,7 +1,7 @@
 {
   "name": "deckhand",
   "version": "5.1.2",
-  "description": "A story process for Claude Code: from feature request to merged pull request, kept in GitHub issues.",
+  "description": "A feature process for Claude Code: you plan and review, background sessions build, kept in Linear.",
   "author": {
     "name": "JSA+Partners",
     "url": "https://jsapartners.co"
@@ -10,8 +10,8 @@
   "repository": "https://github.com/JSA-Partners/deckhand",
   "license": "MIT",
   "keywords": [
-    "github-issues",
-    "github-projects",
+    "linear",
+    "feature",
     "story",
     "review",
     "user-stories",

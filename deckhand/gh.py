@@ -57,6 +57,10 @@ def mark_ready(number: int, repo: str, runner: Runner = run) -> None:
     gh(["pr", "ready", str(number), "--repo", repo], runner)
 
 
+def mark_draft(number: int, repo: str, runner: Runner = run) -> None:
+    gh(["pr", "ready", str(number), "--repo", repo, "--undo"], runner)
+
+
 def checks(number: int, repo: str, runner: Runner = run) -> Checks:
     argv = ["gh", "pr", "checks", str(number), "--repo", repo, "--required", "--json", "name,bucket"]
     try:

@@ -53,6 +53,7 @@ ISSUE_NODE = {
     "description": "body",
     "team": {"key": "ACME"},
     "project": {"id": "proj-1"},
+    "assignee": {"id": "user-1", "name": "Ada"},
     "labels": {"nodes": [{"id": "l1", "name": "deckhand"}], "pageInfo": {"hasNextPage": False}},
 }
 
@@ -136,6 +137,8 @@ def test_issue_maps_the_node() -> None:
         "description": "body",
         "project": "proj-1",
         "labels": ["deckhand"],
+        "assignee": "user-1",
+        "assignee_name": "Ada",
     }
     assert client.calls == [("Issue", {"id": UUID})]
 
@@ -263,7 +266,7 @@ def test_document_not_found_is_none() -> None:
 
 def test_put_record_uses_fixed_url_per_kind_and_subject() -> None:
     client = FakeClient(AttachmentCreate={"attachmentCreate": {"success": True, "attachment": {"id": "a"}}})
-    store = LinearStore(client)
+    store = LinearStore(client, now=lambda: "2026-11-19T10:00:00.000Z")
     first = record()
     store.put_record(UUID, first)
     store.put_record(UUID, Record("approval", "plan", "v2", "captain", {"ok": False}))
@@ -276,7 +279,7 @@ def test_put_record_uses_fixed_url_per_kind_and_subject() -> None:
                 "issueId": UUID,
                 "url": "https://deckhand.invalid/record/approval/plan",
                 "title": "deckhand approval",
-                "metadata": {"record": first.to_json()},
+                "metadata": {"record": first.to_json(), "written": "2026-11-19T10:00:00.000Z"},
             }
         },
     )
@@ -292,7 +295,7 @@ def test_put_record_distinct_subjects_use_distinct_urls() -> None:
 
 def attachment(rec: Record) -> dict:
     url = f"https://deckhand.invalid/record/{rec.kind}/{rec.subject}"
-    return {"url": url, "metadata": {"record": rec.to_json()}}
+    return {"url": url, "metadata": {"record": rec.to_json()}, "updatedAt": "2026-11-19T10:00:00.000Z"}
 
 
 def test_records_decodes_only_deckhand_urls_sorted_by_url() -> None:
@@ -303,7 +306,44 @@ def test_records_decodes_only_deckhand_urls_sorted_by_url() -> None:
     ]
     client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": nodes, "pageInfo": DONE}}})
     assert LinearStore(client).records(UUID) == [record("plan"), record("review")]
-    assert client.calls == [("IssueAttachments", {"id": UUID})]
+    assert client.calls == [("IssueAttachments", {"id": UUID, "after": None})]
+
+
+def test_records_read_across_pages() -> None:
+    first = [attachment(record(f"s{n:03d}")) for n in range(250)]
+    second = [attachment(record("s250"))]
+    client = FakeClient(
+        IssueAttachments=[
+            {"issue": {"attachments": {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}}},
+            {"issue": {"attachments": {"nodes": second, "pageInfo": DONE}}},
+        ]
+    )
+    found = LinearStore(client).records(UUID)
+    assert [r.subject for r in found] == [f"s{n:03d}" for n in range(251)]
+    assert client.calls == [
+        ("IssueAttachments", {"id": UUID, "after": None}),
+        ("IssueAttachments", {"id": UUID, "after": "c1"}),
+    ]
+
+
+def test_records_carry_the_attachment_time() -> None:
+    node = {**attachment(record("plan")), "updatedAt": "2026-11-19T10:00:00.123Z"}
+    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [node], "pageInfo": DONE}}})
+    assert LinearStore(client).records(UUID)[0].at == "2026-11-19T10:00:00.123Z"
+
+
+def test_records_carry_the_write_time_over_the_attachment_time() -> None:
+    node = {**attachment(record("plan")), "updatedAt": "2026-11-19T10:00:00.000Z"}
+    node["metadata"]["written"] = "2026-11-19T12:30:00.000Z"
+    client = FakeClient(IssueAttachments={"issue": {"attachments": {"nodes": [node], "pageInfo": DONE}}})
+    assert LinearStore(client).records(UUID)[0].at == "2026-11-19T12:30:00.000Z"
+
+
+def test_put_record_stamps_the_local_clock_by_default() -> None:
+    client = FakeClient(AttachmentCreate={"attachmentCreate": {"success": True, "attachment": {"id": "a"}}})
+    LinearStore(client).put_record(UUID, record())
+    written = client.calls[0][1]["input"]["metadata"]["written"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", written)
 
 
 def test_records_refuses_a_malformed_record_naming_issue_and_url() -> None:
@@ -373,7 +413,6 @@ def relations_node(relations: dict = DONE, inverse: dict = DONE) -> dict:
     ("name", "response", "read"),
     [
         ("Issue", {"issue": {**ISSUE_NODE, "labels": {"nodes": [], "pageInfo": MORE}}}, "issue"),
-        ("IssueAttachments", {"issue": {"attachments": {"nodes": [], "pageInfo": MORE}}}, "records"),
         ("IssueRelations", {"issue": relations_node(relations=MORE)}, "relations"),
         ("IssueRelations", {"issue": relations_node(inverse=MORE)}, "relations"),
     ],
@@ -441,7 +480,7 @@ def test_issue_reads_ask_linear_for_a_full_page() -> None:
     store.records(UUID)
     store.relations(UUID)
     for document in client.documents:
-        assert f"(first: {queries.PAGE_SIZE})" in document
+        assert f"(first: {queries.PAGE_SIZE}" in document
     assert client.documents[2].count(f"(first: {queries.PAGE_SIZE})") == 2
 
 
@@ -589,6 +628,8 @@ def test_project_issues_maps_nodes_with_state() -> None:
         "description": "body",
         "team": {"key": "ACME"},
         "state": {"name": "Done"},
+        "completedAt": "2026-11-20T09:30:00.000Z",
+        "assignee": {"id": "user-1", "name": "Ada"},
         "labels": {"nodes": [{"name": "deckhand"}], "pageInfo": DONE},
     }
     client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [node], "pageInfo": DONE}}})
@@ -603,17 +644,46 @@ def test_project_issues_maps_nodes_with_state() -> None:
             "description": "body",
             "project": "proj-1",
             "labels": ["deckhand"],
+            "assignee": "user-1",
+            "assignee_name": "Ada",
             "state": "Done",
+            "completed_at": "2026-11-20T09:30:00.000Z",
         }
     ]
-    assert client.calls == [("ProjectIssues", {"id": "proj-1"})]
+    assert client.calls == [("ProjectIssues", {"id": "proj-1", "after": None})]
     assert f"(first: {queries.PAGE_SIZE})" in client.documents[0]
+    assert "completedAt" in client.documents[0]
 
 
-def test_project_issues_overflow_refuses() -> None:
-    client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [], "pageInfo": MORE}}})
-    with pytest.raises(Refusal, match=rf"proj-1.*more than {queries.PAGE_SIZE}"):
-        LinearStore(client).project_issues("proj-1")
+def issue_node(number: int, assignee: dict | None = None) -> dict:
+    return {
+        "id": f"id-{number}",
+        "identifier": f"ACME-{number}",
+        "number": number,
+        "branchName": f"acme-{number}-t",
+        "title": "T",
+        "description": "",
+        "team": {"key": "ACME"},
+        "state": {"name": "Done"},
+        "completedAt": None,
+        "assignee": assignee,
+        "labels": {"nodes": [], "pageInfo": DONE},
+    }
+
+
+def test_project_issues_read_across_pages() -> None:
+    client = FakeClient(
+        ProjectIssues=[
+            {"project": {"issues": {"nodes": [issue_node(1)], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}}},
+            {"project": {"issues": {"nodes": [issue_node(2)], "pageInfo": DONE}}},
+        ]
+    )
+    found = LinearStore(client).project_issues("proj-1")
+    assert [i["number"] for i in found] == [1, 2]
+    assert found[0]["assignee"] is None
+    assert found[0]["assignee_name"] is None
+    assert found[0]["completed_at"] is None
+    assert client.calls[1] == ("ProjectIssues", {"id": "proj-1", "after": "c1"})
 
 
 def test_project_issues_label_overflow_refuses() -> None:
@@ -626,6 +696,8 @@ def test_project_issues_label_overflow_refuses() -> None:
         "description": "",
         "team": {"key": "ACME"},
         "state": {"name": "Done"},
+        "completedAt": None,
+        "assignee": None,
         "labels": {"nodes": [], "pageInfo": MORE},
     }
     client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [node], "pageInfo": DONE}}})
@@ -655,3 +727,77 @@ def test_repository_labels_lists_the_children_of_the_group() -> None:
         TeamLabels={"team": {"labels": {"nodes": nodes, "pageInfo": DONE}}},
     )
     assert LinearStore(client).repository_labels("ACME") == ["widgets"]
+
+
+def test_issue_carries_the_assignee() -> None:
+    client = FakeClient(Issue={"issue": ISSUE_NODE})
+    found = LinearStore(client).issue(UUID)
+    assert found["assignee"] == "user-1"
+    assert found["assignee_name"] == "Ada"
+
+
+def test_an_unassigned_issue_has_no_assignee() -> None:
+    client = FakeClient(Issue={"issue": {**ISSUE_NODE, "assignee": None}})
+    found = LinearStore(client).issue(UUID)
+    assert found["assignee"] is None
+    assert found["assignee_name"] is None
+
+
+def test_assign_round_trip() -> None:
+    client = FakeClient(IssueUpdate={"issueUpdate": {"success": True}}, Issue={"issue": ISSUE_NODE})
+    store = LinearStore(client)
+    store.assign("ACME-5", "user-1")
+    assert client.calls[-1] == ("IssueUpdate", {"id": UUID, "input": {"assigneeId": "user-1"}})
+    assert store.issue(UUID)["assignee"] == "user-1"
+
+
+def test_viewer() -> None:
+    client = FakeClient(Viewer={"viewer": {"id": "user-1", "name": "Ada"}})
+    assert LinearStore(client).viewer() == {"id": "user-1", "name": "Ada"}
+
+
+def test_project_documents_listed_across_pages() -> None:
+    client = FakeClient(
+        ProjectDocuments=[
+            {
+                "project": {
+                    "documents": {
+                        "nodes": [
+                            {
+                                "id": "d1",
+                                "title": "One",
+                                "url": "https://linear.app/d1",
+                                "updatedAt": "2026-11-19T10:00:00.000Z",
+                            }
+                        ],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                    }
+                }
+            },
+            {
+                "project": {
+                    "documents": {
+                        "nodes": [
+                            {
+                                "id": "d2",
+                                "title": "Two",
+                                "url": "https://linear.app/d2",
+                                "updatedAt": "2026-11-19T11:00:00.000Z",
+                            }
+                        ],
+                        "pageInfo": DONE,
+                    }
+                }
+            },
+        ]
+    )
+    assert LinearStore(client).project_documents("proj-1") == [
+        {"id": "d1", "title": "One", "url": "https://linear.app/d1", "at": "2026-11-19T10:00:00.000Z"},
+        {"id": "d2", "title": "Two", "url": "https://linear.app/d2", "at": "2026-11-19T11:00:00.000Z"},
+    ]
+    assert client.calls[1] == ("ProjectDocuments", {"id": "proj-1", "after": "c1"})
+
+
+def test_project_documents_of_a_missing_project_is_empty() -> None:
+    client = FakeClient(ProjectDocuments=LinearError("INPUT_ERROR", "Entity not found: Project"))
+    assert LinearStore(client).project_documents("proj-1") == []

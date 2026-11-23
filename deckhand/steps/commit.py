@@ -5,7 +5,7 @@ import re
 import shlex
 from pathlib import Path
 
-from deckhand import git
+from deckhand import git, inputs
 from deckhand.step import Refusal, register
 
 USAGE = "commit context prints the staged diff, recent history and the convention; git writes the commit"
@@ -57,14 +57,15 @@ def _rules(text: str) -> list[str]:
 def commitlint(cwd: Path) -> list[str]:
     for name in COMMITLINT_FILES:
         path = cwd / name
-        if path.is_file():
-            return [f"- commitlint: {name}", *_rules(path.read_text(encoding="utf-8", errors="replace"))]
-    package = cwd / "package.json"
-    if not package.is_file():
+        text = inputs.read_or_none(path) if path.is_file() else None
+        if text is not None:
+            return [f"- commitlint: {name}", *_rules(text)]
+    package = inputs.read_or_none(cwd / "package.json")
+    if package is None:
         return []
     try:
-        data = json.loads(package.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(package)
+    except ValueError:
         return []
     if isinstance(data, dict) and "commitlint" in data:
         return ["- commitlint: package.json", *_rules(json.dumps(data["commitlint"]))]
@@ -87,11 +88,8 @@ def grep_context(lines: list[str], keyword: str, before: int, after: int) -> lis
 
 
 def claude_md(cwd: Path) -> list[str]:
-    path = cwd / "CLAUDE.md"
-    if not path.is_file():
-        return []
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if "commit" not in text.lower():
+    text = inputs.read_or_none(cwd / "CLAUDE.md")
+    if text is None or "commit" not in text.lower():
         return []
     shown = grep_context(text.splitlines(), "commit", 1, 3)[:20]
     return ["- CLAUDE.md mentions commits:", *(f"  > {line}" for line in shown)]
@@ -125,20 +123,20 @@ def report(cwd: Path, runner: git.Runner = git.run) -> str:
     def out(*args: str) -> str:
         return git.call(["git", *args], cwd, runner)
 
-    staged = [line for line in out("diff", "--cached", "--name-only").splitlines() if line]
+    staged = [line for line in out("diff", "--cached", "--name-only", git.UNNESTED).splitlines() if line]
     if not staged:
-        status = out("status", "--porcelain")
+        status = out("status", "--porcelain", git.UNNESTED)
         lines = ["Nothing is staged.", "", "Unstaged or untracked:", *(f"- {s}" for s in status.splitlines() if s)]
         paths = porcelain_paths(status)
         if paths:
             lines += ["", "Stage: git add -- " + " ".join(shlex.quote(p) for p in paths), "", STAGE_RULE]
         return "\n".join(lines) + "\n"
-    diff = out("diff", "--cached")
+    diff = out("diff", "--cached", git.UNNESTED)
     marks = fence(diff)
     diff_lines = diff.split("\n")
     log = runner(["git", "log", "--oneline", "-15"], cwd, None)
     history = [line for line in log.stdout.splitlines() if line] if log.returncode == 0 else []
-    lines = ["## Staged", "", out("diff", "--cached", "--stat"), "", "## Diff", "", f"{marks}diff"]
+    lines = ["## Staged", "", out("diff", "--cached", "--stat", git.UNNESTED), "", "## Diff", "", f"{marks}diff"]
     lines += diff_lines[:DIFF_LIMIT]
     if len(diff_lines) > DIFF_LIMIT:
         lines.append(f"... (truncated at {DIFF_LIMIT} lines; use git diff --cached for the rest)")
@@ -159,7 +157,7 @@ class Commit:
     def context(self, args: list[str]) -> None:
         if args:
             raise Refusal(f"commit context takes no arguments; {USAGE}")
-        print(report(self._cwd or Path.cwd(), self._runner), end="")
+        print(report(self._cwd or git.working_directory(self._runner), self._runner), end="")
 
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"commit has no apply; {USAGE}")

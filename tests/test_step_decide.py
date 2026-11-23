@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-from deckhand import answers, decisions, features, planning, versions
+from deckhand import answers, claims, decisions, features, planning, versions
+from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import content_hash
 from deckhand.step import Refusal
+from deckhand.steps import build
 from deckhand.steps.decide import Decide
 from deckhand.store.fake import FakeStore
 
@@ -34,6 +37,16 @@ def feature_store() -> FakeStore:
     feature = features.open_feature(store, "ACME")
     assert feature is not None
     planning.save_section(store, feature, "Contract", "POST /orders.", False)
+    return store
+
+
+def released(store: FakeStore) -> FakeStore:
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    beta = create_id("ACME:Beta", "feature")
+    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
+    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
+    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
     return store
 
 
@@ -75,6 +88,7 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
     for story in ("s1", "s2"):
         [record] = store.records(story)
         assert (record.kind, record.version, record.author) == ("contract", version, "person:sess")
+        assert record.data["by"] == "viewer-1"
     assert store.records("x1") == []
     assert not decisions.pending_path(nonce, state).exists()
 
@@ -137,3 +151,48 @@ def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, cap
     shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
     assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]
     assert all("s2" not in option["description"] for option in shown["options"])
+
+
+class Connected(Exception):
+    pass
+
+
+def roles_connected(monkeypatch: pytest.MonkeyPatch, *steps: ModuleType) -> list[str]:
+    roles: list[str] = []
+
+    def connect(credentials: object, role: str) -> None:
+        roles.append(role)
+        raise Connected
+
+    monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path: object()))
+    monkeypatch.setattr(claims, "connect", connect)
+    for step in steps:
+        monkeypatch.setattr(step, "connect", connect)
+    return roles
+
+
+def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
+    roles = roles_connected(monkeypatch, build)
+    with pytest.raises(Connected):
+        Decide().context(["contract", P1, *TEAM])
+    assert roles == ["person"]
+
+
+def test_a_question_from_a_released_story_is_decided(state: Path, capsys: pytest.CaptureFixture[str]):
+    from deckhand import asks
+
+    store = released(feature_store())
+    found = asks.parse_question(json.dumps({"question": "Drop it?", "options": ["Yes", "No"], "why": "Done."}))
+    store.put_record("s1", asks.question_record("s1", found))
+    capsys.readouterr()
+    Decide(store).context(["question", asks.question_id("Drop it?"), "--story", "ACME-1", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert [o["label"] for o in shown["tool_input"]["questions"][0]["options"]] == ["Yes", "No"]
+
+
+def test_a_hand_never_opens_a_decision(state: Path, monkeypatch: pytest.MonkeyPatch):
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    with pytest.raises(Refusal, match="a hand never decides"):
+        Decide(store).context(["contract", P1, *TEAM])
+    assert not (state / decisions.PENDING).exists()
