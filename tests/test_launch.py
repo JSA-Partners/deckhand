@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import launch
+from deckhand import git, launch
 from deckhand.config import LocalConfig
 from deckhand.policy import Policy
 from deckhand.step import Refusal
@@ -303,8 +303,8 @@ def test_sandbox_write_holding_a_path_dir_refuses(
     bin_dir.mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere-temp"
     elsewhere.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(elsewhere))
-    monkeypatch.setenv("TMPDIR", str(elsewhere))
+    # The test folder may sit under /tmp, which deckhand never trusts on PATH.
+    monkeypatch.setattr(git, "_untrusted_roots", lambda extra=(): [elsewhere.resolve()])
     monkeypatch.setenv("PATH", f"/usr/bin{os.pathsep}{bin_dir}")
     protected = launch.protected(tmp_path / "config", tmp_path / "state")
     policy = Policy(repository_label="widgets")
