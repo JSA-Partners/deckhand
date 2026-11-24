@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,6 +56,19 @@ def test_copy_pipes_the_start_command_to_pbcopy(capsys, monkeypatch: pytest.Monk
     Engine(runner).apply(["copy"])
     assert [argv for argv, _ in shell.calls] == [["pbcopy"]] and piped == [command()]
     assert capsys.readouterr().out == f"copied: {command()}\n"
+
+
+def test_by_default_the_engine_runs_each_command_in_its_own_session(capsys, monkeypatch: pytest.MonkeyPatch):
+    started = []
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: f"/usr/bin/{name}")
+
+    def recorded(argv, **kwargs):
+        started.append((argv, kwargs["start_new_session"]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+    Engine().apply(["copy"])
+    assert started == [(["/usr/bin/pbcopy"], True)]
 
 
 def test_copy_without_pbcopy_prints_the_command(capsys, monkeypatch: pytest.MonkeyPatch):
