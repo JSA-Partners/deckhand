@@ -150,13 +150,11 @@ def test_only_working_or_permission_blocked_hands_hold_a_slot():
     assert not fleet.holds_slot(session("hand-A", "failed", None))
 
 
-def test_live_and_busy():
+def test_live_needs_a_status_and_a_working_state():
     assert fleet.live(session("hand-A", "working", "busy"))
     assert fleet.live(session("hand-A", "blocked", "waiting"))
     assert not fleet.live(session("hand-A", "working", None))
     assert not fleet.live(session("hand-A", "done", None))
-    assert fleet.busy(session("hand-A", "working", "busy"))
-    assert not fleet.busy(session("hand-A", "blocked", "waiting"))
 
 
 def test_alive_is_any_status_and_live_needs_a_working_state():

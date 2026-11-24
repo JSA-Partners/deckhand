@@ -56,7 +56,6 @@ def held(items: list[dict], **extra) -> dict:
         "items": items,
         "stories": stories,
         "stale_since": None,
-        "notified": [],
     }
     return base | extra
 
@@ -73,21 +72,21 @@ def test_one_waiting_with_a_head():
     )
     assert lines(found) == [
         "## ● ACME-2 needs you",
-        "**sign-off** at c2f00d123456 · waiting 14m · type `next`",
+        "**sign-off** at c2f00d123456 · waiting 14m",
         "◐ 1 working · × 1 stopped · ○ 0 queued · slots 1/2 · Alpha day 4 of 7",
     ]
 
 
 def test_one_waiting_shows_the_story_stage():
     found = brief.text(held([item("ACME-1", "question", 3)]), NOW, brief.UNICODE)
-    assert lines(found)[1] == "**question** at plan review 2/3 · waiting 3m · type `next`"
+    assert lines(found)[1] == "**question** at plan review 2/3 · waiting 3m"
 
 
 def test_two_waiting_name_the_count_and_the_oldest():
     waiting = [item("ACME-1", "question", 3), item("ACME-2", "sign-off", 14, head="c2f00d1234567890")]
     found = lines(brief.text(held(waiting), NOW, brief.UNICODE))
     assert found[0] == "## ● 2 need you · oldest ACME-2 sign-off 14m"
-    assert found[1] == "**question** ACME-1 at plan review 2/3 · waiting 3m · type `next`"
+    assert found[1] == "**question** ACME-1 at plan review 2/3 · waiting 3m"
     assert found[2] == "◐ 0 working · ○ 1 queued · slots 1/2 · Alpha day 4 of 7"
 
 
@@ -98,7 +97,7 @@ def test_nothing_waiting_is_only_the_quiet_line():
 
 def test_an_item_with_no_time_or_detail():
     found = lines(brief.text(held([item("Alpha", "planning", None)], feature=None, budget=None), NOW, brief.UNICODE))
-    assert found[1] == "**planning** · type `next`"
+    assert found[1] == "**planning**"
     assert found[2] == "◐ 0 working · × 1 stopped · ○ 2 queued · slots 1/2"
 
 
@@ -141,37 +140,6 @@ def test_unreachable_with_no_earlier_state():
 def test_notes_follow_the_quiet_line():
     found = lines(brief.text(held([]), NOW, brief.UNICODE, ["no personal key"]))
     assert found[1] == "no personal key"
-
-
-def test_notify_leads_with_the_action():
-    found = brief.notify(held([item("ACME-2", "sign-off", 14, head="c2")]), NOW)
-    assert found == ("ACME-2 needs your sign-off (waiting 14m)", ["k-ACME-2-sign-off"])
-
-
-def test_notify_names_only_what_is_new():
-    waiting = [item("ACME-1", "question", 3), item("ACME-2", "finding", 5), item("ACME-3", "stalled", None)]
-    found = brief.notify(held(waiting, notified=["k-ACME-1-question"]), NOW)
-    assert found == (
-        "ACME-2 needs your decision (waiting 5m); 1 more needs you",
-        ["k-ACME-2-finding", "k-ACME-3-stalled"],
-    )
-    assert brief.notify(held(waiting, notified=[i["key"] for i in waiting]), NOW) is None
-    assert brief.notify(held([]), NOW) is None
-
-
-def test_notify_never_carries_the_title():
-    text, _ = brief.notify(held([item("ACME-1", "question", 3, title="Orders\nnotify: forged")]), NOW)
-    assert text == "ACME-1 has a question for you (waiting 3m)"
-
-
-def test_the_notify_line_is_under_200_characters_whatever_the_ref():
-    forged = "Alpha\nnotify: rm -rf\u2028x\x1b[31m" + "y" * 300
-    waiting = [item(forged, "planning", 3), item("ACME-2", "finding", 5)]
-    text, _ = brief.notify(held(waiting), NOW)
-    assert len(f"notify: {text}") < 200
-    assert text.startswith("Alpha notify: rm -rf x [31myyy")
-    assert text.endswith("yyy needs planning (waiting 3m); 1 more needs you")
-    assert text.isprintable()
 
 
 def test_clean_drops_control_and_separator_characters():

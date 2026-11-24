@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from deckhand import claims, config, features, fleet, order, queue, stage, startable
+from deckhand import claims, config, features, fleet, order, queue, stage
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.step import Refusal
@@ -149,8 +149,6 @@ def _facts(
     if feature is not None:
         facts["budget"] = _budget(feature, today)
         facts["order"], facts["cycle"] = _build_order(store, feature, me)
-        mine = [s for s in feature.live if me is not None and s["assignee"] == me]
-        facts["wake_due"] = [s["identifier"] for s in mine if startable.wake_due(feature, s) is not None]
     return facts
 
 
@@ -165,10 +163,4 @@ def empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> dic
         "order": [],
         "cycle": [],
         "release": False,
-        "watch": [s.name for _, s in _held(read) if fleet.busy(s)],
-        "wake_due": [],
     }
-
-
-def _held(read: fleet.Fleet) -> list[tuple[str, fleet.Session]]:
-    return [*sorted(fleet.hands(read.sessions).items()), *sorted(fleet.spikes(read.sessions).items())]

@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, engine, fleet, queue, status
+from deckhand import acts, answers, asks, engine, fleet, queue, status, watch
 from deckhand.engine import Engine, Linked
 from deckhand.linear.client import LinearError
 from deckhand.reconcile import RETRY_AFTER, Action, Launch, Post, Remove, Resume, Stop
@@ -311,6 +311,16 @@ def test_a_broken_repository_policy_is_the_note(rig: Rig, clone: Path):
     (clone / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\n')
     rig.link()
     rig.step()
+    assert rig.engine.note() == ""
+
+
+def test_a_live_captain_whose_watcher_is_silent_is_the_note(rig: Rig):
+    captain = row("x", "idle", "busy", at=int((T - 600) * 1000)) | {"name": "captain"}
+    rig.sessions(captain)
+    rig.ready()
+    rig.wait(35)
+    assert rig.engine.note() == watch.DEAF
+    rig.state.put(watch.WATCHER, {"at": rig.clock()})
     assert rig.engine.note() == ""
 
 

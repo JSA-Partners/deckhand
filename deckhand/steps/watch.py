@@ -22,6 +22,15 @@ def _newest(rows: LocalState, hand: str) -> int:
     return max((m.seq for m in rows.pending(hand) if m.delivered is None), default=0)
 
 
+# A beat that fails is retried on the next poll; the engine shows a watcher that stays silent.
+def _beat(rows: LocalState, now: float) -> float:
+    try:
+        rows.put(watch.WATCHER, {"at": now})
+    except Refusal:
+        return float("-inf")
+    return now
+
+
 def _say(lines: list[str]) -> None:
     for line in lines:
         print(line, flush=True)
@@ -49,8 +58,11 @@ class Watch:
             rows.changed()
             top, held, beat = _captain_facts(rows)
             seen = watch.Seen(top, None, 0, self._clock())
+            beaten = _beat(rows, self._clock())
             while True:
                 self._sleep(POLL)
+                if self._clock() - beaten >= watch.BEAT_EVERY:
+                    beaten = _beat(rows, self._clock())
                 if rows.changed():
                     top, held, beat = _captain_facts(rows)
                 seen, lines = watch.captain(seen, top, held, beat, self._clock())

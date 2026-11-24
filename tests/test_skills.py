@@ -114,3 +114,9 @@ def test_a_skill_that_names_deckhand_commands_may_run_them(path: Path) -> None:
         return
     allowed = fields["allowed-tools"].split()
     assert "Bash" in allowed or "Bash(deckhand *)" in fields["allowed-tools"]
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.parent.name)
+def test_no_skill_allows_send_message_or_push_notification(path: Path) -> None:
+    fields, _ = split(path)
+    assert not {"SendMessage", "PushNotification"} & set(fields.get("allowed-tools", "").split())

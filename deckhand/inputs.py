@@ -6,7 +6,7 @@ import stat
 import tempfile
 from pathlib import Path
 
-from deckhand import answers, config, git
+from deckhand import answers, config, git, launch
 from deckhand.step import Refusal, hand_role
 
 CONFINED = "a hand reads files only from its worktree or the temporary directory, never the config or state dir"
@@ -50,7 +50,7 @@ def _allowed(path: Path) -> bool:
     denied = (config.config_dir(), answers.state_dir())
     if any(path.is_relative_to(Path(root).resolve()) for root in denied):
         return False
-    roots = [Path(tempfile.gettempdir()).resolve()]
+    roots = [Path(tempfile.gettempdir()).resolve(), *(path.resolve() for path in launch.sandbox_tmp())]
     try:
         roots.append(git.working_directory().resolve())
     except Refusal:

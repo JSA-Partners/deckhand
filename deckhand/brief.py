@@ -7,8 +7,6 @@ from datetime import datetime
 
 from deckhand import standing
 
-NOTIFY_LIMIT = 200
-NOTIFY = "notify: "
 LINE_LIMIT = 50
 LINE_STALE_SECONDS = 30 * 60
 SETUP = "run /deckhand:setup"
@@ -121,7 +119,7 @@ def _top(items: list[dict], stories: list[dict], now: float, g: Glyphs) -> str:
     detail, waited = _detail(top, stories), _waited(top, now)
     line += f" at {detail}" if detail else ""
     line += f"{g.sep}waiting {waited}" if waited else ""
-    return line + f"{g.sep}type `next`"
+    return line
 
 
 def _quiet(status: dict, now: float, g: Glyphs) -> str:
@@ -154,19 +152,6 @@ def text(status: dict | None, now: float, g: Glyphs, notes: list[str] = ()) -> s
         blocks.append(_quiet(status, now, g))
     blocks += [clean(note) for note in notes]
     return "\n\n".join("\\" + block if block[:1] in MARKERS and block[1:2] == " " else block for block in blocks)
-
-
-def notify(status: dict, now: float) -> tuple[str, list[str]] | None:
-    new = [i for i in status["items"] if i["key"] not in status["notified"]]
-    if not new:
-        return None
-    first = new[0]
-    waited = _waited(first, now)
-    more = len(new) - 1
-    rest = f" {ACTIONS.get(first['kind'], 'needs you')}" + (f" (waiting {waited})" if waited else "")
-    rest += f"; {more} more {'needs' if more == 1 else 'need'} you" if more else ""
-    room = NOTIFY_LIMIT - 1 - len(NOTIFY) - len(rest)
-    return clean(first["ref"])[:room] + rest, [i["key"] for i in new]
 
 
 def colored(env: Mapping[str, str]) -> bool:

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from deckhand import asks, claims, fleet, git, launch, ops, queue
+from deckhand import answers, asks, claims, config, fleet, git, launch, ops, queue
 from deckhand.linear.client import LinearError
+from deckhand.policy import Policy
 from deckhand.reconcile import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.step import Refusal
 from deckhand.steps.build import DEFAULT_BASE, make_worktree, require_base, worktree_branch
-from deckhand.steps.hand import argv
 from deckhand.store import Store
 from deckhand.store.local import LocalRecords
 from deckhand.store.state import LocalState
@@ -19,6 +20,14 @@ UNHEARD = "unheard"
 def unheard(state: LocalState) -> frozenset[int]:
     body = state.get(UNHEARD)
     return frozenset(body["seqs"]) if body is not None else frozenset()
+
+
+def argv(name: str, ref: str, clone: Path, worktree: Path, kind: str) -> list[str]:
+    protected = launch.protected(config.config_dir(), answers.state_dir())
+    settings = launch.hand_settings(ref, clone, worktree, Policy.load(clone), config.local(), protected, kind=kind)
+    plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
+    prompt = launch.PROMPTS[kind].format(ref)
+    return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, None)
 
 
 def _one_line(text: str) -> str:
@@ -106,7 +115,7 @@ class Acts:
         except git.GitError as error:
             raise Refusal(f"cannot fetch origin: {error.stderr_tail}") from None
         require_base(action.clone, self._runner)
-        command = argv(action.name, action.ref, action.clone, worktree, None, action.kind)
+        command = argv(action.name, action.ref, action.clone, worktree, action.kind)
         start = asks.hand_start(story, records, action.kind) if story is not None else None
         if story is None:
             git.worktree_detached(action.clone, action.name, DEFAULT_BASE, self._runner)

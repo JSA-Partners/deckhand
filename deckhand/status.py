@@ -36,12 +36,8 @@ def snapshot(
     facts: dict,
     waiting: list[Item],
     sessions: list[fleet.Session],
-    previous: dict | None,
     person_unknown: bool = False,
 ) -> dict:
-    items = [_item(item) for item in waiting]
-    keys = {item["key"] for item in items}
-    notified = [key for key in (previous or {}).get("notified", []) if person_unknown or key in keys]
     return {
         "shape": SHAPE,
         "written_at": written_at,
@@ -49,13 +45,12 @@ def snapshot(
         "feature": facts["feature"],
         "budget": facts["budget"],
         "slots": facts["slots"],
-        "items": items,
+        "items": [_item(item) for item in waiting],
         "stories": facts["order"],
         "hands": _hands(sessions),
         "release": facts["release"],
         "stale_since": None,
         "person_unknown": person_unknown,
-        "notified": notified,
     }
 
 
@@ -120,7 +115,6 @@ def _valid(found: dict) -> bool:
     slots, items, stories = found.get("slots"), found.get("items"), found.get("stories")
     return (
         found.get("shape") == SHAPE
-        and _strings(found.get("notified"))
         and _when(found.get("written_at"))
         and isinstance(slots, dict)
         and _count(slots.get("used"))

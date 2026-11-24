@@ -55,7 +55,6 @@ def sample(**changes) -> dict:
         ],
         "release": False,
         "stale_since": None,
-        "notified": [],
     }
     return found | changes
 

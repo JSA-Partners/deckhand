@@ -1,0 +1,1 @@
+[{"name": "watch", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/monitors/watch.sh", "description": "deckhand rows for this session"}]

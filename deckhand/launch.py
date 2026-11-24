@@ -15,7 +15,9 @@ from deckhand.step import Refusal
 
 HAND_EXEMPT = ["deckhand *", "gh pr view *", "gh pr diff *", "gh pr checks *"]
 CAPTAIN_EXEMPT = ["deckhand *"]
-NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "mcp__*"]
+NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "PushNotification", "mcp__*"]
+CAPTAIN_ALLOW = ["Bash(deckhand *)", "Read", "Grep", "Glob", "Agent", "AskUserQuestion", "Skill(deckhand:*)"]
+CAPTAIN_DENY = ["SendMessage", "PushNotification", "Write", "Edit", "NotebookEdit"]
 GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
 CLAUDE_CONFIG = (
     ".claude/settings.json",
@@ -56,6 +58,11 @@ def _forms(*paths: Path) -> list[Path]:
     return found
 
 
+# A sandboxed shell's $TMPDIR points here, so a hand writes its input files under it.
+def sandbox_tmp() -> list[Path]:
+    return _forms(Path(f"/tmp/claude-{os.getuid()}"))
+
+
 def protected(config: Path, state: Path) -> Protected:
     home = Path.home() / ".config"
     return Protected(tuple(_forms(config, home / "deckhand", home / "gh")), tuple(_forms(state)))
@@ -83,11 +90,11 @@ def _guarded(protected: Protected, deny: list[str], deny_write: list[str]) -> di
     }
 
 
-def _sandbox(exempt: list[str], filesystem: dict, credentials: dict) -> dict[str, Any]:
+def _sandbox(exempt: list[str], filesystem: dict, credentials: dict, auto_allow: bool = True) -> dict[str, Any]:
     return {
         "enabled": True,
         "allowUnsandboxedCommands": False,
-        "autoAllowBashIfSandboxed": True,
+        "autoAllowBashIfSandboxed": auto_allow,
         "excludedCommands": exempt,
         "filesystem": filesystem,
         "credentials": credentials,
@@ -96,6 +103,7 @@ def _sandbox(exempt: list[str], filesystem: dict, credentials: dict) -> dict[str
 
 def _hand_env(ref: str, roots: list[Path], kind: str) -> dict[str, str]:
     env = {
+        "UV_NO_CACHE": "1",
         "DECKHAND_ROLE": "hand",
         "DECKHAND_HAND_KIND": kind,
         ("DECKHAND_SPIKE" if kind == SPIKE else "DECKHAND_STORY"): ref,
@@ -152,8 +160,9 @@ def hand_settings(
             "allow": ["Bash(deckhand *)"],
             "deny": guarded["deny"],
             "blockWritesOutsideWorkingDirectories": True,
-            "additionalDirectories": [str(path) for path in _forms(Path(tempfile.gettempdir()))],
+            "additionalDirectories": [str(path) for path in _forms(Path(tempfile.gettempdir()), *sandbox_tmp())],
         },
+        "crossSessionInbound": "refuse",
         "disableClaudeAiConnectors": True,
         "sandbox": sandbox,
     }
@@ -164,8 +173,14 @@ def captain_settings(protected: Protected) -> dict[str, Any]:
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",
-        "permissions": {"allow": ["Bash(deckhand *)", "SendMessage"], "deny": guarded["deny"]},
-        "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"]),
+        "preferredNotifChannel": "terminal_bell",
+        "crossSessionInbound": "refuse",
+        "permissions": {
+            "defaultMode": "dontAsk",
+            "allow": list(CAPTAIN_ALLOW),
+            "deny": [*CAPTAIN_DENY, *guarded["deny"]],
+        },
+        "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"], auto_allow=False),
     }
 
 

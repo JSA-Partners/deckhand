@@ -125,14 +125,15 @@ def test_no_exempt_pattern_runs_git(layout: dict) -> None:
         assert not any(c.split()[0] == "git" for c in settings["sandbox"]["excludedCommands"])
         assert settings["sandbox"]["enabled"] is True
         assert settings["sandbox"]["allowUnsandboxedCommands"] is False
-        assert settings["sandbox"]["autoAllowBashIfSandboxed"] is True
+    assert layout["settings"]["sandbox"]["autoAllowBashIfSandboxed"] is True
     assert layout["settings"]["permissions"]["allow"] == ["Bash(deckhand *)"]
 
 
-def test_hand_cannot_ask_or_message(layout: dict) -> None:
+def test_a_hand_refuses_peer_messages_and_cannot_notify(layout: dict) -> None:
     settings = layout["settings"]
     deny = settings["permissions"]["deny"]
-    assert {"AskUserQuestion", "SendMessage", "ListAgents"} <= set(deny)
+    assert {"AskUserQuestion", "SendMessage", "ListAgents", "PushNotification"} <= set(deny)
+    assert settings["crossSessionInbound"] == "refuse"
     assert "SendMessage" not in settings["permissions"]["allow"]
     assert settings["env"]["DECKHAND_ROLE"] == "hand"
     assert settings["env"]["DECKHAND_STORY"] == "ACME-7"
@@ -172,12 +173,31 @@ def test_deckhand_policy_and_lenses_stay_editable(layout: dict) -> None:
             assert not [p for p in patterns if covers(p, str(target))], target
 
 
-def test_captain_keeps_dialog_and_messaging(layout: dict) -> None:
+def test_the_captain_can_ask_and_read_but_not_write_send_or_notify(layout: dict) -> None:
+    permissions = layout["captain"]["permissions"]
+    assert permissions["allow"] == [
+        "Bash(deckhand *)",
+        "Read",
+        "Grep",
+        "Glob",
+        "Agent",
+        "AskUserQuestion",
+        "Skill(deckhand:*)",
+    ]
+    assert permissions["defaultMode"] == "dontAsk"
+    assert {"SendMessage", "PushNotification", "Write", "Edit", "NotebookEdit"} <= set(permissions["deny"])
+    assert "AskUserQuestion" not in permissions["deny"]
+    assert layout["captain"]["sandbox"]["autoAllowBashIfSandboxed"] is False
+    assert layout["captain"]["env"] == {"DECKHAND_ROLE": "captain"}
+
+
+def test_the_captain_rings_the_terminal_bell_and_refuses_peer_messages(layout: dict) -> None:
     captain = layout["captain"]
-    deny = captain["permissions"]["deny"]
-    assert not {"AskUserQuestion", "SendMessage", "ListAgents"} & set(deny)
-    assert captain["permissions"]["allow"] == ["Bash(deckhand *)", "SendMessage"]
-    assert captain["env"] == {"DECKHAND_ROLE": "captain"}
+    assert (captain["preferredNotifChannel"], captain["crossSessionInbound"]) == ("terminal_bell", "refuse")
+
+
+def test_a_hand_runs_uv_without_a_cache(layout: dict) -> None:
+    assert layout["settings"]["env"]["UV_NO_CACHE"] == "1"
 
 
 PLUGIN_BIN = str(Path(launch.__file__).resolve().parent.parent / "bin")
@@ -193,6 +213,7 @@ def test_hand_env_carries_dirs_and_plugin_bin_first(
     monkeypatch.setenv("PATH", "/usr/bin")
     env = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)["env"]
     assert env == {
+        "UV_NO_CACHE": "1",
         "DECKHAND_ROLE": "hand",
         "DECKHAND_HAND_KIND": "story",
         "DECKHAND_STORY": "ACME-7",
@@ -279,7 +300,9 @@ def test_file_tools_write_only_in_working_directories(
     policy = Policy(repository_label="widgets")
     permissions = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)["permissions"]
     assert permissions["blockWritesOutsideWorkingDirectories"] is True
-    assert permissions["additionalDirectories"] == [str(temp), str(temp_real)]
+    uid = os.getuid()
+    sandbox_tmp = [f"/tmp/claude-{uid}", str(Path(f"/tmp/claude-{uid}").resolve())]
+    assert permissions["additionalDirectories"] == [str(temp), str(temp_real), *dict.fromkeys(sandbox_tmp)]
     assert "blockWritesOutsideWorkingDirectories" not in layout["captain"]["permissions"]
 
 

@@ -169,3 +169,11 @@ def test_the_start_command_carries_no_folders_at_their_defaults(monkeypatch: pyt
     monkeypatch.delenv("DECKHAND_STATE_DIR", raising=False)
     monkeypatch.setattr(sys, "argv", ["/opt/deckhand/bin/deckhand"])
     assert command() == "/opt/deckhand/bin/deckhand engine apply run"
+
+
+def test_without_a_launcher_the_start_command_names_this_deckhand(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    program = tmp_path / "plug in" / "bin" / "deckhand"
+    program.parent.mkdir(parents=True)
+    program.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(sys, "argv", [str(program.parent / ".." / "bin" / "deckhand"), "engine", "apply"])
+    assert command().endswith(f" {shlex.quote(str(program.resolve()))} engine apply run")

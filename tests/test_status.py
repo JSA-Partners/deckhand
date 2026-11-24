@@ -33,8 +33,8 @@ def session(name: str, state: str = "working", waiting_for: str | None = None) -
     return Session(f"id-{name}", name, f"sid-{name}", "/w", "2026-11-20T08:00:00.000Z", state, "busy", waiting_for)
 
 
-def snapshot(waiting: list[Item], sessions: list[Session] = (), previous: dict | None = None) -> dict:
-    return status.snapshot(AT, "ACME", FACTS, waiting, list(sessions), previous)
+def snapshot(waiting: list[Item], sessions: list[Session] = ()) -> dict:
+    return status.snapshot(AT, "ACME", FACTS, waiting, list(sessions))
 
 
 def test_snapshot_shape():
@@ -80,7 +80,6 @@ def test_snapshot_shape():
         "release": False,
         "stale_since": None,
         "person_unknown": False,
-        "notified": [],
     }
 
 
@@ -90,12 +89,6 @@ def test_an_item_with_no_time_has_no_since():
 
 def test_two_questions_on_one_story_have_two_keys():
     assert status.item_key(question("q1")) != status.item_key(question("q2"))
-
-
-def test_notified_keeps_the_keys_of_items_still_waiting():
-    kept, gone = status.item_key(question("q1")), status.item_key(question("q2"))
-    found = snapshot([question("q1")], previous={"notified": [kept, gone]})
-    assert found["notified"] == [kept]
 
 
 def test_the_snapshot_round_trips_through_sqlite(tmp_path: Path):
@@ -131,19 +124,6 @@ def test_read_is_none_unless_a_current_shape(tmp_path: Path, content: object):
 
 
 def test_read_is_none_without_a_snapshot(tmp_path: Path):
-    assert status.read(tmp_path) is None
-
-
-@pytest.mark.parametrize("notified", [None, [["a"]], [1], "abc"])
-def test_read_is_none_when_notified_is_not_a_list_of_strings(tmp_path: Path, notified: object):
-    status.write(tmp_path, snapshot([]) | {"notified": notified})
-    assert status.read(tmp_path) is None
-
-
-def test_read_is_none_without_notified(tmp_path: Path):
-    found = snapshot([])
-    del found["notified"]
-    status.write(tmp_path, found)
     assert status.read(tmp_path) is None
 
 

@@ -178,24 +178,23 @@ GAP = {
 
 
 def test_session_hook_prints_captain_context_only_for_captain(monkeypatch, capsys, tmp_path: Path):
-    from tests.test_step_captain import captain, owned
+    from deckhand.steps.captain import Captain
+    from tests.test_step_captain import NOW, engine_wrote, owned
 
-    (tmp_path / "isolated-config").mkdir()
-    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
-    store = owned()
-    expected = captain(store)
-    expected.context(["--team-key", "ACME"])
+    engine_wrote(owned())
+    Captain(clock=lambda: NOW).context([])
     want = capsys.readouterr().out
-    assert want
+    assert want.splitlines()[-1] == "engine: running"
+    store = owned()
     monkeypatch.setenv("DECKHAND_ROLE", "captain")
-    hook_with(monkeypatch, store, ["session"], {"hook_event_name": "SessionStart"}, captain(store))
+    hook_with(monkeypatch, store, ["session"], {"hook_event_name": "SessionStart"}, Captain(clock=lambda: NOW))
     out = capsys.readouterr()
     assert (out.out, out.err) == (want, "")
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
-    hook_with(monkeypatch, store, ["session"], {}, captain(store))
+    hook_with(monkeypatch, store, ["session"], {}, Captain(clock=lambda: NOW))
     assert capsys.readouterr().out == ""
     monkeypatch.delenv("DECKHAND_ROLE")
-    hook_with(monkeypatch, store, ["session"], {}, captain(store))
+    hook_with(monkeypatch, store, ["session"], {}, Captain(clock=lambda: NOW))
     assert capsys.readouterr().out == ""
 
 

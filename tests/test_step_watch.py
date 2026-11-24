@@ -65,6 +65,18 @@ def test_the_captain_watcher_rings_for_a_new_top_item(db: Path, capsys):
     assert capsys.readouterr().out == watch.QUEUE + "\n"
 
 
+def test_the_captain_watcher_beats_its_own_row(db: Path):
+    now = [1795000000.0]
+
+    def later() -> None:
+        now[0] += watch.BEAT_EVERY
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({1: later}, 2), clock=lambda: now[0]).apply(["captain"])
+    with LocalState(db) as rows:
+        assert watch.heard(rows) == now[0]
+
+
 def test_a_hand_may_run_only_the_hand_watcher(monkeypatch):
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")

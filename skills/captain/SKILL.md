@@ -1,46 +1,39 @@
 ---
 name: captain
-description: "Keep the hands working and bring the person one queue item at a time: sign-offs, findings, questions, planning and after-merge chores."
+description: "Bring the person what needs them, one queue item at a time, while the engine runs the hands: sign-offs, findings, questions, planning and after-merge chores."
 disable-model-invocation: true
-allowed-tools: Bash(deckhand *) AskUserQuestion SendMessage PushNotification Skill(deckhand:signoff) Skill(deckhand:feature)
+allowed-tools: Bash(deckhand *) AskUserQuestion Read Grep Glob Agent Skill(deckhand:signoff) Skill(deckhand:feature)
 ---
 
 # Captain
 
 !`deckhand captain context`
 
-Above: the brief, then the top item with its `next:` lines, slots, the feature's budget, the build
-order and the hands to watch. You hold no state: every answer comes from a fresh context. Run each
-deckhand command as its own bare Bash call, never chained, piped or prefixed.
+Above: the brief, whether the engine runs, and the top item with its `next:` lines. The engine
+starts, resumes and stops every hand and carries every answer to it. You are either waiting or
+asking: print nothing while nothing needs the person, start no hand, relay nothing, and never ask
+the person to type a word to go on. Run each deckhand command as its own bare Bash call.
 
-Subscribe with SendMessage and `notify_when_idle` set to each hand on the `watch:` line and each
-hand a `started`, `resumed` or `send to` line names; only a `send to` carries a message. Never
-send a bare subscription to an idle hand: its notice only repeats.
+On `engine: not running`, run `deckhand engine apply copy`, tell the person in one line to open a
+new terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
 
-Start hands with `deckhand hand apply fill`, up to the slot cap. At the start, print the brief and
-give the person, once, the command on the `board:` line, a live board for another terminal tab.
+On `deckhand: something needs the person`, and after every answered or dismissed dialog, run
+`deckhand captain context` and ask the top item by its `next:` line:
 
-On an idle notice, run fill, then `deckhand captain context --brief`, and print the brief
-unchanged. Pass the text of a closing `notify:` line to PushNotification, not to the person.
-Then stop: open no dialog until the person types `next`; a pending dialog keeps you from
-hearing the hands.
-
-On `next`, run `deckhand captain context`, wake each story on its `wake due:` line with
-`deckhand hand apply wake REF`, print the brief unchanged, then show the top item. With no top
-item, print only the brief. When fill or wake prints `send to hand-REF: ...`, send that text
-unchanged to that hand.
-
-Answer the top item by its `next:` line:
-
-- `/deckhand:signoff REF` or `/deckhand:feature`: run that skill.
-- A `decide context` line: run it with `deckhand` in front, pass the JSON it prints unchanged to the
-  question dialog, then run `deckhand decide apply NONCE` once answered. Never mark an option
+- A skill line, such as `/deckhand:signoff REF` or `/deckhand:feature`: run that skill.
+- A `decide context` line: run it with `deckhand` in front, pass the JSON it prints unchanged to
+  the dialog, then run `deckhand decide apply NONCE` once answered. Never mark an option
   recommended; the person may answer a hand's question in their own words.
-- `hand apply start REF` restarts a stalled hand: run `deckhand hand apply start REF` if the person
-  agrees.
-- A spike document link: give it; the feature skill reads it with the person.
-- `claude attach <id>`: give the person that command to type. A prompt is theirs; never answer it.
+- A `claude attach` line: show it in a dialog with Done and Later. A prompt in a hand is the
+  person's to answer, never yours.
 
-After each answer, do the same as on `next`. The person may stop after any item; every answer is
-saved. On `ready to release`, tell them the feature's last story merged; the production release
-is theirs. A cycle in the build order is theirs to break in Linear.
+A dismissed dialog is not asked again until the person writes something.
+
+Before planning a feature, run `deckhand captain apply hold`. On its approval, or when the person
+pauses, run `deckhand captain apply release`, then read the context.
+
+On `deckhand: the engine stopped`, say so once and give the start command again from
+`deckhand engine apply copy`.
+
+On `ready to release`, tell the person the feature's last story merged; the production release is
+theirs. Offer `/deckhand:feature` for the next one.

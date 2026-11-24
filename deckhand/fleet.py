@@ -120,10 +120,6 @@ def live(session: Session) -> bool:
     return session.status is not None and session.state in LIVE
 
 
-def busy(session: Session) -> bool:
-    return session.status == "busy"
-
-
 def failed(session: Session) -> bool:
     return session.state in FAILED
 

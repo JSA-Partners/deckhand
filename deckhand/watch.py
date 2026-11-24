@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from deckhand import fleet
+from deckhand.records import epoch
+from deckhand.step import Refusal
 from deckhand.store import state
 
 QUEUE = "deckhand: something needs the person"
@@ -9,6 +12,9 @@ STOPPED = "deckhand: the engine stopped"
 RUNNING = "deckhand: the engine is running"
 MAIL = "deckhand: a message waits"
 HOLD = "hold"
+WATCHER = "watcher"
+BEAT_EVERY = 10.0
+DEAF = "the captain cannot hear the engine; close the captain and open it again"
 
 
 @dataclass(frozen=True)
@@ -19,17 +25,18 @@ class Seen:
     at: float
 
 
+# The captain withholds every item while the engine is down, so an item still on top rings when it returns.
 def captain(seen: Seen, top: str, held: bool, beat: float | None, now: float) -> tuple[Seen, list[str]]:
     if now - seen.at > state.SLEEP_GAP:
         return replace(seen, at=now), []
     lines = []
-    shown = seen.top
+    engine = state.alive(beat, now)
+    shown = "" if seen.engine is False and engine else seen.top
     if not top:
         shown = ""
-    elif top != seen.top and not held:
+    elif top != shown and not held:
         lines.append(QUEUE)
         shown = top
-    engine = state.alive(beat, now)
     if seen.engine is not None and engine != seen.engine:
         lines.append(RUNNING if engine else STOPPED)
     return Seen(shown, engine, seen.seq, now), lines
@@ -39,3 +46,21 @@ def hand(seen: Seen, newest: int, now: float) -> tuple[Seen, list[str]]:
     if newest > seen.seq:
         return replace(seen, seq=newest, at=now), [MAIL]
     return replace(seen, at=now), []
+
+
+def heard(rows: state.LocalState) -> float | None:
+    try:
+        body = rows.get(WATCHER)
+    except Refusal:
+        return None
+    at = body.get("at") if isinstance(body, dict) else None
+    return float(at) if isinstance(at, int | float) and not isinstance(at, bool) else None
+
+
+# A captain or an engine just started has had no time to hear its first beat.
+def deaf(read: fleet.Fleet | None, beat: float | None, now: float, since: float) -> bool:
+    captain = fleet.captain(read.sessions) if read is not None and not read.note else None
+    if captain is None or state.alive(beat, now):
+        return False
+    started = epoch(captain.started_at) if captain.started_at else now
+    return now - max(started, since) > state.STALE_AFTER

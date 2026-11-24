@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, config, features, fleet, git, reading, status
+from deckhand import acts, config, features, fleet, git, reading, status, watch
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.policy import Policy
@@ -291,7 +291,7 @@ class Engine:
         self._lines.clear("read")
         previous = status.get(self._state)
         shown = status.snapshot(
-            self._iso(good.at), self._team, found.facts, found.waiting, read.sessions, previous, found.me is None
+            self._iso(good.at), self._team, found.facts, found.waiting, read.sessions, found.me is None
         )
         if self._newest is not None and self._newest.error:
             shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)
@@ -336,6 +336,8 @@ class Engine:
             return READING
         if self._lines.newest():
             return self._lines.newest()
+        if watch.deaf(self._fleets.latest(), watch.heard(self._state), self._clock(), self._woke):
+            return watch.DEAF
         if newest is not None and newest.error:
             return f"cannot read Linear: {newest.error}"
         good = self._good

@@ -8,10 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import reading
+from deckhand.config import LocalConfig
 from deckhand.features import FEATURE_LABEL
+from deckhand.fleet import Fleet
 from deckhand.ops import create_id
 from deckhand.steps.build import Build
-from deckhand.steps.captain import Captain
 from deckhand.steps.decide import Decide
 from deckhand.steps.hand import Hand
 from deckhand.steps.review import Review
@@ -28,6 +30,7 @@ from tests.test_step_review import planned
 __all__ = ["clone", "repo"]
 
 BUDGET = 12
+DAY = date(2026, 11, 17)
 
 
 def released(store: FakeStore, name: str, start: str) -> None:
@@ -69,24 +72,21 @@ def repeated(counting: CountingStore) -> list[tuple]:
     return [call for call, n in Counter(reads(counting)).items() if n > 1]
 
 
-def run_captain(capsys: pytest.CaptureFixture[str]) -> None:
-    Captain(None, Shell(), today=lambda: date(2026, 11, 17), clock=lambda: 1795000000.0).context(["--json", *TEAM])
-    facts = json.loads(capsys.readouterr().out)
-    assert (facts["feature"], [row["ref"] for row in facts["order"]]) == ("Alpha", ["ACME-1", "ACME-2"])
+def run_read() -> None:
+    found = reading.read(
+        store_open.open_store("app"), lambda: store_open.open_store("person"), "ACME", Fleet(), LocalConfig(), DAY
+    )
+    assert (found.facts["feature"], [row["ref"] for row in found.facts["order"]]) == ("Alpha", ["ACME-1", "ACME-2"])
 
 
-def test_captain_context_reads_each_linear_object_at_most_once(
-    clone: Path, opened: dict[str, CountingStore], capsys: pytest.CaptureFixture[str]
-):
-    run_captain(capsys)
+def test_the_engine_read_reads_each_linear_object_at_most_once(clone: Path, opened: dict[str, CountingStore]):
+    run_read()
     assert repeated(opened["app"]) == []
     assert reads(opened["person"]) == [("viewer", (), ())]
 
 
-def test_captain_context_stays_within_its_read_budget(
-    clone: Path, opened: dict[str, CountingStore], capsys: pytest.CaptureFixture[str]
-):
-    run_captain(capsys)
+def test_the_engine_read_stays_within_its_read_budget(clone: Path, opened: dict[str, CountingStore]):
+    run_read()
     assert len(reads(opened["app"])) <= BUDGET
 
 
@@ -115,12 +115,3 @@ def test_hand_context_reads_each_object_at_most_once(
     assert json.loads(capsys.readouterr().out)["feature"] == "Alpha"
     assert repeated(opened["app"]) == []
     assert reads(opened["person"]) == [("viewer", (), ())]
-
-
-def test_hand_start_opens_each_store_once(
-    clone: Path, opened: dict[str, CountingStore], capsys: pytest.CaptureFixture[str]
-):
-    shell = Shell()
-    Hand(None, shell).apply(["start", "ACME-1", *TEAM])
-    assert shell.launched() == ["hand-ACME-1"]
-    assert {role: counting.opens for role, counting in opened.items()} == {"app": 1, "person": 1}
