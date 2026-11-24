@@ -25,6 +25,7 @@ from deckhand.steps.signoff import Signoff
 from deckhand.steps.spike import Spike
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
+from tests.shell import Shell, row
 from tests.test_build_flow import World
 from tests.test_feature_approval import P1, decided, reviewed, sat
 from tests.test_implplan import BASE, Git, manifest
@@ -32,7 +33,7 @@ from tests.test_queue import Clock
 from tests.test_quiz import SOURCE, item, reader, reply, summary
 from tests.test_step_captain import DAY
 from tests.test_step_checks import Commands
-from tests.test_step_hand import ME, TEAM, Shell, clone, configure, row, spike_row, state
+from tests.test_step_hand import ME, TEAM, clone, configure, spike_row, state
 from tests.test_step_review import answer, record_round
 from tests.test_step_signoff import Clock as MergeClock
 from tests.test_step_stories import entry, story_id

@@ -19,9 +19,10 @@ from deckhand.store import open as store_open
 from deckhand.store.cached import READS, CachedStore
 from deckhand.store.fake import FakeStore
 from tests.conftest import CountingStore
+from tests.shell import Shell
 from tests.test_implplan import BASE, Git, repo
 from tests.test_step_build import Shell as BuildShell
-from tests.test_step_hand import TEAM, Shell, clone
+from tests.test_step_hand import TEAM, clone
 from tests.test_step_review import planned
 
 __all__ = ["clone", "repo"]

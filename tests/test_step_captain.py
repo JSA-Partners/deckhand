@@ -17,9 +17,10 @@ from deckhand.step import REGISTRY, Refusal
 from deckhand.steps.captain import Captain
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import LocalState
+from tests.shell import Shell, row
 from tests.test_feature_approval import setup
 from tests.test_queue import asked
-from tests.test_step_hand import ME, TEAM, Shell, building, clone, row, spike_row, state
+from tests.test_step_hand import ME, TEAM, building, clone, spike_row, state
 
 __all__ = ["clone", "state"]
 
