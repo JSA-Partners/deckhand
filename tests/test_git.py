@@ -378,6 +378,7 @@ KEPT = (
     "LC_CTYPE",
     "TERM",
     "TMPDIR",
+    "SSH_AUTH_SOCK",
     "HTTPS_PROXY",
     "http_proxy",
     "no_proxy",

@@ -23,7 +23,7 @@ UNNESTED = "--ignore-submodules=all"
 GITLINK = "160000"
 NESTED = "a commit takes no nested repository: {}; remove it or list it in .gitignore"
 
-CLAUDE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR")
+CLAUDE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "SSH_AUTH_SOCK")
 CLAUDE_ENV += ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
 CLAUDE_ENV_PREFIXES = ("LC_", "ANTHROPIC_", "CLAUDE_", "DECKHAND_")
 # A running Claude Code session sets these for itself; a process started under it would take them as its own.
