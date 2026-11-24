@@ -95,11 +95,14 @@ class StoryStep:
         self._runner = runner
         self._repo = repo
         self._me = me
+        self._opened: Store | None = None
 
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return open_store("app")
+        if self._opened is None:
+            self._opened = open_store("app")
+        return self._opened
 
     def viewer(self) -> str:
         if self._me is not None:

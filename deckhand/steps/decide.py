@@ -59,7 +59,11 @@ class Decide(StoryStep):
         self._reader = reader
 
     def _store_for_run(self) -> Store:
-        return self._store if self._store is not None else claims.person_store()
+        if self._store is not None:
+            return self._store
+        if self._opened is None:
+            self._opened = claims.person_store()
+        return self._opened
 
     def context(self, args: list[str]) -> None:
         if hand_role():

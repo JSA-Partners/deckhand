@@ -78,11 +78,14 @@ class Hand:
         self._store = store
         self._runner = runner
         self._person = person
+        self._opened: Store | None = None
 
     def _app(self) -> Store:
         if self._store is not None:
             return self._store
-        return open_store("app")
+        if self._opened is None:
+            self._opened = open_store("app")
+        return self._opened
 
     def _person_store(self) -> Store:
         return self._person if self._person is not None else claims.person_store()
