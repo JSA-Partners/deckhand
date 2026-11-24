@@ -54,7 +54,7 @@ class Feature:
         today = self._today()
         found = features.open_features(store, team)
         parked = [{"id": p["id"], "name": p["name"]} for p in features.parked(store, team)]
-        facts: dict = {"open": [], "parked": parked, "input_folder": _input_folder()}
+        facts: dict = {"open": [], "parked": parked}
         for feature in found:
             budget = features.budget_of(feature.project, today)
             current = features.phase(feature)
@@ -91,12 +91,13 @@ class Feature:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        facts = self._facts(self._store_for_run(), team_key(parsed))
+        folder = _input_folder()
+        if folder and not parsed["json"]:
+            print(f"input folder: {folder}", flush=True)
+        facts = self._facts(self._store_for_run(), team_key(parsed)) | {"input_folder": folder}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
-        if facts["input_folder"]:
-            print(f"input folder: {facts['input_folder']}")
         if not facts["open"]:
             print("no feature is open")
         if "anomaly" in facts:
