@@ -56,8 +56,7 @@ def _building(records: list[Record], story: str) -> Stage | None:
         return None
     held = _rounds(records, story, "plan")
     if review.cleared(records, story, "plan", plan.version):
-        subject = review.cap_subject(story, "plan")
-        answers = [r for r in records if r.kind == review.CAP_DECISION and r.subject == subject]
+        answers = review.cap_answers(records, f"{story}:plan")
         return Stage(BUILDING, None, _newest([*held, *answers]))
     return _review(PLAN_REVIEW, held)
 

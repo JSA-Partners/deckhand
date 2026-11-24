@@ -438,9 +438,7 @@ def rounds(store: FakeStore, stage: str, *items: dict, count: int = 3) -> Record
 def proceed(store: FakeStore, stage: str, latest: Record) -> None:
     version = review.cap_version(latest)
     data = {"answer": review.PROCEED}
-    store.put_record(
-        "s1", Record(review.CAP_DECISION, review.cap_subject("s1", stage), version, review.PERSON + "s", data)
-    )
+    store.put_record("s1", Record(review.CAP_DECISION, review.cap_subject(latest), version, review.PERSON + "s", data))
 
 
 def test_branch_cap_waits_for_the_person_until_proceed_whatever_the_checked_head():

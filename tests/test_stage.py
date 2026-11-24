@@ -66,7 +66,7 @@ def signed(log: Log, head: str = HEAD) -> Record:
 
 
 def cap_answer(log: Log, stage_name: str, latest: Record, answer: str) -> Record:
-    subject = review.cap_subject("s1", stage_name)
+    subject = review.cap_subject(latest)
     version = review.cap_version(latest)
     return log.add(Record(review.CAP_DECISION, subject, version, PERSON, {"answer": answer}))
 

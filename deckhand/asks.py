@@ -169,7 +169,7 @@ def _waited(records: list[Record], decision: Record, story: str) -> bool:
     if decision.kind == review.DECISION:
         return _finding_waited(records, decision.subject, story)
     if decision.kind == review.CAP_DECISION:
-        return decision.subject in (review.cap_subject(story, "plan"), review.cap_subject(story, "branch"))
+        return review.cap_prefix(decision.subject) in (f"{story}:plan", f"{story}:branch")
     return decision.subject == story
 
 

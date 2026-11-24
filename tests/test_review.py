@@ -94,7 +94,13 @@ def test_three_p1_rounds_stop_at_the_cap_whatever_the_target():
 
 
 def proceed_at(round: Record) -> Record:
-    return Record(review.CAP_DECISION, "s1", review.cap_version(round), "person:pat", {"answer": review.PROCEED})
+    return Record(
+        review.CAP_DECISION,
+        review.cap_subject(round),
+        review.cap_version(round),
+        "person:pat",
+        {"answer": review.PROCEED},
+    )
 
 
 def test_proceed_waives_the_open_p1_and_the_next_commit_is_still_reviewed():

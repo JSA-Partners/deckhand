@@ -169,7 +169,11 @@ def make_question(kind: str, pin: Pin) -> Question:
 def question_text(kind: str, pin: Pin) -> str:
     fields = {"kind": kind, **asdict(pin)}
     check = content_hash(json.dumps(fields, sort_keys=True))[:12]
-    ask = _BRANCH_CAP if kind == review.CAP_DECISION and pin.subject.endswith(":branch") else _ASKS[kind]
+    ask = (
+        _BRANCH_CAP
+        if kind == review.CAP_DECISION and review.cap_prefix(pin.subject).endswith(":branch")
+        else _ASKS[kind]
+    )
     shown = " ".join(part for part in (ask, pin.label) if part)
     if pin.detail:
         shown += f": {pin.detail}"

@@ -72,16 +72,25 @@ def test_a_wake_after_the_last_sign_off_leaves_nothing_due():
     start = stamped("hand-start", "2026-11-19T18:00:00.000Z", "agent:hand")
     answer = stamped("question", "2026-11-19T18:05:00.000Z", "person:s1", "abc")
     wake1 = stamped("wake", "2026-11-19T18:06:00.000Z", "agent:captain")
-    cap = stamped("review-cap", "2026-11-19T18:10:00.000Z", "person:s1", "s1")
+    cap = stamped("review-cap", "2026-11-19T18:10:00.000Z", "person:s1", "s1:plan:3")
     wake2 = stamped("wake", "2026-11-19T18:11:00.000Z", "agent:captain")
     finding = stamped("finding", "2026-11-19T18:15:00.000Z", "person:s1", "f1")
-    cap2 = stamped("review-cap", "2026-11-19T18:16:00.000Z", "person:s1", "s1")
+    cap2 = stamped("review-cap", "2026-11-19T18:16:00.000Z", "person:s1", "s1:branch:3")
     wake3 = stamped("wake", "2026-11-19T18:17:00.000Z", "agent:captain")
     sign = stamped("sign-off", "2026-11-19T18:20:00.000Z", "person:s1", "s1")
     wake4 = stamped("wake", "2026-11-19T18:21:00.000Z", "agent:captain")
     held = [start, answer, wake1, cap, wake2, finding, cap2, wake3, sign]
     assert asks.wake_due(held, "s1") == sign
     assert asks.wake_due([*held, wake4], "s1") is None
+
+
+def test_a_cap_answer_at_any_round_wakes_the_hand():
+    start = stamped("hand-start", "2026-11-19T18:00:00.000Z", "agent:hand")
+    for subject in ("s1:plan:3", "s1:branch:6"):
+        cap = stamped("review-cap", "2026-11-19T18:10:00.000Z", "person:s1", subject)
+        assert asks.wake_due([start, cap], "s1") == cap
+    other = stamped("review-cap", "2026-11-19T18:10:00.000Z", "person:s1", "s2:plan:3")
+    assert asks.wake_due([start, other], "s1") is None
 
 
 def test_wake_due_ignores_stories_without_a_hand_and_decisions_a_hand_does_not_wait_on():

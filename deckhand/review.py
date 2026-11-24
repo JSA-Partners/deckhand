@@ -292,33 +292,36 @@ def _cap_cut(record: Record) -> int:
         return 0
 
 
-def cap_subject(story: str, stage: str) -> str:
-    return story if stage == "plan" else f"{story}:{stage}"
+# Each cap answer is its own record, named by the round it was given at.
+def cap_subject(round: Record) -> str:
+    return round.subject
 
 
-def _cap_answers(records: list[Record], subject: str, answer: str) -> list[Record]:
+def cap_prefix(subject: str) -> str:
+    return subject.rpartition(":")[0]
+
+
+def cap_answers(records: list[Record], prefix: str) -> list[Record]:
     return [
-        r
-        for r in records
-        if r.kind == CAP_DECISION
-        and r.subject == subject
-        and r.author.startswith(PERSON)
-        and r.data.get("answer") == answer
+        r for r in records if r.kind == CAP_DECISION and cap_prefix(r.subject) == prefix and r.author.startswith(PERSON)
     ]
+
+
+def _cap_answers(records: list[Record], prefix: str, answer: str) -> list[Record]:
+    return [r for r in cap_answers(records, prefix) if r.data.get("answer") == answer]
 
 
 def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     rounds = rounds_of(records, prefix)
-    story, _, stage = prefix.rpartition(":")
+    stage = prefix.rpartition(":")[2]
     if stage not in ("plan", "branch"):
         return rounds, 0
-    cut = max(map(_cap_cut, _cap_answers(records, cap_subject(story, stage), REWORK)), default=0)
+    cut = max(map(_cap_cut, _cap_answers(records, prefix, REWORK)), default=0)
     return [r for r in rounds if round_number(r) > cut], cut
 
 
 def waived(records: list[Record], prefix: str) -> set[str]:
-    story, _, stage = prefix.rpartition(":")
-    pinned = {r.version for r in _cap_answers(records, cap_subject(story, stage), PROCEED)}
+    pinned = {r.version for r in _cap_answers(records, prefix, PROCEED)}
     rounds = [r for r in counted(records, prefix)[0] if cap_version(r) in pinned]
     return {f["id"] for r in rounds for f in open_p1(r, declined(records))}
 
@@ -333,8 +336,7 @@ def excused(records: list[Record], prefix: str) -> set[str]:
 
 
 def proceeded(records: list[Record], prefix: str) -> int:
-    story, _, stage = prefix.rpartition(":")
-    return max(map(_cap_cut, _cap_answers(records, cap_subject(story, stage), PROCEED)), default=0)
+    return max(map(_cap_cut, _cap_answers(records, prefix, PROCEED)), default=0)
 
 
 def at_cap(rounds: list[Record], excused: set[str], since: int = 0) -> bool:

@@ -597,6 +597,38 @@ def test_proceed_at_the_cap_stops_proceeded_and_a_revision_still_gets_a_round(
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "unchanged"
 
 
+def capped_twice(tmp_path: Path, repo: Path, state: Path, capsys, first: str) -> FakeStore:
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    for n in range(1, 7):
+        if n > 1:
+            submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
+        left = [raw(summary="A name is vague.")] if n == 1 else []
+        record_round(step, tmp_path, raw(severity="P1", summary=f"Gap {n}."), *left)
+        if n in (3, 6):
+            choice = first if n == 3 else "Proceed"
+            answer(state, Decide(store), capsys, ["review-cap", "ACME-1", "--stage", "plan"], choice)
+    assert len([r for r in store.records("s1") if r.kind == review.CAP_DECISION]) == 2
+    return store
+
+
+def test_a_proceed_after_a_rework_keeps_the_rework_cut(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    records = capped_twice(tmp_path, repo, state, capsys, "Rework").records("s1")
+    assert review.counted(records, "s1:plan")[1] == 3
+    assert review.waived(records, "s1:plan") == {finding_id(raw(severity="P1", summary="Gap 6."))}
+    assert review.left_open(records, "s1", "plan") == []
+
+
+def test_a_second_proceed_keeps_the_first_waiver(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    records = capped_twice(tmp_path, repo, state, capsys, "Proceed").records("s1")
+    gaps = {finding_id(raw(severity="P1", summary=f"Gap {n}.")) for n in (3, 6)}
+    assert review.waived(records, "s1:plan") == gaps
+
+
 def test_rounds_past_three_without_a_p1_keep_reviewing_and_never_print_cap_clear(
     tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ):

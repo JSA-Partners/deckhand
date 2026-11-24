@@ -311,7 +311,7 @@ def test_branch_cap_proceed_clears_the_branch_review(
     assert re.search("branch review has not stopped clean", gap_text(store))
     question = answer(state, step, capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed")
     assert question["question"].startswith("Three review rounds left a P1 open. Proceed to sign-off")
-    assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch"]
+    assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch:3"]
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
 

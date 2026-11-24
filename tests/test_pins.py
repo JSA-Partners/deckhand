@@ -98,7 +98,7 @@ def test_cap_pin_is_pinned_to_the_round_whatever_head_is_passed():
     feature = features.open_feature(store, "ACME")
     for head in ("", "c3", "c9"):
         held = pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="branch", head=head)
-        assert (held.subject, held.version) == ("s1:branch", review.cap_version(latest))
+        assert (held.subject, held.version) == (latest.subject, review.cap_version(latest))
     assert "3 rounds left a P1 open, 1 P1 open at c3" in held.detail
 
 
@@ -110,7 +110,9 @@ def test_cap_pin_refuses_off_the_cap_and_after_proceed():
         pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="branch")
     store, _ = asked()
     latest = capped(store, P1)
-    proceed = Record(review.CAP_DECISION, "s1:branch", review.cap_version(latest), "person:pat", {"answer": "Proceed"})
+    proceed = Record(
+        review.CAP_DECISION, latest.subject, review.cap_version(latest), "person:pat", {"answer": "Proceed"}
+    )
     store.put_record("s1", proceed)
     feature = features.open_feature(store, "ACME")
     with pytest.raises(Refusal, match="has not reached its cap"):
