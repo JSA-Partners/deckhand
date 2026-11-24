@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from deckhand import features, planning, spec, versions
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from deckhand import features, launch, planning, spec, versions
 from deckhand.records import Record, content_hash
 from deckhand.store.fake import FakeStore
 from tests.test_step_decide import feature_store
@@ -83,3 +88,53 @@ def test_planning_text_prints_each_named_section_or_not_written():
     assert spec.planning_text(store, feature, ("Frame", "Contract")) == (
         "# Frame\n\nnot written\n\n# Contract\n\nWritten by the person.\n\nPOST /orders.\n"
     )
+
+
+@pytest.fixture
+def temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    return tmp_path / launch.INPUT
+
+
+def size(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def test_a_context_under_the_bound_prints_whole_and_saves_nothing(temp: Path):
+    assert spec.fitted("ACME-1-build", "story: ACME-1\n", "plan:\nnone saved\n") == "story: ACME-1\nplan:\nnone saved\n"
+    assert not temp.exists()
+
+
+def test_a_long_context_prints_what_was_approved_and_the_saved_whole(temp: Path):
+    first, rest = "story: ACME-1\n# Contract\n\nPOST /orders.\n", "plan:\n" + "Step é.\n" * 3000
+    shown = spec.fitted("ACME-1-build", first, rest)
+    saved = temp / "ACME-1-build.md"
+    assert size(shown) < spec.LIMIT and shown.startswith(first) and str(saved) in shown
+    assert saved.read_text(encoding="utf-8") == first + rest
+
+
+def test_an_approved_spec_over_the_bound_is_cut_and_still_names_the_whole(temp: Path):
+    first = "story: ACME-1\n# Contract\n\n" + "A rule é.\n" * 4000
+    shown = spec.fitted("ACME-1-build", first, "plan:\nnone saved\n")
+    saved = temp / "ACME-1-build.md"
+    assert size(shown) < spec.LIMIT and shown.startswith("story: ACME-1\n# Contract\n\nA rule") and str(saved) in shown
+    assert saved.read_text(encoding="utf-8") == first + "plan:\nnone saved\n"
+
+
+def test_a_planted_link_is_replaced_never_followed(temp: Path, tmp_path: Path):
+    temp.mkdir(mode=0o700)
+    target = tmp_path / "elsewhere.txt"
+    target.write_text("kept")
+    (temp / "ACME-1-build.md").symlink_to(target)
+    spec.fitted("ACME-1-build", "story: ACME-1\n", "x\n" * 20000)
+    assert target.read_text() == "kept"
+    assert not (temp / "ACME-1-build.md").is_symlink()
+
+
+def test_a_context_that_cannot_be_saved_still_prints_under_the_bound(temp: Path, monkeypatch: pytest.MonkeyPatch):
+    def refused() -> Path:
+        raise OSError("read-only")
+
+    monkeypatch.setattr(launch, "input_folder", refused)
+    shown = spec.fitted("ACME-1-build", "story: ACME-1\n", "x\n" * 20000)
+    assert size(shown) < spec.LIMIT and shown.startswith("story: ACME-1\n") and "could not be saved" in shown

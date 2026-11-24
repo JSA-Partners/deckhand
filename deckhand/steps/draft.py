@@ -43,16 +43,14 @@ class Draft(StoryStep):
         store = self._store_for_run()
         feature = features.owning(store, team_key(parsed), parsed["words"][0])
         story = features.story(store, feature, parsed["words"][0])
-        print(f"story: {story['identifier']} {story['title']}")
-        print(story["description"] or "no description")
+        ref = story["identifier"]
+        first = f"story: {ref} {story['title']}\n{spec.planning_text(store, feature, spec.DRAFT_SECTIONS)}\n"
+        rest = [story["description"] or "no description"]
         stub = next((r for r in feature.records.get(story["id"], []) if r.kind == "stub"), None)
         for name in ("unknowns", "new_here", "decisions"):
-            for item in stub.data.get(name, []) if stub else []:
-                print(f"{name}: {item}")
-        print(spec.planning_text(store, feature, spec.DRAFT_SECTIONS))
-        print("the draft holds, in this order:")
-        for part in SHAPE:
-            print(f"- {part}")
+            rest += [f"{name}: {item}" for item in (stub.data.get(name, []) if stub else [])]
+        rest += ["the draft holds, in this order:", *(f"- {part}" for part in SHAPE)]
+        print(spec.fitted(f"{ref}-draft", first, "\n".join(rest) + "\n"), end="")
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)

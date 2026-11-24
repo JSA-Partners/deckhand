@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import git, review, step
+from deckhand import git, launch, ops, review, spec, step
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.commit import Commit
@@ -245,6 +245,21 @@ def test_build_context_prints_the_spec_before_the_plan(tmp_path: Path, repo: Pat
     assert facts["examples"] == "Written by the person.\n\nThe Examples of Alpha."
     assert facts["invariants"] == "Written by the person.\n\nThe Invariants of Alpha."
     assert facts["decisions"] == []
+
+
+def test_a_long_context_prints_the_spec_and_saves_the_whole(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = labeled(tmp_path, repo)
+    store.put_document(ops.create_id("s1", "sitting"), "s1", "Sitting", "An order of two ships the same day.\n" * 600)
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    saved = tmp_path / launch.INPUT / "ACME-1-build.md"
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and str(saved) in out and "plan:" not in out
+    assert "The Contract of Alpha." in saved.read_text() and "sitting:\nAn order of two" in saved.read_text()
 
 
 def test_a_renamed_story_keeps_its_worktree(tmp_path: Path, repo: Path):

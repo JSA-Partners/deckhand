@@ -290,16 +290,11 @@ def _worktree_of(at: Located) -> Path:
 
 
 def _print(facts: dict, approved: str) -> None:
-    print(f"story: {facts['story']} {facts['title']}")
-    print(f"worktree: {facts['worktree']} (branch {facts['branch']})")
-    print(f"tier: {facts['tier'] if facts['tier'] is not None else 'not decided'}")
-    print("tools:")
-    for tool in facts["tools"]:
-        print(f"- {tool}")
-    print("checks:")
-    for check in facts["checks"]:
-        print(f"- {check}")
-    print(approved)
+    first = [f"story: {facts['story']} {facts['title']}", f"worktree: {facts['worktree']} (branch {facts['branch']})"]
+    rest = [f"tier: {facts['tier'] if facts['tier'] is not None else 'not decided'}", "tools:"]
+    rest += [f"- {tool}" for tool in facts["tools"]]
+    rest += ["checks:", *(f"- {check}" for check in facts["checks"])]
     for name in ("plan", "sitting"):
-        print(f"{name}:")
-        print(facts[name] if facts[name] else "none saved")
+        rest += [f"{name}:", facts[name] or "none saved"]
+    head, tail = "\n".join(first), "\n".join(rest)
+    print(spec.fitted(f"{facts['story']}-build", f"{head}\n{approved}\n", f"{tail}\n"), end="")
