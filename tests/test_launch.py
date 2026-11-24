@@ -187,8 +187,11 @@ def test_the_captain_can_ask_read_and_plan_but_not_send_or_notify(layout: dict) 
         "Skill(deckhand:signoff)",
         "Skill(superpowers:*)",
         "Skill(impeccable:*)",
+        *(f"Bash({command} *)" for command in launch.READ_ONLY),
     ]
-    assert permissions["defaultMode"] == "dontAsk"
+    assert {"ls", "cat", "grep", "git status", "git log", "git diff", "git show"} <= set(launch.READ_ONLY)
+    assert not {"find", "Bash", "Write", "Edit"} & (set(launch.READ_ONLY) | set(permissions["allow"]))
+    assert permissions["defaultMode"] == "default"
     assert {"SendMessage", "PushNotification", "NotebookEdit", "mcp__*"} <= set(permissions["deny"])
     assert "AskUserQuestion" not in permissions["deny"]
     assert layout["captain"]["sandbox"]["autoAllowBashIfSandboxed"] is False

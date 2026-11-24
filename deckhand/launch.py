@@ -18,6 +18,8 @@ CAPTAIN_EXEMPT = ["deckhand *"]
 NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "PushNotification", "mcp__*"]
 CAPTAIN_ALLOW = ["Bash(deckhand *)", "Read", "Grep", "Glob", "Agent", "AskUserQuestion"]
 CAPTAIN_ALLOW += ["Skill(deckhand:feature)", "Skill(deckhand:signoff)", "Skill(superpowers:*)", "Skill(impeccable:*)"]
+READ_ONLY = ("ls", "cat", "head", "tail", "wc", "grep", "git status", "git log", "git diff", "git show")
+CAPTAIN_ALLOW += [f"Bash({command} *)" for command in READ_ONLY]
 CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit", "mcp__*"]
 INPUT = "deckhand-input"
 GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
@@ -193,7 +195,8 @@ def captain_settings(protected: Protected) -> dict[str, Any]:
         "preferredNotifChannel": "terminal_bell",
         "crossSessionInbound": "refuse",
         "permissions": {
-            "defaultMode": "dontAsk",
+            # Pinned so the person's own mode never applies; dontAsk would deny AskUserQuestion.
+            "defaultMode": "default",
             "allow": [*CAPTAIN_ALLOW, *(_rule(tool, root, "/**") for root in roots for tool in ("Write", "Edit"))],
             "deny": [*CAPTAIN_DENY, *guarded["deny"]],
             "additionalDirectories": [str(root) for root in roots],
