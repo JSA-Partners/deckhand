@@ -23,30 +23,39 @@ from deckhand import (
     hosts,
     reading,
     status,
+    watch,
 )
 from deckhand.linear.client import LinearError
 from deckhand.records import iso
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
+from deckhand.store.local import default_path
 from deckhand.store.open import Stores
+from deckhand.store.state import LocalState
 
 REFRESH_LIMIT = 120.0
 NOT_RUN = 127
 PLACES = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
-USAGE = "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]]"
+USAGE = (
+    "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]], "
+    "or apply hold|release"
+)
+ACTIONS = ("hold", "release")
 FLAGS = ("--brief", "--json", "--line", "--color", "--board", "--watch", "--no-color")
 
 
 def _parse(args: list[str]) -> dict:
-    found: dict = {flag[2:]: False for flag in FLAGS}
+    found: dict = {flag[2:]: False for flag in FLAGS} | {"words": []}
     rest = iter(args)
     for arg in rest:
         if arg in FLAGS:
             found[arg[2:]] = True
         elif arg == "--team-key":
             found["team_key"] = next(rest, "")
-        else:
+        elif arg.startswith("--"):
             raise Refusal(f"unknown argument {arg}; {USAGE}")
+        else:
+            found["words"].append(arg)
     if found["color"] and not found["line"]:
         raise Refusal(f"--color goes with --line; {USAGE}")
     if found["line"] and (found["brief"] or found["json"]):
@@ -90,6 +99,8 @@ class Captain:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
+        if parsed["words"]:
+            raise Refusal(f"unknown argument {parsed['words'][0]}; {USAGE}")
         if parsed["line"]:
             self._line(parsed["color"])
             return
@@ -154,7 +165,15 @@ class Captain:
             print("deckhand: --watch needs a terminal; printed the board once", file=sys.stderr)
 
     def apply(self, args: list[str]) -> None:
-        raise Refusal(f"captain has no apply; {USAGE}")
+        words = _parse(args)["words"]
+        if words != args or len(words) != 1 or words[0] not in ACTIONS:
+            raise Refusal(f"captain apply takes hold or release; {USAGE}")
+        with LocalState(default_path()) as rows:
+            if args == ["hold"]:
+                rows.put(watch.HOLD, {})
+            else:
+                rows.drop(watch.HOLD)
+        print("done")
 
     def _now(self) -> str:
         return iso(int(self._clock() * 1000))

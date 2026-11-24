@@ -29,8 +29,9 @@ HAND_APPLIES: dict[str, Callable[[list[str]], bool]] = {
     "draft": lambda rest: "take" not in rest,
     "mail": _any,
     "hook": lambda rest: rest[:1] in (["session"], ["permission"], ["stop"]),
+    "watch": lambda rest: rest[:1] == ["hand"],
 }
-UNREFERENCED = ("hook",)
+UNREFERENCED = ("hook", "watch")
 
 
 class Refusal(Exception):

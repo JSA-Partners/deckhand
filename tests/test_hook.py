@@ -408,3 +408,22 @@ def test_hook_stop_marks_the_turn_end_for_a_spike_hand(monkeypatch, tmp_path: Pa
         assert rows.hands()["spike-a1b2c3d4e5f6"].turn_ended is not None
     out = capsys.readouterr()
     assert (out.out, out.err) == ("", "")
+
+
+@pytest.mark.parametrize(("source", "kept"), [("startup", False), ("resume", True), ("compact", True), ("clear", True)])
+def test_a_captain_startup_clears_the_hold_and_a_compact_keeps_it(tmp_path: Path, monkeypatch, capsys, source, kept):
+    from deckhand.steps.captain import Captain
+    from deckhand.store.local import default_path
+    from deckhand.store.state import LocalState
+    from deckhand.watch import HOLD
+
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    Captain().apply(["hold"])
+    capsys.readouterr()
+    context = []
+    stub = type("Stub", (), {"context": lambda self, args: context.append(args)})()
+    hook_with(monkeypatch, Raising(), ["session"], {"hook_event_name": "SessionStart", "source": source}, stub)
+    with LocalState(default_path()) as rows:
+        assert (rows.get(HOLD) is not None) is kept
+    assert context == [[]]
+    assert capsys.readouterr().err == ""

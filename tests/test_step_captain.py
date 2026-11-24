@@ -9,13 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, checks, config, status
+from deckhand import answers, asks, checks, config, status, watch
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
 from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
 from deckhand.steps.captain import Captain
 from deckhand.store.fake import FakeStore
+from deckhand.store.state import LocalState
 from tests.test_feature_approval import setup
 from tests.test_queue import asked
 from tests.test_step_hand import ME, TEAM, Shell, building, clone, row, spike_row, state
@@ -42,10 +43,28 @@ def owned() -> FakeStore:
     return store
 
 
-def test_registered_without_an_apply():
-    assert "captain" in REGISTRY
+@pytest.mark.parametrize("args", [[], ["park"], ["hold", "release"], ["--json"]])
+def test_captain_apply_takes_hold_or_release(state: Path, args: list[str]):
     with pytest.raises(Refusal):
-        REGISTRY["captain"].apply([])
+        REGISTRY["captain"].apply(args)
+    with LocalState(state / "deckhand.db") as rows:
+        assert rows.get(watch.HOLD) is None
+
+
+def test_hold_and_release_set_and_clear_the_row(state: Path, capsys: pytest.CaptureFixture[str]):
+    REGISTRY["captain"].apply(["hold"])
+    assert capsys.readouterr().out == "done\n"
+    with LocalState(state / "deckhand.db") as rows:
+        assert rows.get(watch.HOLD) is not None
+    REGISTRY["captain"].apply(["release"])
+    assert capsys.readouterr().out == "done\n"
+    with LocalState(state / "deckhand.db") as rows:
+        assert rows.get(watch.HOLD) is None
+
+
+def test_captain_context_takes_no_words(clone: Path):
+    with pytest.raises(Refusal, match="unknown argument hold"):
+        captain(owned()).context(["hold", *TEAM])
 
 
 def since(store: FakeStore, capsys: pytest.CaptureFixture[str]) -> float:

@@ -14,10 +14,14 @@ from deckhand.steps.captain import Captain
 from deckhand.store import Store
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
+from deckhand.watch import HOLD
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
-USAGE = "hook apply answer|ask|permission reads one hook event as JSON on stdin; hook apply session|stop reads none"
+USAGE = (
+    "hook apply answer|ask|permission reads one hook event as JSON on stdin; "
+    "hook apply session reads one in the captain role and none for a hand"
+)
 
 
 def _read() -> dict:
@@ -83,6 +87,9 @@ class Hook(StoryStep):
             return
         if os.environ.get("DECKHAND_ROLE") != "captain":
             return
+        if _read().get("source") == "startup":
+            with LocalState(default_path()) as rows:
+                rows.drop(HOLD)
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             (self._captain or Captain()).context([])
