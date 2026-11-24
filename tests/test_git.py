@@ -425,15 +425,21 @@ def test_a_claude_call_carries_only_the_allowed_environment(monkeypatch: pytest.
 
 
 ALONE = """
-import sys, threading
+import os, sys, threading, time
 from deckhand import git
+marker = sys.argv[1]
 out = {}
 done = threading.Event()
 def work():
-    out["rc"] = git.alone(["sleep", "1"]).returncode
-    done.set()
+    try:
+        out["rc"] = git.alone(["sh", "-c", ': > "$0"; exec sleep 1', marker]).returncode
+    finally:
+        done.set()
 threading.Thread(target=work).start()
-print("ready", flush=True)
+deadline = time.monotonic() + 10
+while not os.path.exists(marker) and not done.is_set() and time.monotonic() < deadline:
+    time.sleep(0.01)
+print("started" if os.path.exists(marker) else "not started", flush=True)
 # On Python 3.12 a Thread.join interrupted by Ctrl-C marks the thread finished while it still runs.
 while True:
     try:
@@ -441,23 +447,30 @@ while True:
         break
     except KeyboardInterrupt:
         pass
-print(out["rc"], flush=True)
+print(out.get("rc"), flush=True)
 """
 
 
-def test_a_child_run_alone_survives_a_ctrl_c_sent_to_its_parents_group():
+def test_a_child_run_alone_survives_a_ctrl_c_sent_to_its_parents_group(tmp_path: Path) -> None:
     import signal
     import sys
-    import time
 
     root = Path(__file__).resolve().parent.parent
     parent = subprocess.Popen(
-        [sys.executable, "-c", ALONE], cwd=root, stdout=subprocess.PIPE, text=True, start_new_session=True
+        [sys.executable, "-c", ALONE, str(tmp_path / "started")],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
     )
-    assert parent.stdout is not None and parent.stdout.readline() == "ready\n"
-    time.sleep(0.3)
-    os.killpg(parent.pid, signal.SIGINT)
-    out, _ = parent.communicate(timeout=10)
+    try:
+        assert parent.stdout is not None and parent.stdout.readline() == "started\n"
+        os.killpg(parent.pid, signal.SIGINT)
+        out, _ = parent.communicate(timeout=10)
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.communicate()
     assert out.strip() == "0"
 
 
