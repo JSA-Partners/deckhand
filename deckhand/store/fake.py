@@ -3,14 +3,13 @@ from __future__ import annotations
 import copy
 import json
 import re
-import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
-from deckhand.records import Record, iso
+from deckhand.records import Clock, Record
 from deckhand.ref import Ref
 from deckhand.store import Store
 
@@ -27,19 +26,9 @@ class WriteFailed(Exception):
     pass
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self._last = 0
-
-    # Linear stamps sequential writes in order; the wall clock repeats within one millisecond.
-    def __call__(self) -> str:
-        self._last = max(self._last + 1, time.time_ns() // 1_000_000)
-        return iso(self._last)
-
-
 class FakeStore(Store):
     def __init__(self, now: Callable[[], str] | None = None, viewer: str = "viewer-1") -> None:
-        self._now = now or _Clock()
+        self._now = now or Clock()
         self._viewer = viewer
         self._issues: dict[str, dict[str, Any]] = {}
         self._projects: dict[str, dict[str, Any]] = {}

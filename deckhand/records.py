@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -48,3 +49,13 @@ def content_hash(text: str) -> str:
 def iso(ms: int) -> str:
     moment = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(milliseconds=ms)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+class Clock:
+    def __init__(self) -> None:
+        self._last = 0
+
+    # Linear stamps sequential writes in order; the wall clock repeats within one millisecond.
+    def __call__(self) -> str:
+        self._last = max(self._last + 1, time.time_ns() // 1_000_000)
+        return iso(self._last)
