@@ -268,3 +268,9 @@ def test_carried_lists_the_open_p1s_and_the_accepted_findings_not_yet_fixed():
 def test_a_declined_or_undecided_finding_is_never_unfixed():
     records = [done(1, "h1", FIRST, SECOND), person(id_of(FIRST), review.DECLINE)]
     assert review.unfixed(records) == []
+
+
+def test_an_accepted_finding_an_unscoped_later_round_does_not_raise_is_fixed():
+    whole = review.round_record("s1", "plan", RoundPlan(4, scoped=False, base_hash=""), "h4", findings(SECOND))
+    records = [done(3, "h3", FIRST, SECOND), whole, person(id_of(FIRST)), person(id_of(SECOND))]
+    assert summaries(records) == ["second"]

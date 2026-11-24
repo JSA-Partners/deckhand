@@ -152,7 +152,8 @@ def accepted(records: list[Record]) -> set[str]:
 
 def _fixed(rounds: list[Record], id: str) -> bool:
     raised = max(n for n, round in enumerate(rounds) if any(f["id"] == id for f in round.data["findings"]))
-    return any(id in round.data.get("carried", []) for round in rounds[raised + 1 :])
+    later = rounds[raised + 1 :]
+    return any(not round.data["scoped"] or id in round.data.get("carried", []) for round in later)
 
 
 def _unfixed(records: list[Record], prefix: str) -> list[dict]:
