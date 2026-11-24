@@ -78,5 +78,11 @@ def hand_may_apply(command: str, args: list[str]) -> bool:
         return False
     if command in UNREFERENCED:
         return allowed(args)
-    own = os.environ.get("DECKHAND_SPIKE" if command == "spike" else "DECKHAND_STORY", "")
+    from deckhand import fleet
+
+    own = (
+        fleet.own_ref()
+        if command == "mail"
+        else os.environ.get("DECKHAND_SPIKE" if command == "spike" else "DECKHAND_STORY", "")
+    )
     return bool(own) and args[:1] == [own] and allowed(args[1:])

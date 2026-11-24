@@ -398,3 +398,22 @@ def test_a_hand_may_apply_the_stop_hook(monkeypatch):
 
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     assert hand_may_apply("hook", ["stop"])
+
+
+def test_hook_stop_marks_the_turn_end_for_a_spike_hand(monkeypatch, tmp_path: Path, capsys):
+    from deckhand.steps.hook import Hook
+    from deckhand.store.state import LocalState
+
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "spike")
+    monkeypatch.setenv("DECKHAND_SPIKE", "a1b2c3d4e5f6")
+    monkeypatch.delenv("DECKHAND_STORY", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        rows.want("spike-a1b2c3d4e5f6", "a1b2c3d4e5f6", "p1", "spike", str(tmp_path))
+    Hook(Raising()).apply(["stop"])
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        assert rows.hands()["spike-a1b2c3d4e5f6"].turn_ended is not None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")

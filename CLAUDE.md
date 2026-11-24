@@ -10,21 +10,22 @@
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
   `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
-  planning work (`spike`, `draft`) and its questions (`ask`), and the person's fleet (`hand`
-  starts, fills and wakes hands, `captain` prints the brief, the queue, the status line segment
-  and the board); `commit` and `document` only report
+  planning work (`spike`, `draft`), its questions (`ask`) and its messages (`mail`), and the
+  person's fleet (`hand` starts, fills and wakes hands, `captain` prints the brief, the queue, the
+  status line segment and the board); `commit` and `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
   quiz and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
   and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
-  who owns a story, `asks.py` a hand's questions and wakes, `gaps.py` permission gaps, `spikes.py`
-  spike questions and answers, `order.py` the build order, `answers.py` the dialog answers the hook
-  stores, `inputs.py` the files a hand may hand in; `stage.py` where each story is in the build and
-  its review round, `reading.py` the full read the captain shares, `status.py` the snapshot kept in
-  deckhand's local SQLite file, `standing.py` how the snapshot and the fleet sort into needs you,
-  working, stopped, queued, team and done today, `brief.py` the brief, the notify text and the
-  status line segment, `board.py` the board's sections and rows
+  who owns a story, `asks.py` a hand's questions and wakes, `wakes.py` the text of the messages a
+  hand is sent, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the
+  build order, `answers.py` the dialog answers the hook stores, `inputs.py` the files a hand may
+  hand in; `stage.py` where each story is in the build and its review round, `reading.py` the full
+  read the captain shares, `status.py` the snapshot kept in deckhand's local SQLite file,
+  `standing.py` how the snapshot and the fleet sort into needs you, working, stopped, queued, team
+  and done today, `brief.py` the brief, the notify text and the status line segment, `board.py` the
+  board's sections and rows
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
   escape codes; `statusline.py` installs and removes the captain's segment in the person's status
   line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`

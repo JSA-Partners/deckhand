@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 
 from deckhand import git
@@ -73,6 +74,14 @@ def hand_name(ref: str) -> str:
 
 def spike_name(key: str) -> str:
     return SPIKE + key
+
+
+def own_ref() -> str:
+    return os.environ.get("DECKHAND_SPIKE") or os.environ.get("DECKHAND_STORY", "")
+
+
+def session_of(ref: str) -> str:
+    return spike_name(ref) if ref and ref == os.environ.get("DECKHAND_SPIKE") else hand_name(ref)
 
 
 def _newest(sessions: list[Session], prefix: str) -> dict[str, Session]:

@@ -76,3 +76,24 @@ def test_a_hand_may_apply_mail_for_its_own_story_only(monkeypatch):
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
     assert hand_may_apply("mail", ["ACME-1", "ack", "3"])
     assert not hand_may_apply("mail", ["ACME-2", "ack", "3"])
+
+
+def as_spike(monkeypatch: pytest.MonkeyPatch, key: str = "a1b2c3d4e5f6") -> None:
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "spike")
+    monkeypatch.setenv("DECKHAND_SPIKE", key)
+    monkeypatch.delenv("DECKHAND_STORY", raising=False)
+
+
+def test_a_spike_hand_reads_and_acks_its_own_mail(capsys, db: Path, monkeypatch):
+    as_spike(monkeypatch)
+    with LocalState(db) as rows:
+        rows.post("k1", "spike-a1b2c3d4e5f6", "answer", "The person answered the spike.")
+        rows.post("k2", "hand-a1b2c3d4e5f6", "answer", "not the spike's")
+    assert hand_may_apply("mail", ["a1b2c3d4e5f6", "ack", "1"])
+    assert not hand_may_apply("mail", ["ACME-1", "ack", "1"])
+    Mail().context(["a1b2c3d4e5f6"])
+    assert capsys.readouterr().out.splitlines() == ["1 answer", "The person answered the spike."]
+    Mail().apply(["a1b2c3d4e5f6", "ack", "1"])
+    assert capsys.readouterr().out == "done: acknowledged 1\n"
+    assert pending(db) == [(2, "hand-a1b2c3d4e5f6")]

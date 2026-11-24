@@ -29,7 +29,7 @@ def _parse(args: list[str]) -> dict:
 class Mail:
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        hand = fleet.hand_name(parsed["words"][0])
+        hand = fleet.session_of(parsed["words"][0])
         with LocalState(default_path()) as rows:
             waiting = rows.pending(hand)
         if parsed["json"]:
@@ -47,7 +47,7 @@ class Mail:
         if len(words) != 3 or words[1] != "ack":
             raise Refusal(USAGE)
         ref, seq = words[0], words[2]
-        hand = fleet.hand_name(ref)
+        hand = fleet.session_of(ref)
         with LocalState(default_path()) as rows:
             seqs = {m.seq for m in rows.pending(hand)}
             if not seq.isdigit() or int(seq) not in seqs:

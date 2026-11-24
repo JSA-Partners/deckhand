@@ -89,10 +89,10 @@ class Hook(StoryStep):
         print(buffer.getvalue(), end="")
 
     def _stop(self) -> None:
-        ref = os.environ.get("DECKHAND_STORY", "")
+        ref = fleet.own_ref()
         if hand_role() and ref:
             with LocalState(default_path()) as rows:
-                rows.turn_ended(fleet.hand_name(ref))
+                rows.turn_ended(fleet.session_of(ref))
 
     def _permission(self, hook_input: dict) -> None:
         ref = os.environ.get("DECKHAND_STORY", "")
