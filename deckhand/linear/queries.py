@@ -4,8 +4,8 @@ PAGE_SIZE = 250
 PAGE = f"(first: {PAGE_SIZE})"
 MORE = "pageInfo { hasNextPage }"
 CURSOR = "pageInfo { hasNextPage endCursor }"
-AFTER = f"(first: {PAGE_SIZE}, after: $after)"
 ISSUE_PAGE = 50
+DOCUMENT_PAGE = 50
 ISSUE_LABEL_PAGE = 20
 NESTED_LABEL_PAGE = 10
 RELATION_PAGE = 50
@@ -129,7 +129,9 @@ mutation ProjectUpdate($id: String!, $input: ProjectUpdateInput!) {
 
 PROJECT_DOCUMENTS = f"""
 query ProjectDocuments($id: String!, $after: String) {{
-  project(id: $id) {{ documents{AFTER} {{ nodes {{ id title url content updatedAt }} {CURSOR} }} }}
+  project(id: $id) {{
+    documents(first: {DOCUMENT_PAGE}, after: $after) {{ nodes {{ id title url content updatedAt }} {CURSOR} }}
+  }}
 }}
 """
 
