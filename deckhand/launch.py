@@ -22,7 +22,7 @@ READ_ONLY = ("ls", "cat", "head", "tail", "wc", "grep", "git status")
 CAPTAIN_ALLOW += [f"Bash({command} *)" for command in READ_ONLY]
 CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit", "mcp__*"]
 INPUT = "deckhand-input"
-GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
+CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg", ".aws", ".config/gcloud")
 CLAUDE_CONFIG = (
     ".claude/settings.json",
     ".claude/settings.local.json",
@@ -94,14 +94,16 @@ def _rule(tool: str, path: Path, suffix: str = "") -> str:
 
 def _guarded(protected: Protected, deny: list[str], deny_write: list[str]) -> dict[str, Any]:
     secrets = [str(path) for path in protected.secrets]
+    credentials = _forms(*(Path.home() / name for name in CREDENTIALS))
     permissions_deny = [*deny]
+    permissions_deny += [_rule("Read", path, suffix) for path in credentials for suffix in ("", "/**")]
     for path in protected.secrets:
         permissions_deny += [_rule("Read", path, "/**"), _rule("Edit", path, "/**")]
     permissions_deny += [_rule("Edit", path, "/**") for path in protected.state]
     state = [str(path) for path in protected.state]
     return {
         "deny": permissions_deny,
-        "filesystem": {"denyWrite": secrets + state + deny_write, "denyRead": secrets},
+        "filesystem": {"denyWrite": secrets + state + deny_write, "denyRead": secrets + [str(p) for p in credentials]},
         "credentials": {
             "files": [{"path": path, "mode": "deny"} for path in secrets],
             "envVars": [{"name": name, "mode": "deny"} for name in SECRET_ENV],
@@ -161,16 +163,13 @@ def hand_settings(
     worktrees = _forms(worktree)
     env = _hand_env(ref, clones + worktrees, kind)
     _refuse_path_writes(local.sandbox_write, env["PATH"])
-    git_credentials = _forms(*(Path.home() / name for name in GIT_CREDENTIALS))
     deny = list(NO_DIALOG)
-    deny += [_rule("Read", path, suffix) for path in git_credentials for suffix in ("", "/**")]
     deny += [_rule("Edit", path / ".git", "/**") for path in clones]
     deny += [_rule("Edit", path / ".git") for path in worktrees]
     deny += [_rule("Edit", path / name) for path in worktrees for name in CLAUDE_CONFIG]
     metadata = [str(path / ".git") for path in clones + worktrees]
     guarded = _guarded(protected, deny, metadata)
     filesystem = {"allowWrite": list(local.sandbox_write), **guarded["filesystem"]}
-    filesystem["denyRead"] = filesystem["denyRead"] + [str(path) for path in git_credentials]
     sandbox = _sandbox(HAND_EXEMPT, filesystem, guarded["credentials"])
     sandbox["network"] = {"allowedDomains": list(policy.sandbox_domains)}
     return {

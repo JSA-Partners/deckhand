@@ -310,7 +310,7 @@ def test_start_argv_names_the_prompt_and_plugin_dir_for_testing() -> None:
     ]
 
 
-GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
+CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg", ".aws", ".config/gcloud")
 
 
 def test_file_tools_write_only_in_working_directories(
@@ -334,19 +334,34 @@ def test_hand_has_no_mcp_tools(layout: dict) -> None:
     assert "disableClaudeAiConnectors" not in layout["captain"]
 
 
-def test_git_credentials_unreadable(tmp_path: Path, home: Path) -> None:
+def both_roles(tmp_path: Path) -> list[dict]:
+    protected = launch.protected(tmp_path / "config", tmp_path / "state")
+    policy = Policy(repository_label="widgets")
+    hand = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)
+    return [hand, launch.captain_settings(protected)]
+
+
+def test_credentials_unreadable_to_both_roles(tmp_path: Path, home: Path) -> None:
     real_ssh = (tmp_path / "keys").resolve()
     real_ssh.mkdir()
     (home / ".ssh").symlink_to(real_ssh)
-    protected = launch.protected(tmp_path / "config", tmp_path / "state")
-    policy = Policy(repository_label="widgets")
-    settings = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)
-    deny = settings["permissions"]["deny"]
-    deny_read = settings["sandbox"]["filesystem"]["denyRead"]
-    for path in [*(home / name for name in GIT_CREDENTIALS), real_ssh]:
-        assert rule("Read", path) in deny
-        assert rule("Read", path, "/**") in deny
-        assert str(path) in deny_read
+    for settings in both_roles(tmp_path):
+        deny = settings["permissions"]["deny"]
+        deny_read = settings["sandbox"]["filesystem"]["denyRead"]
+        for path in [*(home / name for name in CREDENTIALS), real_ssh]:
+            assert rule("Read", path) in deny
+            assert rule("Read", path, "/**") in deny
+            assert str(path) in deny_read
+
+
+def test_the_captain_cannot_read_a_key_or_cat_netrc(tmp_path: Path, home: Path) -> None:
+    captain = both_roles(tmp_path)[1]
+    reads = [r[len("Read(/") : -1] for r in captain["permissions"]["deny"] if r.startswith("Read(")]
+    assert any(covers(pattern, str(home / ".ssh" / "id_ed25519")) for pattern in reads)
+    sandbox = captain["sandbox"]
+    assert sandbox["enabled"] is True and sandbox["allowUnsandboxedCommands"] is False
+    assert not [command for command in sandbox["excludedCommands"] if command.startswith("cat")]
+    assert any(covers(pattern, str(home / ".netrc")) for pattern in captain["sandbox"]["filesystem"]["denyRead"])
 
 
 @pytest.mark.parametrize("entry", ["tools", "tools/bin"])
