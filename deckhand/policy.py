@@ -7,6 +7,7 @@ from typing import Any
 from deckhand.step import Refusal, read_toml
 
 STAGES = ("plan", "branch")
+FILE = ".claude/deckhand.toml"
 TIER_KEYS = ("0", "1", "2", "3", "4")
 KEYS = frozenset(
     {
@@ -35,7 +36,7 @@ class Policy:
 
     @classmethod
     def load(cls, repo_root: Path) -> Policy:
-        path = repo_root / ".claude" / "deckhand.toml"
+        path = repo_root / FILE
         table = read_toml(path)
         for key in table:
             if key not in KEYS:
@@ -54,6 +55,15 @@ class Policy:
             second_signoff=_flag(path, table, "second_signoff"),
             sandbox_domains=_sandbox_domains(path, table.get("sandbox", {})),
         )
+
+
+def described(rule: str, clone: Path, label: str) -> str:
+    detail = rule.removeprefix(f"{clone / FILE}: ")
+    if detail == "file not found":
+        return f"{FILE} is missing in clone {label}"
+    if detail == "not valid TOML":
+        return f"{FILE} is not valid TOML in clone {label}"
+    return f"{detail} in {FILE} of clone {label}"
 
 
 def _flag(path: Path, table: dict, name: str) -> bool:

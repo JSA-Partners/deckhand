@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from deckhand.records import Record, content_hash, iso
+from deckhand.records import Record, content_hash, epoch, iso
 
 
 def _record(**overrides):
@@ -83,3 +83,7 @@ def test_record_at_not_in_json_or_equality():
 def test_iso_writes_linears_form_from_unix_milliseconds():
     assert iso(0) == "1970-01-01T00:00:00.000Z"
     assert iso(1763546400123) == "2025-11-19T10:00:00.123Z"
+
+
+def test_epoch_reads_clock_text():
+    assert epoch("2025-11-19T10:00:00.123Z") == 1763546400.123

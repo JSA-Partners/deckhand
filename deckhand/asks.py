@@ -4,7 +4,7 @@ import json
 import posixpath
 from pathlib import PurePosixPath
 
-from deckhand import review, signoff
+from deckhand import fleet, review, signoff
 from deckhand.questions import MAX_OPTIONS, MIN_OPTIONS, RECOMMENDED
 from deckhand.records import HAND, Record, content_hash
 from deckhand.step import Refusal
@@ -21,6 +21,12 @@ QUESTION_SHAPE = {"question": "TEXT", "options": ["TWO TO FOUR OPTIONS"], "why":
 EDIT_SHAPE = {"path": "PATH", "change": "TEXT", "why": "TEXT"}
 WAITING = (ANSWER, review.DECISION, review.CAP_DECISION, signoff.KIND, signoff.SECOND, EDIT)
 _OWN_FILES = ("deckhand.toml", "deckhand")
+
+
+def hand_start(story: dict, records: list[Record], kind: str) -> Record:
+    newest = max((r.at for r in records), default="")
+    data = {"kind": kind, "session": fleet.hand_name(story["identifier"])}
+    return Record(HAND_START, story["id"], newest, HAND, data)
 
 
 def _object(text: str, shape: dict) -> dict:

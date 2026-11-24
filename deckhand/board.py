@@ -7,7 +7,6 @@ from deckhand import brief, fleet, standing
 from deckhand.brief import Glyphs
 from deckhand.standing import Entry, Hand
 
-START = "/deckhand:captain"
 FLEET_FAILED = "hands from the file, fleet read failed"
 NO_CAPTAIN = "no captain running"
 CAPTAIN_STATES = {"busy": "working", "idle": "idle", "waiting": "waiting on you"}
@@ -89,7 +88,7 @@ def _hand_detail(hand: Hand | None) -> tuple[Detail, ...]:
 def _needs(entry: Entry, now: float) -> Row:
     item, ref = entry.item or {}, brief.clean(entry.ref)
     kind = _clean(item, "kind")
-    action = f"{brief.ACTIONS.get(kind, 'needs you')}; type next in the captain"
+    action = f"{brief.ACTIONS.get(kind, 'needs you')}; the captain will ask"
     key = f"item:{_clean(item, 'key') or ref + kind}"
     title = _clean(item, "title") or _clean(entry.story, "title")
     detail = (("", action, ""), *_hand_detail(entry.hand))
@@ -101,10 +100,10 @@ def _hand_row(entry: Entry, now: float) -> Row:
     label, since = _stage(entry.story)
     title = _clean(entry.story, "title") or ("spike" if hand and hand.spike else "")
     if entry.kind == standing.WORKING and hand is not None:
-        own = brief.clean(hand.status)
+        own = "resuming" if hand.resuming else brief.clean(hand.status)
         state = ", ".join(part for part in (label, "" if own == "busy" else own) if part)
     else:
-        gone = (brief.clean(hand.state) if hand else "") or "stopped"
+        gone = "idle" if hand and hand.idle else (brief.clean(hand.state) if hand else "") or "stopped"
         state = f"{gone} at {label}" if label else gone
     age = _ago(since, now) or (_ago(hand.started_at, now) if hand else "")
     return Row(f"story:{ref}", TONES[entry.kind], ref, title, state, age, _hand_detail(hand))
@@ -143,10 +142,9 @@ def _row(entry: Entry, now: float, full: bool, g: Glyphs) -> Row:
     return _done(entry, now) if entry.kind == standing.MERGED else _hand_row(entry, now)
 
 
-def _slots(status: dict, read: fleet.Fleet | None) -> tuple[int, int]:
+def _slots(status: dict) -> tuple[int, int]:
     slots = status.get("slots")
-    used = fleet.slots_used(read.sessions) if read is not None and not read.note else _number(slots, "used")
-    return used or 0, _number(slots, "cap") or 0
+    return _number(slots, "used") or 0, _number(slots, "cap") or 0
 
 
 def _facts(status: dict) -> tuple[str, ...]:
@@ -157,12 +155,10 @@ def _facts(status: dict) -> tuple[str, ...]:
 
 
 def _stale(status: dict, since: float | None) -> str:
+    if not status.get("stale_since"):
+        return ""
     age = brief.age(since) if since is not None else "an unknown time"
-    if status.get("stale_since"):
-        return f"stale: Linear was unreachable, this is the state from {age} ago; run {START} to retry"
-    if since is None or since > brief.LINE_STALE_SECONDS:
-        return f"stale: the captain last read Linear {age} ago; run {START} to refresh"
-    return ""
+    return f"stale: Linear is unreachable, this is the state from {age} ago"
 
 
 def _captain(read: fleet.Fleet | None) -> str:
@@ -184,9 +180,10 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     if not isinstance(status, dict):
         return Board(False)
     live = read is not None and not read.note
-    hands = standing.live(read.sessions) if live else standing.filed(status)
+    flags = (standing.flagged(status, "idle"), standing.flagged(status, "resuming"))
+    hands = standing.live(read.sessions, *flags) if live else standing.filed(status)
     entries = standing.classify(status, hands, today)
-    used, cap = _slots(status, read)
+    used, cap = _slots(status)
     rows: dict[str, list[Row]] = {kind: [] for kind in standing.ORDER}
     for entry in entries:
         rows[entry.kind].append(_row(entry, now, used >= cap, g))
@@ -194,10 +191,11 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     stamp = standing.timestamp(standing.text(status, "written_at"))
     since = now - stamp if stamp is not None else None
     stale = _stale(status, since)
+    old = bool(stale) or since is None or since > brief.LINE_STALE_SECONDS
     lead = brief.segment(status, since, now, g, entries)
     working = len(rows[standing.WORKING])
-    updated = "" if stale else _updated(since)
+    updated = "" if old else _updated(since)
     failed = read is not None and bool(read.note)
-    quiet = brief.UNKNOWN if brief.unknown(status) else brief.nothing(since, bool(stale))
+    quiet = brief.UNKNOWN if brief.unknown(status) else brief.nothing(since, old)
     slots = (str(used), str(cap))
     return Board(True, lead, _facts(status), slots, updated, stale, sections, working, failed, quiet, _captain(read))

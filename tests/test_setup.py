@@ -536,3 +536,26 @@ def test_context_statusline_with_other_flags_prints_the_usage(capsys: pytest.Cap
     out = capsys.readouterr().out
     assert "--statusline takes no other flag" in out
     assert "status line: none" in out
+
+
+def test_team_labels_past_one_page_are_read_in_full():
+    linear = FakeLinear("ACME")
+    team = linear.teams["ACME"]
+    first = [{"id": f"l{n}", "name": f"label-{n}", "isGroup": False, "parent": None} for n in range(100)]
+    rest = [{"id": "l100", "name": "label-100", "isGroup": False, "parent": None}]
+    asked: list[object] = []
+    plain = linear.query
+
+    def query(document: str, variables: dict) -> dict:
+        if "query TeamLabels" not in document:
+            return plain(document, variables)
+        asked.append(variables["after"])
+        if variables["after"] is None:
+            return {"team": {"labels": {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": "c1"}}}}
+        return {"team": {"labels": {"nodes": rest, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}
+
+    linear.query = query
+    found = Workspace(linear).team("ACME")
+    assert len(found["labels"]["nodes"]) == 101
+    assert asked == [None, "c1"]
+    assert team["id"] == found["id"]

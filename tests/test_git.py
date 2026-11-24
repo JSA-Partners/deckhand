@@ -355,3 +355,140 @@ def test_two_commits_in_one_worktree_take_turns(tmp_path: Path, monkeypatch: pyt
     assert calls.index(("A", ["git", "commit"])) < calls.index(("B", ["git", "ls-tree"]))
     log = subprocess.run(["git", "log", "--format=%s"], cwd=worktree, check=True, capture_output=True, text=True)
     assert log.stdout.split("\n")[:3] == ["feat: two", "feat: one", "base"]
+
+
+def test_fetch_prunes_origin_and_raises_on_failure() -> None:
+    fake = Fake((0, "", ""), (128, "", "fatal: unable to access origin"))
+    git.fetch(Path("/clone"), fake)
+    assert fake.calls[0][:2] == (["git", "fetch", "origin", "--prune"], Path("/clone"))
+    with pytest.raises(git.GitError) as raised:
+        git.fetch(Path("/clone"), fake)
+    assert raised.value.stderr_tail == "fatal: unable to access origin"
+
+
+SECRETS = ("GH_TOKEN", "LINEAR_API_KEY", "OPENROUTER_API_KEY", "CLOCKIFY_API_KEY", "AWS_SECRET_ACCESS_KEY", "DB_URL")
+SESSION = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_TOKEN")
+KEPT = (
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TMPDIR",
+    "SSH_AUTH_SOCK",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "no_proxy",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "DECKHAND_STATE_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "GIT_SSH_COMMAND",
+    "GIT_SSH",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "AWS_REGION",
+    "AWS_PROFILE",
+    "CLOUD_ML_REGION",
+)
+
+
+def test_a_claude_call_carries_only_the_allowed_environment(monkeypatch: pytest.MonkeyPatch):
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name in (*SECRETS, *SESSION, *KEPT):
+        monkeypatch.setenv(name, "value")
+    seen = {}
+
+    def run(full, env=None, **kwargs):
+        seen[Path(full[0]).name] = env
+        return subprocess.CompletedProcess(full, 0, "", "")
+
+    monkeypatch.setattr(git.subprocess, "run", run)
+    monkeypatch.setattr(git, "_program", lambda name, search: f"/usr/bin/{name}")
+    monkeypatch.setattr(git, "trusted_path", lambda: "/usr/bin")
+    git.run(["claude", "agents", "--json", "--all"])
+    git.run(["git", "fetch", "origin"])
+    assert set(seen["claude"]) == {"PATH", *KEPT}
+    assert seen["claude"]["PATH"] == "/usr/bin"
+    assert {*SECRETS, *SESSION, *KEPT} <= set(seen["git"])
+
+
+ALONE = """
+import os, sys, threading, time
+from deckhand import git
+marker = sys.argv[1]
+out = {}
+done = threading.Event()
+def work():
+    try:
+        out["rc"] = git.alone(["sh", "-c", ': > "$0"; exec sleep 1', marker]).returncode
+    finally:
+        done.set()
+threading.Thread(target=work).start()
+deadline = time.monotonic() + 10
+while not os.path.exists(marker) and not done.is_set() and time.monotonic() < deadline:
+    time.sleep(0.01)
+print("started" if os.path.exists(marker) else "not started", flush=True)
+# On Python 3.12 a Thread.join interrupted by Ctrl-C marks the thread finished while it still runs.
+while True:
+    try:
+        done.wait()
+        break
+    except KeyboardInterrupt:
+        pass
+print(out.get("rc"), flush=True)
+"""
+
+
+def test_a_child_run_alone_survives_a_ctrl_c_sent_to_its_parents_group(tmp_path: Path) -> None:
+    import signal
+    import sys
+
+    root = Path(__file__).resolve().parent.parent
+    parent = subprocess.Popen(
+        [sys.executable, "-c", ALONE, str(tmp_path / "started")],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        assert parent.stdout is not None and parent.stdout.readline() == "started\n"
+        os.killpg(parent.pid, signal.SIGINT)
+        out, _ = parent.communicate(timeout=10)
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.communicate()
+    assert out.strip() == "0"
+
+
+def test_alone_gives_a_child_no_terminal_input():
+    assert git.alone(["cat"]).stdout == ""
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "fatal: could not read Username for 'https://github.com': Device not configured\n",
+        "ssh_askpass: exec(/usr/bin/ssh-askpass): No such file or directory\n"
+        "Host key verification failed: read_passphrase: can't open /dev/tty: Device not configured\n",
+    ],
+)
+def test_a_prompt_with_no_terminal_says_how_to_load_the_key(stderr: str) -> None:
+    fake = Fake((128, "", stderr))
+    with pytest.raises(git.GitError) as caught:
+        git.push(WT, "b", fake)
+    assert caught.value.stderr_tail == git.NO_PROMPT
+    assert "Device not configured" not in str(caught.value)

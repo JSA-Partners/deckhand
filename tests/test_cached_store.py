@@ -36,12 +36,12 @@ def seeded() -> tuple[Counting, CachedStore]:
 
 def test_every_store_method_is_a_read_a_write_or_a_record_call() -> None:
     names = {n for n, _ in inspect.getmembers(Store, inspect.isfunction) if not n.startswith("_")}
-    assert names == READS | WRITES | {"put_record", "records"}
+    assert names == READS | WRITES | {"put_record", "records", "recorded"}
     assert not READS & WRITES
 
 
 def test_every_store_method_is_defined_on_the_cache_itself() -> None:
-    assert READS | WRITES | {"put_record", "records"} <= set(vars(CachedStore))
+    assert READS | WRITES | {"put_record", "records", "recorded"} <= set(vars(CachedStore))
 
 
 def test_a_repeated_read_reaches_the_inner_store_once() -> None:

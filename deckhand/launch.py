@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,15 @@ from deckhand.step import Refusal
 
 HAND_EXEMPT = ["deckhand *", "gh pr view *", "gh pr diff *", "gh pr checks *"]
 CAPTAIN_EXEMPT = ["deckhand *"]
-SECRET_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "LINEAR_API_KEY")
-NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "mcp__*"]
-GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
+NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "PushNotification", "mcp__*"]
+CAPTAIN_ALLOW = ["Bash(deckhand *)", "Read", "Grep", "Glob", "Agent", "AskUserQuestion"]
+CAPTAIN_ALLOW += ["Skill(deckhand:feature)", "Skill(deckhand:signoff)", "Skill(superpowers:*)", "Skill(impeccable:*)"]
+READ_ONLY = ("ls", "cat", "head", "tail", "wc", "grep", "git status")
+CAPTAIN_ALLOW += [f"Bash({command} *)" for command in READ_ONLY]
+CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit", "mcp__*"]
+INPUT = "deckhand-input"
+CAPTAIN_SETTINGS = "captain-settings.json"
+CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg", ".aws", ".config/gcloud")
 CLAUDE_CONFIG = (
     ".claude/settings.json",
     ".claude/settings.local.json",
@@ -29,6 +36,11 @@ CLAUDE_CONFIG = (
     ".mcp.json",
 )
 PASSED_DIRS = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
+SECRET_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "LINEAR_API_KEY")
+STORY, DRAFT, SPIKE = "story", "draft", "spike"
+PROMPTS = {STORY: "/deckhand:story {}", DRAFT: "/deckhand:draft {}", SPIKE: "/deckhand:spike {}"}
+BACKGROUNDED = re.compile(r"^backgrounded \u00b7 (\w+)", re.MULTILINE)
+COPY = re.compile(r"started a copy as (\w+)")
 
 
 WILDCARDS = frozenset("*?[")
@@ -52,6 +64,25 @@ def _forms(*paths: Path) -> list[Path]:
     return found
 
 
+# A sandboxed shell's $TMPDIR points here, so a hand writes its input files under it.
+def sandbox_tmp() -> list[Path]:
+    return _forms(Path(f"/tmp/claude-{os.getuid()}"))
+
+
+def input_roots(temp: Path | None = None) -> list[Path]:
+    return _forms(temp or Path(tempfile.gettempdir()), *sandbox_tmp())
+
+
+def captain_inputs(temp: Path | None = None) -> list[Path]:
+    return _forms(*(root / INPUT for root in input_roots(temp)))
+
+
+def input_folder() -> Path:
+    folder = Path(tempfile.gettempdir()) / INPUT
+    folder.mkdir(mode=0o700, exist_ok=True)
+    return folder
+
+
 def protected(config: Path, state: Path) -> Protected:
     home = Path.home() / ".config"
     return Protected(tuple(_forms(config, home / "deckhand", home / "gh")), tuple(_forms(state)))
@@ -64,14 +95,16 @@ def _rule(tool: str, path: Path, suffix: str = "") -> str:
 
 def _guarded(protected: Protected, deny: list[str], deny_write: list[str]) -> dict[str, Any]:
     secrets = [str(path) for path in protected.secrets]
+    credentials = _forms(*(Path.home() / name for name in CREDENTIALS))
     permissions_deny = [*deny]
+    permissions_deny += [_rule("Read", path, suffix) for path in credentials for suffix in ("", "/**")]
     for path in protected.secrets:
         permissions_deny += [_rule("Read", path, "/**"), _rule("Edit", path, "/**")]
     permissions_deny += [_rule("Edit", path, "/**") for path in protected.state]
     state = [str(path) for path in protected.state]
     return {
         "deny": permissions_deny,
-        "filesystem": {"denyWrite": secrets + state + deny_write, "denyRead": secrets},
+        "filesystem": {"denyWrite": secrets + state + deny_write, "denyRead": secrets + [str(p) for p in credentials]},
         "credentials": {
             "files": [{"path": path, "mode": "deny"} for path in secrets],
             "envVars": [{"name": name, "mode": "deny"} for name in SECRET_ENV],
@@ -79,19 +112,24 @@ def _guarded(protected: Protected, deny: list[str], deny_write: list[str]) -> di
     }
 
 
-def _sandbox(exempt: list[str], filesystem: dict, credentials: dict) -> dict[str, Any]:
+def _sandbox(exempt: list[str], filesystem: dict, credentials: dict, auto_allow: bool = True) -> dict[str, Any]:
     return {
         "enabled": True,
         "allowUnsandboxedCommands": False,
-        "autoAllowBashIfSandboxed": True,
+        "autoAllowBashIfSandboxed": auto_allow,
         "excludedCommands": exempt,
         "filesystem": filesystem,
         "credentials": credentials,
     }
 
 
-def _hand_env(ref: str, roots: list[Path], spike: bool) -> dict[str, str]:
-    env = {"DECKHAND_ROLE": "hand", ("DECKHAND_SPIKE" if spike else "DECKHAND_STORY"): ref}
+def _hand_env(ref: str, roots: list[Path], kind: str) -> dict[str, str]:
+    env = {
+        "UV_NO_CACHE": "1",
+        "DECKHAND_ROLE": "hand",
+        "DECKHAND_HAND_KIND": kind,
+        ("DECKHAND_SPIKE" if kind == SPIKE else "DECKHAND_STORY"): ref,
+    }
     env.update({name: os.environ[name] for name in PASSED_DIRS if os.environ.get(name)})
     plugin_dir = os.environ.get("DECKHAND_PLUGIN_DIR")
     plugin_bin = Path(plugin_dir) / "bin" if plugin_dir else Path(__file__).resolve().parent.parent / "bin"
@@ -120,22 +158,19 @@ def hand_settings(
     policy: Policy,
     local: LocalConfig,
     protected: Protected,
-    spike: bool = False,
+    kind: str = STORY,
 ) -> dict[str, Any]:
     clones = _forms(clone)
     worktrees = _forms(worktree)
-    env = _hand_env(ref, clones + worktrees, spike)
+    env = _hand_env(ref, clones + worktrees, kind)
     _refuse_path_writes(local.sandbox_write, env["PATH"])
-    git_credentials = _forms(*(Path.home() / name for name in GIT_CREDENTIALS))
     deny = list(NO_DIALOG)
-    deny += [_rule("Read", path, suffix) for path in git_credentials for suffix in ("", "/**")]
     deny += [_rule("Edit", path / ".git", "/**") for path in clones]
     deny += [_rule("Edit", path / ".git") for path in worktrees]
     deny += [_rule("Edit", path / name) for path in worktrees for name in CLAUDE_CONFIG]
     metadata = [str(path / ".git") for path in clones + worktrees]
     guarded = _guarded(protected, deny, metadata)
     filesystem = {"allowWrite": list(local.sandbox_write), **guarded["filesystem"]}
-    filesystem["denyRead"] = filesystem["denyRead"] + [str(path) for path in git_credentials]
     sandbox = _sandbox(HAND_EXEMPT, filesystem, guarded["credentials"])
     sandbox["network"] = {"allowedDomains": list(policy.sandbox_domains)}
     return {
@@ -144,29 +179,52 @@ def hand_settings(
             "allow": ["Bash(deckhand *)"],
             "deny": guarded["deny"],
             "blockWritesOutsideWorkingDirectories": True,
-            "additionalDirectories": [str(path) for path in _forms(Path(tempfile.gettempdir()))],
+            "additionalDirectories": [str(path) for path in input_roots()],
         },
+        "crossSessionInbound": "refuse",
         "disableClaudeAiConnectors": True,
         "sandbox": sandbox,
     }
 
 
-def captain_settings(protected: Protected) -> dict[str, Any]:
-    guarded = _guarded(protected, [], [])
+# Planning saves its answers through --file, so the captain writes only in deckhand's own input folders.
+def captain_settings(protected: Protected, temp: Path | None = None) -> dict[str, Any]:
+    guarded, roots = _guarded(protected, [], []), captain_inputs(temp)
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",
-        "permissions": {"allow": ["Bash(deckhand *)", "SendMessage"], "deny": guarded["deny"]},
-        "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"]),
+        "preferredNotifChannel": "terminal_bell",
+        "crossSessionInbound": "refuse",
+        "permissions": {
+            # Pinned so the person's own mode never applies; dontAsk would deny AskUserQuestion.
+            "defaultMode": "default",
+            "allow": [*CAPTAIN_ALLOW, *(_rule(tool, root, "/**") for root in roots for tool in ("Write", "Edit"))],
+            "deny": [*CAPTAIN_DENY, *guarded["deny"]],
+            "additionalDirectories": [str(root) for root in roots],
+        },
+        "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"], auto_allow=False),
     }
 
 
-def hand_argv(
-    name: str, settings: dict[str, Any], prompt: str, plugin_dir: Path | None, resume: str | None
-) -> list[str]:
+# Setup and the captain may see different $TMPDIRs, so the temp folder is taken from the installed file.
+def captain_current(installed: object, protected: Protected) -> bool:
+    permissions = installed.get("permissions") if isinstance(installed, dict) else None
+    listed = permissions.get("additionalDirectories") if isinstance(permissions, dict) else None
+    temps = [Path(entry).parent for entry in listed if isinstance(entry, str)] if isinstance(listed, list) else []
+    return any(installed == captain_settings(protected, temp) for temp in temps)
+
+
+def hand_argv(name: str, settings: dict[str, Any], prompt: str, plugin_dir: Path | None) -> list[str]:
     argv = ["claude", "--bg", "--name", name, "--permission-mode", "auto", "--settings", json.dumps(settings)]
     if plugin_dir is not None:
         argv += ["--plugin-dir", str(plugin_dir)]
-    if resume is not None:
-        argv += ["--resume", resume]
     return [*argv, prompt]
+
+
+def resume_argv(session: str, prompt: str) -> list[str]:
+    return ["claude", "--bg", "--resume", session, prompt]
+
+
+def backgrounded(output: str) -> tuple[str | None, str | None]:
+    short, copy = BACKGROUNDED.search(output), COPY.search(output)
+    return short.group(1) if short else None, copy.group(1) if copy else None

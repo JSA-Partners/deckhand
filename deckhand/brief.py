@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from deckhand import standing
+from deckhand.linear.meter import clock
 
-NOTIFY_LIMIT = 200
-NOTIFY = "notify: "
 LINE_LIMIT = 50
 LINE_STALE_SECONDS = 30 * 60
 SETUP = "run /deckhand:setup"
@@ -28,6 +27,7 @@ ACTIONS = {
     "after-merge": "has an after-merge chore for you",
     "planning": "needs planning",
     "spike": "has a spike answer to read",
+    "policy": "needs its repository policy fixed",
 }
 
 
@@ -121,7 +121,7 @@ def _top(items: list[dict], stories: list[dict], now: float, g: Glyphs) -> str:
     detail, waited = _detail(top, stories), _waited(top, now)
     line += f" at {detail}" if detail else ""
     line += f"{g.sep}waiting {waited}" if waited else ""
-    return line + f"{g.sep}type `next`"
+    return line
 
 
 def _quiet(status: dict, now: float, g: Glyphs) -> str:
@@ -156,19 +156,6 @@ def text(status: dict | None, now: float, g: Glyphs, notes: list[str] = ()) -> s
     return "\n\n".join("\\" + block if block[:1] in MARKERS and block[1:2] == " " else block for block in blocks)
 
 
-def notify(status: dict, now: float) -> tuple[str, list[str]] | None:
-    new = [i for i in status["items"] if i["key"] not in status["notified"]]
-    if not new:
-        return None
-    first = new[0]
-    waited = _waited(first, now)
-    more = len(new) - 1
-    rest = f" {ACTIONS.get(first['kind'], 'needs you')}" + (f" (waiting {waited})" if waited else "")
-    rest += f"; {more} more {'needs' if more == 1 else 'need'} you" if more else ""
-    room = NOTIFY_LIMIT - 1 - len(NOTIFY) - len(rest)
-    return clean(first["ref"])[:room] + rest, [i["key"] for i in new]
-
-
 def colored(env: Mapping[str, str]) -> bool:
     return not env.get("NO_COLOR") and env.get("TERM") != "dumb"
 
@@ -191,12 +178,21 @@ def _line_parts(status: dict, now: float, g: Glyphs, entries: list[standing.Entr
 def segment(
     status: dict, since: float | None, now: float, g: Glyphs, entries: list[standing.Entry] | None = None
 ) -> tuple[str, str, str]:
+    limited = standing.timestamp(standing.text(status, "limited_until"))
+    paused = limited is not None and limited > now
     if since is None or status.get("stale_since") or since > LINE_STALE_SECONDS:
-        return g.queued, f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
+        stale = f"Linear limited until {clock(limited)}" if paused and limited is not None else ""
+        return g.queued, stale or f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
     if unknown(status):
         return g.needs, f"{UNKNOWN_LINE}{g.sep}{SETUP}", "needs"
     head, tail = _line_parts(status, now, g, entries)
-    glyph, tone = (g.needs, "needs") if standing.dicts(status, "items") else (g.working, "working")
+    items = standing.dicts(status, "items")
+    glyph, tone = (g.needs, "needs") if items else (g.working, "working")
+    if paused and limited is not None:
+        limit = f"limited until {clock(limited)}"
+        room = LINE_LIMIT - len(glyph) - 1 - len(head) - 2 * len(g.sep) - len(limit)
+        ref = clean(standing.text(items[0], "ref"))[: max(1, room)] if items else ""
+        return glyph, g.sep.join(part for part in (head, ref, limit) if part), tone
     return glyph, f"{head}{g.sep}{tail}", tone
 
 

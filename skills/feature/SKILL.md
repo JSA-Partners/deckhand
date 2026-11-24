@@ -2,15 +2,15 @@
 name: feature
 description: "Plan one feature a screen at a time, from its frame to its approval, saving each answer as it is given."
 effort: high
-allowed-tools: Bash(deckhand *) Read Write Edit Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(impeccable:*)
+allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(impeccable:*)
 ---
 
 # Feature
 
 !`deckhand feature context`
 
-Above: the open feature, its phase and next step. Work one feature and one screen at a time: show
-one thing, get one answer, move on. Each step offers writing it yourself or taking a draft, never
+Above: the open feature, its phase, next step and input folder, for each file you hand in.
+Work one feature and one screen at a time: show one thing, get one answer, move on. Each step offers writing it yourself or taking a draft, never
 a decision. Keep the given option order; mark none recommended.
 
 Open, pick, or park a feature with `deckhand feature apply new --name N [--reference REF]`,
@@ -18,7 +18,7 @@ Open, pick, or park a feature with `deckhand feature apply new --name N [--refer
 Shape it with superpowers:brainstorming before its Frame; use impeccable:impeccable for any story a
 person sees.
 
-`deckhand plan context` lists the sections; name one to read it back. Save every answer when it is
+`deckhand plan context` lists the sections; name one to read it back. Save every answer as
 given with `deckhand plan apply SECTION --file PATH [--drafted]`, `--drafted` for a draft, so
 stopping is safe.
 
@@ -46,5 +46,4 @@ Then decide each gap `deckhand feature context` names. For the feature review, p
 target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence scores
 the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`, HASH
 the target_hash line. A P1 is a gap: fix the Contract or story and review again, or the person
-declines it. Decide the feature-approval once no gap is left, then do the captain's
-`next`.
+declines it. Decide the feature-approval once no gap is left.

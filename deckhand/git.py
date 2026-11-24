@@ -16,6 +16,11 @@ from deckhand.step import Refusal, hand_role
 TIMEOUT = 120
 TAIL_LINES = 5
 TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
+NO_TERMINAL = "Device not configured"
+NO_PROMPT = (
+    "git needs a passphrase or password, and its prompt cannot run in the engine or a hand; "
+    "load the key into the SSH agent with ssh-add, or use a git credential helper"
+)
 
 UNHOOKED = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
 # Without it, status and worktree diffs run git inside a nested repository a hand configured.
@@ -23,6 +28,31 @@ UNNESTED = "--ignore-submodules=all"
 GITLINK = "160000"
 NESTED = "a commit takes no nested repository: {}; remove it or list it in .gitignore"
 
+CLAUDE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "SSH_AUTH_SOCK")
+CLAUDE_ENV += ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
+CLAUDE_ENV += ("GIT_SSH_COMMAND", "GIT_SSH", "GIT_CONFIG_GLOBAL", "GIT_ASKPASS", "SSH_ASKPASS")
+CLAUDE_ENV += ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "AWS_REGION", "AWS_PROFILE", "CLOUD_ML_REGION")
+CLAUDE_ENV_PREFIXES = ("LC_", "XDG_", "ANTHROPIC_", "CLAUDE_", "DECKHAND_")
+# A running Claude Code session sets these for itself; a process started under it would take them as its own.
+SESSION_ENV = frozenset(
+    {
+        "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_SSE_PORT",
+        "CLAUDE_EFFORT",
+        "CLAUDE_ENV_FILE",
+        "CLAUDE_PID",
+        "CLAUDE_PLUGIN_DATA",
+        "CLAUDE_PLUGIN_ROOT",
+        "CLAUDE_PROJECT_DIR",
+    }
+)
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
 
@@ -66,7 +96,19 @@ def _program(name: str, search: str) -> str:
     return found
 
 
-def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+def _passed(name: str) -> bool:
+    return (name in CLAUDE_ENV or name.startswith(CLAUDE_ENV_PREFIXES)) and name not in SESSION_ENV
+
+
+# A hand inherits the engine's environment, so a claude process gets only what it needs; git may authenticate by it.
+def _environment(program: str, search: str) -> dict[str, str]:
+    held = {**os.environ, "PATH": search}
+    return {k: v for k, v in held.items() if _passed(k)} if program == "claude" else held
+
+
+def run(
+    argv: list[str], cwd: Path | None = None, stdin: str | None = None, alone: bool = False
+) -> subprocess.CompletedProcess[str]:
     command = " ".join(argv[:2])
     search = trusted_path()
     program = _program(argv[0], search)
@@ -74,7 +116,7 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
     try:
         return subprocess.run(
             full,
-            env={**os.environ, "PATH": search},
+            env=_environment(argv[0], search),
             # Without a directory, gh and claude would run git in a repository a hand may have planted.
             cwd=cwd or Path.home(),
             input=stdin,
@@ -82,6 +124,7 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
             text=True,
             check=False,
             timeout=TIMEOUT,
+            start_new_session=alone,
         )
     except subprocess.TimeoutExpired:
         raise GitError(command, -1, f"timed out after {TIMEOUT} seconds") from None
@@ -91,8 +134,14 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
         raise GitError(command, -1, f"{argv[0]} could not run: {error.strerror or error}") from None
 
 
+# For a process that owns a terminal: Ctrl-C there never reaches the child, and the child never reads its keys.
+def alone(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    return run(argv, cwd, "" if stdin is None else stdin, alone=True)
+
+
 class GitError(Exception):
     def __init__(self, command: str, code: int, stderr_tail: str) -> None:
+        stderr_tail = NO_PROMPT if NO_TERMINAL in stderr_tail else stderr_tail
         super().__init__(f"{command} failed with exit code {code}: {stderr_tail}")
         self.command = command
         self.code = code
@@ -281,6 +330,14 @@ def merge_from(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     if not conflicts:
         raise GitError("git merge", done.returncode, stderr_tail(done.stderr))
     return conflicts
+
+
+def abort_merge(worktree: Path, runner: Runner = run) -> None:
+    call(["git", "merge", "--abort"], worktree, runner)
+
+
+def fetch(clone: Path, runner: Runner = run) -> None:
+    call(["git", "fetch", "origin", "--prune"], clone, runner)
 
 
 def push(worktree: Path, branch: str, runner: Runner = run) -> None:

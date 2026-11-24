@@ -58,15 +58,16 @@ flowchart TB
 | Sign-off | Shows what changed, the evidence, a targeted tuicr pass and a quiz | Sign off |
 | Merge | Merges pinned to the commit you signed, then does the after-merge chores it can | Do the ones it leaves you |
 
-You talk only to the captain. While you are away, hands keep working up to your slot cap. When a
-hand stops, the captain prints a short brief of what needs you, and sends a notification when
-something new waits; type `next` and it shows the top item. Every answer is saved as it is given,
-so you can stop after any item.
+You talk only to the captain. The engine, in a terminal tab of its own, starts, resumes and stops
+every hand up to your slot cap, and carries each of your answers to the hand that waits on it.
+While nothing needs you, the captain stays quiet. When something new waits, the engine tab rings
+its bell, and the captain asks you the top item in a dialog, which rings the bell again. Every
+answer is saved as it is given, so you can stop after any item.
 
 Hands run in Claude Code's sandbox. A hand cannot read credentials (deckhand's config, `gh`, ssh,
-git), cannot push or write to GitHub except through deckhand, cannot forge your answers,
-cannot write `.git` or Claude Code's settings, and runs without MCP tools or messaging. A change it
-wants to Claude Code's own config reaches you as a queue item. One gap is deliberate:
+git), cannot push or write to GitHub except through deckhand, cannot forge your answers, cannot
+write `.git` or Claude Code's settings, and runs without MCP tools, messages or notifications. A
+change it wants to Claude Code's own config reaches you as a queue item. One gap is deliberate:
 `checks apply` runs a hand's tests, and any check command a hand adds to `.claude/deckhand.toml`,
 with deckhand's access.
 
@@ -108,7 +109,8 @@ claude plugin update deckhand@jsapartners
 ```
 
 Then restart every running Claude Code session, because a session keeps the version it started
-with.
+with. Run `/deckhand:setup` again when an update changes the captain's settings, since setup writes
+them.
 
 ## Usage
 
@@ -117,7 +119,7 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 | Command | What it does |
 | --- | --- |
 | `/deckhand:setup` | Fits a Linear team to the process, names its repositories and clones, offers the status line, and prints the captain's launch line |
-| `/deckhand:captain` | Starts hands, and brings you the queue one item at a time |
+| `/deckhand:captain` | Brings you the queue one item at a time, and gives you the command that starts the engine |
 | `/deckhand:feature` | Opens, picks or parks a feature, and plans it with you a screen at a time |
 | `/deckhand:signoff REF` | Walks you through story REF's sign-off, one screen at a time |
 | `/deckhand:commit` | Writes a conventional commit for the staged changes |
@@ -125,21 +127,28 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 
 Run setup once per machine, and again when a repository joins. Then launch the captain with the line
 it prints, which starts Claude Code under the captain's own settings, in focus view: your prompt, a
-line summing up its tool calls, and its reply. The captain runs the feature
-and sign-off skills for you when an item needs them. Hands run `story`, `spike` and `draft` on
-their own; you never type those.
+line summing up its tool calls, and its reply. Without a prompt, the captain runs deckhand, reads
+files, runs a few read-only commands such as `ls` and `git status`, writes in deckhand's own input
+folders and asks you. Anything else shows Claude Code's usual permission prompt, and it never
+messages another session. It runs the feature and sign-off skills for you when an item needs them.
+Hands run `story`, `spike` and `draft` on their own; you never type those.
 
-Two views follow the captain without asking it anything:
+When the engine is not running, the captain copies its start command for you: open a new terminal
+tab, paste and press Enter. Setup writes a `deckhand` launcher in `~/.config/deckhand/` that runs
+the newest installed version, and the command goes through it. The engine reads the fleet every
+five seconds and Linear every minute, and keeps working while you are away. Its tab shows the
+board: every story of the feature, full screen, under needs you, working, stopped, queued, team
+(the stories a teammate owns) and done today. Press `r` to read Linear at once. Press `q` to leave:
+it asks whether to leave the hands running or stop them all.
 
-- The status line: one segment, such as `1 needs you` with the top item's kind, story and wait, in
-  your Claude Code status line. On your yes, setup adds it to Claude Code's own, or to claude-hud,
-  ccstatusline or CCometixLine, and puts it on a second line under any other. It backs up each
-  file first, and setup can take it out again, removing only what it added.
-- The board: every story of the feature, full screen, under needs you, working, stopped, queued,
-  team (the stories a teammate owns) and done today. Setup writes a `deckhand` launcher in
-  `~/.config/deckhand/` that runs the newest installed version, and the captain gives you the
-  command to run the board in another terminal tab. The board reads Linear itself when you press
-  `r`, and every five minutes while the captain's last read is older than that.
+Each session runs a small watcher, a plugin monitor that prints one line when a row for that
+session appears: an item for the captain, or a message for a hand. Sessions never message each
+other, so a row is the message and the watcher only rings the doorbell.
+
+The status line follows the captain without asking it anything: one segment, such as `1 needs you`
+with the top item's kind, story and wait. On your yes, setup adds it to Claude Code's own, or to
+claude-hud, ccstatusline or CCometixLine, and puts it on a second line under any other. It backs up
+each file first, and setup can take it out again, removing only what it added.
 
 ## How it is built
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import sqlite3
+import stat
 import threading
 from multiprocessing.queues import Queue
 from multiprocessing.synchronize import Barrier
@@ -12,7 +13,7 @@ import pytest
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import local
-from deckhand.store.local import SCHEMA_VERSION, LocalRecords, default_path
+from deckhand.store.local import SCHEMA_VERSION, LocalRecords, connect, default_path
 
 ID = "7c1f3a52-0b7e-4c1e-9a55-3f7a1d2b9e10"
 OTHER = "0d4e8b16-5a2c-4f0e-8d3b-6c9a7e1f2b34"
@@ -125,6 +126,15 @@ def test_the_file_is_created_with_the_schema_version(tmp_path: Path) -> None:
         assert db.execute("PRAGMA journal_mode").fetchone() == ("wal",)
 
 
+def test_connect_makes_the_folder_and_every_table(tmp_path: Path) -> None:
+    db = connect(tmp_path / "nested" / "deckhand.db")
+    try:
+        names = {name for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        db.close()
+    assert {"records", "messages", "hands", "engine"} <= names
+
+
 def test_the_default_path_follows_the_state_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
     assert default_path() == tmp_path / "deckhand.db"
@@ -190,3 +200,27 @@ def test_opening_an_existing_file_does_not_wait_for_a_writer(tmp_path: Path, mon
         assert [r.subject for r in LocalRecords(path).records(ID)] == ["s"]
     finally:
         holder.close()
+
+
+def test_a_new_state_folder_is_owner_only(tmp_path: Path) -> None:
+    LocalRecords(tmp_path / "state" / "deckhand.db")
+    assert stat.S_IMODE((tmp_path / "state").stat().st_mode) == 0o700
+
+
+def test_an_existing_file_open_to_others_becomes_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "deckhand.db"
+    LocalRecords(path)
+    path.chmod(0o644)
+    LocalRecords(path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_recorded_lists_each_issue_holding_a_record_of_a_kind_once(tmp_path: Path) -> None:
+    store = LocalRecords(tmp_path / "deckhand.db")
+    store.put_record(OTHER, tier("a"))
+    store.put_record(OTHER, tier("b"))
+    store.put_record(ID, tier())
+    store.put_record(ID, Record("quiz", "s", "v1", "person", {}))
+    assert store.recorded("tier") == sorted([ID, OTHER])
+    assert store.recorded("quiz") == [ID]
+    assert store.recorded("sign-off") == []

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, tiers, versions
+from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, spec, tiers, versions
 from deckhand.features import Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -172,6 +172,7 @@ class Build(StoryStep):
         plan = store.document(ops.create_id(story["id"], implplan.PURPOSE))
         sitting = store.document(ops.create_id(story["id"], "sitting"))
         branch = branch_of(records, story) or story["branch_name"]
+        approved = spec.gather(store, at.feature, story)
         facts = {
             "story": story["identifier"],
             "title": story["title"],
@@ -181,13 +182,17 @@ class Build(StoryStep):
             "checks": policy.checks,
             "worktree": str(git.worktree_path(clone, branch)),
             "branch": branch,
+            "contract": approved.contract,
+            "examples": approved.examples,
+            "invariants": approved.invariants,
+            "decisions": approved.decisions,
             "plan": plan["body"] if plan else None,
             "sitting": sitting["body"] if sitting else None,
         }
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
-        _print(facts)
+        _print(facts, spec.text(approved))
 
     def apply(self, args: list[str]) -> None:
         parsed = parse(args, USAGE)
@@ -204,7 +209,7 @@ class Build(StoryStep):
         elif message is not None:
             self._commit(at, message)
         elif action == "sync":
-            self._sync(at)
+            sync(_worktree_of(at), story["identifier"], self._runner)
         else:
             self._push(feature, story, clone)
 
@@ -217,18 +222,6 @@ class Build(StoryStep):
             raise Refusal(f"conflict markers remain in {', '.join(marked)}; resolve them, then commit again")
         git.commit_all(path, message, self._runner)
         print(f"done: committed {git.head(path, self._runner)} on {at.story['identifier']}")
-
-    def _sync(self, at: Located) -> None:
-        path, ref = _worktree_of(at), at.story["identifier"]
-        if git.dirty(path, self._runner):
-            raise Refusal(f"{path} has uncommitted changes; run build apply {ref} commit --message FILE first")
-        conflicts = git.merge_from(path, DEFAULT_BASE, self._runner)
-        if conflicts:
-            raise Refusal(
-                f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; resolve the markers,"
-                f" then run build apply {ref} commit --message FILE"
-            )
-        print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, self._runner)}")
 
     def _worktree(self, feature: features.Feature, story: dict, clone: Path) -> None:
         branch = worktree_branch(story, feature.records.get(story["id"], []))
@@ -259,6 +252,20 @@ class Build(StoryStep):
         print(f"done: pushed {branch} and opened the draft pull request {found['url']}")
 
 
+def sync(path: Path, ref: str, runner: git.Runner, leave: str | None = None) -> None:
+    if git.dirty(path, runner):
+        raise Refusal(
+            f"{path} has uncommitted changes; {leave or f'run build apply {ref} commit --message FILE first'}"
+        )
+    conflicts = git.merge_from(path, DEFAULT_BASE, runner)
+    if conflicts and leave:
+        git.abort_merge(path, runner)
+    if conflicts:
+        fix = leave or f"resolve the markers, then run build apply {ref} commit --message FILE"
+        raise Refusal(f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; {fix}")
+    print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, runner)}")
+
+
 def require_base(clone: Path, runner: git.Runner) -> None:
     if runner(["git", "rev-parse", "--verify", "--quiet", DEFAULT_BASE], clone, None).returncode != 0:
         raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
@@ -284,18 +291,12 @@ def _worktree_of(at: Located) -> Path:
     return at.path
 
 
-def _print(facts: dict) -> None:
-    print(f"story: {facts['story']} {facts['title']}")
-    if facts["description"]:
-        print(facts["description"])
-    print(f"worktree: {facts['worktree']} (branch {facts['branch']})")
-    print(f"tier: {facts['tier'] if facts['tier'] is not None else 'not decided'}")
-    print("tools:")
-    for tool in facts["tools"]:
-        print(f"- {tool}")
-    print("checks:")
-    for check in facts["checks"]:
-        print(f"- {check}")
+def _print(facts: dict, approved: str) -> None:
+    first = [f"story: {facts['story']} {facts['title']}", f"worktree: {facts['worktree']} (branch {facts['branch']})"]
+    rest = [f"tier: {facts['tier'] if facts['tier'] is not None else 'not decided'}", "tools:"]
+    rest += [f"- {tool}" for tool in facts["tools"]]
+    rest += ["checks:", *(f"- {check}" for check in facts["checks"])]
     for name in ("plan", "sitting"):
-        print(f"{name}:")
-        print(facts[name] if facts[name] else "none saved")
+        rest += [f"{name}:", facts[name] or "none saved"]
+    head, tail = "\n".join(first), "\n".join(rest)
+    print(spec.fitted(f"{facts['story']}-build", f"{head}\n{approved}\n", f"{tail}\n"), end="")

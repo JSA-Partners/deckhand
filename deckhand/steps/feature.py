@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from datetime import date, timedelta
 
-from deckhand import features, ops, planning
+from deckhand import features, launch, ops, planning
 from deckhand.features import Phase
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
@@ -91,7 +91,10 @@ class Feature:
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        facts = self._facts(self._store_for_run(), team_key(parsed))
+        folder = _input_folder()
+        if folder and not parsed["json"]:
+            print(f"input folder: {folder}", flush=True)
+        facts = self._facts(self._store_for_run(), team_key(parsed)) | {"input_folder": folder}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
@@ -177,3 +180,10 @@ class Feature:
             raise Refusal(f"{features.describe(project)} is {current.value}, only a feature in planning can be parked")
         ops.ensure_project_dates(store, project["id"], None, None)
         print(f"done: parked {project['name']}")
+
+
+def _input_folder() -> str | None:
+    try:
+        return str(launch.input_folder())
+    except OSError:
+        return None

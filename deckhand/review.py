@@ -103,7 +103,13 @@ def ordered(findings: list[Finding]) -> list[Finding]:
 
 
 def round_record(
-    story: str, stage: str, plan: RoundPlan, target_hash: str, findings: list[Finding], head: str = ""
+    story: str,
+    stage: str,
+    plan: RoundPlan,
+    target_hash: str,
+    findings: list[Finding],
+    head: str = "",
+    carried: list[str] | None = None,
 ) -> Record:
     data = {
         "target_hash": target_hash,
@@ -113,6 +119,8 @@ def round_record(
     }
     if head:
         data["head"] = head
+    if carried:
+        data["carried"] = carried
     return Record(KIND, f"{story}:{stage}:{plan.n}", target_hash, "agent:review", data)
 
 
@@ -140,6 +148,35 @@ def declined(records: list[Record]) -> set[str]:
 def accepted(records: list[Record]) -> set[str]:
     by_person = {id for id, answer in decided(records).items() if answer == ACCEPT}
     return by_person | {r.subject for r in records if r.kind == HAND_ACCEPT}
+
+
+def _fixed(rounds: list[Record], id: str) -> bool:
+    raised = max(n for n, round in enumerate(rounds) if any(f["id"] == id for f in round.data["findings"]))
+    later = rounds[raised + 1 :]
+    return any(not round.data["scoped"] or id in round.data.get("carried", []) for round in later)
+
+
+def _unfixed(records: list[Record], prefix: str) -> list[dict]:
+    answers = decided(records)
+    rounds = rounds_of(records, prefix)
+    found: dict[str, dict] = {}
+    for round in rounds:
+        for item in round.data["findings"]:
+            if answers.get(item["id"]) == ACCEPT and item["id"] not in found and not _fixed(rounds, item["id"]):
+                found[item["id"]] = item
+    return list(found.values())
+
+
+def unfixed(records: list[Record]) -> list[dict]:
+    prefixes = dict.fromkeys(r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND)
+    return [item for prefix in prefixes for item in _unfixed(records, prefix)]
+
+
+def carried(records: list[Record], prefix: str) -> list[dict]:
+    held = last(counted(records, prefix)[0])
+    p1 = open_p1(held, declined(records)) if held else []
+    ids = {f["id"] for f in p1}
+    return p1 + [f for f in _unfixed(records, prefix) if f["id"] not in ids]
 
 
 def accept_record(finding: str, version: str) -> Record:

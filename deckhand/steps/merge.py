@@ -4,9 +4,9 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import gh, git, ops, signoff
+from deckhand import gh, git, ops, signoff, wakes
 from deckhand.records import Record
-from deckhand.step import Refusal, register, team_key
+from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import Located, StoryStep, branch_of, parse
 from deckhand.store import Store
 
@@ -21,6 +21,17 @@ def _parse(args: list[str]) -> dict:
     if len(parsed["words"]) != 1:
         raise Refusal(f"merge takes one story REF; {USAGE}")
     return parsed
+
+
+def _standing(at: Located) -> str:
+    held = signoff.signed(at.records, at.story["id"])
+    if held is None:
+        return f"{at.story['identifier']}: the person has not signed off"
+    head = signoff.signed_head(held)
+    if at.head is not None and at.head != head:
+        return f"{at.story['identifier']}: head moved: the worktree is at {at.head}, signed at {head}"
+    standing = signoff.standing(at.records, at.story["id"], head, at.policy.second_signoff)
+    return f"{at.story['identifier']}: {standing or f'signed off at {head}, ready to merge pinned to it'}"
 
 
 @register("merge")
@@ -45,16 +56,10 @@ class Merge(StoryStep):
             print(merged)
             return
         at = self.locate(parsed["words"][0], team_key(parsed))
-        held = signoff.signed(at.records, at.story["id"])
-        if held is None:
-            print(f"{at.story['identifier']}: the person has not signed off")
-            return
-        head = signoff.signed_head(held)
-        if at.head is not None and at.head != head:
-            print(f"{at.story['identifier']}: head moved: the worktree is at {at.head}, signed at {head}")
-            return
-        standing = signoff.standing(at.records, at.story["id"], head, at.policy.second_signoff)
-        print(f"{at.story['identifier']}: {standing or f'signed off at {head}, ready to merge pinned to it'}")
+        print(_standing(at))
+        if hand_role():
+            for line in wakes.unfixed_lines(at.records):
+                print(line)
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -12,12 +14,15 @@ from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.after import After
 from deckhand.steps.decide import Decide
+from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
+from tests.conftest import CountingStore
 from tests.test_feature_approval import TEAM, approve_everything, setup
-from tests.test_implplan import manifest
+from tests.test_implplan import manifest, repo
+from tests.test_step_build import BRANCH, Shell, labeled
 from tests.test_step_review import answer, state
 
-__all__ = ["state"]
+__all__ = ["repo", "state"]
 
 CHORES = ["drop the old queue table", "rotate the webhook secret"]
 
@@ -138,3 +143,93 @@ def test_released_items_stay_after_the_next_feature_opens(state: Path, capsys: p
     After(store).apply(["ACME-1", "done", "1", "--note", "dropped", *TEAM])
     assert statuses(store, capsys) == ["done by the hand", "done by the person"]
     assert signoff.after_merge_queue(store, "ACME", me) == []
+
+
+SYNCED = [
+    ["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"],
+    ["git", "status", "--porcelain", "--ignore-submodules=all"],
+    ["git", "fetch", "--no-recurse-submodules", "origin"],
+    ["git", "merge", "--no-edit", "origin/HEAD"],
+    ["git", "rev-parse", "HEAD"],
+]
+
+
+def test_after_merge_work_takes_fresh_main_into_the_worktree(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    store.set_issue_state("s1", "Done")
+    shell = Shell()
+    written = list(store.writes)
+    capsys.readouterr()
+    After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert shell.argvs == SYNCED
+    assert store.writes == written
+    assert capsys.readouterr().out == "done: merged origin/HEAD into ACME-1 at c2\n"
+
+
+def test_after_merge_sync_refuses_before_the_merge_and_on_a_dirty_worktree(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    shell = Shell(dirty=True)
+    with pytest.raises(Refusal, match="ACME-1 is not Done"):
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    store.set_issue_state("s1", "Done")
+    with pytest.raises(Refusal, match="uncommitted changes") as refused:
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert refused.value.rule.endswith(LEAVE)
+    (repo / ".worktrees" / BRANCH).rmdir()
+    with pytest.raises(Refusal, match="ACME-1 has no worktree"):
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert shell.ran("git", "fetch") == [] and shell.ran("git", "merge") == []
+
+
+LEAVE = "leave the item that needs main to the person with after apply ACME-1 person N --why TEXT"
+
+
+class Conflicted(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:2] == ["git", "merge"]:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0 if "--abort" in argv else 1, "", "CONFLICT")
+        if argv[:2] == ["git", "diff"] and "--diff-filter=U" in argv:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "a.txt\n", "")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_an_after_merge_sync_conflict_leaves_the_item_to_the_person(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    store.set_issue_state("s1", "Done")
+    shell = Conflicted()
+    with pytest.raises(Refusal, match=r"conflicts in a\.txt") as refused:
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert refused.value.rule.endswith(LEAVE)
+    assert shell.ran("git", "merge") == [["git", "merge", "--no-edit", "origin/HEAD"], ["git", "merge", "--abort"]]
+    assert "build apply" not in refused.value.rule
+
+
+def test_the_after_merge_queue_loads_a_released_feature_only_for_an_item_left_in_the_records(
+    counting_store: Callable[[FakeStore], CountingStore],
+):
+    store = chored()
+    me = store.viewer()["id"]
+    store.assign("s1", me)
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    beta = create_id("ACME:Beta", "feature")
+    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
+    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
+    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
+    gamma = create_id("ACME:Gamma", "feature")
+    store.create_project(gamma, "ACME", "Gamma", "", [FEATURE_LABEL])
+    store.set_project_dates(gamma, "2026-11-02", "2026-11-09")
+    store.create_issue("s4", "ACME", "Four", "Outcome.", gamma, [])
+    store.set_issue_state("s4", "Done")
+    alpha = store.issue("s1")["project"]
+    counting = counting_store(store)
+    assert signoff.after_merge_queue(CachedStore(counting), "ACME", me) == []
+    assert [call[1] for call in counting.log if call[0] == "project_issues"] == [(beta,)]
+    After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
+    counting.log.clear()
+    assert len(signoff.after_merge_queue(CachedStore(counting), "ACME", me)) == 1
+    assert sorted(call[1] for call in counting.log if call[0] == "project_issues") == sorted([(beta,), (alpha,)])

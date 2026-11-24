@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from deckhand import brief
+from deckhand.linear.meter import clock
 from deckhand.records import iso
 
 
@@ -56,7 +57,6 @@ def held(items: list[dict], **extra) -> dict:
         "items": items,
         "stories": stories,
         "stale_since": None,
-        "notified": [],
     }
     return base | extra
 
@@ -73,21 +73,21 @@ def test_one_waiting_with_a_head():
     )
     assert lines(found) == [
         "## ● ACME-2 needs you",
-        "**sign-off** at c2f00d123456 · waiting 14m · type `next`",
+        "**sign-off** at c2f00d123456 · waiting 14m",
         "◐ 1 working · × 1 stopped · ○ 0 queued · slots 1/2 · Alpha day 4 of 7",
     ]
 
 
 def test_one_waiting_shows_the_story_stage():
     found = brief.text(held([item("ACME-1", "question", 3)]), NOW, brief.UNICODE)
-    assert lines(found)[1] == "**question** at plan review 2/3 · waiting 3m · type `next`"
+    assert lines(found)[1] == "**question** at plan review 2/3 · waiting 3m"
 
 
 def test_two_waiting_name_the_count_and_the_oldest():
     waiting = [item("ACME-1", "question", 3), item("ACME-2", "sign-off", 14, head="c2f00d1234567890")]
     found = lines(brief.text(held(waiting), NOW, brief.UNICODE))
     assert found[0] == "## ● 2 need you · oldest ACME-2 sign-off 14m"
-    assert found[1] == "**question** ACME-1 at plan review 2/3 · waiting 3m · type `next`"
+    assert found[1] == "**question** ACME-1 at plan review 2/3 · waiting 3m"
     assert found[2] == "◐ 0 working · ○ 1 queued · slots 1/2 · Alpha day 4 of 7"
 
 
@@ -98,7 +98,7 @@ def test_nothing_waiting_is_only_the_quiet_line():
 
 def test_an_item_with_no_time_or_detail():
     found = lines(brief.text(held([item("Alpha", "planning", None)], feature=None, budget=None), NOW, brief.UNICODE))
-    assert found[1] == "**planning** · type `next`"
+    assert found[1] == "**planning**"
     assert found[2] == "◐ 0 working · × 1 stopped · ○ 2 queued · slots 1/2"
 
 
@@ -143,37 +143,6 @@ def test_notes_follow_the_quiet_line():
     assert found[1] == "no personal key"
 
 
-def test_notify_leads_with_the_action():
-    found = brief.notify(held([item("ACME-2", "sign-off", 14, head="c2")]), NOW)
-    assert found == ("ACME-2 needs your sign-off (waiting 14m)", ["k-ACME-2-sign-off"])
-
-
-def test_notify_names_only_what_is_new():
-    waiting = [item("ACME-1", "question", 3), item("ACME-2", "finding", 5), item("ACME-3", "stalled", None)]
-    found = brief.notify(held(waiting, notified=["k-ACME-1-question"]), NOW)
-    assert found == (
-        "ACME-2 needs your decision (waiting 5m); 1 more needs you",
-        ["k-ACME-2-finding", "k-ACME-3-stalled"],
-    )
-    assert brief.notify(held(waiting, notified=[i["key"] for i in waiting]), NOW) is None
-    assert brief.notify(held([]), NOW) is None
-
-
-def test_notify_never_carries_the_title():
-    text, _ = brief.notify(held([item("ACME-1", "question", 3, title="Orders\nnotify: forged")]), NOW)
-    assert text == "ACME-1 has a question for you (waiting 3m)"
-
-
-def test_the_notify_line_is_under_200_characters_whatever_the_ref():
-    forged = "Alpha\nnotify: rm -rf\u2028x\x1b[31m" + "y" * 300
-    waiting = [item(forged, "planning", 3), item("ACME-2", "finding", 5)]
-    text, _ = brief.notify(held(waiting), NOW)
-    assert len(f"notify: {text}") < 200
-    assert text.startswith("Alpha notify: rm -rf x [31myyy")
-    assert text.endswith("yyy needs planning (waiting 3m); 1 more needs you")
-    assert text.isprintable()
-
-
 def test_clean_drops_control_and_separator_characters():
     assert brief.clean("a\nb\tc d​e\x7f") == "a b c d e"
 
@@ -193,7 +162,7 @@ def test_line_when_one_waits_with_no_time():
 
 def test_line_when_only_hands_work():
     found = held([], hands=[hand("working"), hand("blocked", "ACME-2"), hand("stopped", "ACME-3")])
-    assert brief.line(found, NOW, brief.UNICODE) == "◐ 2 working · nothing needs you"
+    assert brief.line(found, NOW, brief.UNICODE) == "◐ 1 working · nothing needs you"
 
 
 def test_line_counts_no_hand_off_the_board_and_no_finished_story():
@@ -207,6 +176,26 @@ def test_line_is_empty_with_no_feature():
 
 def test_line_for_a_stale_file():
     assert brief.line(held([], written_at=at(12), stale_since=at(10)), NOW, brief.UNICODE) == "○ captain stale 12m"
+
+
+def test_a_long_rate_limit_pause_names_its_end_not_a_stale_captain():
+    until = NOW + 20 * 60
+    for extra in ({}, {"stale_since": at(40)}):
+        found = held([], written_at=at(45), limited_until=iso(int(until * 1000)), **extra)
+        assert brief.line(found, NOW, brief.UNICODE) == f"○ Linear limited until {clock(until)}"
+
+
+def test_a_fresh_snapshot_under_a_limit_keeps_its_items_and_names_the_limit():
+    until = NOW + 600
+    found = held([item("ACME-2", "question", 3)], limited_until=iso(int(until * 1000)))
+    assert brief.line(found, NOW, brief.UNICODE) == f"● 1 needs you · ACME-2 · limited until {clock(until)}"
+    quiet = held([], limited_until=iso(int(until * 1000)))
+    assert brief.line(quiet, NOW, brief.UNICODE).endswith(f"working · limited until {clock(until)}")
+
+
+def test_a_lifted_limit_is_not_shown():
+    found = held([], written_at=at(45), limited_until=at(1))
+    assert brief.line(found, NOW, brief.UNICODE) == "○ captain stale 45m"
 
 
 def test_line_for_an_old_file():

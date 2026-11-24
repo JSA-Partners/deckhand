@@ -155,8 +155,29 @@ def test_current_with_three_released_and_one_open_feature_reads_each_project_onc
     store = CachedStore(counting)
     found = current(store, "ACME")
     assert found is not None and found.project["name"] == "Delta"
-    assert counting.calls["project_issues"] == 4
+    assert counting.calls["project_issues"] == 1
     assert counting.calls["project_documents"] == 1
+
+
+def test_current_with_no_open_feature_loads_the_released_ones(
+    counting_store: Callable[[FakeStore], CountingStore],
+):
+    fake = FakeStore()
+    for name in ("Alpha", "Beta"):
+        started_feature(fake, name, ["Done"])
+    counting = counting_store(fake)
+    found = current(CachedStore(counting), "ACME")
+    assert found is not None and phase(found) is Phase.RELEASED
+    assert counting.calls["project_issues"] == 2
+
+
+def test_open_feature_loads_no_released_project(counting_store: Callable[[FakeStore], CountingStore]):
+    fake = FakeStore()
+    for name in ("Alpha", "Beta"):
+        started_feature(fake, name, ["Done"])
+    counting = counting_store(fake)
+    assert open_feature(CachedStore(counting), "ACME") is None
+    assert "project_issues" not in counting.calls
 
 
 def test_phase_of_an_open_feature_is_unchanged(counting_store: Callable[[FakeStore], CountingStore]):

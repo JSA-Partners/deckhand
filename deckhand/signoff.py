@@ -205,9 +205,24 @@ def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int,
     return [(n, text, str(held.data.get("why", ""))) for n, text, held in _left(records, story)]
 
 
+def _left_elsewhere(store: Store, team: str, seen: set[str]) -> list[dict]:
+    projects: set[str] = set()
+    for issue in store.recorded(AFTER_PERSON):
+        if issue in seen or not _left(store.records(issue), issue):
+            continue
+        held = store.issue(issue)
+        if held is not None and held["project"] and held["team"] == team:
+            projects.add(held["project"])
+    found = [store.project(id) for id in sorted(projects)]
+    return [p for p in found if p is not None and features.is_feature(p)]
+
+
 def after_merge_queue(store: Store, team: str, me: str) -> list[tuple[dict, int, str, str, str]]:
+    held = features.open_features(store, team)
+    for project in _left_elsewhere(store, team, {s["id"] for feature in held for s in feature.stories}):
+        held.append(features.load(store, project))
     found = []
-    for feature in features.started(store, team):
+    for feature in held:
         for story in feature.stories:
             if story["assignee"] == me:
                 held = _left(feature.records.get(story["id"], []), story["id"])

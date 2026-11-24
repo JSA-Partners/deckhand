@@ -6,15 +6,22 @@ import json
 import os
 import sys
 
-from deckhand import answers, decisions, features, gaps, ops
+from deckhand import answers, decisions, features, fleet, gaps, launch, ops, spec
 from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
-from deckhand.step import Refusal, hand_role, register, team_key
+from deckhand.step import Refusal, hand_role, own_ref, register, team_key
 from deckhand.steps.build import StoryStep
 from deckhand.steps.captain import Captain
 from deckhand.store import Store
+from deckhand.store.local import default_path
+from deckhand.store.state import LocalState
+from deckhand.watch import HOLD
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
-USAGE = "hook apply answer|ask|permission reads one hook event as JSON on stdin; hook apply session reads none"
+POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
+USAGE = (
+    "hook apply answer|ask|permission reads one hook event as JSON on stdin; "
+    "hook apply session reads one in the captain role and none for a hand"
+)
 
 
 def _read() -> dict:
@@ -22,6 +29,14 @@ def _read() -> dict:
     if not isinstance(data, dict):
         raise ValueError("not an object")
     return data
+
+
+# Unreadable input still starts the captain, so it counts as a fresh start.
+def _source() -> object:
+    try:
+        return _read().get("source")
+    except ValueError:
+        return "startup"
 
 
 def _deckhand_items(hook_input: dict) -> list[dict]:
@@ -72,12 +87,27 @@ class Hook(StoryStep):
         self._captain = captain
 
     def _session(self) -> None:
+        if hand_role():
+            pointer = POINTERS.get(os.environ.get("DECKHAND_HAND_KIND", ""))
+            ref = os.environ.get("DECKHAND_STORY", "")
+            if pointer is not None and ref:
+                print(pointer(ref))
+            return
         if os.environ.get("DECKHAND_ROLE") != "captain":
             return
+        if _source() == "startup":
+            with LocalState(default_path()) as rows:
+                rows.drop(HOLD)
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             (self._captain or Captain()).context([])
         print(buffer.getvalue(), end="")
+
+    def _stop(self) -> None:
+        ref = own_ref()
+        if hand_role() and ref:
+            with LocalState(default_path()) as rows:
+                rows.turn_ended(fleet.session_of(ref))
 
     def _permission(self, hook_input: dict) -> None:
         ref = os.environ.get("DECKHAND_STORY", "")
@@ -104,6 +134,9 @@ class Hook(StoryStep):
         try:
             if action == "session":
                 self._session()
+                return
+            if action == "stop":
+                self._stop()
                 return
             hook_input = _read()
             if action == "permission":

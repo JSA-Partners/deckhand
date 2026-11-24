@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, asks, ops, quiz, review, signoff, tiers
+from deckhand import answers, asks, ops, queue, quiz, review, signoff, tiers
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -29,6 +29,7 @@ KINDS = (
     signoff.AFTER,
     asks.ANSWER,
     asks.EDIT,
+    queue.STALLED,
 )
 
 _PIN_OPTIONS = (quiz.KIND, asks.ANSWER, signoff.KIND)
@@ -48,6 +49,7 @@ _OPTIONS = {
     signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
     signoff.AFTER: [signoff.DONE, signoff.NOT_YET],
     asks.EDIT: asks.EDIT_OPTIONS,
+    queue.STALLED: [queue.RESTART, queue.LEAVE],
 }
 
 _SIGN_OFF = {
@@ -63,6 +65,7 @@ _DESCRIPTIONS = {
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
     signoff.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
+    queue.STALLED: ["the hand starts again", "the hand stays stopped"],
 }
 
 _ASKS = {
@@ -82,6 +85,7 @@ _ASKS = {
     signoff.AFTER: "Is this after-merge item done for",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
+    queue.STALLED: "",
 }
 _BRANCH_CAP = "Three branch review rounds ran, none clean. Proceed to sign-off or rework the branch for"
 _RECORDED = (
@@ -94,8 +98,21 @@ _RECORDED = (
     signoff.SECOND,
     asks.ANSWER,
     asks.EDIT,
+    queue.STALLED,
 )
-_CHOSEN = ("finding", review.CAP_DECISION, quiz.KIND, signoff.KIND, signoff.SECOND, signoff.AFTER, asks.EDIT)
+_CHOSEN = (
+    "finding",
+    review.CAP_DECISION,
+    quiz.KIND,
+    signoff.KIND,
+    signoff.SECOND,
+    signoff.AFTER,
+    asks.EDIT,
+    queue.STALLED,
+)
+
+_OWN_WORDS = (signoff.KIND, signoff.SECOND)
+_SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 
 _POSITIVE = {
     "contract": "Approve",
@@ -212,6 +229,12 @@ def _saw_the_options(pending: Pending, found: Answer) -> bool:
     return (labels, texts, found.multi) == (pending.options, pending.descriptions, False)
 
 
+def in_own_words(pending: Pending, answer: str) -> bool:
+    if pending.kind not in _OWN_WORDS or not answer.strip() or answer in pending.options:
+        return False
+    return not answers.only_labels(answer, _SIGN_OFF_LABELS)
+
+
 def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
@@ -229,7 +252,7 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
-    if pending.kind in _CHOSEN and found.answer not in pending.options:
+    if pending.kind in _CHOSEN and found.answer not in pending.options and not in_own_words(pending, found.answer):
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
@@ -260,7 +283,9 @@ def _another_signs(store: Store, pending: Pending, by: str) -> None:
 
 def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     found = check(pending, state)
-    if not _creates_record(pending, found.answer):
+    note = found.answer if in_own_words(pending, found.answer) else None
+    answer = signoff.NOT_YET if note is not None else found.answer
+    if not _creates_record(pending, answer):
         return False
     if pending.kind == signoff.KIND:
         _owner_signs(store, pending, by)
@@ -275,7 +300,8 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         pending.subject,
         pending.version,
         f"person:{found.session_id}",
-        {"answer": found.answer, "question": pending.question, "nonce": pending.nonce, "by": by}
+        {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
+        | ({"note": note} if note is not None else {})
         | ({"item": pending.detail} if pending.kind == "decision-item" else {})
         | (_tier_data(found.answer) if pending.kind == "tier" else {})
         | graded,

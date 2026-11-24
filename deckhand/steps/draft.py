@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from deckhand import claims, features, inputs, ops, planning, queue
+from deckhand import claims, features, inputs, ops, queue, spec
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -43,18 +43,17 @@ class Draft(StoryStep):
         store = self._store_for_run()
         feature = features.owning(store, team_key(parsed), parsed["words"][0])
         story = features.story(store, feature, parsed["words"][0])
-        print(f"story: {story['identifier']} {story['title']}")
-        print(story["description"] or "no description")
+        ref = story["identifier"]
         stub = next((r for r in feature.records.get(story["id"], []) if r.kind == "stub"), None)
-        for name in ("unknowns", "new_here", "decisions"):
-            for item in stub.data.get(name, []) if stub else []:
-                print(f"{name}: {item}")
-        for name in ("Contract", "Examples"):
-            print(f"{name.lower()}:")
-            print(planning.section(store, feature, name) or "none saved")
-        print("the draft holds, in this order:")
-        for part in SHAPE:
-            print(f"- {part}")
+
+        def items(name: str) -> list[str]:
+            return [f"{name}: {item}" for item in (stub.data.get(name, []) if stub else [])]
+
+        first = [f"story: {ref} {story['title']}", spec.planning_text(store, feature, ("Contract",))]
+        first += [*items("decisions"), spec.planning_text(store, feature, ("Frame", "Shape", "Examples"))]
+        rest = [story["description"] or "no description", *items("unknowns"), *items("new_here")]
+        rest += ["the draft holds, in this order:", *(f"- {part}" for part in SHAPE)]
+        print(spec.fitted(f"{ref}-draft", "\n".join(first) + "\n", "\n".join(rest) + "\n"), end="")
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)

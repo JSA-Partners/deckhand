@@ -89,6 +89,9 @@ class CachedStore(Store):
     def records(self, issue: str) -> list[Record]:
         return self._inner.records(issue)
 
+    def recorded(self, kind: str) -> list[str]:
+        return self._inner.recorded(kind)
+
     def relate(self, blocker: str, blocked: str) -> None:
         self._write("relate", blocker, blocked)
 

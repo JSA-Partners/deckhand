@@ -27,9 +27,11 @@ HAND_APPLIES: dict[str, Callable[[list[str]], bool]] = {
     "after": _any,
     "spike": _any,
     "draft": lambda rest: "take" not in rest,
-    "hook": lambda rest: rest[:1] in (["session"], ["permission"]),
+    "mail": _any,
+    "hook": lambda rest: rest[:1] in (["session"], ["permission"], ["stop"]),
+    "watch": lambda rest: rest[:1] == ["hand"],
 }
-UNREFERENCED = ("hook",)
+UNREFERENCED = ("hook", "watch")
 
 
 class Refusal(Exception):
@@ -71,11 +73,18 @@ def hand_role() -> bool:
     return os.environ.get("DECKHAND_ROLE") == "hand"
 
 
+def own_ref() -> str:
+    return os.environ.get("DECKHAND_SPIKE") or os.environ.get("DECKHAND_STORY", "")
+
+
 def hand_may_apply(command: str, args: list[str]) -> bool:
     allowed = HAND_APPLIES.get(command)
     if allowed is None:
         return False
     if command in UNREFERENCED:
         return allowed(args)
-    own = os.environ.get("DECKHAND_SPIKE" if command == "spike" else "DECKHAND_STORY", "")
+    if command == "mail":
+        own = own_ref()
+    else:
+        own = os.environ.get("DECKHAND_SPIKE" if command == "spike" else "DECKHAND_STORY", "")
     return bool(own) and args[:1] == [own] and allowed(args[1:])

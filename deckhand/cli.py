@@ -9,6 +9,7 @@ from deckhand import config, steps
 from deckhand.git import GitError
 from deckhand.linear.client import LinearError
 from deckhand.step import REGISTRY, VERBS, Refusal, hand_may_apply, hand_role
+from deckhand.store import open as store_open
 
 
 def _load_steps() -> None:
@@ -30,6 +31,13 @@ def _sandboxed() -> bool:
 
 
 def main(argv: list[str]) -> int:
+    try:
+        return _main(argv)
+    finally:
+        store_open.flush()
+
+
+def _main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     _load_steps()

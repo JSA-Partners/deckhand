@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 from deckhand import fleet, standing
 from deckhand.queue import Item
 from deckhand.records import content_hash
+from deckhand.step import Refusal
+from deckhand.store.state import LocalState
 
-FILE = "captain.json"
+SNAPSHOT = "snapshot"
 SHAPE = 1
 
 
@@ -19,13 +19,22 @@ def item_key(item: Item) -> str:
 
 def _item(item: Item) -> dict:
     keys = {"key": item_key(item), "kind": item.kind, "ref": item.ref, "title": item.title}
-    return keys | {"since": item.at or None, "next": item.next, "head": item.head or None}
+    return keys | {"since": item.at or None, "next": item.next, "head": item.head or None, "lines": item.lines}
 
 
-def _hands(sessions: list[fleet.Session]) -> list[dict]:
+def _hands(sessions: list[fleet.Session], idle: frozenset[str], resuming: frozenset[str]) -> list[dict]:
     held = [*sorted(fleet.hands(sessions).items()), *sorted(fleet.spikes(sessions).items())]
     return [
-        {"name": s.name, "ref": ref, "state": s.state, "waiting_for": s.waiting_for, "started_at": s.started_at}
+        {
+            "name": s.name,
+            "ref": ref,
+            "state": s.state,
+            "waiting_for": s.waiting_for,
+            "started_at": s.started_at,
+            "idle": s.name in idle,
+            "resuming": s.name in resuming,
+            "alive": fleet.alive(s),
+        }
         for ref, s in held
     ]
 
@@ -36,40 +45,34 @@ def snapshot(
     facts: dict,
     waiting: list[Item],
     sessions: list[fleet.Session],
-    previous: dict | None,
     person_unknown: bool = False,
+    idle: frozenset[str] = frozenset(),
+    used: int | None = None,
+    resuming: frozenset[str] = frozenset(),
 ) -> dict:
-    items = [_item(item) for item in waiting]
-    keys = {item["key"] for item in items}
-    notified = [key for key in (previous or {}).get("notified", []) if person_unknown or key in keys]
     return {
         "shape": SHAPE,
         "written_at": written_at,
         "team": team,
         "feature": facts["feature"],
         "budget": facts["budget"],
-        "slots": facts["slots"],
-        "items": items,
+        "slots": facts["slots"] if used is None else {**facts["slots"], "used": used},
+        "items": [_item(item) for item in waiting],
         "stories": facts["order"],
-        "hands": _hands(sessions),
+        "cycle": facts.get("cycle", []),
+        "hands": _hands(sessions, idle, resuming),
         "release": facts["release"],
         "stale_since": None,
         "person_unknown": person_unknown,
-        "notified": notified,
     }
 
 
-def write(state: Path, status: dict) -> None:
-    state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    state.chmod(0o700)
-    fd, temp = tempfile.mkstemp(dir=state, prefix=f".{FILE}.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(status, handle, indent=2)
-        os.replace(temp, state / FILE)
-    except BaseException:
-        Path(temp).unlink(missing_ok=True)
-        raise
+def _state(state: Path) -> LocalState:
+    return LocalState(state / "deckhand.db")
+
+
+def put(rows: LocalState, status: dict) -> None:
+    rows.put(SNAPSHOT, status)
 
 
 def _strings(value: object) -> bool:
@@ -91,7 +94,8 @@ def _when(value: object) -> bool:
 def _item_ok(found: object) -> bool:
     if not isinstance(found, dict) or not all(isinstance(found.get(key), str) for key in ("key", "kind", "ref")):
         return False
-    return (found.get("since") is None or _when(found["since"])) and _maybe(found.get("head"), str)
+    timed = found.get("since") is None or _when(found["since"])
+    return timed and _maybe(found.get("head"), str) and _strings(found.get("lines", []))
 
 
 def _stage_ok(found: object) -> bool:
@@ -119,7 +123,6 @@ def _valid(found: dict) -> bool:
     slots, items, stories = found.get("slots"), found.get("items"), found.get("stories")
     return (
         found.get("shape") == SHAPE
-        and _strings(found.get("notified"))
         and _when(found.get("written_at"))
         and isinstance(slots, dict)
         and _count(slots.get("used"))
@@ -131,6 +134,7 @@ def _valid(found: dict) -> bool:
         and isinstance(found.get("release"), bool)
         and isinstance(items, list)
         and all(_item_ok(entry) for entry in items)
+        and _strings(found.get("cycle", []))
         and isinstance(stories, list)
         and all(_story_ok(entry) for entry in stories)
     )
@@ -138,10 +142,22 @@ def _valid(found: dict) -> bool:
 
 def read(state: Path) -> dict | None:
     try:
-        found = json.loads((state / FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        with _state(state) as rows:
+            return get(rows)
+    except Refusal:
+        return None
+
+
+def get(rows: LocalState) -> dict | None:
+    try:
+        found = rows.get(SNAPSHOT)
+    except (Refusal, ValueError):
         return None
     return found if isinstance(found, dict) and _valid(found) else None
+
+
+def cycle_line(cycle: list[str]) -> str:
+    return f"build order cycle: {', '.join(cycle)}; break it in Linear"
 
 
 def stale(previous: dict, at: str) -> dict:

@@ -10,6 +10,7 @@ import urllib.request
 from collections.abc import Callable
 
 from deckhand import __version__
+from deckhand.linear.meter import LIMITED, Headers, Meter, name_of, wait_words
 from deckhand.step import Refusal
 
 HOST = "api.linear.app"
@@ -32,6 +33,16 @@ class DuplicateId(LinearError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(code, message)
         self.entity = message.removeprefix(CONFLICT_PREFIX).strip()
+
+
+class Reply(bytes):
+    headers: Headers = {}
+
+
+def _reply(body: bytes, headers: Headers) -> Reply:
+    reply = Reply(body)
+    reply.headers = headers
+    return reply
 
 
 DROPPED = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError, ssl.SSLEOFError)
@@ -96,7 +107,7 @@ class KeepAliveTransport:
             raise urllib.error.HTTPError(
                 request.full_url, response.status, response.reason, response.headers, io.BytesIO(body)
             )
-        return body
+        return _reply(body, response.headers)
 
 
 default_transport = KeepAliveTransport()
@@ -131,39 +142,48 @@ class LinearClient:
         on_unauthorized: Callable[[], None],
         transport: Transport = default_transport,
         source: str = "the Linear credentials",
+        meter: Meter | None = None,
     ) -> None:
         self._token = token
         self._on_unauthorized = on_unauthorized
         self._transport = transport
         self._source = source
+        self._meter = meter if meter is not None else Meter()
 
     def query(self, document: str, variables: dict) -> dict:
         payload = json.dumps({"query": document, "variables": variables}).encode()
         try:
-            raw = self._send(payload)
+            raw, headers = self._send(payload)
         except _Unauthorized:
             self._on_unauthorized()
             try:
-                raw = self._send(payload)
+                raw, headers = self._send(payload)
             except _Unauthorized:
                 raise Refusal(f"unauthorized: check {self._source}") from None
         body = _parse(raw)
         errors = body.get("errors")
-        if errors:
-            raise _error_from(errors if isinstance(errors, list) else [])
+        error = _error_from(errors if isinstance(errors, list) else []) if errors else None
+        limited = error is not None and error.code == LIMITED
+        until = self._meter.heard(name_of(document), headers, limited)
+        if limited and until is not None:
+            words = wait_words(until, self._meter.now())
+            raise LinearError(LIMITED, f"Linear's rate limit is spent until {words}; run the same call again then")
+        if error is not None:
+            raise error
         data = body.get("data")
         if not isinstance(data, dict):
             raise LinearError("bad_response", "the response held no data")
         return data
 
-    def _send(self, payload: bytes) -> bytes:
+    def _send(self, payload: bytes) -> tuple[bytes, Headers]:
         request = urllib.request.Request(
             URL,
             data=payload,
             headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, "Authorization": self._token()},
         )
         try:
-            return self._transport(request)
+            raw = self._transport(request)
+            return raw, raw.headers if isinstance(raw, Reply) else {}
         except urllib.error.HTTPError as error:
             if error.code == 401:
                 raise _Unauthorized from None
@@ -176,7 +196,7 @@ class LinearClient:
             except ValueError:
                 parsed = None
             if isinstance(parsed, dict) and parsed.get("errors"):
-                return body
+                return body, error.headers or {}
             raise LinearError("http", f"Linear answered HTTP {error.code}") from None
         except (urllib.error.URLError, OSError, http.client.HTTPException):
             raise LinearError("network", "could not reach Linear") from None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import git, review, step
+from deckhand import git, launch, ops, review, spec, step
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.commit import Commit
@@ -16,6 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
+from tests.test_feature_approval import approve_everything, decided, setup
 from tests.test_implplan import BASE, Git, manifest
 from tests.test_step_review import (
     PLAN,
@@ -229,6 +231,60 @@ def test_context_prints_the_briefing(tmp_path: Path, repo: Path, capsys: pytest.
     assert (facts["story"], facts["tier"], facts["tools"], facts["checks"]) == ("ACME-1", 0, ["ruff"], ["make lint"])
     assert facts["worktree"] == str(repo / ".worktrees" / BRANCH)
     assert facts["plan"] == PLAN
+
+
+def test_build_context_prints_the_spec_before_the_plan(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
+    store = labeled(tmp_path, repo)
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    contract = "# Contract\n\nWritten by the person.\n\nThe Contract of Alpha."
+    assert contract in out
+    assert out.index(contract) < out.index("# Decisions") < out.index("plan:\n" + PLAN)
+    Build(store, Shell(), repo).context(["s1", *TEAM, "--json"])
+    facts = json.loads(capsys.readouterr().out)
+    assert facts["contract"] == "Written by the person.\n\nThe Contract of Alpha."
+    assert facts["examples"] == "Written by the person.\n\nThe Examples of Alpha."
+    assert facts["invariants"] == "Written by the person.\n\nThe Invariants of Alpha."
+    assert facts["decisions"] == []
+
+
+def test_a_long_context_prints_the_spec_and_saves_the_whole(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = labeled(tmp_path, repo)
+    store.put_document(ops.create_id("s1", "sitting"), "s1", "Sitting", "An order of two ships the same day.\n" * 600)
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    saved = tmp_path / launch.INPUT / "ACME-1-build.md"
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and str(saved) in out and "plan:" not in out
+    assert "The Contract of Alpha." in saved.read_text() and "sitting:\nAn order of two" in saved.read_text()
+
+
+def test_a_long_examples_section_leaves_the_contract_and_decisions_inline(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = setup()
+    decided(store, "decision-item", "Ids are UUIDs", "Keep", ["s1"])
+    approve_everything(store)
+    submit(store, tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    Build(store, Shell(), repo).apply(["s1", "worktree", *TEAM])
+    gather = spec.gather
+
+    def long_examples(*args) -> spec.Spec:
+        return dataclasses.replace(gather(*args), examples="An order of two ships the same day.\n" * 1000)
+
+    monkeypatch.setattr(spec, "gather", long_examples)
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and "- Ids are UUIDs: Keep" in out and "# Scope" not in out
 
 
 def test_a_renamed_story_keeps_its_worktree(tmp_path: Path, repo: Path):

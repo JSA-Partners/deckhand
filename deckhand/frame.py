@@ -4,7 +4,7 @@ import textwrap
 import unicodedata
 from dataclasses import dataclass
 
-from deckhand.board import FLEET_FAILED, NO_CAPTAIN, START, Board, Row
+from deckhand.board import FLEET_FAILED, NO_CAPTAIN, Board, Row
 from deckhand.brief import Glyphs
 
 WIDTH = 110
@@ -13,9 +13,10 @@ SHORT = 8
 AGE = 5
 REF = 14
 STATE = 28
-FIRST = f"no captain has run yet; start one with {START}"
+FIRST = "reading Linear for the first time"
 PLAIN = ("queued", "team")
-HINT = "type next in the captain to take them in turn"
+HINT = "the captain asks these one at a time"
+ASK = "Leave hands running (l) or stop all hands (s)? Their conversations are kept. Any other key stays."
 SGR = {"bold": "1", "dim": "2", "needs": "1;31", "working": "32", "stopped": "1", "done": "2", "stale": "2"}
 SGR |= {"warn": "1;33", "command": "36"}
 
@@ -60,22 +61,24 @@ def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - cells(text))
 
 
-def _header(found: Board, g: Glyphs, note: str) -> Line:
-    if not found.read:
-        return Line(((" ", ""), ("Captain", "bold")))
-    glyph, words, tone = found.lead
+def _header(found: Board, g: Glyphs, note: str, width: int) -> Line:
     sep = (g.sep, "dim")
-    spans: list[Span] = [(" ", ""), (glyph, tone), (" ", ""), (words, tone)]
-    if note:
-        spans += [sep, (note, "warn")]
-    elif found.updated:
-        spans += [sep, (f"updated {found.updated} ago", "dim")]
+    if not found.read:
+        return Line(((" ", ""), ("Captain", "bold"), *((sep, (note, "warn")) if note else ())))
+    glyph, words, tone = found.lead
+    lead: list[Span] = [(" ", ""), (glyph, tone), (" ", ""), (words, tone)]
+    rest: list[Span] = []
     for fact in found.facts:
-        spans += [sep, (fact, "")]
-    spans += [sep, ("slots ", ""), (found.slots[0], "bold"), (f"/{found.slots[1]}", "dim")]
+        rest += [sep, (fact, "")]
+    rest += [sep, ("slots ", ""), (found.slots[0], "bold"), (f"/{found.slots[1]}", "dim")]
     if found.captain:
-        spans += [sep, (found.captain, "warn" if found.captain == NO_CAPTAIN else "dim")]
-    return Line(tuple(spans))
+        rest += [sep, (found.captain, "warn" if found.captain == NO_CAPTAIN else "dim")]
+    room = width - sum(cells(text) for text, _ in (*lead, *rest)) - cells(g.sep)
+    if note:
+        middle = [sep, (fit(note, room, g.ellipsis), "warn")] if room > cells(g.ellipsis) + SHORT else []
+    else:
+        middle = [sep, (f"updated {found.updated} ago", "dim")] if found.updated else []
+    return Line((*lead, *middle, *rest))
 
 
 def _fleet(found: Board, g: Glyphs) -> list[Line]:
@@ -149,7 +152,11 @@ def _body(found: Board, g: Glyphs, width: int, selected: str | None, expanded: s
     return lines, end
 
 
-def _footer(found: Board, width: int, g: Glyphs) -> list[Line]:
+def _footer(found: Board, width: int, g: Glyphs, asking: bool) -> list[Line]:
+    if asking:
+        first, rest = ASK.split("? ", 1)
+        asked = [ASK] if cells(ASK) < width else [f"{first}?", rest]
+        return [_rule("", 0, g, width), *(Line(((" ", ""), (part, "warn"))) for part in asked)]
     rows = [row for section in found.sections for row in section.rows]
     keys = [("q", "quit"), ("r", "refresh")]
     keys += [("j/k", "move")] if len(rows) > 1 else []
@@ -193,13 +200,14 @@ def render(
     expanded: str | None = None,
     keys: bool = False,
     note: str = "",
+    asking: bool = False,
 ) -> list[Line]:
     width = cols
-    top = [_header(found, g, note), *_banner(found, g, width), *_fleet(found, g)]
+    top = [_header(found, g, note, width), *_banner(found, g, width), *_fleet(found, g)]
     if rows is not None and rows < SHORT:
         return [_clip(line, width, g) for line in top[:2][:rows]]
     body, end = _body(found, g, width, selected, expanded)
-    footer = _footer(found, width, g) if keys else []
+    footer = _footer(found, width, g, asking) if keys else []
     if rows is not None:
         body = _window(body, end, max(0, rows - len(top) - len(footer)))
     return [_clip(line, width, g) for line in (*top, *body, *footer)]

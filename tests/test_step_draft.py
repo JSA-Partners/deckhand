@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
 
-from deckhand import ops, queue
+from deckhand import features, launch, ops, planning, queue, spec
 from deckhand.step import Refusal
 from deckhand.steps.draft import Draft
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import P1, approve_everything, decided, setup
+from tests.test_feature_approval import P1, approve_everything, decided, expect, setup
 
 TEAM = ["--team-key", "ACME"]
 DRAFT = "Outcome: an order is placed.\n\nExamples:\n- a paid order ships.\n"
@@ -111,9 +112,9 @@ def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.Captu
     out = capsys.readouterr().out
     assert "ACME-1 Orders" in out
     assert "Outcome: an order is placed." in out
-    assert "The Contract of Alpha." in out
-    assert "The Examples of Alpha." in out
-    assert "never settled here" in out
+    for name in ("Frame", "Shape", "Contract", "Examples"):
+        assert f"# {name}\n\nWritten by the person.\n\nThe {name} of Alpha.\n" in out
+    assert out.index("# Examples") < out.index("never settled here")
 
 
 def test_draft_refused_once_the_draft_is_taken(tmp_path: Path):
@@ -125,3 +126,36 @@ def test_draft_refused_once_the_draft_is_taken(tmp_path: Path):
     with pytest.raises(Refusal, match="ACME-1 took its draft already"):
         step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
     assert store.writes == written
+
+
+def test_a_long_feature_prints_what_was_approved_and_saves_the_whole_draft_context(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = approved_contract()
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Examples", "A paid order of two ships.\n" * 1500, True)
+    Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
+    out = capsys.readouterr().out
+    saved = tmp_path / launch.INPUT / "ACME-1-draft.md"
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and str(saved) in out and "never settled here" not in out
+    assert "never settled here" in saved.read_text() and "A paid order of two ships.\n" * 1500 in saved.read_text()
+
+
+def test_a_long_frame_leaves_the_contract_and_the_stub_decisions_inline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = approved_contract()
+    expect(store, "s1", "orders", "Send receipts by email")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Frame", "A line of the frame.\n" * 1500, True)
+    Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
+    out = capsys.readouterr().out
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and "decisions: Send receipts by email" in out
+    assert out.index("The Contract of Alpha.") < out.index("decisions: Send") < out.index("# Frame")
+    assert "never settled here" not in out

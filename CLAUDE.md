@@ -10,29 +10,46 @@
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
   `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
-  planning work (`spike`, `draft`) and its questions (`ask`), and the person's fleet (`hand`
-  starts, fills and wakes hands, `captain` prints the brief, the queue, the status line segment
-  and the board); `commit` and `document` only report
+  planning work (`spike`, `draft`), its questions (`ask`) and its messages (`mail`), and the
+  person's fleet (`hand` lists the fleet and asks the engine for a spike, `captain` prints the
+  brief, the top item and whether the engine runs from the snapshot alone, the status line segment
+  and the board, `engine` says whether the engine runs and how to start it, and runs it with its
+  screen, `watch` rings a session's doorbell and beats the captain's watcher); `commit` and
+  `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
   quiz and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
   and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
-  who owns a story, `asks.py` a hand's questions and wakes, `gaps.py` permission gaps, `spikes.py`
-  spike questions and answers, `order.py` the build order, `answers.py` the dialog answers the hook
-  stores, `inputs.py` the files a hand may hand in; `stage.py` where each story is in the build and
-  its review round, `status.py` the captain's status file, `standing.py` how the status file and the
-  fleet sort into needs you, working, stopped, queued, team and done today, `brief.py` the brief, the
-  notify text and the status line segment, `board.py` the board's sections and rows
+  who owns a story, `asks.py` a hand's questions and wakes, `wakes.py` the text of the messages a
+  hand is sent, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the
+  build order, `answers.py` the dialog answers the hook stores, `inputs.py` the files a hand may
+  hand in; `stage.py` where each story is in the build and its review round, `reading.py` the full
+  read the engine makes, `spec.py` what the person approved for a story and how a hand's context
+  fits its injection, `status.py` the snapshot kept in deckhand's local SQLite file,
+  `standing.py` how the snapshot and the fleet sort into needs you, working, stopped, queued, team
+  and done today, `brief.py` the brief and the status line segment, `board.py` the board's sections
+  and rows; `watch.py` when a session's watcher rings and when the captain's has gone silent
+- The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into the
+  actions of `actions.py` and writes nothing, `idle.py` which live hands sit idle past their turn,
+  `acts.py` carries one action out and builds every hand's launch, `worker.py` runs them in order on
+  one thread, `poller.py` reads the fleet and Linear on their own threads, `linker.py` the Linear
+  read the engine takes from that thread, `lines.py` the failures the engine shows, `shown.py` the
+  snapshot the engine writes and the stories, slots and resuming hands it holds, and `engine.py` is
+  the loop, its lock and its heartbeat
+- `monitors/monitors.json` registers `watch.sh`, the watcher every session runs; in a session that
+  is neither captain nor hand it parks rather than exits, since an exit costs a model turn
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
   escape codes; `statusline.py` installs and removes the captain's segment in the person's status
   line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`
   what each status line tool needs, and the launcher scripts
-- `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
-  setup reads and plans for a team, and a client for the app or the person
+- `linear/` every Linear call: the GraphQL client and its errors, the meter that reads its budget
+  headers, the app token, every query, what setup reads and plans for a team, and a client for the
+  app or the person; `budget.py` the Linear budget each role's meter keeps in the local state
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
-  tests use, and the store backed by Linear; `ops.py` the idempotent ensure operations over any
-  store, with deterministic ids
+  tests use, and the store backed by Linear; `local.py` the records in deckhand's local SQLite
+  file, `state.py` its message, hand and engine rows; `ops.py` the idempotent ensure operations over
+  any store, with deterministic ids
 - `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
   a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
   person's machine; `launch.py` the sandboxed settings a hand or the captain runs under
@@ -104,13 +121,15 @@ install reaches them when the next fix or feature does.
 - A status is never written by deckhand; Linear moves a story from the pull request: draft to In
   Progress, ready to In Review, merged to Done
 - Every decision comes from a recorded dialog answer in the person's session, never from anything
-  else; a hand never asks, it records a question with `ask` and stops until a wake
-- A hand is a background session per story, draft or spike, launched only by `hand`, under settings that
-  hold no credential; every write it causes goes through `deckhand`, and a raw write fails
-- The captain holds no state: its view, the queue and the wakes are printed from records, and a
-  hand stopping only reprints the brief; a waiting hand frees its slot, a planning hand holds one
-- The status file is written for the brief, the status line and the board, and never decided from;
-  its notified list only keeps a notification from repeating
+  else; a hand never asks, it records a question with `ask` and stops until its message arrives
+- A hand is a background session per story, draft or spike, under settings that hold no
+  credential; every write it causes goes through `deckhand`, and a raw write fails
+- Sessions never message each other: a row in deckhand's local SQLite file is the message, and a
+  session's watcher, a plugin monitor, is only the doorbell
+- Only the engine starts, resumes or stops a hand; a waiting hand frees its slot, a planning hand
+  holds one
+- Only the engine writes the snapshot, for the captain, the status line and the board, and nothing
+  decides from it
 - A hand does the after-merge chores it can; only the rest reach the person's queue
 - `.claude/` is Claude Code's: a hand may edit `.claude/deckhand.toml` and
   `.claude/deckhand/lenses/`, and any other change becomes a queue item through `ask apply --edit`

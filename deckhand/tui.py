@@ -4,25 +4,22 @@ import os
 import select
 import sys
 import termios
-import threading
 import tty
 from collections.abc import Callable
 from typing import Protocol
 
-from deckhand import board, fleet, frame, standing
+from deckhand import board, brief, fleet, frame, standing
 from deckhand.brief import Glyphs
 
 TICK = 0.25
 STATUS_EVERY = 2.0
-FLEET_EVERY = 5.0
 FIRST_READ = 1.0
-AUTO_REFRESH = 300.0
 KEYS = {"q": "quit", "\x1b": "quit", "j": "down", "k": "up", "r": "refresh", "\r": "enter", "\n": "enter"}
 KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
+LEAVE, STOP = "l", "s"
+READING_FLEET, FINISHING = " reading the fleet", " finishing an action"
 ESC, ESC_WAIT = "\x1b", 0.025
 ENTER_SCREEN, LEAVE_SCREEN = "\x1b[?1049h\x1b[?25l", "\x1b[?25h\x1b[?1049l"
-
-Refresh = Callable[[], Callable[[], int | None]]
 
 
 def split_key(buffer: str) -> tuple[str, str]:
@@ -41,47 +38,25 @@ class Terminal(Protocol):
 
     def show(self, lines: list[str]) -> None: ...
 
+    def bell(self) -> None: ...
 
-class Poller:
-    def __init__(self, read: Callable[[], fleet.Fleet], every: float = FLEET_EVERY) -> None:
-        self._read, self._every = read, every
-        self._lock, self._wake, self._stop, self._first = (
-            threading.Lock(),
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-        )
-        self._latest: fleet.Fleet | None = None
-        self._thread = threading.Thread(target=self._loop, name="deckhand-fleet", daemon=True)
 
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            self._wake.clear()
-            try:
-                found = self._read()
-            except Exception as error:
-                found = fleet.Fleet([], f"the fleet read failed: {type(error).__name__}")
-            with self._lock:
-                self._latest = found
-            self._first.set()
-            self._wake.wait(self._every)
+class Fleets(Protocol):
+    def wait(self, timeout: float) -> bool: ...
 
-    def start(self) -> None:
-        self._thread.start()
+    def latest(self) -> fleet.Fleet | None: ...
 
-    def wait(self, timeout: float) -> bool:
-        return self._first.wait(timeout)
 
-    def latest(self) -> fleet.Fleet | None:
-        with self._lock:
-            return self._latest
+class Drives(Protocol):
+    def tick(self) -> None: ...
 
-    def poke(self) -> None:
-        self._wake.set()
+    def refresh(self) -> None: ...
 
-    def stop(self) -> None:
-        self._stop.set()
-        self._wake.set()
+    def note(self) -> str: ...
+
+    def stop_all(self) -> list[str]: ...
+
+    def finishing(self) -> bool: ...
 
 
 class Watch:
@@ -89,22 +64,21 @@ class Watch:
         self,
         term: Terminal,
         read_status: Callable[[], dict | None],
-        poller: Poller,
+        poller: Fleets,
         clock: Callable[[], float],
         g: Glyphs,
         color: bool,
-        refresh: Refresh | None = None,
+        engine: Drives,
     ) -> None:
         self._term, self._read, self._poller, self._clock, self._g = term, read_status, poller, clock, g
-        self._color, self._refresh = color, refresh
-        self._running: Callable[[], int | None] | None = None
-        self._failed = False
-        self._before = ""
-        self._refreshed = float("-inf")
+        self._color, self._engine = color, engine
         self._status: dict | None = None
         self._read_at = float("-inf")
         self._keys: list[str] = []
         self._shown: tuple[int, int, list[str]] | None = None
+        self._needs: frozenset[str] | None = None
+        self._asking = False
+        self._said: list[str] = []
         self.selected: str | None = None
         self.expanded: str | None = None
 
@@ -122,63 +96,62 @@ class Watch:
             at = self._keys.index(self.selected) + step
             self.selected = self._keys[max(0, min(at, len(self._keys) - 1))]
 
-    def _start_refresh(self) -> None:
-        if self._refresh is not None and self._running is None:
-            self._before = standing.text(self._status, "written_at")
-            self._running, self._refreshed = self._refresh(), self._clock()
-
-    # Nothing else reads Linear while the captain plans a feature, so an old file refreshes itself.
-    def _refresh_if_old(self) -> None:
-        now = self._clock()
-        stamp = standing.timestamp(standing.text(self._status, "written_at"))
-        old = stamp is None or now - stamp >= AUTO_REFRESH
-        if self._status is not None and old and now - self._refreshed >= AUTO_REFRESH:
-            self._start_refresh()
-
-    def _note(self) -> str:
-        if self._running is not None and self._running() is not None:
-            self._running = None
-            self._reread()
-            # A full read never fails by its exit code, so a refresh counts only when it wrote the file.
-            self._failed = standing.text(self._status, "written_at") == self._before
-        if self._running is not None:
-            return "refreshing"
-        return "refresh failed" if self._failed else ""
+    # The first snapshot sets what is already known; a failed read changes nothing, so neither rings.
+    def _ring(self, found: board.Board) -> None:
+        if self._status is None:
+            return
+        rows = (section.rows for section in found.sections if section.name == standing.NEEDS)
+        needs = frozenset(row.key for found_rows in rows for row in found_rows)
+        if self._needs is not None and needs - self._needs:
+            self._term.bell()
+        self._needs = needs
 
     def draw(self) -> None:
         now = self._clock()
         found = board.build(self._status, self._poller.latest(), now, board.midnight(now), self._g)
         self._follow(found.keys())
+        self._ring(found)
         rows, cols = self._term.size()
-        lines = frame.render(found, self._g, cols, rows, self.selected, self.expanded, keys=True, note=self._note())
+        note, asking = brief.clean(self._engine.note()), self._asking
+        lines = frame.render(found, self._g, cols, rows, self.selected, self.expanded, True, note, asking)
         painted = [frame.paint(line, self._color) for line in lines[:rows]]
         if (rows, cols, painted) != self._shown:
             self._term.show(painted)
             self._shown = (rows, cols, painted)
 
+    def _answer(self, key: str) -> bool:
+        self._asking = False
+        if key == STOP:
+            if self._engine.finishing():
+                self._term.show([FINISHING])
+            self._said = self._engine.stop_all()
+        return key not in (LEAVE, STOP)
+
     def handle(self, key: str | None) -> bool:
+        if key is not None and self._asking:
+            return self._answer(key)
         action = KEYS.get(key or "")
         if action == "quit":
-            return False
-        if action == "refresh":
+            self._asking = True
+        elif action == "refresh":
             self._reread()
-            self._poller.poke()
-            self._start_refresh()
+            self._engine.refresh()
         elif action in ("down", "up"):
             self._move(1 if action == "down" else -1)
         elif action == "enter" and self.selected:
             self.expanded = None if self.expanded == self.selected else self.selected
         return True
 
-    def run(self) -> None:
+    def run(self) -> list[str]:
+        self._term.show([READING_FLEET])
         self._poller.wait(FIRST_READ)
         while True:
+            self._engine.tick()
             if self._clock() - self._read_at >= STATUS_EVERY:
                 self._reread()
-                self._refresh_if_old()
             self.draw()
             if not self.handle(self._term.key(TICK)):
-                return
+                return self._said
 
 
 # Plain escape codes, row by row: a curses build may repeat a non-ASCII character in a way terminals misdraw.
@@ -218,6 +191,10 @@ class Screen:
         found, self._pending = split_key(self._pending)
         return found
 
+    def bell(self) -> None:
+        self._out.write("\a")
+        self._out.flush()
+
     def show(self, lines: list[str]) -> None:
         rows, _ = self.size()
         drawn = [f"\x1b[{y + 1};1H\x1b[2K{line}" for y, line in enumerate(lines)]
@@ -226,20 +203,20 @@ class Screen:
         self._out.flush()
 
 
+def fleet_failed(error: Exception) -> fleet.Fleet:
+    return fleet.Fleet([], f"the fleet read failed: {type(error).__name__}")
+
+
 def watch(
     read_status: Callable[[], dict | None],
-    read_fleet: Callable[[], fleet.Fleet],
+    poller: Fleets,
     clock: Callable[[], float],
     color: bool,
     g: Glyphs,
-    refresh: Refresh | None = None,
-) -> None:
-    poller = Poller(read_fleet)
-    poller.start()
+    engine: Drives,
+) -> list[str]:
     try:
         with Screen(sys.stdin.fileno(), sys.stdout) as screen:
-            Watch(screen, read_status, poller, clock, g, color, refresh).run()
+            return Watch(screen, read_status, poller, clock, g, color, engine).run()
     except KeyboardInterrupt:
-        return
-    finally:
-        poller.stop()
+        return []

@@ -178,25 +178,82 @@ GAP = {
 
 
 def test_session_hook_prints_captain_context_only_for_captain(monkeypatch, capsys, tmp_path: Path):
-    from tests.test_step_captain import captain, owned
+    from deckhand.steps.captain import Captain
+    from tests.test_step_captain import NOW, engine_wrote, owned
 
-    (tmp_path / "isolated-config").mkdir()
-    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
-    store = owned()
-    expected = captain(store)
-    expected.context(["--team-key", "ACME"])
+    engine_wrote(owned())
+    Captain(clock=lambda: NOW).context([])
     want = capsys.readouterr().out
-    assert want
+    assert want.splitlines()[-1] == "engine: running"
+    store = owned()
     monkeypatch.setenv("DECKHAND_ROLE", "captain")
-    hook_with(monkeypatch, store, ["session"], {"hook_event_name": "SessionStart"}, captain(store))
+    hook_with(monkeypatch, store, ["session"], {"hook_event_name": "SessionStart"}, Captain(clock=lambda: NOW))
     out = capsys.readouterr()
     assert (out.out, out.err) == (want, "")
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
-    hook_with(monkeypatch, store, ["session"], {}, captain(store))
+    hook_with(monkeypatch, store, ["session"], {}, Captain(clock=lambda: NOW))
     assert capsys.readouterr().out == ""
     monkeypatch.delenv("DECKHAND_ROLE")
-    hook_with(monkeypatch, store, ["session"], {}, captain(store))
+    hook_with(monkeypatch, store, ["session"], {}, Captain(clock=lambda: NOW))
     assert capsys.readouterr().out == ""
+
+
+class Raising:
+    def __getattr__(self, name: str):
+        raise AssertionError(f"the store was called: {name}")
+
+
+def test_a_hand_session_start_prints_the_pointer_and_reads_no_linear(capsys, monkeypatch):
+    from deckhand import spec
+
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "story")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == (spec.pointer("ACME-1") + "\n", "")
+
+
+def test_a_draft_session_start_points_at_the_draft_context(capsys, monkeypatch):
+    from deckhand import spec
+
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "draft")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == (spec.draft_pointer("ACME-1") + "\n", "")
+
+
+@pytest.mark.parametrize("kind", ["", "unknown"])
+def test_a_hand_of_no_known_kind_prints_nothing(capsys, monkeypatch, kind):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", kind)
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    assert capsys.readouterr().out == ""
+
+
+def test_a_spike_session_start_prints_nothing(capsys, monkeypatch):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "spike")
+    monkeypatch.setenv("DECKHAND_SPIKE", "ACME-1")
+    monkeypatch.delenv("DECKHAND_STORY", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
 
 
 def test_permission_gap_recorded_for_hand(monkeypatch, capsys, tmp_path: Path):
@@ -293,3 +350,100 @@ def test_permission_gap_recorded_once_the_next_feature_opens(monkeypatch, tmp_pa
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
     hook_with(monkeypatch, store, ["permission"], GAP)
     assert len(store.records("s1")) == 1
+
+
+def turn_ended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str | None) -> str | None:
+    from deckhand.steps.hook import Hook
+    from deckhand.store.state import LocalState
+
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    if role is None:
+        monkeypatch.delenv("DECKHAND_ROLE", raising=False)
+    else:
+        monkeypatch.setenv("DECKHAND_ROLE", role)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        rows.want("hand-ACME-1", "ACME-1", "s1", "story", str(tmp_path))
+    Hook(Raising()).apply(["stop"])
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        return rows.hands()["hand-ACME-1"].turn_ended
+
+
+def test_hook_stop_marks_the_turn_end_for_a_hand(monkeypatch, tmp_path: Path, capsys):
+    assert turn_ended(tmp_path, monkeypatch, "hand") is not None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
+@pytest.mark.parametrize("role", ["captain", None])
+def test_hook_stop_outside_a_hand_writes_nothing(monkeypatch, tmp_path: Path, capsys, role):
+    assert turn_ended(tmp_path, monkeypatch, role) is None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
+def test_a_hand_may_apply_the_stop_hook(monkeypatch):
+    from deckhand.step import hand_may_apply
+
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    assert hand_may_apply("hook", ["stop"])
+
+
+def test_hook_stop_marks_the_turn_end_for_a_spike_hand(monkeypatch, tmp_path: Path, capsys):
+    from deckhand.steps.hook import Hook
+    from deckhand.store.state import LocalState
+
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "spike")
+    monkeypatch.setenv("DECKHAND_SPIKE", "a1b2c3d4e5f6")
+    monkeypatch.delenv("DECKHAND_STORY", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        rows.want("spike-a1b2c3d4e5f6", "a1b2c3d4e5f6", "p1", "spike", str(tmp_path))
+    Hook(Raising()).apply(["stop"])
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        assert rows.hands()["spike-a1b2c3d4e5f6"].turn_ended is not None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
+@pytest.mark.parametrize(("source", "kept"), [("startup", False), ("resume", True), ("compact", True), ("clear", True)])
+def test_a_captain_startup_clears_the_hold_and_a_compact_keeps_it(tmp_path: Path, monkeypatch, capsys, source, kept):
+    from deckhand.steps.captain import Captain
+    from deckhand.store.local import default_path
+    from deckhand.store.state import LocalState
+    from deckhand.watch import HOLD
+
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    Captain().apply(["hold"])
+    capsys.readouterr()
+    context = []
+    stub = type("Stub", (), {"context": lambda self, args: context.append(args)})()
+    hook_with(monkeypatch, Raising(), ["session"], {"hook_event_name": "SessionStart", "source": source}, stub)
+    with LocalState(default_path()) as rows:
+        assert (rows.get(HOLD) is not None) is kept
+    assert context == [[]]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("payload", ["", "not json", "[1]"])
+def test_a_captain_session_with_unreadable_input_still_prints_its_context_as_a_startup(
+    tmp_path: Path, monkeypatch, capsys, payload
+):
+    from deckhand.steps.captain import Captain
+    from deckhand.store.local import default_path
+    from deckhand.store.state import LocalState
+    from deckhand.watch import HOLD
+
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    Captain().apply(["hold"])
+    capsys.readouterr()
+    context = []
+    stub = type("Stub", (), {"context": lambda self, args: context.append(args)})()
+    hook_with(monkeypatch, Raising(), ["session"], payload, stub)
+    with LocalState(default_path()) as rows:
+        assert rows.get(HOLD) is None
+    assert context == [[]]
+    assert capsys.readouterr().err == ""

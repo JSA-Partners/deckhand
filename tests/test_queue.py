@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, queue, quiz, review, signoff, spikes
+from deckhand import asks, features, fleet, gaps, implplan, policy, queue, quiz, review, signoff, spikes
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
@@ -178,14 +178,117 @@ def test_failed_hand_is_stalled_item():
     [start] = [r for r in store.records("s1") if r.kind == asks.HAND_START]
     for session in (hand("ACME-1", "failed", None), hand("ACME-1", "stopped", None)):
         [item] = waiting(store, sessions=(session,))
-        assert (item.kind, item.rank, item.at, item.next) == ("stalled", 2, start.at, ["hand apply start ACME-1"])
+        assert (item.kind, item.rank, item.at, item.next) == ("stalled", 2, start.at, ["decide context stalled ACME-1"])
     assert waiting(store, sessions=(hand("ACME-1", "working", "busy"),)) == []
     assert waiting(store, sessions=(hand("ACME-1", "failed", None),), note="the fleet read failed") == []
     store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
     assert waiting(store, sessions=(hand("ACME-1", "failed", None),)) == []
-    assert queue.restart_due(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), None, "story")
+    story = store.issue("s1") | {"state": "In Progress"}
+    records = store.records("s1")
+    assert queue.stalled(story, records, None, "story") and queue.auto_restart(records, "story", None)
     started(store, "s1")
-    assert not queue.restart_due(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), None, "story")
+    records = store.records("s1")
+    assert not (queue.stalled(story, records, None, "story") and queue.auto_restart(records, "story", None))
+
+
+def stalled_items(store: FakeStore, restarts: dict[str, int] | None = None) -> list[queue.Item]:
+    feature = features.open_feature(store, "ACME")
+    gone = Fleet([hand("ACME-1", "failed", None)])
+    found = queue.items(store, "ACME", feature, ME, gone, lambda story: Policy("widgets"), restarts=restarts)
+    return [i for i in found if i.kind == queue.STALLED]
+
+
+def stop_answered(store: FakeStore, answer: str) -> None:
+    start = queue.last_start(store.records("s1"), "story")
+    assert start is not None
+    store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
+
+
+def test_a_sandbox_request_on_a_hand_is_an_item_with_the_attach_command():
+    store = alpha()
+    store.put_record("s1", gaps.record("s1", "PermissionRequest", "Bash", "npm ci", "not allowed"))
+    asking = hand("ACME-1", "blocked", "waiting", "sandbox request", iso(1795000000500))
+    [item] = waiting(store, sessions=(asking,))
+    assert (item.kind, item.next) == ("prompt", ["claude attach id-ACME-1"])
+    assert item.lines == ["ACME-1 Orders", "hand-ACME-1 waits on sandbox request"]
+    idle = hand("ACME-1", "idle", "idle", "input needed", iso(1795000000500))
+    [item] = waiting(store, sessions=(idle,))
+    assert item.lines[1:] == ["hand-ACME-1 waits on input needed"]
+    assert waiting(store, sessions=(hand("ACME-1", "failed", None, "input needed"),)) == []
+
+
+def test_input_needed_on_a_spike_is_an_item_too(state: Path):
+    store, project, key = spiked(state)
+    asking = Session("id-s", fleet.spike_name(key), "sid", "/w", iso(1795000000000), "idle", "idle", "input needed")
+    found = [i for i in waiting(store, me=OTHER, sessions=(asking,)) if i.kind == "prompt"]
+    assert [(i.ref, i.lines, i.next) for i in found] == [
+        (key, [f"{fleet.spike_name(key)} waits on input needed"], ["claude attach id-s"])
+    ]
+
+
+def test_an_idle_hand_on_its_own_prompt_is_a_prompt_and_never_stalled():
+    store = alpha()
+    started(store, "s1")
+    idle = hand("ACME-1", "idle", "idle", "input needed", iso(1795000000500))
+    assert kinds(waiting(store, sessions=(idle,))) == [("prompt", 2, "ACME-1")]
+    assert not queue.stalled(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), idle, "story")
+
+
+def test_a_first_stop_restarts_automatically_and_asks_nothing():
+    store = alpha()
+    started(store, "s1")
+    story, records = store.issue("s1") | {"state": "In Progress"}, store.records("s1")
+    assert queue.stalled(story, records, None, "story") and queue.auto_restart(records, "story", 0)
+    assert stalled_items(store, {"ACME-1": 0}) == []
+
+
+def test_a_second_stop_without_progress_asks():
+    store = alpha()
+    started(store, "s1")
+    assert not queue.auto_restart(store.records("s1"), "story", 1)
+    [item] = stalled_items(store, {"ACME-1": 1})
+    assert item.next == ["decide context stalled ACME-1"]
+
+
+def test_a_stop_after_progress_restarts_automatically_again():
+    store = alpha()
+    started(store, "s1")
+    store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
+    assert queue.auto_restart(store.records("s1"), "story", 1)
+    assert stalled_items(store, {"ACME-1": 1}) == []
+
+
+def test_a_hand_with_no_row_restarts_only_after_a_new_record():
+    store = alpha()
+    started(store, "s1")
+    assert not queue.auto_restart(store.records("s1"), "story", None)
+    assert [i.ref for i in stalled_items(store)] == ["ACME-1"]
+    assert [i.ref for i in stalled_items(store, {"ACME-2": 0})] == ["ACME-1"]
+    store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
+    assert queue.auto_restart(store.records("s1"), "story", None)
+    assert stalled_items(store) == []
+
+
+def test_an_answered_stop_clears_the_item_and_is_no_progress():
+    for answer in (queue.RESTART, queue.LEAVE):
+        store = alpha()
+        started(store, "s1")
+        stop_answered(store, answer)
+        assert stalled_items(store, {"ACME-1": 1}) == []
+        assert not queue.auto_restart(store.records("s1"), "story", 1)
+        assert queue.stall_answer(store.records("s1"), "story") == answer
+
+
+def test_a_later_start_that_stalls_again_asks_again():
+    store = alpha()
+    started(store, "s1")
+    stop_answered(store, queue.RESTART)
+    assert stalled_items(store, {"ACME-1": 1}) == []
+    started(store, "s1")
+    assert queue.stall_answer(store.records("s1"), "story") is None
+    [item] = stalled_items(store, {"ACME-1": 1})
+    start = queue.last_start(store.records("s1"), "story")
+    assert start is not None and item.at == start.at
 
 
 def test_finished_hand_is_not_stalled():
@@ -309,8 +412,8 @@ def test_second_signoff_due_is_waiting_not_stalled(
     store.put_record("s1", Record("checks", "s1", "x", "agent:checks", {"head": "x", "passed": False}))
     later = store.records("s1")
     assert not queue.stalled(story, records, None, "story", second=True)
-    assert not queue.restart_due(story, later, None, "story", second=True)
-    assert queue.restart_due(story, later, None, "story")
+    assert not (queue.stalled(story, later, None, "story", second=True) and queue.auto_restart(later, "story", None))
+    assert queue.stalled(story, later, None, "story") and queue.auto_restart(later, "story", None)
 
 
 def test_released_feature_chore_stays_in_the_queue():
@@ -401,3 +504,74 @@ def test_spike_hand_on_a_prompt_is_shown(state: Path):
     )
     found = [i for i in waiting(store, me=OTHER, sessions=(blocked,)) if i.kind == "prompt"]
     assert [(i.rank, i.ref, i.next) for i in found] == [(4, key, ["claude attach id-s"])]
+
+
+def test_a_broken_clone_is_one_item_for_the_clones_its_stories_use(tmp_path: Path):
+    store = setup()
+    store.create_issue(
+        "s3", "ACME", "Gadget", "Outcome.", features.open_feature(store, "ACME").project["id"], ["gadgets"]
+    )
+    feature = features.open_feature(store, "ACME")
+    widgets, gadgets, unused = tmp_path / "widgets", tmp_path / "gadgets", tmp_path / "unused"
+    clones = {"widgets": widgets, "gadgets": gadgets, "unused": unused}
+    broken = {widgets: "widgets is broken", gadgets: "gadgets is broken", unused: "unused is broken"}
+    found = queue.policy_items(feature, clones, broken)
+    assert [(i.kind, i.ref, i.lines, i.next) for i in found] == [
+        (queue.POLICY, "gadgets", ["gadgets is broken", queue.POLICY_LINE], []),
+        (queue.POLICY, "widgets", ["widgets is broken", queue.POLICY_LINE], []),
+    ]
+    assert queue.policy_items(None, clones, broken) == []
+
+
+def test_two_broken_clones_of_one_folder_name_are_told_apart_by_their_label(tmp_path: Path):
+    store = setup()
+    store.create_issue(
+        "s3", "ACME", "Gadget", "Outcome.", features.open_feature(store, "ACME").project["id"], ["gadgets"]
+    )
+    feature = features.open_feature(store, "ACME")
+    widgets, gadgets = tmp_path / "a" / "app", tmp_path / "b" / "app"
+    clones = {"widgets": widgets, "gadgets": gadgets}
+    broken = {
+        path: policy.described(f"{path / policy.FILE}: file not found", path, label) for label, path in clones.items()
+    }
+    found = queue.policy_items(feature, clones, broken)
+    assert [(i.ref, i.title, i.lines[0]) for i in found] == [
+        ("gadgets", "clone gadgets", ".claude/deckhand.toml is missing in clone gadgets"),
+        ("widgets", "clone widgets", ".claude/deckhand.toml is missing in clone widgets"),
+    ]
+
+
+def test_a_broken_clone_ranks_below_every_item_of_a_story_in_flight(tmp_path: Path):
+    store = alpha(planning=True)
+    sessions = every_kind(store)
+    feature = features.open_feature(store, "ACME")
+    clones = {"widgets": tmp_path / "widgets"}
+    blocked = queue.policy_items(feature, clones, {tmp_path / "widgets": "widgets is broken"})
+    found = queue.ranked([*blocked, *waiting(store, sessions=sessions)])
+    assert kinds(found)[-1] == (queue.POLICY, queue.POLICY_RANK, "widgets")
+    assert [i.kind for i in found].count(queue.POLICY) == 1
+
+
+def idle_items(store: FakeStore, idle: frozenset[str], restarts: dict[str, int]) -> list[queue.Item]:
+    feature = features.open_feature(store, "ACME")
+    blocked = Fleet([hand("ACME-1", "blocked", "busy", None, iso(1795000000500))])
+    found = queue.items(
+        store, "ACME", feature, ME, blocked, lambda story: Policy("widgets"), restarts=restarts, idle=idle
+    )
+    return [i for i in found if i.kind == queue.STALLED]
+
+
+def test_an_idle_hand_past_its_one_restart_is_a_stalled_item():
+    store = alpha()
+    started(store, "s1")
+    [item] = idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1})
+    assert item.lines[1:] == ["its hand is idle, and no record is new since it last started"]
+    assert idle_items(store, frozenset(), {"ACME-1": 1}) == []
+    assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 0}) == []
+
+
+def test_an_idle_hand_waiting_on_the_person_is_not_stalled():
+    store = alpha()
+    started(store, "s1")
+    asked(store, "s1")
+    assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1}) == []

@@ -31,7 +31,7 @@ def test_below_eight_rows_only_the_header_shows_and_it_carries_the_count():
 
 
 def test_a_narrow_short_screen_still_says_stale():
-    lines = texts(shown(sample(written_at=at(45)), cols=40, rows=6))
+    lines = texts(shown(sample(written_at=at(45), stale_since=at(1)), cols=40, rows=6))
     assert lines[0].startswith(" - captain stale 45m")
     assert lines[1].startswith(" - stale:")
 
@@ -55,10 +55,36 @@ def test_the_footer_shows_only_keys_that_act():
     assert texts(frame.render(empty, G, 100, 30, keys=True))[-1] == " q quit  r refresh"
 
 
+def test_a_long_note_is_cut_so_the_budget_and_slots_stay_in_the_header():
+    found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
+    note = "cannot read Linear: " + "x" * 300
+    for cols, kept in ((100, "cannot read..."), (160, "cannot read Linear: xx")):
+        head = texts(frame.render(found, G, cols, 30, note=note))[0]
+        assert frame.cells(head) == cols and kept in head
+        assert "day 2 of 7" in head and "slots 2/2" in head and head.endswith("captain idle")
+    head = texts(frame.render(found, G, 86, 30, note=note))[0]
+    assert "cannot" not in head and "slots 2/2" in head
+
+
+def test_on_a_narrow_tab_the_question_wraps_and_keeps_its_keys():
+    found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
+    for cols in (80, 47):
+        lines = texts(frame.render(found, G, cols, 30, keys=True, asking=True))
+        assert lines[-2:][0] == " Leave hands running (l) or stop all hands (s)?"
+        assert lines[-1].startswith(" Their conversations are kept.")
+        assert len(lines) == 30
+
+
+def test_asking_puts_the_question_in_the_footer():
+    found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
+    lines = texts(frame.render(found, G, 100, 30, keys=True, asking=True))
+    assert lines[-1] == f" {frame.ASK}"
+
+
 def test_the_banner_wraps_on_a_narrow_screen():
-    lines = texts(shown(sample(written_at=at(45)), cols=50))
+    lines = texts(shown(sample(written_at=at(5), stale_since=at(1)), cols=50))
     assert lines[1].startswith(" - stale:")
-    assert lines[2].startswith("   ") and "refresh" in " ".join(lines[1:4])
+    assert lines[2].startswith("   ") and lines[2].endswith(" ago")
 
 
 def test_styled_text_colors_only_when_asked():
@@ -72,7 +98,7 @@ def test_yellow_is_only_for_warnings_and_queued_is_plain():
     assert "\x1b[33m" not in painted and "\x1b[1;33m" not in painted
     queued = next(line for line in shown(sessions=[CAPTAIN]) if "ACME-19" in line.text)
     assert {style for text, style in queued.spans if text.strip()} <= {"", "bold", "dim"}
-    stale = frame.text(shown(sample(written_at=at(45))), color=True)
+    stale = frame.text(shown(sample(written_at=at(5), stale_since=at(1))), color=True)
     assert "\x1b[2m-\x1b[0m \x1b[1;33mstale:" in stale
 
 

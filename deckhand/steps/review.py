@@ -218,10 +218,9 @@ class Review(StoryStep):
                 facts["target"] = str(review.save_text(answers.state_dir(), owner, key, text))
         facts["carried"] = []
         if isinstance(plan, review.RoundPlan) and plan.scoped and not plan.carry:
-            held = review.last(counted)
             facts["carried"] = [
                 {k: f[k] for k in ("id", "lens", "path", "line", "summary")}
-                for f in (review.open_p1(held, declined) if held else [])
+                for f in review.carried(subject.records, subject.prefix)
             ]
         facts["last_round"] = None
         if last is not None:
@@ -264,7 +263,9 @@ class Review(StoryStep):
         if plan.carry:
             record = review.carry_record(owner, subject.stage, plan, review.last(counted), target.head)
         else:
-            record = review.round_record(owner, subject.stage, plan, target.hash, review.ordered(found), target.head)
+            carried = [f["id"] for f in review.carried(subject.records, subject.prefix)] if plan.scoped else []
+            ordered = review.ordered(found)
+            record = review.round_record(owner, subject.stage, plan, target.hash, ordered, target.head, carried)
         for story in subject.stories:
             ops.ensure_record(store, story, record)
         held = record.data["findings"]
@@ -345,8 +346,8 @@ def _print(facts: dict) -> None:
         if facts["target"]:
             print(f"target: {facts['target']}")
     if facts["carried"]:
-        print("open P1s from the last round; re-report each the diff does not fix, with the same lens, path, line")
-        print("and summary so the id is kept:")
+        print("open P1s and accepted findings not yet fixed; re-report each the diff does not fix, with the same")
+        print("lens, path, line and summary so the id is kept:")
         for item in facts["carried"]:
             print(f"- {item['id']} {item['lens']} {item['path']}:{item['line']} {item['summary']}")
     if facts["note"]:
