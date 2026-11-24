@@ -55,17 +55,17 @@ def test_a_missing_section_is_none_and_prints_as_not_written():
     assert (found.examples, found.invariants, found.decisions) == (None, None, [])
     assert spec.text(found) == (
         "# Contract\n\nWritten by the person.\n\nPOST /orders.\n\n"
+        "# Decisions\n\nnot written\n\n"
         "# Examples\n\nnot written\n\n"
         "# Invariants\n\nnot written\n\n"
-        "# Scope\n\nOne\n\nOutcome.\n\n"
-        "# Decisions\n\nnot written\n"
+        "# Scope\n\nOne\n\nOutcome.\n"
     )
 
 
 def test_decisions_print_as_a_list():
     decisions = [{"item": "Ids", "answer": "Keep", "note": None}, {"item": "X", "answer": "Change", "note": "Y"}]
     found = spec.Spec("C", "E", "I", "One", decisions)
-    assert spec.text(found).endswith("# Decisions\n\n- Ids: Keep\n- X: Change (Y)\n")
+    assert "# Decisions\n\n- Ids: Keep\n- X: Change (Y)\n\n# Examples" in spec.text(found)
 
 
 def test_the_pointer_names_the_build_context_read():
@@ -138,3 +138,9 @@ def test_a_context_that_cannot_be_saved_still_prints_under_the_bound(temp: Path,
     monkeypatch.setattr(launch, "input_folder", refused)
     shown = spec.fitted("ACME-1-build", "story: ACME-1\n", "x\n" * 20000)
     assert size(shown) < spec.LIMIT and shown.startswith("story: ACME-1\n") and "could not be saved" in shown
+
+
+def test_a_first_line_over_the_bound_keeps_its_start(temp: Path):
+    first = "\u00e9" * 15000 + "\n"
+    shown = spec.fitted("ACME-1-build", first, "rest\n")
+    assert size(shown) < spec.LIMIT and shown.startswith("\u00e9" * 100) and spec.CUT in shown

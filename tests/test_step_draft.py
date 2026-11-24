@@ -9,7 +9,7 @@ from deckhand import features, launch, ops, planning, queue, spec
 from deckhand.step import Refusal
 from deckhand.steps.draft import Draft
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import P1, approve_everything, decided, setup
+from tests.test_feature_approval import P1, approve_everything, decided, expect, setup
 
 TEAM = ["--team-key", "ACME"]
 DRAFT = "Outcome: an order is placed.\n\nExamples:\n- a paid order ships.\n"
@@ -142,3 +142,20 @@ def test_a_long_feature_prints_what_was_approved_and_saves_the_whole_draft_conte
     assert len(out.encode("utf-8")) < spec.LIMIT
     assert "The Contract of Alpha." in out and str(saved) in out and "never settled here" not in out
     assert "never settled here" in saved.read_text() and "A paid order of two ships.\n" * 1500 in saved.read_text()
+
+
+def test_a_long_frame_leaves_the_contract_and_the_stub_decisions_inline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = approved_contract()
+    expect(store, "s1", "orders", "Send receipts by email")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Frame", "A line of the frame.\n" * 1500, True)
+    Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
+    out = capsys.readouterr().out
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and "decisions: Send receipts by email" in out
+    assert out.index("The Contract of Alpha.") < out.index("decisions: Send") < out.index("# Frame")
+    assert "never settled here" not in out

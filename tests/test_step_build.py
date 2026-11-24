@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
+from tests.test_feature_approval import approve_everything, decided, setup
 from tests.test_implplan import BASE, Git, manifest
 from tests.test_step_review import (
     PLAN,
@@ -260,6 +262,29 @@ def test_a_long_context_prints_the_spec_and_saves_the_whole(
     assert len(out.encode("utf-8")) < spec.LIMIT
     assert "The Contract of Alpha." in out and str(saved) in out and "plan:" not in out
     assert "The Contract of Alpha." in saved.read_text() and "sitting:\nAn order of two" in saved.read_text()
+
+
+def test_a_long_examples_section_leaves_the_contract_and_decisions_inline(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    store = setup()
+    decided(store, "decision-item", "Ids are UUIDs", "Keep", ["s1"])
+    approve_everything(store)
+    submit(store, tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    Build(store, Shell(), repo).apply(["s1", "worktree", *TEAM])
+    gather = spec.gather
+
+    def long_examples(*args) -> spec.Spec:
+        return dataclasses.replace(gather(*args), examples="An order of two ships the same day.\n" * 1000)
+
+    monkeypatch.setattr(spec, "gather", long_examples)
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    assert len(out.encode("utf-8")) < spec.LIMIT
+    assert "The Contract of Alpha." in out and "- Ids are UUIDs: Keep" in out and "# Scope" not in out
 
 
 def test_a_renamed_story_keeps_its_worktree(tmp_path: Path, repo: Path):

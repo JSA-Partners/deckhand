@@ -10,7 +10,6 @@ from deckhand.records import Record
 from deckhand.store import Store
 
 MISSING = "not written"
-DRAFT_SECTIONS = ("Frame", "Shape", "Contract", "Examples")
 # Claude Code cuts a skill's injected output over about 25 KB to a short preview.
 LIMIT = 20_000
 CUT = "(cut here to fit; the rest is in the file below)\n"
@@ -63,10 +62,10 @@ def text(spec: Spec) -> str:
     return _blocks(
         [
             ("Contract", spec.contract),
+            ("Decisions", decisions),
             ("Examples", spec.examples),
             ("Invariants", spec.invariants),
             ("Scope", spec.scope),
-            ("Decisions", decisions),
         ]
     )
 
@@ -110,9 +109,12 @@ def _cut(text: str, room: int) -> str:
     kept: list[str] = []
     used = _size(CUT)
     for line in text.splitlines(keepends=True):
-        used += _size(line)
-        if used >= room:
+        if used + _size(line) >= room:
+            if not kept:
+                start = line.encode("utf-8")[: room - used - 2].decode("utf-8", errors="ignore")
+                kept.append(start + "\n")
             break
+        used += _size(line)
         kept.append(line)
     return "".join(kept) + CUT
 
