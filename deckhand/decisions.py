@@ -111,6 +111,9 @@ _CHOSEN = (
     queue.STALLED,
 )
 
+_OWN_WORDS = (signoff.KIND, signoff.SECOND)
+_SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
+
 _POSITIVE = {
     "contract": "Approve",
     "invariants": "Approve",
@@ -226,6 +229,13 @@ def _saw_the_options(pending: Pending, found: Answer) -> bool:
     return (labels, texts, found.multi) == (pending.options, pending.descriptions, False)
 
 
+# A sign-off answered in the person's own words is a Not yet, the words its reason.
+def in_own_words(pending: Pending, answer: str) -> bool:
+    if pending.kind not in _OWN_WORDS or not answer.strip() or answer in pending.options:
+        return False
+    return not answers.only_labels(answer, _SIGN_OFF_LABELS)
+
+
 def check(pending: Pending, state: Path) -> Answer:
     found = answers.find(pending.nonce, pending.question, state)
     if found is None:
@@ -243,7 +253,7 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
     if pending.kind == "tier":
         tiers.chosen(found.answer)
-    if pending.kind in _CHOSEN and found.answer not in pending.options:
+    if pending.kind in _CHOSEN and found.answer not in pending.options and not in_own_words(pending, found.answer):
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
@@ -274,7 +284,9 @@ def _another_signs(store: Store, pending: Pending, by: str) -> None:
 
 def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     found = check(pending, state)
-    if not _creates_record(pending, found.answer):
+    note = found.answer if in_own_words(pending, found.answer) else None
+    answer = signoff.NOT_YET if note is not None else found.answer
+    if not _creates_record(pending, answer):
         return False
     if pending.kind == signoff.KIND:
         _owner_signs(store, pending, by)
@@ -289,7 +301,8 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         pending.subject,
         pending.version,
         f"person:{found.session_id}",
-        {"answer": found.answer, "question": pending.question, "nonce": pending.nonce, "by": by}
+        {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
+        | ({"note": note} if note is not None else {})
         | ({"item": pending.detail} if pending.kind == "decision-item" else {})
         | (_tier_data(found.answer) if pending.kind == "tier" else {})
         | graded,

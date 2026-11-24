@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, implplan, review, signoff, versions
+from deckhand import asks, implplan, review, signoff, versions, wakes
 from deckhand.git import GitError
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -211,6 +211,31 @@ def test_an_early_not_yet_wakes_the_hand(tmp_path: Path, repo: Path, state: Path
     sign(store, repo, state, capsys, signoff.NOT_YET)
     woken = asks.wake_due(store.records("s1"), "s1")
     assert woken is not None and woken.kind == signoff.KIND
+
+
+def test_a_sign_off_in_the_persons_own_words_is_not_yet_and_reaches_the_hand(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    store.put_record("s1", Record(asks.HAND_START, "s1", "v1", "agent:hand", {}))
+    sign(store, repo, state, capsys, "Tax first, then ship it.")
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert (held.data["answer"], held.data["note"]) == (signoff.NOT_YET, "Tax first, then ship it.")
+    assert not signoff.current(store.records("s1"), "s1", "c2")
+    woken = asks.wake_due(store.records("s1"), "s1")
+    assert woken == held
+    assert "Reason: Tax first, then ship it." in wakes.body(store.issue("s1"), woken, store.records("s1"))
+
+
+@pytest.mark.parametrize("words", ["Sign off, Not yet", ""])
+def test_labels_or_nothing_typed_as_a_sign_off_are_refused(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], words: str
+):
+    store = ready(tmp_path, repo, state, capsys)
+    store.writes.clear()
+    with pytest.raises(Refusal, match="is not one of Sign off, Not yet"):
+        sign(store, repo, state, capsys, words)
+    assert store.writes == []
 
 
 def test_sign_off_on_a_not_ready_question_is_refused_and_writes_nothing(
@@ -660,6 +685,18 @@ def test_second_signoff_needs_another_person(
     )
     assert signoff.current(store.records("s1"), "s1", "c2", second=True)
     assert overview(store, repo, capsys)["missing"] == []
+
+
+def test_a_second_sign_off_in_the_persons_own_words_is_not_yet_with_its_reason(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    two_signers(repo)
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    second(store, repo, state, capsys, "teammate-2", "The refund path needs a test.")
+    [held] = [r for r in store.records("s1") if r.kind == signoff.SECOND]
+    assert (held.data["answer"], held.data["note"]) == (signoff.NOT_YET, "The refund path needs a test.")
+    assert not signoff.current(store.records("s1"), "s1", "c2", second=True)
 
 
 def test_second_signer_screens_from_records(
