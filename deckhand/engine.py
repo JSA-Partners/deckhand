@@ -15,7 +15,7 @@ from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
 from deckhand.reading import Reading
-from deckhand.reconcile import Facts, reconcile, reserved
+from deckhand.reconcile import Facts, reconcile, reserved, used
 from deckhand.records import Record, epoch, iso
 from deckhand.step import Refusal
 from deckhand.store.state import HEARTBEAT, SLEEP_GAP, HandRow, LocalState
@@ -107,6 +107,7 @@ class Engine:
         self._budget = budget.Budget()
         self._idle: frozenset[str] = frozenset()
         self._idle_read: frozenset[str] = frozenset()
+        self._used: int | None = None
 
     def tick(self) -> None:
         now = self._clock()
@@ -137,12 +138,14 @@ class Engine:
             return
         due = now - self._reconciled >= RECONCILE_EVERY
         self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke)
-        held = reserved(self._facts(now, read, hands, busy)) | self._starting | set(self._settling)
+        now_facts = self._facts(now, read, hands, busy)
+        held = reserved(now_facts) | self._starting | set(self._settling)
         quiet = frozenset(fleet.ref_of(name) for name in held)
         fresh = self._fresh_records(good) if due else None
+        slots = used(now_facts)
         moved = changed or read != self._fleet or quiet != self._quiet or self._idle != self._idle_read
-        moved = moved or fresh is not None
-        if (moved or linked) and not self._read(good, read, hands, quiet, now) and fresh is not None:
+        moved = moved or slots != self._used or fresh is not None
+        if (moved or linked) and not self._read(good, read, hands, quiet, now, slots) and fresh is not None:
             self._keep_records(fresh)
         began = self._fleets.began()
         linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
@@ -231,7 +234,13 @@ class Engine:
             self._reading = replace(held, feature=replace(held.feature, records=fresh))
 
     def _read(
-        self, good: Linked, read: fleet.Fleet, hands: dict[str, HandRow], quiet: frozenset[str], now: float
+        self,
+        good: Linked,
+        read: fleet.Fleet,
+        hands: dict[str, HandRow],
+        quiet: frozenset[str],
+        now: float,
+        slots: int,
     ) -> bool:
         stores = good.stores
         assert stores is not None
@@ -252,11 +261,12 @@ class Engine:
             self._lines.say("read", f"cannot read: {problem(error)}")
             return False
         self._reading, self._fleet, self._quiet, self._idle_read = found, read, quiet, self._idle
+        self._used = slots
         self._lines.clear("read")
         previous = status.get(self._state)
         waiting = queue.ranked([*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting])
         shown = status.snapshot(
-            self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle
+            self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle, slots
         )
         if self._newest is not None and self._newest.error:
             shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)

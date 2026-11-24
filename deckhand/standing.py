@@ -28,6 +28,10 @@ class Hand:
     def live(self) -> bool:
         return self.state in fleet.LIVE
 
+    @property
+    def holds(self) -> bool:
+        return fleet.holds(self.state, self.waiting_for or None) and not self.idle
+
 
 @dataclass(frozen=True)
 class Entry:
@@ -95,7 +99,7 @@ def started(story: dict) -> bool:
 
 def _story(story: dict, hand: Hand | None) -> str:
     if hand is not None:
-        return WORKING if hand.live and not hand.idle else STOPPED
+        return WORKING if hand.holds else STOPPED
     if story.get("mine") is False:
         return TEAM
     return STOPPED if started(story) else QUEUED
@@ -120,7 +124,7 @@ def classify(status: dict, hands: dict[str, Hand], today: float | None = None) -
             found[_story(story, hand)].append(Entry(_story(story, hand), ref, story, None, hand))
     for ref, hand in hands.items():
         if hand.spike and ref not in waiting and ref not in by_ref and (hand.live or hand.state == FAILED):
-            kind = WORKING if hand.live else STOPPED
+            kind = WORKING if hand.holds else STOPPED
             found[kind].append(Entry(kind, ref, {}, None, hand))
     return [entry for kind in ORDER for entry in found[kind]]
 

@@ -124,10 +124,12 @@ def failed(session: Session) -> bool:
     return session.state in FAILED
 
 
+def holds(state: str, waiting_for: str | None) -> bool:
+    return state == "working" or (state in LIVE and waiting_for == PERMISSION)
+
+
 def holds_slot(session: Session) -> bool:
-    if not live(session):
-        return False
-    return session.state == "working" or session.waiting_for == PERMISSION
+    return live(session) and holds(session.state, session.waiting_for)
 
 
 def slots_used(sessions: list[Session]) -> int:

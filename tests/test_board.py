@@ -318,3 +318,10 @@ def test_the_header_says_whether_a_captain_runs():
     busy = fleet.Session("cap2", "captain", "sid-cap2", "/w", at(1), "", "busy", None)
     assert texts(shown(sessions=[*LIVE, busy], cols=110))[0].endswith("| captain working")
     assert "captain" not in texts(shown(failed=True))[0].split("|")[-1]
+
+
+def test_a_live_slot_count_matches_the_working_section():
+    live = [CAPTAIN, session("a1b2", "ACME-15"), session("c3d4", "ACME-17", state="blocked", status="busy")]
+    built = board.build(sample(slots={"used": 2, "cap": 2}), fleet.Fleet(live), NOW, TODAY, brief.UNICODE)
+    [working] = [section for section in built.sections if section.name == "working"]
+    assert (built.slots, [row.ref for row in working.rows]) == (("1", "2"), ["ACME-15"])

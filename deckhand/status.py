@@ -45,6 +45,7 @@ def snapshot(
     sessions: list[fleet.Session],
     person_unknown: bool = False,
     idle: frozenset[str] = frozenset(),
+    used: int | None = None,
 ) -> dict:
     return {
         "shape": SHAPE,
@@ -52,7 +53,7 @@ def snapshot(
         "team": team,
         "feature": facts["feature"],
         "budget": facts["budget"],
-        "slots": facts["slots"],
+        "slots": facts["slots"] if used is None else {**facts["slots"], "used": used},
         "items": [_item(item) for item in waiting],
         "stories": facts["order"],
         "cycle": facts.get("cycle", []),

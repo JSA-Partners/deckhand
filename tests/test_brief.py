@@ -161,7 +161,7 @@ def test_line_when_one_waits_with_no_time():
 
 def test_line_when_only_hands_work():
     found = held([], hands=[hand("working"), hand("blocked", "ACME-2"), hand("stopped", "ACME-3")])
-    assert brief.line(found, NOW, brief.UNICODE) == "◐ 2 working · nothing needs you"
+    assert brief.line(found, NOW, brief.UNICODE) == "◐ 1 working · nothing needs you"
 
 
 def test_line_counts_no_hand_off_the_board_and_no_finished_story():

@@ -91,7 +91,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
     found: list[Action] = [*removed, *_adopt(facts, sessions)]
     reading = facts.reading
     if reading is not None and reading.me is not None:
-        tick = _Tick(facts, sessions, reading.me, _used(facts), set(facts.busy), set(reserved(facts)))
+        tick = _Tick(facts, sessions, reading.me, used(facts), set(facts.busy), set(reserved(facts)))
         feature = reading.feature
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature)
@@ -130,7 +130,7 @@ def _resumable(facts: Facts, name: str) -> bool:
     return start is None or not queue.finished(story, records, start)
 
 
-def _used(facts: Facts) -> int:
+def used(facts: Facts) -> int:
     return fleet.slots_used(facts.read.sessions) + len(facts.busy - _holding(facts)) + len(reserved(facts))
 
 

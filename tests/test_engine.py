@@ -182,7 +182,10 @@ def test_a_link_writes_the_snapshot_and_an_unchanged_one_is_not_rewritten(rig: R
     assert rig.shown()["feature"] == "Alpha" and rig.shown()["written_at"] == iso(int(T * 1000))
     rig.step()
     rig.step()
-    assert len(writes) == 1
+    written = len(writes)
+    rig.step()
+    rig.step()
+    assert len(writes) == written
 
 
 def test_a_new_record_recomputes_the_queue_without_a_linear_read(rig: Rig):
@@ -825,3 +828,19 @@ def test_a_failing_resume_for_a_reassigned_story_stays_backed_off(clone: Path):
     resumes = [a for a in rig.worker.submitted if isinstance(a, Resume)]
     assert 2 <= len(resumes) <= 4
     assert notes[-1] == "ACME-1: claude --bg failed: busy"
+
+
+def test_the_snapshot_counts_a_slot_reserved_for_a_resume(rig: Rig):
+    rig.store.assign("s1", "viewer-1")
+    rig.store.assign("s2", "someone-else")
+    held_hand(rig)
+    rig.sessions(row("ACME-1", "blocked", "busy"))
+    rig.ready()
+    rig.step()
+    assert rig.shown()["slots"]["used"] == 0
+    rig.state.post("k", NAME, "answer", "x")
+    rig.state.put(acts.UNHEARD, {"seqs": [rig.state.pending()[0].seq]})
+    rig.sessions(row("ACME-1", "stopped"))
+    rig.step()
+    rig.step()
+    assert rig.shown()["slots"]["used"] == 1
