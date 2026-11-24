@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import json
 
-from deckhand import claims, features, ops, signoff
+from deckhand import claims, features, git, ops, signoff
 from deckhand.order import DONE
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
-from deckhand.steps.build import StoryStep, parse
+from deckhand.steps.build import StoryStep, branch_of, parse, require_base, sync
 
 USAGE = (
     "after takes REF and [--team-key KEY] on both verbs; context [--json],"
-    " apply done N --note TEXT or apply person N --why TEXT"
+    " apply done N --note TEXT, apply person N --why TEXT, or apply sync"
 )
 WAITS = "waits for the merge"
-ACTIONS = {"done": ("--note", "note", signoff.AFTER_DONE), "person": ("--why", "why", signoff.AFTER_PERSON)}
+ITEMS = {"done": ("--note", "note", signoff.AFTER_DONE), "person": ("--why", "why", signoff.AFTER_PERSON)}
+SYNC = "sync"
+ACTIONS = (*ITEMS, SYNC)
 
 
 def _arguments(args: list[str]) -> dict:
@@ -68,14 +70,14 @@ class After(StoryStep):
     def apply(self, args: list[str]) -> None:
         parsed = _arguments(args)
         words = parsed["words"]
-        if len(words) != 3 or words[1] not in ACTIONS:
+        if words[1:] == [SYNC]:
+            self._sync(parsed)
+            return
+        if len(words) != 3 or words[1] not in ITEMS:
             raise Refusal(f"apply takes REF, done or person, and an item number; {USAGE}")
-        flag, key, kind = ACTIONS[words[1]]
-        story, records = self._find(parsed)
-        claims.owned(story, self.viewer())
+        flag, key, kind = ITEMS[words[1]]
+        story, records = self._merged(parsed)
         ref, sid = story["identifier"], story["id"]
-        if story["state"] != DONE:
-            raise Refusal(f"{ref} is not Done; its after-merge items open once it merges")
         items = signoff.after_items(records, sid)
         n = _item(story, items, words[2])
         status, _ = signoff.after_status(records, sid, n, items[n - 1])
@@ -87,3 +89,20 @@ class After(StoryStep):
         record = signoff.after_record(kind, sid, n, items[n - 1], {key: text})
         ops.ensure_record(self._store_for_run(), sid, record)
         print(f"done: item {n} of {ref} is {signoff.after_status([*records, record], sid, n, items[n - 1])[0]}")
+
+    def _merged(self, parsed: dict) -> tuple[dict, list[Record]]:
+        story, records = self._find(parsed)
+        claims.owned(story, self.viewer())
+        if story["state"] != DONE:
+            raise Refusal(f"{story['identifier']} is not Done; its after-merge items open once it merges")
+        return story, records
+
+    # The sandbox lets a hand write neither FETCH_HEAD nor the worktree's git metadata, so main comes through here.
+    def _sync(self, parsed: dict) -> None:
+        story, records = self._merged(parsed)
+        ref, clone, branch = story["identifier"], self._clone(story["labels"]), branch_of(records, story)
+        path = git.worktree_path(clone, branch) if branch else None
+        if path is None or not path.is_dir():
+            raise Refusal(f"{ref} has no worktree to bring main into")
+        require_base(clone, self._runner)
+        sync(path, ref, self._runner)

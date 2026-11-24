@@ -21,7 +21,7 @@ with message text, do what `deckhand mail context REF` says, then `deckhand mail
 A rerun resumes at the first step the contexts show undone; `deckhand merge context REF` shows a
 sign-off. Fix the rule a refusing command names; a raw write fails. Run each deckhand call alone,
 never after `cd`. Input files go in a temporary directory outside the worktree. Never narrate
-reviewer returns or reread a printed context.
+reviewer returns or reread a context.
 
 Plan with superpowers:writing-plans and a manifest shaped as
 `deckhand implplan context REF` prints; save both with `deckhand implplan apply REF --plan PLAN.md --manifest MANIFEST.json`.
@@ -45,6 +45,6 @@ and the quiz on the hunks tuicr shows; save with
 `deckhand signoff apply REF summary --summary SUMMARY.json` and
 `deckhand quiz apply REF --quiz QUIZ.json --summary SUMMARY.json`, then stop.
 
-After sign-off, run `deckhand merge apply REF`; a void means a new commit or failed check: fix and review. Once merged, do what you can of
-`deckhand after context REF`, each with `deckhand after apply REF done N --note TEXT`, others with
-`person N --why TEXT`.
+After sign-off, run `deckhand merge apply REF`; fix and review a void. Once merged, take main with
+`deckhand after apply REF sync` and do what you can of `deckhand after context REF` with
+`deckhand after apply REF done N --note TEXT`, others with `person N --why TEXT`.

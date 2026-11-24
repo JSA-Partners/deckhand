@@ -209,7 +209,7 @@ class Build(StoryStep):
         elif message is not None:
             self._commit(at, message)
         elif action == "sync":
-            self._sync(at)
+            sync(_worktree_of(at), story["identifier"], self._runner)
         else:
             self._push(feature, story, clone)
 
@@ -222,18 +222,6 @@ class Build(StoryStep):
             raise Refusal(f"conflict markers remain in {', '.join(marked)}; resolve them, then commit again")
         git.commit_all(path, message, self._runner)
         print(f"done: committed {git.head(path, self._runner)} on {at.story['identifier']}")
-
-    def _sync(self, at: Located) -> None:
-        path, ref = _worktree_of(at), at.story["identifier"]
-        if git.dirty(path, self._runner):
-            raise Refusal(f"{path} has uncommitted changes; run build apply {ref} commit --message FILE first")
-        conflicts = git.merge_from(path, DEFAULT_BASE, self._runner)
-        if conflicts:
-            raise Refusal(
-                f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; resolve the markers,"
-                f" then run build apply {ref} commit --message FILE"
-            )
-        print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, self._runner)}")
 
     def _worktree(self, feature: features.Feature, story: dict, clone: Path) -> None:
         branch = worktree_branch(story, feature.records.get(story["id"], []))
@@ -262,6 +250,18 @@ class Build(StoryStep):
         title = f"{story['identifier']} {story['title']}"
         found = gh.ensure_draft_pr(branch, repo, title, f"Draft for {story['identifier']}.", self._runner)
         print(f"done: pushed {branch} and opened the draft pull request {found['url']}")
+
+
+def sync(path: Path, ref: str, runner: git.Runner) -> None:
+    if git.dirty(path, runner):
+        raise Refusal(f"{path} has uncommitted changes; run build apply {ref} commit --message FILE first")
+    conflicts = git.merge_from(path, DEFAULT_BASE, runner)
+    if conflicts:
+        raise Refusal(
+            f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; resolve the markers,"
+            f" then run build apply {ref} commit --message FILE"
+        )
+    print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, runner)}")
 
 
 def require_base(clone: Path, runner: git.Runner) -> None:

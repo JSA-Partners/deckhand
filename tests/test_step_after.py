@@ -14,10 +14,11 @@ from deckhand.steps.after import After
 from deckhand.steps.decide import Decide
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import TEAM, approve_everything, setup
-from tests.test_implplan import manifest
+from tests.test_implplan import manifest, repo
+from tests.test_step_build import BRANCH, Shell, labeled
 from tests.test_step_review import answer, state
 
-__all__ = ["state"]
+__all__ = ["repo", "state"]
 
 CHORES = ["drop the old queue table", "rotate the webhook secret"]
 
@@ -138,3 +139,40 @@ def test_released_items_stay_after_the_next_feature_opens(state: Path, capsys: p
     After(store).apply(["ACME-1", "done", "1", "--note", "dropped", *TEAM])
     assert statuses(store, capsys) == ["done by the hand", "done by the person"]
     assert signoff.after_merge_queue(store, "ACME", me) == []
+
+
+SYNCED = [
+    ["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"],
+    ["git", "status", "--porcelain", "--ignore-submodules=all"],
+    ["git", "fetch", "--no-recurse-submodules", "origin"],
+    ["git", "merge", "--no-edit", "origin/HEAD"],
+    ["git", "rev-parse", "HEAD"],
+]
+
+
+def test_after_merge_work_takes_fresh_main_into_the_worktree(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = labeled(tmp_path, repo)
+    store.set_issue_state("s1", "Done")
+    shell = Shell()
+    written = list(store.writes)
+    capsys.readouterr()
+    After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert shell.argvs == SYNCED
+    assert store.writes == written
+    assert capsys.readouterr().out == "done: merged origin/HEAD into ACME-1 at c2\n"
+
+
+def test_after_merge_sync_refuses_before_the_merge_and_on_a_dirty_worktree(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    shell = Shell(dirty=True)
+    with pytest.raises(Refusal, match="ACME-1 is not Done"):
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    store.set_issue_state("s1", "Done")
+    with pytest.raises(Refusal, match="uncommitted changes"):
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    (repo / ".worktrees" / BRANCH).rmdir()
+    with pytest.raises(Refusal, match="ACME-1 has no worktree"):
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert shell.ran("git", "fetch") == [] and shell.ran("git", "merge") == []
