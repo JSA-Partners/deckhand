@@ -96,3 +96,9 @@ def test_the_file_is_created_with_the_schema_version(tmp_path: Path) -> None:
 def test_the_default_path_follows_the_state_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
     assert default_path() == tmp_path / "deckhand.db"
+
+
+def test_records_refuses_an_identifier(tmp_path: Path) -> None:
+    store = LocalRecords(tmp_path / "deckhand.db")
+    with pytest.raises(Refusal):
+        store.records("ACME-5")

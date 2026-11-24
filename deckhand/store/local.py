@@ -52,7 +52,7 @@ class LocalRecords:
         return db
 
     def put_record(self, issue: str, record: Record) -> None:
-        _require_id(issue)
+        require_id(issue)
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
@@ -62,6 +62,7 @@ class LocalRecords:
             db.close()
 
     def records(self, issue: str) -> list[Record]:
+        require_id(issue)
         db = self._connect()
         try:
             rows = db.execute(
@@ -73,7 +74,7 @@ class LocalRecords:
         return [replace(Record.from_json(body), at=written) for body, written in rows]
 
 
-def _require_id(issue: str) -> None:
+def require_id(issue: str) -> None:
     try:
         Ref.parse(issue)
     except ValueError:

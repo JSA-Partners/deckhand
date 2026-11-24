@@ -9,6 +9,7 @@ import pytest
 from deckhand.linear.client import DuplicateId
 from deckhand.records import Record
 from deckhand.ref import Ref
+from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore, WriteFailed
 
 
@@ -301,3 +302,11 @@ def test_project_documents_listed() -> None:
         {"id": "d2", "title": "Two", "url": "https://linear.invalid/document/d2", "at": "2026-11-19T10:00:00.000Z"},
     ]
     assert "at" not in store.document("d1")
+
+
+def test_records_are_refused_by_identifier() -> None:
+    store = FakeStore()
+    with pytest.raises(Refusal):
+        store.put_record("ACME-5", Record("tier", "s", "v1", "person", {"level": 1}))
+    with pytest.raises(Refusal):
+        store.records("ACME-5")

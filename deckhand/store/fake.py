@@ -12,6 +12,7 @@ from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
 from deckhand.records import Clock, Record
 from deckhand.ref import Ref
 from deckhand.store import Store
+from deckhand.store.local import require_id
 
 
 def _branch_name(team: str, number: int, title: str) -> str:
@@ -154,6 +155,7 @@ class FakeStore(Store):
         ]
 
     def put_record(self, issue: str, record: Record) -> None:
+        require_id(issue)
         url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"
         now = self._now()
         held = self._attachments.setdefault(issue, {})
@@ -162,6 +164,7 @@ class FakeStore(Store):
         self._wrote("put_record", issue, record.kind, record.subject)
 
     def records(self, issue: str) -> list[Record]:
+        require_id(issue)
         held = self._attachments.get(issue, {})
         found = []
         for url in sorted(held):
