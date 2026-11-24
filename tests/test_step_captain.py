@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from deckhand.git import GitError
 from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
 from deckhand.steps.captain import Captain
+from deckhand.store import local
 from deckhand.store import open as store_open
 from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
@@ -435,3 +437,37 @@ def test_context_names_a_corrupt_record_file_through_the_cli_and_exits_zero(
     monkeypatch.setitem(REGISTRY, "captain", Captain(clock=lambda: NOW))
     assert cli.main(["captain", "context"]) == 0
     assert capsys.readouterr().out == f"deckhand: captain context: deckhand.db in the state folder {state} is corrupt\n"
+
+
+def test_context_with_a_locked_record_file_prints_one_line_and_exits_zero(
+    state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand import cli
+
+    state.mkdir(parents=True)
+    monkeypatch.setattr(local, "BUSY_SECONDS", 0)
+    holder = sqlite3.connect(state / "deckhand.db", isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    monkeypatch.setitem(REGISTRY, "captain", Captain(clock=lambda: NOW))
+    try:
+        assert cli.main(["captain", "context"]) == 0
+    finally:
+        holder.close()
+    expected = f"deckhand: captain context: deckhand.db in the state folder {state} is locked by another process\n"
+    assert capsys.readouterr().out == expected
+
+
+def test_context_with_an_unreadable_record_file_prints_one_line_and_exits_zero(
+    state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand import cli
+
+    LocalState(default_path()).close()
+    (state / "deckhand.db").chmod(0)
+    monkeypatch.setitem(REGISTRY, "captain", Captain(clock=lambda: NOW))
+    try:
+        assert cli.main(["captain", "context"]) == 0
+    finally:
+        (state / "deckhand.db").chmod(0o600)
+    expected = f"deckhand: captain context: deckhand.db in the state folder {state} cannot be opened\n"
+    assert capsys.readouterr().out == expected
