@@ -187,6 +187,15 @@ def test_a_sibling_merge_posts_sync_to_each_open_hand_once_keyed(clone: Path):
     assert reconcile(facts(store, *sessions, hands=hands, cap=2), store) == expected
 
 
+def test_a_sync_already_posted_is_not_posted_again(clone: Path):
+    store = merged_with_two_open(clone)
+    sessions = (row("ACME-2", "working", "busy"), row("ACME-3", "working", "busy"))
+    hands = (held("ACME-2", issue="s2"), held("ACME-3", issue="s3"))
+    posted = frozenset({"sync:s1:hand-ACME-2"})
+    found = reconcile(facts(store, *sessions, hands=hands, cap=2, posted=posted), store)
+    assert [a.key for a in found if isinstance(a, Post)] == ["sync:s1:hand-ACME-3"]
+
+
 def test_a_hand_started_after_the_merge_gets_no_sync(clone: Path):
     store = merged_with_two_open(clone)
     sessions = (row("ACME-2", "working", "busy"), row("ACME-3", "working", "busy"))

@@ -16,8 +16,9 @@ from deckhand.store.state import HandRow, LocalState
 from deckhand.worker import problem
 
 
+# Only a launch, resume or stop in flight holds a story; a posted message or an adoption does not.
 def held(facts: Facts, holding: frozenset[str]) -> tuple[frozenset[str], int, frozenset[str]]:
-    resuming = reserved(facts)
+    resuming = reserved(replace(facts, busy=frozenset()))
     nudged = idle.nudged(facts.pending, facts.now, facts.woke)
     quiet = frozenset(fleet.ref_of(name) for name in resuming | nudged | holding)
     return quiet, used(replace(facts, busy=holding)), resuming

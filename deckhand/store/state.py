@@ -97,6 +97,9 @@ class LocalState:
             rows = self._read(f"{_MESSAGE} WHERE acked IS NULL AND hand = ? ORDER BY seq", (hand,))
         return [Message(*row) for row in rows]
 
+    def posted(self) -> frozenset[str]:
+        return frozenset(row[0] for row in self._read("SELECT key FROM messages"))
+
     def delivered(self, seqs: Sequence[int]) -> None:
         if not seqs:
             return

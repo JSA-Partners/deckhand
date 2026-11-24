@@ -35,6 +35,7 @@ class Facts:
     labels: Mapping[str, list[str]] = field(default_factory=dict)
     idle: frozenset[str] = frozenset()
     readable: bool = True
+    posted: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -242,11 +243,11 @@ def _sync(tick: _Tick, feature: Feature) -> list[Action]:
             if other["state"] == order.DONE or not labels & set(other["labels"]):
                 continue
             name = fleet.hand_name(other["identifier"])
-            row = tick.facts.hands.get(name)
+            row, key = tick.facts.hands.get(name), f"sync:{done['id']}:{name}"
             if row is None or row.kind != queue.STORY_HAND or epoch(row.wanted) >= epoch(done["completed_at"]):
                 continue
-            body = wakes.sync_body(done)
-            found.append(Post(name, f"sync:{done['id']}:{name}", wakes.SYNC, body, other["id"], None))
+            if key not in tick.facts.posted:
+                found.append(Post(name, key, wakes.SYNC, wakes.sync_body(done), other["id"], None))
     return found
 
 

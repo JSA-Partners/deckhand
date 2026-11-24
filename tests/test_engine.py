@@ -871,3 +871,27 @@ def test_a_hand_holding_a_reserved_slot_is_filed_as_resuming(rig: Rig):
     rig.step()
     rig.step()
     assert [(h["ref"], h["resuming"]) for h in rig.shown()["hands"]] == [("ACME-1", True)]
+
+
+def test_a_sibling_merge_posts_its_sync_once_and_keeps_the_snapshot_still(clone: Path):
+    configure(clone, 2)
+    store = building()
+    store.add_repository_label("ACME", "widgets")
+    started(store, "s2")
+    rig = Rig(store, row("ACME-2", "idle", "idle"))
+    rig.state.want("hand-ACME-2", "ACME-2", "s2", queue.STORY_HAND, "/w/acme-2")
+    rig.state.adopt("hand-ACME-2", "id-ACME-2", "sid-ACME-2")
+    rig.clock.t += 100
+    store.set_issue_state("s1", "Done")
+    rig.ready()
+    slots = []
+    for _ in range(4):
+        for action in [a for a in rig.worker.submitted if a.name in rig.worker.running]:
+            if isinstance(action, Post):
+                rig.state.post(action.key, action.name, action.kind, action.body)
+            rig.worker.finish(action)
+        rig.landed()
+        rig.step(0.5)
+        slots.append(rig.shown()["slots"])
+    assert slots == [slots[0]] * 4
+    assert [a.key for a in rig.worker.submitted if isinstance(a, Post)] == ["sync:s1:hand-ACME-2"]

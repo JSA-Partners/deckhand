@@ -83,6 +83,14 @@ def test_ack_through_a_seq_clears_only_that_hand(tmp_path: Path) -> None:
     assert [m.key for m in rows.pending()] == ["k3"]
 
 
+def test_posted_keys_include_acknowledged_messages(tmp_path: Path) -> None:
+    rows = state(tmp_path)
+    rows.post("k1", "hand-ACME-1", "answer", "one")
+    rows.post("k2", "hand-ACME-2", "answer", "two")
+    rows.ack("hand-ACME-1", 1)
+    assert rows.posted() == {"k1", "k2"}
+
+
 def test_an_ack_stamps_delivered_when_the_row_was_never_delivered(tmp_path: Path) -> None:
     rows = state(tmp_path, now=ticking())
     rows.post("k1", "hand-ACME-1", "answer", "one")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import IO, Protocol
 
 from deckhand import acts, budget, config, features, fleet, git, idle, reading, shown, status, watch
-from deckhand.actions import Action, Adopt, Launch, Post, Resume
+from deckhand.actions import Action, Adopt, Launch, Post, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
@@ -23,6 +23,7 @@ from deckhand.worker import problem
 FLEET_EVERY, LINEAR_EVERY, RECONCILE_EVERY, HEARTBEAT_EVERY = 5.0, 60.0, 1.0, 5.0
 LOCK = "engine.lock"
 READING = "reading Linear"
+HOLDS = Launch | Resume | Stop
 
 
 def lock(state_dir: Path) -> IO[str] | None:
@@ -97,8 +98,8 @@ class Engine:
         self._reading: reading.Reading | None = None
         self._lines = Lines()
         self._shown = shown.Shown(team, state, self._lines, today)
-        self._settling: dict[str, float] = {}
-        self._starting: set[str] = set()
+        self._settling: dict[str, tuple[float, bool]] = {}
+        self._holding: set[str] = set()
         self._poked_for = 0.0
         self._poked_at: float | None = None
         self._turn_poked = float("-inf")
@@ -144,8 +145,9 @@ class Engine:
         linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
-            busy = busy | self._reconcile(good, now_facts)
-        quiet, slots, resuming = shown.held(now_facts, self._starting | busy | self._worker.busy())
+            self._reconcile(good, now_facts)
+        settled = {name for name, (_, holds) in self._settling.items() if holds}
+        quiet, slots, resuming = shown.held(now_facts, frozenset(self._holding | settled))
         if changed or linked or fresh is not None or self._shown.moved(read, quiet, self._idle, slots):
             stale = self._iso(now) if self._newest is not None and self._newest.error else None
             found = self._shown.read(good, read, hands, self._idle, quiet, (slots, resuming), self._limit(now), stale)
@@ -187,14 +189,14 @@ class Engine:
     def _collect(self, now: float) -> frozenset[str]:
         busy = self._worker.busy()
         for action, line in self._worker.results():
-            if isinstance(action, Launch | Resume):
-                self._starting.discard(action.name)
+            if isinstance(action, HOLDS):
+                self._holding.discard(action.name)
             self._lines.heard(action, line, now)
             if not isinstance(action, Post | Adopt):
-                self._settling[action.name] = now
+                self._settling[action.name] = (now, isinstance(action, HOLDS))
                 self._fleets.poke()
         began = self._fleets.began()
-        self._settling = {n: at for n, at in self._settling.items() if began is None or began <= at}
+        self._settling = {n: kept for n, kept in self._settling.items() if began is None or began <= kept[0]}
         return busy | frozenset(self._settling)
 
     def _facts(self, now: float, read: fleet.Fleet, hands: dict[str, HandRow], busy: frozenset[str]) -> Facts:
@@ -216,6 +218,7 @@ class Engine:
             labels=good.labels if good is not None else {},
             idle=self._idle,
             readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
+            posted=self._state.posted(),
         )
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
@@ -234,25 +237,22 @@ class Engine:
         if held is not None and held.feature is not None:
             self._reading = replace(held, feature=replace(held.feature, records=fresh))
 
-    def _reconcile(self, good: Linked, facts: Facts) -> frozenset[str]:
+    def _reconcile(self, good: Linked, facts: Facts) -> None:
         assert good.stores is not None
         store = good.stores("app")
         try:
             found = reconcile(facts, store)
         except (LinearError, Refusal) as error:
             self._lines.say("reconcile", f"cannot reconcile: {problem(error)}")
-            return frozenset()
+            return
         self._lines.clear("reconcile")
         self._lines.settle(facts.read, _stories(facts))
-        submitted = set()
         for action in found:
             if self._lines.backing_off(action, facts.now):
                 continue
-            if isinstance(action, (Launch, Resume)):
-                self._starting.add(action.name)
+            if isinstance(action, HOLDS):
+                self._holding.add(action.name)
             self._worker.submit(action)
-            submitted.add(action.name)
-        return frozenset(submitted)
 
     def refresh(self) -> None:
         self._poked_at = self._clock()
