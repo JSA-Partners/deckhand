@@ -602,3 +602,12 @@ def test_a_story_finished_while_its_hand_was_stopped_holds_no_reservation(clone:
     done = after_stop(store, row("ACME-1", "stopped"), hand=hand, sync=sync)
     assert reserved(done) == frozenset()
     assert reconcile(done, store) == [launch(store, clone, "ACME-2")]
+
+
+def test_an_unlisted_short_adopts_the_one_alive_session_of_its_name(clone: Path):
+    store = building()
+    running = row("ACME-1", "working", "busy") | {"id": "id-new", "sessionId": "sid-new"}
+    assert reconcile(facts(store, running, hands=(held(),)), store) == [Adopt("hand-ACME-1", "id-new", "sid-new")]
+    other = running | {"id": "id-other", "sessionId": "sid-other", "startedAt": 1795000060000}
+    found = reconcile(facts(store, running, other, hands=(held(),)), store)
+    assert found == [Remove("hand-ACME-1", "id-new"), Adopt("hand-ACME-1", "id-other", "sid-other")]

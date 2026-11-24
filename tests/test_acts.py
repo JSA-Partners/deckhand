@@ -315,6 +315,25 @@ def test_a_silent_relaunch_whose_fleet_read_fails_still_counts_its_restart(clone
     assert loop.restarts() == 1
 
 
+def test_a_silent_relaunch_whose_fleet_read_failed_is_adopted_on_the_next_tick(clone: Path, rows: LocalState):
+    loop = Loop(rows)
+    loop.running()
+    old = rows.hands()[NAME].short
+    loop.world.rows.clear()
+    loop.world.silent = True
+    loop.world.reads_before_failing = sum(call[:2] == ["claude", "agents"] for call in loop.world.calls) + 2
+    assert loop.tick() != [None]
+    assert rows.hands()[NAME].short == old
+    restarts, launched = loop.restarts(), loop.world.launches()
+    loop.world.silent, loop.world.reads_before_failing = False, None
+    assert loop.tick() == [None]
+    [running] = [found for found in loop.world.rows if found["name"] == NAME]
+    held = rows.hands()[NAME]
+    assert (held.short, held.session) == (running["id"], running["sessionId"])
+    assert loop.tick() == []
+    assert loop.world.launches() == launched and loop.restarts() == restarts
+
+
 def test_a_silent_resume_reads_its_short_id_from_the_fleet(rows: LocalState, db: Path):
     wanted(rows)
     world = World()

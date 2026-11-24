@@ -205,11 +205,15 @@ def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:
 def _adopt(facts: Facts, sessions: list[fleet.Session]) -> list[Action]:
     alive = [s for s in sessions if fleet.alive(s)]
     found: list[Action] = []
+    listed = {s.id for s in facts.read.sessions}
     for row in facts.hands.values():
-        if row.short:
+        named = [s for s in alive if s.name == row.name]
+        if row.short and row.short in listed:
             match = [s for s in alive if s.id == row.short and s.session_id != row.session]
+        elif row.short:
+            match = named if len(named) == 1 else []
         else:
-            match = [s for s in alive if s.name == row.name]
+            match = named
         if match:
             session = max(match, key=_started)
             found.append(Adopt(row.name, session.id, session.session_id))
