@@ -35,6 +35,7 @@ CLAUDE_CONFIG = (
     ".mcp.json",
 )
 PASSED_DIRS = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
+SECRET_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "LINEAR_API_KEY")
 STORY, DRAFT, SPIKE = "story", "draft", "spike"
 PROMPTS = {STORY: "/deckhand:story {}", DRAFT: "/deckhand:draft {}", SPIKE: "/deckhand:spike {}"}
 BACKGROUNDED = re.compile(r"^backgrounded \u00b7 (\w+)", re.MULTILINE)
@@ -103,7 +104,7 @@ def _guarded(protected: Protected, deny: list[str], deny_write: list[str]) -> di
         "filesystem": {"denyWrite": secrets + state + deny_write, "denyRead": secrets},
         "credentials": {
             "files": [{"path": path, "mode": "deny"} for path in secrets],
-            "envVars": [{"name": name, "mode": "deny"} for name in git.SECRET_ENV],
+            "envVars": [{"name": name, "mode": "deny"} for name in SECRET_ENV],
         },
     }
 

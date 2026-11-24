@@ -366,9 +366,34 @@ def test_fetch_prunes_origin_and_raises_on_failure() -> None:
     assert raised.value.stderr_tail == "fatal: unable to access origin"
 
 
-def test_a_claude_call_carries_no_token_and_a_git_call_keeps_them(monkeypatch: pytest.MonkeyPatch):
-    for name in git.SECRET_ENV:
-        monkeypatch.setenv(name, "secret")
+SECRETS = ("GH_TOKEN", "LINEAR_API_KEY", "OPENROUTER_API_KEY", "CLOCKIFY_API_KEY", "AWS_SECRET_ACCESS_KEY", "DB_URL")
+SESSION = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_TOKEN")
+KEPT = (
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TMPDIR",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "no_proxy",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "DECKHAND_STATE_DIR",
+)
+
+
+def test_a_claude_call_carries_only_the_allowed_environment(monkeypatch: pytest.MonkeyPatch):
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name in (*SECRETS, *SESSION, *KEPT):
+        monkeypatch.setenv(name, "value")
     seen = {}
 
     def run(full, env=None, **kwargs):
@@ -377,10 +402,12 @@ def test_a_claude_call_carries_no_token_and_a_git_call_keeps_them(monkeypatch: p
 
     monkeypatch.setattr(git.subprocess, "run", run)
     monkeypatch.setattr(git, "_program", lambda name, search: f"/usr/bin/{name}")
+    monkeypatch.setattr(git, "trusted_path", lambda: "/usr/bin")
     git.run(["claude", "agents", "--json", "--all"])
     git.run(["git", "fetch", "origin"])
-    assert not set(git.SECRET_ENV) & set(seen["claude"])
-    assert set(git.SECRET_ENV) <= set(seen["git"])
+    assert set(seen["claude"]) == {"PATH", *KEPT}
+    assert seen["claude"]["PATH"] == "/usr/bin"
+    assert {*SECRETS, *SESSION, *KEPT} <= set(seen["git"])
 
 
 ALONE = """

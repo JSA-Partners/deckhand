@@ -23,7 +23,29 @@ UNNESTED = "--ignore-submodules=all"
 GITLINK = "160000"
 NESTED = "a commit takes no nested repository: {}; remove it or list it in .gitignore"
 
-SECRET_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "LINEAR_API_KEY")
+CLAUDE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR")
+CLAUDE_ENV += ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
+CLAUDE_ENV_PREFIXES = ("LC_", "ANTHROPIC_", "CLAUDE_", "DECKHAND_")
+# A running Claude Code session sets these for itself; a process started under it would take them as its own.
+SESSION_ENV = frozenset(
+    {
+        "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_SSE_PORT",
+        "CLAUDE_EFFORT",
+        "CLAUDE_ENV_FILE",
+        "CLAUDE_PID",
+        "CLAUDE_PLUGIN_DATA",
+        "CLAUDE_PLUGIN_ROOT",
+        "CLAUDE_PROJECT_DIR",
+    }
+)
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
 
@@ -67,10 +89,14 @@ def _program(name: str, search: str) -> str:
     return found
 
 
-# A hand inherits the engine's environment, so no token reaches a claude process.
+def _passed(name: str) -> bool:
+    return (name in CLAUDE_ENV or name.startswith(CLAUDE_ENV_PREFIXES)) and name not in SESSION_ENV
+
+
+# A hand inherits the engine's environment, so a claude process gets only what it needs; git may authenticate by it.
 def _environment(program: str, search: str) -> dict[str, str]:
     held = {**os.environ, "PATH": search}
-    return {k: v for k, v in held.items() if k not in SECRET_ENV} if program == "claude" else held
+    return {k: v for k, v in held.items() if _passed(k)} if program == "claude" else held
 
 
 def run(
