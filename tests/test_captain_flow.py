@@ -163,9 +163,9 @@ def test_an_idle_hand_is_nudged_then_resumed_then_brought_to_the_person(
     stop = ["claude", "stop", launched["id"]]
     for _ in range(125):
         flow.turn()
+        assert "stalled" not in [item["kind"] for item in status.read(answers.state_dir())["items"]]
         if stop in flow.world.calls:
             break
-        assert "stalled" not in [item["kind"] for item in status.read(answers.state_dir())["items"]]
     for _ in range(5):
         flow.turn()
     assert stop in flow.world.calls

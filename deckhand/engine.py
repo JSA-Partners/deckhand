@@ -140,22 +140,25 @@ class Engine:
             return
         due = now - self._reconciled >= RECONCILE_EVERY
         self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke)
-        now_facts = self._facts(now, read, hands, busy)
-        resuming = reserved(now_facts)
-        nudged = idle.nudged(now_facts.pending, now, self._woke)
-        held = resuming | nudged | self._starting | set(self._settling)
-        quiet = frozenset(fleet.ref_of(name) for name in held)
         fresh = self._fresh_records(good) if due else None
-        slots = used(now_facts)
-        moved = changed or read != self._fleet or quiet != self._quiet or self._idle != self._idle_read
-        moved = moved or slots != self._used or fresh is not None
-        if (moved or linked) and not self._read(good, read, hands, quiet, now, (slots, resuming)) and fresh is not None:
+        if fresh is not None:
             self._keep_records(fresh)
+        now_facts = self._facts(now, read, hands, busy)
+        # Reconcile before the snapshot, so a stop decided this tick already holds its story's stalled item.
         began = self._fleets.began()
         linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
-            self._reconcile(good, self._facts(now, read, hands, busy))
+            busy = busy | self._reconcile(good, now_facts)
+        resuming = reserved(now_facts)
+        nudged = idle.nudged(now_facts.pending, now, self._woke)
+        held = resuming | nudged | self._starting | busy | self._worker.busy()
+        quiet = frozenset(fleet.ref_of(name) for name in held)
+        slots = used(self._facts(now, read, hands, busy | self._worker.busy()))
+        moved = changed or read != self._fleet or quiet != self._quiet or self._idle != self._idle_read
+        moved = moved or slots != self._used or fresh is not None
+        if moved or linked:
+            self._read(good, read, hands, quiet, now, (slots, resuming))
 
     def _heartbeat(self, now: float) -> None:
         try:
@@ -299,22 +302,25 @@ class Engine:
         else:
             self._lines.clear("snapshot")
 
-    def _reconcile(self, good: Linked, facts: Facts) -> None:
+    def _reconcile(self, good: Linked, facts: Facts) -> frozenset[str]:
         assert good.stores is not None
         store = good.stores("app")
         try:
             found = reconcile(facts, store)
         except (LinearError, Refusal) as error:
             self._lines.say("reconcile", f"cannot reconcile: {problem(error)}")
-            return
+            return frozenset()
         self._lines.clear("reconcile")
         self._lines.settle(facts.read, _stories(facts))
+        submitted = set()
         for action in found:
             if self._lines.backing_off(action, facts.now):
                 continue
             if isinstance(action, (Launch, Resume)):
                 self._starting.add(action.name)
             self._worker.submit(action)
+            submitted.add(action.name)
+        return frozenset(submitted)
 
     def refresh(self) -> None:
         self._poked_at = self._clock()
