@@ -13,7 +13,7 @@ import pytest
 from deckhand import __version__
 from deckhand.credentials import APP_FILE
 from deckhand.linear.client import DuplicateId, KeepAliveTransport, LinearClient, LinearError
-from deckhand.linear.meter import Meter
+from deckhand.linear.meter import Meter, clock
 from deckhand.linear.oauth import fetch_app_token
 from deckhand.step import Refusal
 
@@ -476,6 +476,23 @@ def test_the_meter_hears_a_rate_limit_from_the_error_headers() -> None:
         linear.query("query Viewer { viewer { id } }", {})
     assert raised.value.code == "RATELIMITED"
     assert meter.taken()["budget"]["until"] == 65.0
+
+
+def test_a_rate_limit_names_when_to_run_the_call_again() -> None:
+    meter = Meter(lambda: 1_000.0)
+    linear = LinearClient(lambda: BEARER, Unauthorized(), Transport(limited_error({"Retry-After": "720"})), meter=meter)
+    with pytest.raises(LinearError) as raised:
+        linear.query("query Viewer { viewer { id } }", {})
+    assert raised.value.code == "RATELIMITED"
+    assert raised.value.message == (
+        f"Linear's rate limit is spent until {clock(1_720.0)}, in 12 minutes; run the same call again then"
+    )
+
+
+def test_a_rate_limit_without_a_meter_still_names_a_time() -> None:
+    with pytest.raises(LinearError) as raised:
+        client(Transport(limited_error({}))).query("query Viewer { viewer { id } }", {})
+    assert raised.value.message.startswith("Linear's rate limit is spent until ")
 
 
 def test_a_plain_transport_is_metered_without_headers() -> None:

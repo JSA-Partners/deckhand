@@ -10,7 +10,7 @@ import urllib.request
 from collections.abc import Callable
 
 from deckhand import __version__
-from deckhand.linear.meter import LIMITED, Headers, Meter, name_of
+from deckhand.linear.meter import LIMITED, Headers, Meter, name_of, wait_words
 from deckhand.step import Refusal
 
 HOST = "api.linear.app"
@@ -148,7 +148,7 @@ class LinearClient:
         self._on_unauthorized = on_unauthorized
         self._transport = transport
         self._source = source
-        self._meter = meter
+        self._meter = meter if meter is not None else Meter()
 
     def query(self, document: str, variables: dict) -> dict:
         payload = json.dumps({"query": document, "variables": variables}).encode()
@@ -163,8 +163,11 @@ class LinearClient:
         body = _parse(raw)
         errors = body.get("errors")
         error = _error_from(errors if isinstance(errors, list) else []) if errors else None
-        if self._meter is not None:
-            self._meter.heard(name_of(document), headers, error is not None and error.code == LIMITED)
+        limited = error is not None and error.code == LIMITED
+        until = self._meter.heard(name_of(document), headers, limited)
+        if limited and until is not None:
+            words = wait_words(until, self._meter.now())
+            raise LinearError(LIMITED, f"Linear's rate limit is spent until {words}; run the same call again then")
         if error is not None:
             raise error
         data = body.get("data")

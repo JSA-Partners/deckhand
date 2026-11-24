@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand.linear.meter import UNKNOWN_WAIT, Meter, name_of
+from deckhand.linear.meter import UNKNOWN_WAIT, Meter, clock, name_of, wait_words
 
 NOW = 1_763_546_400.0
 HEADERS = {
@@ -62,3 +62,8 @@ def test_a_later_reply_clears_the_limit_and_keeps_the_last_known_budget() -> Non
     meter.heard("Viewer", {}, False)
     taken = meter.taken()["budget"]
     assert (taken["until"], taken["remaining"]) == (None, 1500000)
+
+
+def test_the_wait_names_the_clock_time_and_the_minutes() -> None:
+    assert wait_words(NOW + 600, NOW) == f"{clock(NOW + 600)}, in 10 minutes"
+    assert wait_words(NOW + 30, NOW) == f"{clock(NOW + 30)}, in 1 minute"

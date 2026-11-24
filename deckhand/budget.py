@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 
+from deckhand.linear.meter import clock
 from deckhand.step import Refusal
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
@@ -31,10 +31,6 @@ def due(found: Budget, now: float, last: float) -> bool:
     if found.limited(now):
         return False
     return not found.low(now) or now - last >= LOW_EVERY
-
-
-def clock(at: float) -> str:
-    return datetime.fromtimestamp(at).strftime("%H:%M")
 
 
 def phrase(found: Budget, now: float) -> str:
