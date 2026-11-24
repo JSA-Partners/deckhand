@@ -29,8 +29,8 @@
   `standing.py` how the snapshot and the fleet sort into needs you, working, stopped, queued, team
   and done today, `brief.py` the brief and the status line segment, `board.py` the board's sections
   and rows; `watch.py` when a session's watcher rings and when the captain's has gone silent
-- The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into actions
-  and writes nothing, `acts.py` carries one action out and builds every hand's launch, `worker.py`
+- The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into the
+  actions of `actions.py` and writes nothing, `acts.py` carries one action out and builds every hand's launch, `worker.py`
   runs them in order on one thread, `poller.py` reads the fleet and Linear on their own threads,
   `linker.py` the Linear read the engine takes from that thread, `lines.py` the failures the
   engine shows, and `engine.py` is the loop, its lock, its heartbeat and the snapshot it writes

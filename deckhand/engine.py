@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import IO, Protocol
 
 from deckhand import acts, budget, config, features, fleet, git, queue, reading, status, watch
+from deckhand.actions import Action, Adopt, Launch, Post, Resume
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
 from deckhand.reading import Reading
-from deckhand.reconcile import Action, Adopt, Facts, Launch, Post, Resume, reconcile, reserved
+from deckhand.reconcile import Facts, reconcile, reserved
 from deckhand.records import Record, epoch, iso
 from deckhand.step import Refusal
 from deckhand.store.state import HEARTBEAT, SLEEP_GAP, HandRow, LocalState

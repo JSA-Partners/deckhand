@@ -7,9 +7,9 @@ from contextlib import AbstractContextManager, ExitStack, contextmanager
 from typing import Protocol
 
 from deckhand import fleet, git
+from deckhand.actions import Action
 from deckhand.acts import Acts
 from deckhand.linear.client import LinearError
-from deckhand.reconcile import Action
 from deckhand.step import Refusal
 from deckhand.store.local import LocalRecords, default_path
 from deckhand.store.open import Stores

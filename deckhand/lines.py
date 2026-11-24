@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from deckhand import fleet
-from deckhand.reconcile import RETRY_AFTER, RETRY_CAP, Action, Launch, Remove, Resume, Stop
+from deckhand.actions import Action, Launch, Remove, Resume, Stop
+from deckhand.reconcile import RETRY_AFTER, RETRY_CAP
 
 START, STOP, REMOVE, FINISHED_STOP = "start", "Stop", "Remove", "Stop:finished"
 LAUNCH = f"{START}:Launch"

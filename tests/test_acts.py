@@ -8,11 +8,12 @@ from pathlib import Path
 import pytest
 
 from deckhand import asks, config, features, fleet, launch, queue
+from deckhand.actions import Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.acts import Acts, unheard
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import Adopt, Facts, Launch, Post, Remove, Resume, Stop, reconcile
+from deckhand.reconcile import Facts, reconcile
 from deckhand.records import HAND, Record
 from deckhand.store.fake import FakeStore
 from deckhand.store.local import LocalRecords

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from deckhand import queue
-from deckhand.reconcile import Action, Adopt, Post, Resume
+from deckhand.actions import Action, Adopt, Post, Resume
 from deckhand.step import Refusal
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState

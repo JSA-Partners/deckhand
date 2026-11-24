@@ -11,10 +11,11 @@ from typing import Any
 import pytest
 
 from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, status, watch
+from deckhand.actions import Action, Launch, Post, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
 from deckhand.linker import Linked
-from deckhand.reconcile import RETRY_AFTER, Action, Launch, Post, Remove, Resume, Stop
+from deckhand.reconcile import RETRY_AFTER
 from deckhand.records import iso
 from deckhand.step import Refusal
 from deckhand.store.cached import CachedStore

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from deckhand import asks, fleet, order, queue, startable, wakes
+from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
 from deckhand.policy import Policy
@@ -32,64 +33,6 @@ class Facts:
     policies: Mapping[Path, Policy] = field(default_factory=dict)
     unheard: frozenset[int] = frozenset()
     labels: Mapping[str, list[str]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class Launch:
-    name: str
-    ref: str
-    kind: str
-    clone: Path
-    story: dict | None
-    me: str
-    restart: bool = False
-
-
-@dataclass(frozen=True)
-class Resume:
-    name: str
-    session: str
-    cwd: str
-    text: str
-    seqs: tuple[int, ...]
-    record: Record | None = None
-    restart: bool = False
-
-
-@dataclass(frozen=True)
-class Post:
-    name: str
-    key: str
-    kind: str
-    body: str
-    issue: str
-    record: Record | None
-    restart: bool = False
-
-
-@dataclass(frozen=True)
-class Stop:
-    name: str
-    short: str
-    why: str
-    seqs: tuple[int, ...] = ()
-
-
-@dataclass(frozen=True)
-class Remove:
-    name: str
-    short: str
-    stop: bool = True
-
-
-@dataclass(frozen=True)
-class Adopt:
-    name: str
-    short: str
-    session: str
-
-
-Action = Launch | Resume | Post | Stop | Remove | Adopt
 
 
 @dataclass

@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, asks, fleet, linker, spikes, status
+from deckhand.actions import Action
 from deckhand.acts import Acts
 from deckhand.engine import Engine
-from deckhand.reconcile import Action
 from deckhand.records import iso
 from deckhand.steps.captain import Captain
 from deckhand.steps.decide import Decide

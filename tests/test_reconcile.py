@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 
 from deckhand import asks, config, features, fleet, queue, wakes
+from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import Action, Adopt, Facts, Launch, Post, Remove, Resume, Stop, reconcile, reserved
+from deckhand.reconcile import Facts, reconcile, reserved
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
