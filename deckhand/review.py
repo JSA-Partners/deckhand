@@ -35,6 +35,7 @@ class Finding:
     confidence: float
     reason: str = ""
     changes_delivery: bool = False
+    touches: str = ""
 
 
 def finding_id(finding: Finding, stage: str) -> str:
@@ -72,9 +73,10 @@ def _finding(index: int, item: object) -> Finding:
     confidence = item.get("confidence")
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1:
         raise bad("confidence", "must be a number from 0.0 to 1.0")
-    reason = item.get("reason", "")
-    if not isinstance(reason, str):
-        raise bad("reason", "must be a string")
+    reason, touches = item.get("reason", ""), item.get("touches", "")
+    for field, value in (("reason", reason), ("touches", touches)):
+        if not isinstance(value, str):
+            raise bad(field, "must be a string")
     changes_delivery = item.get("changes_delivery", False)
     if not isinstance(changes_delivery, bool):
         raise bad("changes_delivery", "must be true or false")
@@ -85,6 +87,7 @@ def _finding(index: int, item: object) -> Finding:
         confidence=float(confidence),
         reason=reason,
         changes_delivery=changes_delivery,
+        touches=touches,
     )
 
 

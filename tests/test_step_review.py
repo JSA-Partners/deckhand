@@ -410,16 +410,20 @@ def test_feature_resolve_without_live_stories_refuses():
     assert store.writes[-1][0] == "set_project_dates"
 
 
-def test_branch_round_without_a_head_refuses(tmp_path: Path, repo: Path):
+def test_branch_round_without_a_head_reviews_the_whole_diff(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
     store = planned(tmp_path, repo)
     plan = review.RoundPlan(1, scoped=False, base_hash="")
     found = review.parse_findings(json.dumps([raw(severity="P1")]))
     store.put_record("s1", review.round_record("s1", "branch", plan, "h1", found))
     checked(store, "c2")
     worktree(store, repo)
-    step = Review(store, BranchGit("c2", {"base1...HEAD": "+two\n"}), repo)
-    with pytest.raises(Refusal, match="holds no head"):
-        step.context(["s1", "--stage", "branch", *TEAM])
+    step = Review(store, BranchGit("c2", {"base1...HEAD": "+one\n+two\n"}), repo)
+    facts = shown(step, capsys, "s1", "--stage", "branch")
+    assert (facts["round"], facts["scoped"]) == (2, True)
+    assert Path(facts["target"]).read_text() == "+one\n+two\n"
+    assert "holds no head" in facts["note"]
 
 
 def test_scoped_round_carries_the_open_p1s(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
@@ -523,3 +527,49 @@ def test_a_scoped_round_carries_accepted_findings_and_records_what_it_carried(
     latest = max(rounds(store), key=lambda r: r.subject)
     assert latest.data["carried"] == [finding_id(p1), finding_id(p2)]
     assert review.unfixed(store.records("s1")) == []
+
+
+def test_plan_and_branch_context_carry_the_approved_spec(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    decided(store, "decision-item", "Greeting language", "English only", ["s1"])
+    step = Review(store, Git(BASE), repo)
+    plan = shown(step, capsys, "s1", "--stage", "plan")
+    held = Path(plan["spec"]).read_text()
+    assert "The Contract of Alpha." in held
+    assert "- Greeting language: English only" in held
+    assert plan["spec"] != plan["target"]
+    step.context(["s1", "--stage", "plan", *TEAM])
+    out = capsys.readouterr().out
+    assert out.index(f"target: {plan['target']}") < out.index(f"spec: {plan['spec']}")
+    worktree(store, repo)
+    checked(store, "c1")
+    branch = shown(Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo), capsys, "s1", "--stage", "branch")
+    assert Path(branch["spec"]).read_text() == held
+
+
+def test_a_contract_edit_after_a_round_needs_no_new_round(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    worktree(store, repo)
+    checked(store, "c1")
+    git = BranchGit("c1", {"base1...HEAD": "+one\n"})
+    plan, branch = Review(store, Git(BASE), repo), Review(store, git, repo)
+    record_round(plan, tmp_path)
+    record_round(branch, tmp_path, stage="branch")
+    before = [shown(plan, capsys, "s1", "--stage", "plan"), shown(branch, capsys, "s1", "--stage", "branch")]
+    planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
+    approve_everything(store)
+    after = [shown(plan, capsys, "s1", "--stage", "plan"), shown(branch, capsys, "s1", "--stage", "branch")]
+    assert after == before
+    assert [facts["stop"] for facts in after] == ["clean", "clean"]
+
+
+def test_feature_review_has_no_spec(capsys: pytest.CaptureFixture[str]):
+    step = FeatureReview(feature_ready())
+    facts = shown(step, capsys)
+    assert (facts["round"], facts["spec"]) == (1, None)
+    step.context([*TEAM])
+    assert "spec:" not in capsys.readouterr().out

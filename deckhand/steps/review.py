@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, tiers, versions
+from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, spec, tiers, versions
 from deckhand.checks import passing
 from deckhand.features import Phase
 from deckhand.policy import STAGES, Policy
@@ -152,7 +152,7 @@ class Review(StoryStep):
     def _scoped_diff(self, subject: Subject, target: Target, last: Record, repo: Path) -> tuple[str | None, str]:
         if subject.stage == "branch":
             if not last.data.get("head"):
-                raise Refusal(f"the last branch round of {subject.label} holds no head to scope the diff from")
+                return None, "the last branch round holds no head to scope the diff from; review the whole diff"
             try:
                 return git.changed_since(repo, last.data["head"], target.base, self._runner), ""
             except git.GitError:
@@ -201,7 +201,7 @@ class Review(StoryStep):
         plan = review.Stop("checks") if self._unchecked(subject, repo) else plan
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
-        facts["note"] = target.note
+        facts |= {"note": target.note, "spec": None}
         if isinstance(plan, review.Stop):
             held = review.last(counted)
             proceeded = held is not None and bool(review.open_p1(held, declined)) and plan.reason == "clean"
@@ -221,9 +221,13 @@ class Review(StoryStep):
                     facts["diff"] = diff
                 elif diff is not None:
                     key, text = content_hash(diff), diff
+            owner = subject.prefix.split(":")[0]
             if text is not None:
-                owner = subject.prefix.split(":")[0]
                 facts["target"] = str(review.save_text(answers.state_dir(), owner, key, text))
+            if subject.stage != FEATURE:
+                approved = spec.text(spec.gather(store, subject.feature, subject.story))
+                name = "spec-" + content_hash(approved)[:12]
+                facts["spec"] = str(review.save_text(answers.state_dir(), owner, name, approved))
         facts["carried"] = []
         if isinstance(plan, review.RoundPlan) and plan.scoped and not plan.carry:
             facts["carried"] = [
@@ -358,6 +362,8 @@ def _print(facts: dict) -> None:
             print(f"- {lens['name']}: {lens['path']}")
         if facts["target"]:
             print(f"target: {facts['target']}")
+        if facts["spec"]:
+            print(f"spec: {facts['spec']}")
     if facts["carried"]:
         print("open P1s and accepted findings not yet fixed; re-report each the diff does not fix, with the same")
         print("lens, path, line and summary so the id is kept:")
