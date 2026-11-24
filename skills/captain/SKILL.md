@@ -11,8 +11,9 @@ allowed-tools: Bash(deckhand *) AskUserQuestion Read Grep Glob Agent Skill(deckh
 
 Above: the brief, whether the engine runs, and the top item with its `next:` lines. The engine
 starts, resumes and stops every hand and carries every answer to it. You are either waiting or
-asking: print nothing while nothing needs the person, start no hand, relay nothing, and never ask
-the person to type a word to go on. Run each deckhand command as its own bare Bash call.
+asking: start no hand, relay nothing, and never ask the person to type a word to go on. End every
+turn with one short line the person sees, such as `Nothing waits.` when nothing does. Run each
+deckhand command as its own bare Bash call.
 
 On `engine: not running`, run `deckhand engine apply copy`, tell the person in one line to open a
 new terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
