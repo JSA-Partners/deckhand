@@ -244,20 +244,23 @@ def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "RE
     ]
 
 
-def p1_rounds(rounds: list[Record], excused: set[str]) -> int:
-    return sum(not r.data.get("carry") and bool(open_p1(r, excused)) for r in rounds)
+def p1_rounds(rounds: list[Record], excused: set[str], since: int = 0) -> int:
+    return sum(_n(r) > since and not r.data.get("carry") and bool(open_p1(r, excused)) for r in rounds)
 
 
-def next_round(rounds: list[Record], target_hash: str, excused: set[str], head: str = "") -> RoundPlan | Stop:
+def next_round(
+    rounds: list[Record], target_hash: str, excused: set[str], head: str = "", since: int = 0
+) -> RoundPlan | Stop:
     latest = last(rounds)
     if latest is None:
         return RoundPlan(1, scoped=False, base_hash="")
-    if latest.data["target_hash"] == target_hash:
-        if head and latest.data.get("head") and latest.data["head"] != head:
-            return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
+    moved = bool(head and latest.data.get("head") and latest.data["head"] != head)
+    if latest.data["target_hash"] == target_hash and not moved:
         return Stop("unchanged") if open_p1(latest, excused) else Stop("clean")
-    if at_cap(rounds, excused):
+    if at_cap(rounds, excused, since):
         return Stop("cap")
+    if latest.data["target_hash"] == target_hash:
+        return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
 
 
@@ -311,9 +314,14 @@ def excused(records: list[Record], prefix: str) -> set[str]:
     return declined(records) | waived(records, prefix)
 
 
-def at_cap(rounds: list[Record], excused: set[str]) -> bool:
+def proceeded(records: list[Record], prefix: str) -> int:
+    story, _, stage = prefix.rpartition(":")
+    return max(map(_cap_cut, _cap_answers(records, cap_subject(story, stage), PROCEED)), default=0)
+
+
+def at_cap(rounds: list[Record], excused: set[str], since: int = 0) -> bool:
     latest = last(rounds)
-    return latest is not None and bool(open_p1(latest, excused)) and p1_rounds(rounds, excused) >= CAP
+    return latest is not None and bool(open_p1(latest, excused)) and p1_rounds(rounds, excused, since) >= CAP
 
 
 def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:

@@ -119,6 +119,27 @@ def test_a_new_p1_after_proceed_blocks_until_fixed_and_starts_a_fresh_count():
     assert review.next_round([*rounds, fourth], "h5", excused) == RoundPlan(5, scoped=True, base_hash="h4")
 
 
+def test_proceed_restarts_the_count_of_p1_rounds():
+    raised = [raw(severity="P1", summary=f"Hole {name}.") for name in ("W", "V", "U", "T")]
+    rounds = [done(n, f"h{n}", raised[n - 1]) for n in (1, 2, 3)]
+    fourth = done(4, "h4", raised[3])
+    records = [*rounds, proceed_at(rounds[-1]), fourth]
+    assert review.waived(records, "s1:plan") == {id_of(raised[2])}
+    excused = review.excused(records, "s1:plan")
+    since = review.proceeded(records, "s1:plan")
+    assert since == 3
+    assert review.p1_rounds([*rounds, fourth], excused, since) == 1
+    assert not review.at_cap([*rounds, fourth], excused, since)
+    assert review.next_round([*rounds, fourth], "h5", excused, since=since) == RoundPlan(5, scoped=True, base_hash="h4")
+
+
+def test_at_the_cap_a_moved_head_with_the_same_diff_stops_at_the_cap():
+    p1 = raw(severity="P1")
+    rounds = [done(n, f"h{n}", p1, stage="branch", head=f"c{n}") for n in (1, 2, 3)]
+    assert review.next_round(rounds, "h3", set(), "c4") == Stop("cap")
+    assert review.next_round(rounds, "h3", set(), "c3") == Stop("unchanged")
+
+
 def test_a_waived_p1_is_never_carried_into_the_next_round():
     p1 = raw(severity="P1")
     rounds = [done(n, f"h{n}", p1) for n in (1, 2, 3)]
@@ -221,7 +242,8 @@ def test_a_new_head_with_the_same_diff_carries_the_last_round():
 def test_a_carried_round_keeps_the_findings_at_the_new_head_and_never_counts_to_the_cap():
     p1 = raw(severity="P1")
     rounds = [done(n, f"h{n}", p1, stage="branch", head=f"c{n}") for n in (1, 2, 3)]
-    plan = review.next_round(rounds, "h3", set(), "c4")
+    assert review.next_round(rounds, "h3", set(), "c4") == Stop("cap")
+    plan = review.next_round(rounds, "h3", {id_of(p1, "branch")}, "c4")
     assert plan == RoundPlan(4, scoped=True, base_hash="h3", carry=True)
     carried = review.carry_record("s1", "branch", plan, rounds[-1], "c4")
     assert (carried.subject, carried.version) == ("s1:branch:4", "h3")

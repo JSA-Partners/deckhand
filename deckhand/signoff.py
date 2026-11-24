@@ -55,7 +55,7 @@ def _branch_gap(records: list[Record], story: str, head: str) -> list[str]:
     latest = review.last(review.counted(records, f"{story}:branch")[0])
     if latest is None or review.reviewed(latest) != head:
         return [f"the branch review has not reviewed the signed head {head}; run a branch round"]
-    return ["the branch review has not stopped clean, a P1 is open; fix it, or at the cap ask the person to proceed"]
+    return ["the branch review has not stopped clean, a P1 is open; fix it; at the cap the person decides"]
 
 
 def _plan_gap(records: list[Record], story: str) -> list[str]:

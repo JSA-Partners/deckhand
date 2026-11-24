@@ -68,9 +68,11 @@ class Target:
     note: str = ""
 
 
-def _status(item: dict, declined: set[str], accepted: set[str]) -> str:
+def _status(item: dict, declined: set[str], waived: set[str], accepted: set[str]) -> str:
     if item["id"] in declined:
         return "declined by the person"
+    if item["id"] in waived:
+        return "waived by the person"
     return "accepted" if item["id"] in accepted else "open"
 
 
@@ -186,10 +188,13 @@ class Review(StoryStep):
         rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
-        excused = review.excused(subject.records, subject.prefix)
+        excused, since = (
+            review.excused(subject.records, subject.prefix),
+            review.proceeded(subject.records, subject.prefix),
+        )
         last = review.last(rounds)
         target = self._target(store, subject, repo)
-        plan = review.next_round(counted, target.hash, excused, target.head)
+        plan = review.next_round(counted, target.hash, excused, target.head, since)
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts["note"] = target.note
@@ -223,7 +228,8 @@ class Review(StoryStep):
             ]
         facts["last_round"] = None
         if last is not None:
-            items = [item | {"status": _status(item, declined, accepted)} for item in last.data["findings"]]
+            waived = excused - declined
+            items = [item | {"status": _status(item, declined, waived, accepted)} for item in last.data["findings"]]
             facts["last_round"] = {"n": int(last.subject.rsplit(":", 1)[1]), "findings": items}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
@@ -249,7 +255,11 @@ class Review(StoryStep):
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
-        plan = review.next_round(counted, target.hash, review.excused(subject.records, subject.prefix), target.head)
+        excused, since = (
+            review.excused(subject.records, subject.prefix),
+            review.proceeded(subject.records, subject.prefix),
+        )
+        plan = review.next_round(counted, target.hash, excused, target.head, since)
         if isinstance(plan, review.Stop):
             raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
         if plan.carry and parsed.get("findings"):

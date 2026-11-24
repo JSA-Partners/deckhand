@@ -441,7 +441,9 @@ def test_proceed_at_the_cap_stops_proceeded_and_a_revision_still_gets_a_round(
     submit(store, tmp_path, repo, PLAN + "\nRevision 3.\n")
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "unchanged"
     answer(state, Decide(store), capsys, ["review-cap", "ACME-1", "--stage", "plan"], "Proceed")
-    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "proceeded"
+    facts = shown(step, capsys, "s1", "--stage", "plan")
+    assert facts["stop"] == "proceeded"
+    assert [f["status"] for f in facts["last_round"]["findings"]] == ["waived by the person"]
     submit(store, tmp_path, repo, PLAN + "\nRevision 4.\n")
     facts = shown(step, capsys, "s1", "--stage", "plan")
     assert (facts["stop"], facts["round"], facts["scoped"], facts["carried"]) == (None, 4, True, [])

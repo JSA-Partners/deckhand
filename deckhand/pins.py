@@ -41,11 +41,12 @@ def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> P
     held, _ = review.counted(records, prefix)
     excused = review.excused(records, prefix)
     latest = review.last(held)
-    if latest is None or not review.at_cap(held, excused):
+    since = review.proceeded(records, prefix)
+    if latest is None or not review.at_cap(held, excused, since):
         raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
     open_count = len(review.open_p1(latest, excused))
     at = review.reviewed(latest)[:12]
-    detail = f"{review.p1_rounds(held, excused)} rounds left a P1 open, {open_count} P1 open at {at}"
+    detail = f"{review.p1_rounds(held, excused, since)} rounds left a P1 open, {open_count} P1 open at {at}"
     subject, version = review.cap_subject(story["id"], stage), review.cap_version(latest)
     return Pin(subject, version, [story["id"]], detail, _label(story), [_label(story)])
 
