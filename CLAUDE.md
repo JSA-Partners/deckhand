@@ -32,8 +32,8 @@
 - The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into actions
   and writes nothing, `acts.py` carries one action out and builds every hand's launch, `worker.py`
   runs them in order on one thread, `poller.py` reads the fleet and Linear on their own threads,
-  `lines.py` the failures the engine shows, and `engine.py` is the loop, its lock, its heartbeat
-  and the snapshot it writes
+  `linker.py` the Linear read the engine takes from that thread, `lines.py` the failures the
+  engine shows, and `engine.py` is the loop, its lock, its heartbeat and the snapshot it writes
 - `monitors/monitors.json` registers `watch.sh`, the watcher every session runs; in a session that
   is neither captain nor hand it parks rather than exits, since an exit costs a model turn
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain

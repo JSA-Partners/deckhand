@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, config, engine, status, tui
-from deckhand.engine import Linked
+from deckhand import answers, config, engine, linker, status, tui
+from deckhand.linker import Linked
 from deckhand.step import Refusal
 from deckhand.steps.engine import Engine, command, invocation
 from deckhand.store.local import default_path
@@ -86,7 +86,7 @@ def tty(monkeypatch: pytest.MonkeyPatch, terminal: bool = True) -> None:
 def run(monkeypatch: pytest.MonkeyPatch, watch, shell: Shell | None = None) -> Shell:
     shell = shell or Shell()
     tty(monkeypatch)
-    monkeypatch.setattr(engine, "link", lambda team, *rest: Linked(None, None, NOW, "network: down"))
+    monkeypatch.setattr(linker, "link", lambda team, *rest: Linked(None, None, NOW, "network: down"))
     monkeypatch.setattr(tui, "watch", watch)
     Engine(shell, clock=lambda: NOW).apply(["run", "--team-key", "ACME"])
     return shell

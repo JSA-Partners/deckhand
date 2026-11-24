@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, engine, fleet, spikes, status
+from deckhand import answers, asks, fleet, linker, spikes, status
 from deckhand.acts import Acts
 from deckhand.engine import Engine
 from deckhand.reconcile import Action
@@ -65,7 +65,7 @@ class Flow:
         self.clock.t += 1
         stores = Stores(app=self.store, person=self.store)
         self.fleets.value = fleet.sessions(self.world)
-        self.linear.value = engine.link("ACME", self.fleets.latest, self.clock, lambda: stores, lambda: DAY)
+        self.linear.value = linker.link("ACME", self.fleets.latest, self.clock, lambda: stores, lambda: DAY)
         self.fleets.at = self.clock()
         self.engine.tick()
 

@@ -10,9 +10,10 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, engine, fleet, queue, status, watch
-from deckhand.engine import Engine, Linked
+from deckhand import acts, answers, asks, engine, fleet, linker, queue, status, watch
+from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
+from deckhand.linker import Linked
 from deckhand.reconcile import RETRY_AFTER, Action, Launch, Post, Remove, Resume, Stop
 from deckhand.records import iso
 from deckhand.step import Refusal
@@ -115,7 +116,7 @@ class Rig:
 
     def link(self) -> Linked:
         stores = Stores(app=CachedStore(self.down), person=self.store)
-        found = engine.link("ACME", self.fleets.latest, self.clock, lambda: stores, lambda: DAY)
+        found = linker.link("ACME", self.fleets.latest, self.clock, lambda: stores, lambda: DAY)
         self.linear.value = found
         return found
 
@@ -298,7 +299,7 @@ def test_no_reconcile_before_the_first_good_link(rig: Rig):
 
 
 def test_a_missing_personal_key_is_a_note_not_a_failed_link(rig: Rig):
-    found = engine.link("ACME", rig.fleets.latest, rig.clock, lambda: Stores(app=CachedStore(rig.down)), lambda: DAY)
+    found = linker.link("ACME", rig.fleets.latest, rig.clock, lambda: Stores(app=CachedStore(rig.down)), lambda: DAY)
     assert found.error == "" and found.reading is not None and found.reading.me is None
     assert [note.split(":")[0] for note in found.reading.notes] == ["missing credentials file"]
 

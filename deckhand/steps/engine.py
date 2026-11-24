@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, brief, config, engine, fleet, git, hosts, status
+from deckhand import answers, brief, config, engine, fleet, git, hosts, linker, status
 from deckhand.poller import Poller
 from deckhand.step import Refusal, register, team_key
 from deckhand.store.local import default_path
@@ -103,18 +103,18 @@ class Engine:
             raise Refusal(f"the engine already runs in another tab{_holder(state_dir)}")
         from deckhand import tui
 
-        runner, clock, link = self._runner, self._clock, engine.link
+        runner, clock, link = self._runner, self._clock, linker.link
         fleets = Poller(lambda: fleet.sessions(runner), engine.FLEET_EVERY, tui.fleet_failed, "deckhand-fleet", clock)
 
         # The first Linear read waits for the first fleet read, so a hand is never read as missing.
-        def linked() -> engine.Linked:
+        def linked() -> linker.Linked:
             fleets.wait(engine.FLEET_EVERY)
             return link(team, fleets.latest, clock)
 
         linear = Poller(
             linked,
             engine.LINEAR_EVERY,
-            lambda error: engine.Linked(None, None, clock(), problem(error)),
+            lambda error: linker.Linked(None, None, clock(), problem(error)),
             "deckhand-linear",
             clock,
         )
