@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, queue, quiz, review, signoff, spikes
+from deckhand import asks, features, fleet, gaps, implplan, policy, queue, quiz, review, signoff, spikes
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
@@ -521,6 +521,24 @@ def test_a_broken_clone_is_one_item_for_the_clones_its_stories_use(tmp_path: Pat
         (queue.POLICY, "widgets", ["widgets is broken", queue.POLICY_LINE], []),
     ]
     assert queue.policy_items(None, clones, broken) == []
+
+
+def test_two_broken_clones_of_one_folder_name_are_told_apart_by_their_label(tmp_path: Path):
+    store = setup()
+    store.create_issue(
+        "s3", "ACME", "Gadget", "Outcome.", features.open_feature(store, "ACME").project["id"], ["gadgets"]
+    )
+    feature = features.open_feature(store, "ACME")
+    widgets, gadgets = tmp_path / "a" / "app", tmp_path / "b" / "app"
+    clones = {"widgets": widgets, "gadgets": gadgets}
+    broken = {
+        path: policy.described(f"{path / policy.FILE}: file not found", path, label) for label, path in clones.items()
+    }
+    found = queue.policy_items(feature, clones, broken)
+    assert [(i.ref, i.title, i.lines[0]) for i in found] == [
+        ("gadgets", "clone gadgets", ".claude/deckhand.toml is missing in clone gadgets"),
+        ("widgets", "clone widgets", ".claude/deckhand.toml is missing in clone widgets"),
+    ]
 
 
 def test_a_broken_clone_ranks_below_every_item_of_a_story_in_flight(tmp_path: Path):

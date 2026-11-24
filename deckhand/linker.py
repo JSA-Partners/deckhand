@@ -50,11 +50,11 @@ def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Pol
         local = config.LocalConfig()
     policies: dict[Path, Policy] = {}
     broken: dict[Path, str] = {}
-    for clone in local.clones.values():
+    for label, clone in local.clones.items():
         try:
             policies[clone] = Policy.load(clone)
         except Refusal as error:
-            broken[clone] = policy.described(error.rule, clone)
+            broken[clone] = policy.described(error.rule, clone, label)
             problems.append(f"{broken[clone]}; its stories do not start")
     return local, policies, broken
 

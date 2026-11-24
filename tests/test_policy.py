@@ -195,4 +195,14 @@ def test_a_load_refusal_is_described_in_words_with_the_clone_name(tmp_path: Path
         write_policy(clone, text)
     with pytest.raises(Refusal) as refused:
         Policy.load(clone)
-    assert policies.described(refused.value.rule, clone) == said
+    assert policies.described(refused.value.rule, clone, "widgets") == said
+
+
+def test_a_load_refusal_names_the_clone_by_its_repository_label(tmp_path: Path):
+    clone = tmp_path / "app"
+    clone.mkdir()
+    with pytest.raises(Refusal) as refused:
+        Policy.load(clone)
+    assert (
+        policies.described(refused.value.rule, clone, "widgets") == ".claude/deckhand.toml is missing in clone widgets"
+    )

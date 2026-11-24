@@ -57,13 +57,13 @@ class Policy:
         )
 
 
-def described(rule: str, clone: Path) -> str:
+def described(rule: str, clone: Path, label: str) -> str:
     detail = rule.removeprefix(f"{clone / FILE}: ")
     if detail == "file not found":
-        return f"{FILE} is missing in clone {clone.name}"
+        return f"{FILE} is missing in clone {label}"
     if detail == "not valid TOML":
-        return f"{FILE} is not valid TOML in clone {clone.name}"
-    return f"{detail} in {FILE} of clone {clone.name}"
+        return f"{FILE} is not valid TOML in clone {label}"
+    return f"{detail} in {FILE} of clone {label}"
 
 
 def _flag(path: Path, table: dict, name: str) -> bool:

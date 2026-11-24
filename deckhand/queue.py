@@ -53,9 +53,11 @@ class Item:
 
 def policy_items(feature: Feature | None, clones: Mapping[str, Path], broken: Mapping[Path, str]) -> list[Item]:
     stories = feature.live if feature is not None else []
-    held = {clones[label] for s in stories for label in s["labels"] if label in clones}
-    named = sorted(held & set(broken), key=lambda clone: clone.name)
-    return [Item(POLICY, POLICY_RANK, c.name, f"clone {c.name}", "", 0, [broken[c], POLICY_LINE], []) for c in named]
+    named = sorted({label for s in stories for label in s["labels"] if label in clones and clones[label] in broken})
+    return [
+        Item(POLICY, POLICY_RANK, label, f"clone {label}", "", 0, [broken[clones[label]], POLICY_LINE], [])
+        for label in named
+    ]
 
 
 def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], next: list[str], head: str = "") -> Item:
