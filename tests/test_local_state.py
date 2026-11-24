@@ -242,3 +242,19 @@ def test_a_read_that_meets_a_broken_table_refuses_in_the_records_wording(tmp_pat
     with pytest.raises(Refusal) as refused:
         rows.pending()
     assert refused.value.rule == f"deckhand.db in the state folder {tmp_path} cannot be used"
+
+
+def test_a_launch_clears_the_last_turn_end(tmp_path: Path) -> None:
+    rows = state(tmp_path)
+    rows.want("hand", "ACME-1", ISSUE, STORY_HAND, "/work")
+    rows.turn_ended("hand")
+    rows.launched("hand", "1444880d")
+    assert rows.hands()["hand"].turn_ended is None
+
+
+def test_want_for_another_kind_clears_the_last_turn_end(tmp_path: Path) -> None:
+    rows = state(tmp_path)
+    rows.want("hand", "ACME-1", ISSUE, DRAFT_HAND, "/work")
+    rows.turn_ended("hand")
+    rows.want("hand", "ACME-1", ISSUE, STORY_HAND, "/work")
+    assert rows.hands()["hand"].turn_ended is None

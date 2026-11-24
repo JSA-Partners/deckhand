@@ -119,7 +119,7 @@ class LocalState:
             else:
                 db.execute(
                     "UPDATE hands SET ref = ?, issue = ?, kind = ?, cwd = ?, wanted = ?, short = NULL, "
-                    "session = NULL, restarts = 0 WHERE name = ?",
+                    "session = NULL, turn_ended = NULL, restarts = 0 WHERE name = ?",
                     (ref, issue, kind, cwd, self._now(), name),
                 )
 
@@ -128,7 +128,7 @@ class LocalState:
             db.execute(sql, params)
 
     def launched(self, name: str, short: str) -> None:
-        self._update("UPDATE hands SET short = ? WHERE name = ?", (short, name))
+        self._update("UPDATE hands SET short = ?, turn_ended = NULL WHERE name = ?", (short, name))
 
     def restarted(self, name: str) -> None:
         self._update("UPDATE hands SET restarts = restarts + 1 WHERE name = ?", (name,))
