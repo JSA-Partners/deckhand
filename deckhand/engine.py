@@ -141,13 +141,14 @@ class Engine:
         due = now - self._reconciled >= RECONCILE_EVERY
         self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke)
         now_facts = self._facts(now, read, hands, busy)
-        held = reserved(now_facts) | self._starting | set(self._settling)
+        resuming = reserved(now_facts)
+        held = resuming | self._starting | set(self._settling)
         quiet = frozenset(fleet.ref_of(name) for name in held)
         fresh = self._fresh_records(good) if due else None
         slots = used(now_facts)
         moved = changed or read != self._fleet or quiet != self._quiet or self._idle != self._idle_read
         moved = moved or slots != self._used or fresh is not None
-        if (moved or linked) and not self._read(good, read, hands, quiet, now, slots) and fresh is not None:
+        if (moved or linked) and not self._read(good, read, hands, quiet, now, (slots, resuming)) and fresh is not None:
             self._keep_records(fresh)
         began = self._fleets.began()
         linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
@@ -253,7 +254,7 @@ class Engine:
         hands: dict[str, HandRow],
         quiet: frozenset[str],
         now: float,
-        slots: int,
+        slots: tuple[int, frozenset[str]],
     ) -> bool:
         stores = good.stores
         assert stores is not None
@@ -274,12 +275,12 @@ class Engine:
             self._lines.say("read", f"cannot read: {problem(error)}")
             return False
         self._reading, self._fleet, self._quiet, self._idle_read = found, read, quiet, self._idle
-        self._used = slots
+        self._used = slots[0]
         self._lines.clear("read")
         previous = status.get(self._state)
         waiting = queue.ranked([*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting])
         shown = status.snapshot(
-            self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle, slots
+            self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle, *slots
         )
         shown["limited_until"] = self._limit_shown = self._limit(now)
         if self._newest is not None and self._newest.error:

@@ -61,9 +61,9 @@ def test_a_long_note_is_cut_so_the_budget_and_slots_stay_in_the_header():
     for cols, kept in ((100, "cannot read..."), (160, "cannot read Linear: xx")):
         head = texts(frame.render(found, G, cols, 30, note=note))[0]
         assert frame.cells(head) == cols and kept in head
-        assert "day 2 of 7" in head and "slots 0/2" in head and head.endswith("captain idle")
+        assert "day 2 of 7" in head and "slots 2/2" in head and head.endswith("captain idle")
     head = texts(frame.render(found, G, 86, 30, note=note))[0]
-    assert "cannot" not in head and "slots 0/2" in head
+    assert "cannot" not in head and "slots 2/2" in head
 
 
 def test_on_a_narrow_tab_the_question_wraps_and_keeps_its_keys():

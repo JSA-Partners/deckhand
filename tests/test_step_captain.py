@@ -400,7 +400,7 @@ def test_board_prints_once_in_plain_text_off_a_terminal(state: Path, capsys: pyt
     out, err = board_of([], capsys, shell)
     assert "\x1b" not in out and err == ""
     lines = out.splitlines()
-    assert lines[0] == " ● 1 needs you · sign-off ACME-1 14m · updated 0s ago · Alpha · slots 1/2 · no captain running"
+    assert lines[0] == " ● 1 needs you · sign-off ACME-1 14m · updated 0s ago · Alpha · slots 0/2 · no captain running"
     assert any(line.split()[:3] == ["●", "ACME-1", "t"] for line in lines)
     assert any(line.split()[:3] == ["◐", "ACME-2", "Receipts"] for line in lines)
     assert [argv[:2] for argv, _ in shell.calls] == [["claude", "agents"]]

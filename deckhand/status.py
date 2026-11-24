@@ -22,7 +22,7 @@ def _item(item: Item) -> dict:
     return keys | {"since": item.at or None, "next": item.next, "head": item.head or None, "lines": item.lines}
 
 
-def _hands(sessions: list[fleet.Session], idle: frozenset[str]) -> list[dict]:
+def _hands(sessions: list[fleet.Session], idle: frozenset[str], resuming: frozenset[str]) -> list[dict]:
     held = [*sorted(fleet.hands(sessions).items()), *sorted(fleet.spikes(sessions).items())]
     return [
         {
@@ -32,6 +32,7 @@ def _hands(sessions: list[fleet.Session], idle: frozenset[str]) -> list[dict]:
             "waiting_for": s.waiting_for,
             "started_at": s.started_at,
             "idle": s.name in idle,
+            "resuming": s.name in resuming,
         }
         for ref, s in held
     ]
@@ -46,6 +47,7 @@ def snapshot(
     person_unknown: bool = False,
     idle: frozenset[str] = frozenset(),
     used: int | None = None,
+    resuming: frozenset[str] = frozenset(),
 ) -> dict:
     return {
         "shape": SHAPE,
@@ -57,7 +59,7 @@ def snapshot(
         "items": [_item(item) for item in waiting],
         "stories": facts["order"],
         "cycle": facts.get("cycle", []),
-        "hands": _hands(sessions, idle),
+        "hands": _hands(sessions, idle, resuming),
         "release": facts["release"],
         "stale_since": None,
         "person_unknown": person_unknown,

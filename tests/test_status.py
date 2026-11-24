@@ -71,6 +71,7 @@ def test_snapshot_shape():
                 "waiting_for": fleet.PERMISSION,
                 "started_at": "2026-11-20T08:00:00.000Z",
                 "idle": False,
+                "resuming": False,
             },
             {
                 "name": "spike-0123456789ab",
@@ -79,6 +80,7 @@ def test_snapshot_shape():
                 "waiting_for": None,
                 "started_at": "2026-11-20T08:00:00.000Z",
                 "idle": False,
+                "resuming": False,
             },
         ],
         "release": False,

@@ -856,3 +856,18 @@ def test_the_snapshot_names_a_rate_limit_until_it_lifts(rig: Rig):
     for _ in range(25):
         rig.step(25)
     assert rig.shown()["limited_until"] is None
+
+
+def test_a_hand_holding_a_reserved_slot_is_filed_as_resuming(rig: Rig):
+    rig.store.assign("s1", "viewer-1")
+    rig.store.assign("s2", "someone-else")
+    held_hand(rig)
+    rig.sessions(row("ACME-1", "blocked", "busy"))
+    rig.ready()
+    rig.step()
+    rig.state.post("k", NAME, "answer", "x")
+    rig.state.put(acts.UNHEARD, {"seqs": [rig.state.pending()[0].seq]})
+    rig.sessions(row("ACME-1", "stopped"))
+    rig.step()
+    rig.step()
+    assert [(h["ref"], h["resuming"]) for h in rig.shown()["hands"]] == [("ACME-1", True)]

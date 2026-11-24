@@ -320,8 +320,12 @@ def test_the_header_says_whether_a_captain_runs():
     assert "captain" not in texts(shown(failed=True))[0].split("|")[-1]
 
 
-def test_a_live_slot_count_matches_the_working_section():
-    live = [CAPTAIN, session("a1b2", "ACME-15"), session("c3d4", "ACME-17", state="blocked", status="busy")]
-    built = board.build(sample(slots={"used": 2, "cap": 2}), fleet.Fleet(live), NOW, TODAY, brief.UNICODE)
+def test_the_engine_tab_shows_the_engines_count_and_a_reserved_hand_as_resuming():
+    hands = [{"name": "hand-ACME-17", "ref": "ACME-17", "state": "stopped", "waiting_for": None, "resuming": True}]
+    status = sample(items=[], slots={"used": 2, "cap": 2}, hands=hands)
+    live = [CAPTAIN, session("a1b2", "ACME-15"), session("c3d4", "ACME-17", state="stopped", status=None)]
+    built = board.build(status, fleet.Fleet(live), NOW, TODAY, brief.UNICODE)
     [working] = [section for section in built.sections if section.name == "working"]
-    assert (built.slots, [row.ref for row in working.rows]) == (("1", "2"), ["ACME-15"])
+    assert built.slots == ("2", "2")
+    assert [row.ref for row in working.rows] == ["ACME-15", "ACME-17"]
+    assert "resuming" in working.rows[1].state
