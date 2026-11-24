@@ -46,6 +46,10 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def epoch(at: str) -> float:
+    return datetime.fromisoformat(at).timestamp()
+
+
 def iso(ms: int) -> str:
     moment = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(milliseconds=ms)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
