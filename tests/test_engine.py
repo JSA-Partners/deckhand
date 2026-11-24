@@ -542,11 +542,11 @@ def test_a_failed_launch_whose_hand_turns_up_running_clears_its_line(rig: Rig):
     assert rig.engine.note() == "" and len(rig.worker.submitted) == 1
 
 
-def fail_every_submitted(rig: Rig, seconds: float, line: str) -> list[str]:
+def fail_every_submitted(rig: Rig, seconds: float, line: str, name: str | None = None) -> list[str]:
     notes, answered = [], 0
     for _ in range(int(seconds // 5)):
         for action in rig.worker.submitted[answered:]:
-            rig.worker.finish(action, line)
+            rig.worker.finish(action, line if name in (None, action.name) else None)
         answered = len(rig.worker.submitted)
         rig.landed()
         rig.step(5)
@@ -613,3 +613,33 @@ def test_a_stop_that_keeps_failing_for_a_finished_story_backs_off_and_shows(clon
     stops = [a for a in rig.worker.submitted if isinstance(a, Stop) and a.name == NAME]
     assert 2 <= len(stops) <= 3
     assert notes[-1] == "ACME-1: claude stop failed: busy"
+
+
+def test_a_failed_launch_clears_once_its_story_belongs_to_someone_else(rig: Rig):
+    rig.ready()
+    notes = fail_every_submitted(rig, 10, "ACME-1: cannot fetch origin")
+    assert notes[-1].endswith("cannot fetch origin")
+    rig.store.assign("s1", "someone-else")
+    rig.store.assign("s2", "someone-else")
+    rig.link()
+    rig.landed()
+    rig.step()
+    rig.step()
+    assert rig.engine.note() == ""
+
+
+def test_a_failed_stop_clears_once_its_story_is_reopened(clone: Path):
+    configure(clone, 1)
+    rig = Rig(building(), row("ACME-1", "idle", "idle"))
+    held_hand(rig)
+    started(rig.store, "s1")
+    rig.store.set_issue_state("s1", "Done")
+    rig.ready()
+    notes = fail_every_submitted(rig, 10, "ACME-1: claude stop failed: busy", NAME)
+    assert notes[-1] == "ACME-1: claude stop failed: busy"
+    rig.store.set_issue_state("s1", "In Progress")
+    rig.link()
+    rig.landed()
+    rig.step()
+    rig.step()
+    assert rig.engine.note() == ""

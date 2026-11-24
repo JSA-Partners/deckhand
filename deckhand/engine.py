@@ -11,7 +11,7 @@ from typing import IO, Protocol
 
 from deckhand import acts, config, features, fleet, git, reading, status
 from deckhand.linear.client import LinearError
-from deckhand.lines import Lines
+from deckhand.lines import Lines, Stories
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.reconcile import Action, Adopt, Facts, Launch, Post, Resume, reconcile, reserved
@@ -107,10 +107,15 @@ class Works(Protocol):
     def stop(self) -> None: ...
 
 
-def _finished(found: Reading | None) -> frozenset[str]:
-    feature = found.feature if found is not None else None
-    live = feature.live if feature is not None else []
-    return frozenset(fleet.hand_name(s["identifier"]) for s in live if s["state"] in features.FINISHED)
+def _stories(facts: Facts) -> Stories | None:
+    found = facts.reading
+    if found is None or found.feature is None or found.me is None:
+        return None
+    live = found.feature.live
+    names = {s["id"]: fleet.hand_name(s["identifier"]) for s in live}
+    finished = frozenset(names[s["id"]] for s in live if s["state"] in features.FINISHED)
+    mine = frozenset(names[s["id"]] for s in live if s["assignee"] in (None, found.me))
+    return Stories(finished, mine, frozenset(names.values()) | frozenset(facts.hands))
 
 
 class Engine:
@@ -308,7 +313,7 @@ class Engine:
             self._lines.say("reconcile", f"cannot reconcile: {problem(error)}")
             return
         self._lines.clear("reconcile")
-        self._lines.settle(facts.read, _finished(facts.reading))
+        self._lines.settle(facts.read, _stories(facts))
         for action in found:
             if self._lines.backing_off(action, facts.now):
                 continue
