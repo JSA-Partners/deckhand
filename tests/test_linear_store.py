@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearError
 from deckhand.ops import ensure_relation
 from deckhand.records import Record
@@ -316,26 +315,38 @@ def test_relations_of_a_missing_issue_is_empty(records: LocalRecords) -> None:
     assert LinearStore(client, records).relations("m") == []
 
 
-def relations_node(relations: dict = DONE, inverse: dict = DONE) -> dict:
-    return {
+def page(nodes: list[dict], cursor: str | None = None) -> dict:
+    info = {"hasNextPage": True, "endCursor": cursor} if cursor else {"hasNextPage": False, "endCursor": None}
+    return {"nodes": nodes, "pageInfo": info}
+
+
+def test_issue_labels_past_one_page_are_read_in_full(records: LocalRecords) -> None:
+    first = [{"id": f"l{n}", "name": f"label-{n}"} for n in range(20)]
+    client = FakeClient(
+        Issue={"issue": {**ISSUE_NODE, "labels": page(first, "c1")}},
+        IssueLabels={"issue": {"labels": page([{"id": "l20", "name": "label-20"}])}},
+    )
+    found = LinearStore(client, records).issue(UUID)
+    assert found["labels"] == [f"label-{n}" for n in range(21)]
+    assert client.calls[1] == ("IssueLabels", {"id": UUID, "after": "c1"})
+
+
+def test_relations_past_one_page_are_read_in_both_directions(records: LocalRecords) -> None:
+    node = {
         "id": "m",
-        "relations": {"nodes": [], "pageInfo": relations},
-        "inverseRelations": {"nodes": [], "pageInfo": inverse},
+        "relations": page([{"type": "blocks", "relatedIssue": {"id": "z"}}], "r1"),
+        "inverseRelations": page([{"type": "blocks", "issue": {"id": "a"}}], "i1"),
     }
-
-
-@pytest.mark.parametrize(
-    ("name", "response", "read"),
-    [
-        ("Issue", {"issue": {**ISSUE_NODE, "labels": {"nodes": [], "pageInfo": MORE}}}, "issue"),
-        ("IssueRelations", {"issue": relations_node(relations=MORE)}, "relations"),
-        ("IssueRelations", {"issue": relations_node(inverse=MORE)}, "relations"),
-    ],
-)
-def test_a_page_overflow_refuses_naming_the_issue(name: str, response: dict, read: str, records: LocalRecords) -> None:
-    client = FakeClient(**{name: response})
-    with pytest.raises(Refusal, match=rf"{UUID}.*more than {queries.PAGE_SIZE}"):
-        getattr(LinearStore(client, records), read)(UUID)
+    client = FakeClient(
+        IssueRelations={"issue": node},
+        IssueRelationsPage={"issue": {"relations": page([{"type": "blocks", "relatedIssue": {"id": "y"}}])}},
+        IssueInverseRelationsPage={"issue": {"inverseRelations": page([{"type": "blocks", "issue": {"id": "b"}}])}},
+    )
+    assert LinearStore(client, records).relations("m") == [("a", "m"), ("b", "m"), ("m", "y"), ("m", "z")]
+    assert client.calls[1:] == [
+        ("IssueRelationsPage", {"id": "m", "after": "r1"}),
+        ("IssueInverseRelationsPage", {"id": "m", "after": "i1"}),
+    ]
 
 
 OTHER = "7c1d2e3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
@@ -378,19 +389,6 @@ def test_an_unknown_identifier_refuses_before_any_write(records: LocalRecords) -
     with pytest.raises(Refusal, match="ACME-99"):
         LinearStore(client, records).relate("ACME-99", UUID)
     assert client.names == ["Issue"]
-
-
-def test_issue_reads_ask_linear_for_a_full_page(records: LocalRecords) -> None:
-    client = FakeClient(
-        Issue={"issue": ISSUE_NODE},
-        IssueRelations={"issue": relations_node()},
-    )
-    store = LinearStore(client, records)
-    store.issue(UUID)
-    store.relations(UUID)
-    for document in client.documents:
-        assert f"(first: {queries.PAGE_SIZE}" in document
-    assert client.documents[1].count(f"(first: {queries.PAGE_SIZE})") == 2
 
 
 PROJECT_NODE = {
@@ -503,17 +501,17 @@ def test_team_projects_queries_the_team_and_maps_nodes(records: LocalRecords) ->
         TeamProjects={"team": {"projects": {"nodes": [PROJECT_NODE], "pageInfo": DONE}}},
     )
     assert LinearStore(client, records).team_projects("ACME") == [PROJECT]
-    assert client.calls[1] == ("TeamProjects", {"id": TEAM_ID})
-    assert f"(first: {queries.PAGE_SIZE})" in client.documents[1]
+    assert client.calls[1] == ("TeamProjects", {"id": TEAM_ID, "after": None})
 
 
-def test_team_projects_overflow_refuses(records: LocalRecords) -> None:
+def test_team_projects_read_across_pages(records: LocalRecords) -> None:
+    later = {**PROJECT_NODE, "id": "proj-2"}
     client = FakeClient(
         TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
-        TeamProjects={"team": {"projects": {"nodes": [], "pageInfo": MORE}}},
+        TeamProjects=[{"team": {"projects": page([PROJECT_NODE], "p1")}}, {"team": {"projects": page([later])}}],
     )
-    with pytest.raises(Refusal, match=rf"ACME.*more than {queries.PAGE_SIZE}"):
-        LinearStore(client, records).team_projects("ACME")
+    assert [p["id"] for p in LinearStore(client, records).team_projects("ACME")] == ["proj-1", "proj-2"]
+    assert client.calls[2] == ("TeamProjects", {"id": TEAM_ID, "after": "p1"})
 
 
 def test_set_project_dates_sends_both_dates_and_null_clears(records: LocalRecords) -> None:
@@ -560,7 +558,6 @@ def test_project_issues_maps_nodes_with_state(records: LocalRecords) -> None:
         }
     ]
     assert client.calls == [("ProjectIssues", {"id": "proj-1", "after": None})]
-    assert f"(first: {queries.PAGE_SIZE})" in client.documents[0]
     assert "completedAt" in client.documents[0]
 
 
@@ -595,23 +592,16 @@ def test_project_issues_read_across_pages(records: LocalRecords) -> None:
     assert client.calls[1] == ("ProjectIssues", {"id": "proj-1", "after": "c1"})
 
 
-def test_project_issues_label_overflow_refuses(records: LocalRecords) -> None:
-    node = {
-        "id": UUID,
-        "identifier": "ACME-5",
-        "number": 5,
-        "branchName": "acme-5-t",
-        "title": "T",
-        "description": "",
-        "team": {"key": "ACME"},
-        "state": {"name": "Done"},
-        "completedAt": None,
-        "assignee": None,
-        "labels": {"nodes": [], "pageInfo": MORE},
-    }
-    client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [node], "pageInfo": DONE}}})
-    with pytest.raises(Refusal, match=rf"{UUID}.*more than {queries.PAGE_SIZE}"):
-        LinearStore(client, records).project_issues("proj-1")
+def test_project_issues_read_labels_past_the_nested_page(records: LocalRecords) -> None:
+    first = [{"id": f"l{n}", "name": f"label-{n}"} for n in range(10)]
+    node = {**issue_node(5), "labels": page(first, "c1")}
+    client = FakeClient(
+        ProjectIssues={"project": {"issues": page([node])}},
+        IssueLabels={"issue": {"labels": page([{"id": "l10", "name": "label-10"}])}},
+    )
+    found = LinearStore(client, records).project_issues("proj-1")
+    assert found[0]["labels"] == [f"label-{n}" for n in range(11)]
+    assert client.calls[1] == ("IssueLabels", {"id": "id-5", "after": "c1"})
 
 
 def test_project_issues_of_a_missing_project_is_empty(records: LocalRecords) -> None:
@@ -636,6 +626,17 @@ def test_repository_labels_lists_the_children_of_the_group(records: LocalRecords
         TeamLabels={"team": {"labels": {"nodes": nodes, "pageInfo": DONE}}},
     )
     assert LinearStore(client, records).repository_labels("ACME") == ["widgets"]
+
+
+def test_repository_labels_read_across_pages(records: LocalRecords) -> None:
+    group = {"id": "g", "name": "Repository", "isGroup": True, "parent": None}
+    child = {"id": "l1", "name": "widgets", "isGroup": False, "parent": {"name": "Repository"}}
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        TeamLabels=[{"team": {"labels": page([group], "t1")}}, {"team": {"labels": page([child])}}],
+    )
+    assert LinearStore(client, records).repository_labels("ACME") == ["widgets"]
+    assert client.calls[2] == ("TeamLabels", {"id": TEAM_ID, "after": "t1"})
 
 
 def test_issue_carries_the_assignee(records: LocalRecords) -> None:

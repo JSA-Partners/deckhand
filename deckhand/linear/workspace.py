@@ -47,7 +47,7 @@ class Workspace:
             return None
         team = dict(nodes[0])
         team["states"] = self._page(queries.TEAM_STATES, team["id"], "states")
-        team["labels"] = self._page(queries.TEAM_LABELS, team["id"], "labels")
+        team["labels"] = {"nodes": self._team_labels(team["id"])}
         team["gitAutomationStates"] = self._page(queries.TEAM_AUTOMATION, team["id"], "gitAutomationStates")
         team["projectLabels"] = self._workspace_project_labels()
         return team
@@ -57,6 +57,16 @@ class Workspace:
         if connection["pageInfo"]["hasNextPage"]:
             raise Refusal(f"the workspace has more than {queries.PAGE_SIZE} project labels; setup cannot plan safely")
         return connection
+
+    def _team_labels(self, team_id: str) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        after = None
+        while True:
+            page = self._client.query(queries.TEAM_LABELS, {"id": team_id, "after": after})["team"]["labels"]
+            nodes += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                return nodes
+            after = page["pageInfo"]["endCursor"]
 
     def _page(self, document: str, team_id: str, field: str) -> dict[str, Any]:
         connection = self._client.query(document, {"id": team_id})["team"][field]

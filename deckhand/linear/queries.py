@@ -5,13 +5,19 @@ PAGE = f"(first: {PAGE_SIZE})"
 MORE = "pageInfo { hasNextPage }"
 CURSOR = "pageInfo { hasNextPage endCursor }"
 AFTER = f"(first: {PAGE_SIZE}, after: $after)"
+ISSUE_PAGE = 50
+ISSUE_LABEL_PAGE = 20
+NESTED_LABEL_PAGE = 10
+RELATION_PAGE = 50
+TEAM_PROJECT_PAGE = 50
+TEAM_LABEL_PAGE = 100
 PROJECT_LABEL_LIMIT = 10
 PROJECT_LABEL_PAGE = f"(first: {PROJECT_LABEL_LIMIT})"
 PROJECT_LABELS_FIELD = f"labels{PROJECT_LABEL_PAGE} {{ nodes {{ name }} {MORE} }}"
 
 TEAM_ID = """
 query TeamId($key: String!) {
-  teams(filter: { key: { eq: $key } }) { nodes { id } }
+  teams(first: 1, filter: { key: { eq: $key } }) { nodes { id } }
 }
 """
 
@@ -35,15 +41,24 @@ query Issue($id: String!) {{
     team {{ key }}
     project {{ id }}
     assignee {{ id name }}
-    labels{PAGE} {{ nodes {{ id name }} {MORE} }}
+    labels(first: {ISSUE_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
   }}
 }}
 """
 
+ISSUE_LABELS = f"""
+query IssueLabels($id: String!, $after: String) {{
+  issue(id: $id) {{ labels(first: {ISSUE_LABEL_PAGE}, after: $after) {{ nodes {{ id name }} {CURSOR} }} }}
+}}
+"""
+
 TEAM_PROJECTS = f"""
-query TeamProjects($id: String!) {{
+query TeamProjects($id: String!, $after: String) {{
   team(id: $id) {{
-    projects{PAGE} {{ nodes {{ id name description startDate targetDate {PROJECT_LABELS_FIELD} }} {MORE} }}
+    projects(first: {TEAM_PROJECT_PAGE}, after: $after) {{
+      nodes {{ id name description startDate targetDate {PROJECT_LABELS_FIELD} }}
+      {CURSOR}
+    }}
   }}
 }}
 """
@@ -75,7 +90,7 @@ mutation ProjectLabelCreate($input: ProjectLabelCreateInput!) {
 PROJECT_ISSUES = f"""
 query ProjectIssues($id: String!, $after: String) {{
   project(id: $id) {{
-    issues{AFTER} {{
+    issues(first: {ISSUE_PAGE}, after: $after) {{
       nodes {{
         id
         identifier
@@ -87,7 +102,7 @@ query ProjectIssues($id: String!, $after: String) {{
         state {{ name }}
         completedAt
         assignee {{ id name }}
-        labels{PAGE} {{ nodes {{ name }} {MORE} }}
+        labels(first: {NESTED_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
       }}
       {CURSOR}
     }}
@@ -123,8 +138,24 @@ ISSUE_RELATIONS = f"""
 query IssueRelations($id: String!) {{
   issue(id: $id) {{
     id
-    relations{PAGE} {{ nodes {{ type relatedIssue {{ id }} }} {MORE} }}
-    inverseRelations{PAGE} {{ nodes {{ type issue {{ id }} }} {MORE} }}
+    relations(first: {RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}
+    inverseRelations(first: {RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}
+  }}
+}}
+"""
+
+ISSUE_RELATIONS_PAGE = f"""
+query IssueRelationsPage($id: String!, $after: String) {{
+  issue(id: $id) {{
+    relations(first: {RELATION_PAGE}, after: $after) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}
+  }}
+}}
+"""
+
+ISSUE_INVERSE_RELATIONS_PAGE = f"""
+query IssueInverseRelationsPage($id: String!, $after: String) {{
+  issue(id: $id) {{
+    inverseRelations(first: {RELATION_PAGE}, after: $after) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}
   }}
 }}
 """
@@ -182,9 +213,9 @@ query TeamStates($id: String!) {{
 """
 
 TEAM_LABELS = f"""
-query TeamLabels($id: String!) {{
+query TeamLabels($id: String!, $after: String) {{
   team(id: $id) {{
-    labels{PAGE} {{ nodes {{ id name isGroup parent {{ name }} }} {MORE} }}
+    labels(first: {TEAM_LABEL_PAGE}, after: $after) {{ nodes {{ id name isGroup parent {{ name }} }} {CURSOR} }}
   }}
 }}
 """
