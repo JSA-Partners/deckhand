@@ -5,7 +5,6 @@ from typing import Any
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
 from deckhand.linear.workspace import GROUP
-from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
@@ -196,18 +195,8 @@ class LinearStore(Store):
         return self._records.records(issue)
 
     def relate(self, blocker: str, blocked: str) -> None:
-        blocker, blocked = self._uuid(blocker), self._uuid(blocked)
-        relation = {
-            "id": create_id(blocker, f"blocks {blocked}"),
-            "issueId": blocker,
-            "relatedIssueId": blocked,
-            "type": "blocks",
-        }
-        try:
-            self._client.query(queries.RELATION_CREATE, {"input": relation})
-        except DuplicateId as error:
-            if error.entity != "IssueRelation":
-                raise
+        relation = {"issueId": self._uuid(blocker), "relatedIssueId": self._uuid(blocked), "type": "blocks"}
+        self._client.query(queries.RELATION_CREATE, {"input": relation})
 
     def relations(self, issue: str) -> list[tuple[str, str]]:
         try:

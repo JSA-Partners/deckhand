@@ -321,7 +321,7 @@ def through_main(tmp_path, monkeypatch: pytest.MonkeyPatch):
             return b""
 
     class Connection:
-        def __init__(self, host: str, timeout: float) -> None:
+        def __init__(self, host: str, port: int | None = None, timeout: float | None = None) -> None:
             pass
 
         def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:

@@ -7,7 +7,7 @@ import pytest
 
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearError
-from deckhand.ops import create_id, ensure_relation
+from deckhand.ops import ensure_relation
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
@@ -283,30 +283,9 @@ def test_put_record_sends_nothing_to_linear(tmp_path: Path) -> None:
 def test_relate_sends_blocker_as_issue_and_blocked_as_related(records: LocalRecords) -> None:
     client = FakeClient(IssueRelationCreate={"issueRelationCreate": {"success": True}})
     LinearStore(client, records).relate("a", "b")
-    relation = {"id": create_id("a", "blocks b"), "issueId": "a", "relatedIssueId": "b", "type": "blocks"}
-    assert client.calls == [("IssueRelationCreate", {"input": relation})]
-
-
-def test_relate_sends_the_same_id_for_the_same_pair(records: LocalRecords) -> None:
-    client = FakeClient(IssueRelationCreate={"issueRelationCreate": {"success": True}})
-    store = LinearStore(client, records)
-    store.relate("a", "b")
-    store.relate("a", "c")
-    store.relate("a", "b")
-    ids = [variables["input"]["id"] for _, variables in client.calls]
-    assert ids[0] == ids[2] != ids[1]
-
-
-def test_relate_a_relation_already_created_is_done(records: LocalRecords) -> None:
-    client = FakeClient(IssueRelationCreate=duplicate("IssueRelation"))
-    LinearStore(client, records).relate("a", "b")
-    assert client.names == ["IssueRelationCreate"]
-
-
-def test_relate_other_duplicate_entity_propagates(records: LocalRecords) -> None:
-    client = FakeClient(IssueRelationCreate=duplicate("Issue"))
-    with pytest.raises(DuplicateId):
-        LinearStore(client, records).relate("a", "b")
+    assert client.calls == [
+        ("IssueRelationCreate", {"input": {"issueId": "a", "relatedIssueId": "b", "type": "blocks"}})
+    ]
 
 
 def test_relations_reads_both_directions_blocks_only_sorted(records: LocalRecords) -> None:
