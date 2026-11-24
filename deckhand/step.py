@@ -27,7 +27,8 @@ HAND_APPLIES: dict[str, Callable[[list[str]], bool]] = {
     "after": _any,
     "spike": _any,
     "draft": lambda rest: "take" not in rest,
-    "hook": lambda rest: rest[:1] in (["session"], ["permission"]),
+    "mail": _any,
+    "hook": lambda rest: rest[:1] in (["session"], ["permission"], ["stop"]),
 }
 UNREFERENCED = ("hook",)
 

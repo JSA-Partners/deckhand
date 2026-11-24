@@ -83,7 +83,7 @@ def _second(story: dict, records: list[Record], policy_for: Callable[[dict], Pol
     return [_story_item(signoff.SECOND, 0, story, sign.at, lines, next, head)]
 
 
-def _finding_line(records: list[Record], finding: str) -> tuple[str, str]:
+def finding_line(records: list[Record], finding: str) -> tuple[str, str]:
     found = review.locate(records, finding)
     if found is None:
         return "", f"finding {finding}"
@@ -96,7 +96,7 @@ def _findings(story: dict, records: list[Record]) -> list[Item]:
     proposed = set()
     for proposal in asks.open_proposals(records):
         proposed.add(proposal.subject)
-        _, line = _finding_line(records, proposal.subject)
+        _, line = finding_line(records, proposal.subject)
         lines = [line, f"the hand proposes to decline it: {proposal.data.get('reason', '')}"]
         next = [f"decide context finding {ref} --finding {proposal.subject}"]
         found.append(_story_item(review.DECISION, 1, story, proposal.at, lines, next))
@@ -104,7 +104,7 @@ def _findings(story: dict, records: list[Record]) -> list[Item]:
         for finding in review.undecided_delivery(records, story["id"], stage):
             if finding["id"] in proposed:
                 continue
-            at, line = _finding_line(records, finding["id"])
+            at, line = finding_line(records, finding["id"])
             lines = [line, "it changes what the story delivers"]
             next = [f"decide context finding {ref} --finding {finding['id']}"]
             found.append(_story_item(review.DECISION, 1, story, at, lines, next))

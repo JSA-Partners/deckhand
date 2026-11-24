@@ -7,11 +7,11 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from deckhand import answers, gh, git, implplan, inputs, ops, quiz, review, signoff, tuicr, versions
+from deckhand import answers, gh, git, implplan, inputs, ops, quiz, review, signoff, tuicr, versions, wakes
 from deckhand.checks import KIND as CHECKS
 from deckhand.checks import passing
 from deckhand.records import Record
-from deckhand.step import Refusal, register, team_key
+from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep, branch_of
 from deckhand.store import Store
 from deckhand.summary import ChangeSummary, parse_summary
@@ -112,6 +112,9 @@ class Signoff(StoryStep):
         lines += [f"{n} {name}: {status[name]}" for n, name in enumerate(SCREENS, start=1)]
         lines += ["missing:", *(f"- {m}" for m in missing)] if missing else ["signed off at this head"]
         found = {"story": at.story["identifier"], "head": head, "screens": status, "missing": missing}
+        if hand_role():
+            found["unfixed"] = review.unfixed(at.records)
+            lines += wakes.unfixed_lines(at.records)
         return found | {"comments": comments, "lines": lines}
 
     def _screen(self, at: Located, n: int) -> dict:

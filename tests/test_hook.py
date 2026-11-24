@@ -351,3 +351,50 @@ def test_permission_gap_recorded_once_the_next_feature_opens(monkeypatch, tmp_pa
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
     hook_with(monkeypatch, store, ["permission"], GAP)
     assert len(store.records("s1")) == 1
+
+
+def test_hooks_json_runs_the_stop_hook_on_every_turn_end():
+    from tests.conftest import ROOT
+
+    [entry] = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["Stop"]
+    assert "matcher" not in entry
+    [command] = entry["hooks"]
+    assert command == {"type": "command", "command": '"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" hook apply stop'}
+
+
+def turn_ended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str | None) -> str | None:
+    from deckhand.steps.hook import Hook
+    from deckhand.store.state import LocalState
+
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    if role is None:
+        monkeypatch.delenv("DECKHAND_ROLE", raising=False)
+    else:
+        monkeypatch.setenv("DECKHAND_ROLE", role)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        rows.want("hand-ACME-1", "ACME-1", "s1", "story", str(tmp_path))
+    Hook(Raising()).apply(["stop"])
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        return rows.hands()["hand-ACME-1"].turn_ended
+
+
+def test_hook_stop_marks_the_turn_end_for_a_hand(monkeypatch, tmp_path: Path, capsys):
+    assert turn_ended(tmp_path, monkeypatch, "hand") is not None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
+@pytest.mark.parametrize("role", ["captain", None])
+def test_hook_stop_outside_a_hand_writes_nothing(monkeypatch, tmp_path: Path, capsys, role):
+    assert turn_ended(tmp_path, monkeypatch, role) is None
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
+def test_a_hand_may_apply_the_stop_hook(monkeypatch):
+    from deckhand.step import hand_may_apply
+
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    assert hand_may_apply("hook", ["stop"])

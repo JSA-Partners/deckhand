@@ -283,3 +283,18 @@ def test_merge_context_of_a_merged_story_names_its_after_merge_work(capsys: pyte
     assert capsys.readouterr().out.splitlines() == [
         "ACME-1 has merged; do its after-merge items from deckhand after context ACME-1"
     ]
+
+
+def test_merge_context_lists_unfixed_findings_once_signed_for_a_hand(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    from tests.test_step_signoff import UNFIXED, as_hand, with_unfixed
+
+    store = with_unfixed(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    capsys.readouterr()
+    Merge(store, Shell(), repo).context(["s1", *TEAM])
+    assert UNFIXED not in capsys.readouterr().out.splitlines()
+    as_hand(tmp_path, repo, monkeypatch)
+    Merge(store, Shell(), repo).context(["s1", *TEAM])
+    assert capsys.readouterr().out.splitlines()[1:] == [UNFIXED]

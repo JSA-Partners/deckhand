@@ -6,16 +6,18 @@ import json
 import os
 import sys
 
-from deckhand import answers, decisions, features, gaps, launch, ops, spec
+from deckhand import answers, decisions, features, fleet, gaps, launch, ops, spec
 from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
 from deckhand.steps.captain import Captain
 from deckhand.store import Store
+from deckhand.store.local import default_path
+from deckhand.store.state import LocalState
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
-USAGE = "hook apply answer|ask|permission reads one hook event as JSON on stdin; hook apply session reads none"
+USAGE = "hook apply answer|ask|permission reads one hook event as JSON on stdin; hook apply session|stop reads none"
 
 
 def _read() -> dict:
@@ -86,6 +88,12 @@ class Hook(StoryStep):
             (self._captain or Captain()).context([])
         print(buffer.getvalue(), end="")
 
+    def _stop(self) -> None:
+        ref = os.environ.get("DECKHAND_STORY", "")
+        if hand_role() and ref:
+            with LocalState(default_path()) as rows:
+                rows.turn_ended(fleet.hand_name(ref))
+
     def _permission(self, hook_input: dict) -> None:
         ref = os.environ.get("DECKHAND_STORY", "")
         if not hand_role() or not ref:
@@ -111,6 +119,9 @@ class Hook(StoryStep):
         try:
             if action == "session":
                 self._session()
+                return
+            if action == "stop":
+                self._stop()
                 return
             hook_input = _read()
             if action == "permission":

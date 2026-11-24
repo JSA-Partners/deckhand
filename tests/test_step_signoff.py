@@ -801,3 +801,40 @@ def test_a_finding_left_open_in_an_earlier_round_stays_the_persons(
     assert f"{_id(left)} is a P3 the hand left open" in missing
     assert f"{plan_left} is a P2 the hand left open" in missing
     assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
+
+
+OPEN = raw(path="cart.py", line=12, summary="The total skips tax.", fix="Add the tax line.")
+UNFIXED = "accepted, not yet fixed: P2 correctness cart.py:12 The total skips tax. Fix: Add the tax line."
+
+
+def as_hand(tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = tmp_path / "isolated-config"
+    config.mkdir(exist_ok=True)
+    (config / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+
+
+def with_unfixed(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> FakeStore:
+    store = ready(tmp_path, repo, state, capsys)
+    branch_round(store, raw(), OPEN, n=2)
+    for each in (raw(), OPEN):
+        found = review.finding_id(review.parse_findings(json.dumps([each]))[0], "branch")
+        store.put_record("s1", Record(review.DECISION, found, "hash2", "person:pat", {"answer": review.ACCEPT}))
+    return store
+
+
+def test_signoff_and_merge_contexts_list_unfixed_findings_for_a_hand(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    store = with_unfixed(tmp_path, repo, state, capsys)
+    assert "unfixed" not in overview(store, repo, capsys)
+    Signoff(store, Shell(), repo).context(["s1", *TEAM])
+    assert UNFIXED not in capsys.readouterr().out.splitlines()
+    as_hand(tmp_path, repo, monkeypatch)
+    shown = overview(store, repo, capsys)
+    assert [f["summary"] for f in shown["unfixed"]] == ["The total skips tax."]
+    Signoff(store, Shell(), repo).context(["s1", *TEAM])
+    assert capsys.readouterr().out.splitlines().count(UNFIXED) == 1
+    Merge(store, Shell(), repo).context(["s1", *TEAM])
+    lines = capsys.readouterr().out.splitlines()
+    assert lines == ["ACME-1: the person has not signed off", UNFIXED]

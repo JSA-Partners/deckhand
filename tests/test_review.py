@@ -223,3 +223,16 @@ def test_feature_gaps_need_the_current_target_while_a_round_is_left():
     ]
     capped = [feature(n, f"h{n}") for n in (1, 2, 3)]
     assert review.feature_gaps("p1", capped, "h4") == []
+
+
+def person(finding: str, answer: str = review.ACCEPT) -> Record:
+    return Record(review.DECISION, finding, "h1", "person:pat", {"answer": answer})
+
+
+def test_unfixed_lists_person_accepted_findings_without_a_hand_fix():
+    first, second, third, fourth = (raw(summary=s) for s in ("first", "second", "third", "fourth"))
+    records = [done(1, "h1", first, second), done(2, "h2", second, third, fourth)]
+    records += [person(id_of(third)), person(id_of(first)), person(id_of(second)), person(id_of(fourth), "Decline")]
+    records.append(review.accept_record(id_of(second), "h2"))
+    assert [f["summary"] for f in review.unfixed(records)] == ["first", "third"]
+    assert review.unfixed([done(1, "h1", first), review.accept_record(id_of(first), "h1")]) == []
