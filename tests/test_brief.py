@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from deckhand import brief
+from deckhand.linear.meter import clock
 from deckhand.records import iso
 
 
@@ -175,6 +176,18 @@ def test_line_is_empty_with_no_feature():
 
 def test_line_for_a_stale_file():
     assert brief.line(held([], written_at=at(12), stale_since=at(10)), NOW, brief.UNICODE) == "○ captain stale 12m"
+
+
+def test_a_long_rate_limit_pause_names_its_end_not_a_stale_captain():
+    until = NOW + 20 * 60
+    for extra in ({}, {"stale_since": at(40)}):
+        found = held([], written_at=at(45), limited_until=iso(int(until * 1000)), **extra)
+        assert brief.line(found, NOW, brief.UNICODE) == f"○ Linear limited until {clock(until)}"
+
+
+def test_a_lifted_limit_is_not_shown():
+    found = held([], written_at=at(45), limited_until=at(1))
+    assert brief.line(found, NOW, brief.UNICODE) == "○ captain stale 45m"
 
 
 def test_line_for_an_old_file():

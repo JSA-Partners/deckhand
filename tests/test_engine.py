@@ -844,3 +844,15 @@ def test_the_snapshot_counts_a_slot_reserved_for_a_resume(rig: Rig):
     rig.step()
     rig.step()
     assert rig.shown()["slots"]["used"] == 1
+
+
+def test_the_snapshot_names_a_rate_limit_until_it_lifts(rig: Rig):
+    rig.ready()
+    rig.step()
+    assert rig.shown().get("limited_until") is None
+    kept_budget(rig, until=rig.clock() + 600)
+    rig.step()
+    assert rig.shown()["limited_until"] == iso(int((rig.clock() + 599) * 1000))
+    for _ in range(25):
+        rig.step(25)
+    assert rig.shown()["limited_until"] is None

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from deckhand import standing
+from deckhand.linear.meter import clock
 
 LINE_LIMIT = 50
 LINE_STALE_SECONDS = 30 * 60
@@ -177,6 +178,9 @@ def _line_parts(status: dict, now: float, g: Glyphs, entries: list[standing.Entr
 def segment(
     status: dict, since: float | None, now: float, g: Glyphs, entries: list[standing.Entry] | None = None
 ) -> tuple[str, str, str]:
+    limited = standing.timestamp(standing.text(status, "limited_until"))
+    if limited is not None and limited > now:
+        return g.queued, f"Linear limited until {clock(limited)}", "stale"
     if since is None or status.get("stale_since") or since > LINE_STALE_SECONDS:
         return g.queued, f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
     if unknown(status):

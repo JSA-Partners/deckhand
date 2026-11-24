@@ -108,6 +108,7 @@ class Engine:
         self._idle: frozenset[str] = frozenset()
         self._idle_read: frozenset[str] = frozenset()
         self._used: int | None = None
+        self._limit_shown: str | None = None
 
     def tick(self) -> None:
         now = self._clock()
@@ -130,6 +131,7 @@ class Engine:
         changed = self._state.changed()
         self._budget = budget.kept(self._state)
         hands = self._state.hands()
+        self._show_limit(now)
         linked = self._take_link(now)
         self._poke_on_turn_end(hands, now)
         busy = self._collect(now)
@@ -174,6 +176,17 @@ class Engine:
         if previous is not None:
             self._write(status.stale(previous, self._iso(now)), previous)
         return False
+
+    def _limit(self, now: float) -> str | None:
+        until = self._budget.until
+        return self._iso(until) if until is not None and self._budget.limited(now) else None
+
+    def _show_limit(self, now: float) -> None:
+        limit = self._limit(now)
+        previous = status.get(self._state) if limit != self._limit_shown else None
+        if previous is not None:
+            self._write(previous | {"limited_until": limit}, previous)
+            self._limit_shown = limit
 
     def _poke_on_turn_end(self, hands: dict[str, HandRow], now: float) -> None:
         ended = max((epoch(row.turn_ended) for row in hands.values() if row.turn_ended), default=0.0)
@@ -268,6 +281,7 @@ class Engine:
         shown = status.snapshot(
             self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle, slots
         )
+        shown["limited_until"] = self._limit_shown = self._limit(now)
         if self._newest is not None and self._newest.error:
             shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)
         self._write(shown, previous)
