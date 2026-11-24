@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from deckhand import asks
+from deckhand import asks, review
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 
@@ -109,6 +109,40 @@ def test_wake_due_only_for_a_decision_this_story_s_hand_waits_on():
     assert asks.wake_due([start, unasked], "s1") is None
     elsewhere = stamped("sign-off", "2026-11-19T10:10:00.000Z", "person:s1", "s2")
     assert asks.wake_due([start, elsewhere], "s1") is None
+
+
+def test_a_proposal_on_a_p1_waived_at_the_cap_is_no_longer_open():
+    p1 = review.parse_findings(
+        json.dumps(
+            [
+                {
+                    "lens": "correctness",
+                    "severity": "P1",
+                    "path": "a.py",
+                    "line": 1,
+                    "summary": "Late.",
+                    "fix": "f",
+                    "evidence": "e",
+                    "confidence": 0.9,
+                    "changes_delivery": True,
+                }
+            ]
+        )
+    )
+    rounds = [
+        review.round_record("s1", "branch", review.RoundPlan(n, n > 1, ""), f"h{n}", p1, f"c{n}") for n in (1, 2, 3)
+    ]
+    finding = rounds[0].data["findings"][0]["id"]
+    proposal = asks.proposal_record(finding, "h1", "out of scope")
+    proceed = Record(
+        review.CAP_DECISION,
+        review.cap_subject(rounds[-1]),
+        review.cap_version(rounds[-1]),
+        "person:pat",
+        {"answer": review.PROCEED},
+    )
+    assert asks.open_proposals([*rounds, proposal]) == [proposal]
+    assert asks.open_proposals([*rounds, proposal, proceed]) == []
 
 
 def test_open_proposals_are_those_without_a_person_decision():

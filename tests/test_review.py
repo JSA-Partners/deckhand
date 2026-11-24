@@ -276,6 +276,15 @@ def test_a_delivery_finding_without_a_person_decision_is_undecided():
     assert review.undecided_delivery([*records, person], "s1", "plan") == []
 
 
+def test_a_delivery_p1_waived_at_the_cap_is_no_longer_undecided():
+    delivery = raw(severity="P1", changes_delivery=True)
+    rounds = [done(n, f"h{n}", delivery) for n in (1, 2, 3)]
+    records = [*rounds, proceed_at(rounds[-1])]
+    assert review.undecided_delivery(records, "s1", "plan") == []
+    assert review.delivery_gaps(records, "s1", "plan") == []
+    assert review.undecided_delivery(rounds, "s1", "plan") != []
+
+
 def test_delivery_gaps_split_by_who_acts():
     delivery = raw(changes_delivery=True)
     records = [done(1, "h1", delivery)]

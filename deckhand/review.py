@@ -224,9 +224,9 @@ def reviewed_count(rounds: list[Record]) -> int:
 
 def undecided_delivery(records: list[Record], story: str, stage: str) -> list[dict]:
     held, _ = counted(records, f"{story}:{stage}")
-    by_person = decided(records)
+    settled = set(decided(records)) | waived(records, f"{story}:{stage}")
     found = {f["id"]: f for r in held for f in r.data["findings"] if f.get("changes_delivery")}
-    return [f for id, f in found.items() if id not in by_person]
+    return [f for id, f in found.items() if id not in settled]
 
 
 def delivery_line(item: dict) -> str:
@@ -325,6 +325,11 @@ def waived(records: list[Record], prefix: str) -> set[str]:
     pinned = {r.version for r in _cap_answers(records, cap_subject(story, stage), PROCEED)}
     rounds = [r for r in counted(records, prefix)[0] if cap_version(r) in pinned]
     return {f["id"] for r in rounds for f in open_p1(r, declined(records))}
+
+
+def waived_anywhere(records: list[Record]) -> set[str]:
+    prefixes = dict.fromkeys(r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND)
+    return {id for prefix in prefixes for id in waived(records, prefix)}
 
 
 def excused(records: list[Record], prefix: str) -> set[str]:

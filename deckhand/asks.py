@@ -94,7 +94,7 @@ def proposed_answer(proposal: Record) -> str:
 
 
 def open_proposals(records: list[Record]) -> list[Record]:
-    settled = review.decided(records)
+    settled = set(review.decided(records)) | review.waived_anywhere(records)
     newest = {r.subject: r for r in records if r.kind == PROPOSAL and r.subject not in settled}
     return [r for r in records if newest.get(r.subject) is r]
 
