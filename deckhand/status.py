@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 from deckhand import fleet, standing
 from deckhand.queue import Item
 from deckhand.records import content_hash
+from deckhand.step import Refusal
+from deckhand.store.state import LocalState
 
-FILE = "captain.json"
+SNAPSHOT = "snapshot"
 SHAPE = 1
 
 
@@ -19,7 +19,7 @@ def item_key(item: Item) -> str:
 
 def _item(item: Item) -> dict:
     keys = {"key": item_key(item), "kind": item.kind, "ref": item.ref, "title": item.title}
-    return keys | {"since": item.at or None, "next": item.next, "head": item.head or None}
+    return keys | {"since": item.at or None, "next": item.next, "head": item.head or None, "lines": item.lines}
 
 
 def _hands(sessions: list[fleet.Session]) -> list[dict]:
@@ -59,17 +59,12 @@ def snapshot(
     }
 
 
+def _state(state: Path) -> LocalState:
+    return LocalState(state / "deckhand.db")
+
+
 def write(state: Path, status: dict) -> None:
-    state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    state.chmod(0o700)
-    fd, temp = tempfile.mkstemp(dir=state, prefix=f".{FILE}.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(status, handle, indent=2)
-        os.replace(temp, state / FILE)
-    except BaseException:
-        Path(temp).unlink(missing_ok=True)
-        raise
+    _state(state).put(SNAPSHOT, status)
 
 
 def _strings(value: object) -> bool:
@@ -91,7 +86,8 @@ def _when(value: object) -> bool:
 def _item_ok(found: object) -> bool:
     if not isinstance(found, dict) or not all(isinstance(found.get(key), str) for key in ("key", "kind", "ref")):
         return False
-    return (found.get("since") is None or _when(found["since"])) and _maybe(found.get("head"), str)
+    timed = found.get("since") is None or _when(found["since"])
+    return timed and _maybe(found.get("head"), str) and _strings(found.get("lines", []))
 
 
 def _stage_ok(found: object) -> bool:
@@ -138,8 +134,8 @@ def _valid(found: dict) -> bool:
 
 def read(state: Path) -> dict | None:
     try:
-        found = json.loads((state / FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        found = _state(state).get(SNAPSHOT)
+    except (Refusal, ValueError):
         return None
     return found if isinstance(found, dict) and _valid(found) else None
 

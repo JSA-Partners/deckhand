@@ -16,22 +16,15 @@ from deckhand import (
     answers,
     board,
     brief,
-    claims,
     config,
-    features,
     fleet,
     frame,
     git,
     hosts,
-    order,
-    queue,
-    stage,
-    startable,
+    reading,
     status,
 )
-from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
-from deckhand.policy import Policy
 from deckhand.records import iso
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
@@ -73,69 +66,6 @@ def _local(notes: list[str]) -> config.LocalConfig:
         return config.LocalConfig()
 
 
-def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
-    try:
-        return features.current(store, team)
-    except Refusal as error:
-        notes.append(str(error))
-    return None
-
-
-def _budget(feature: Feature, today: date) -> dict | None:
-    budget = features.budget_of(feature.project, today)
-    if budget is None:
-        return None
-    note = features.phase(feature) is Phase.PLANNING and budget.planning_note
-    return {
-        "feature": feature.project["name"],
-        "days_used": budget.days_used,
-        "budget_days": budget.budget_days,
-        "planning_note": note,
-    }
-
-
-def _blockers(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict]) -> list[str]:
-    held = [by_id[blocker] for blocker, blocked in edges if blocked == story["id"] and blocker in by_id]
-    return sorted(s["identifier"] for s in held if s["state"] != order.DONE)
-
-
-def _build_order(store: Store, feature: Feature, me: str | None) -> tuple[list[dict], list[str]]:
-    edges = order.edges(store, feature)
-    by_id = {s["id"]: s for s in feature.live}
-    placed, cycle = order.build_order(feature.live, edges)
-    rows = [
-        {
-            "ref": s["identifier"],
-            "title": s["title"],
-            "state": s["state"],
-            "owner": s["assignee_name"],
-            "mine": me is None or s["assignee"] in (None, me),
-            "blocked_by": _blockers(s, edges, by_id),
-            "stage": stage.as_data(stage.of(s, feature.records.get(s["id"], []))),
-            "completed_at": s.get("completed_at"),
-        }
-        for s in placed
-    ]
-    return rows, cycle
-
-
-def _policy_for(notes: list[str], clones: dict[str, Path] | None = None) -> Callable[[dict], Policy]:
-    clones = clones if clones is not None else {}
-
-    def policy(story: dict) -> Policy:
-        clone = next((clones[label] for label in story["labels"] if label in clones), None)
-        try:
-            if clone is None:
-                raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
-            return Policy.load(clone)
-        except Refusal as error:
-            if str(error) not in notes:
-                notes.append(str(error))
-            return Policy("")
-
-    return policy
-
-
 @register("captain")
 class Captain:
     def __init__(
@@ -172,17 +102,17 @@ class Captain:
         local = _local(notes)
         state, alert = answers.state_dir(), None
         try:
-            feature = _current(store, team, notes)
-            me = self._me(notes)
-            waiting = self._waiting(store, team, feature, me, read, local, notes)
-            facts = self._facts(store, feature, waiting, read, me, local, notes)
+            found = reading.read(store, self._person_store, team, read, local, self._today())
         except LinearError as error:
             notes.append(str(error))
             shown = status.read(state)
             shown = status.stale(shown, self._now()) if shown is not None else None
-            facts = _stale(_empty(notes, read, local), shown)
+            facts = _stale(reading.empty(notes, read, local), shown)
         else:
-            shown = status.snapshot(self._now(), team, facts, waiting, read.sessions, status.read(state), me is None)
+            notes += found.notes[1 if read.note else 0 :]
+            facts = found.facts | {"notes": notes}
+            previous, unknown = status.read(state), found.me is None
+            shown = status.snapshot(self._now(), team, facts, found.waiting, read.sessions, previous, unknown)
             alert = brief.notify(shown, self._clock()) if parsed["brief"] and not parsed["json"] else None
             shown["notified"] += alert[1] if alert else []
         if shown is not None:
@@ -227,59 +157,15 @@ class Captain:
     def apply(self, args: list[str]) -> None:
         raise Refusal(f"captain has no apply; {USAGE}")
 
-    def _me(self, notes: list[str]) -> str | None:
-        try:
-            return claims.me(self._person_store())
-        except Refusal as error:
-            notes.append(str(error))
-        return None
-
     def _now(self) -> str:
         return iso(int(self._clock() * 1000))
-
-    def _waiting(
-        self,
-        store: Store,
-        team: str,
-        feature: Feature | None,
-        me: str | None,
-        read: fleet.Fleet,
-        local: config.LocalConfig,
-        notes: list[str],
-    ) -> list[queue.Item]:
-        if me is None:
-            return []
-        return queue.items(store, team, feature, me, read, _policy_for(notes, local.clones))
-
-    def _facts(
-        self,
-        store: Store,
-        feature: Feature | None,
-        waiting: list[queue.Item],
-        read: fleet.Fleet,
-        me: str | None,
-        local: config.LocalConfig,
-        notes: list[str],
-    ) -> dict:
-        top = waiting[0] if waiting else None
-        facts = _empty(notes, read, local) | {
-            "top": {"lines": top.lines, "next": top.next} if top else None,
-            "feature": feature.project["name"] if feature is not None else None,
-            "release": feature is not None and features.phase(feature) is Phase.RELEASED,
-        }
-        if feature is not None:
-            facts["budget"] = _budget(feature, self._today())
-            facts["order"], facts["cycle"] = _build_order(store, feature, me)
-            mine = [s for s in feature.live if me is not None and s["assignee"] == me]
-            facts["wake_due"] = [s["identifier"] for s in mine if startable.wake_due(feature, s) is not None]
-        return facts
 
 
 def _save(state: Path, found: dict, notes: list[str]) -> None:
     try:
         status.write(state, found)
-    except OSError as error:
-        notes.append(f"cannot write {state / status.FILE}: {error.strerror or error}")
+    except Refusal as error:
+        notes.append(f"cannot write the snapshot: {error}")
 
 
 def _board_command() -> str:
@@ -320,26 +206,6 @@ def _encoding() -> str | None:
 def _stale(facts: dict, shown: dict | None) -> dict:
     held = {key: shown[key] for key in ("feature", "budget", "release")} | {"order": shown["stories"]} if shown else {}
     return facts | held | {"unreachable": True}
-
-
-def _empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> dict:
-    return {
-        "notes": notes,
-        "unreachable": False,
-        "top": None,
-        "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
-        "feature": None,
-        "budget": None,
-        "order": [],
-        "cycle": [],
-        "release": False,
-        "watch": [s.name for _, s in _held(read) if fleet.busy(s)],
-        "wake_due": [],
-    }
-
-
-def _held(read: fleet.Fleet) -> list[tuple[str, fleet.Session]]:
-    return [*sorted(fleet.hands(read.sessions).items()), *sorted(fleet.spikes(read.sessions).items())]
 
 
 def _budget_line(budget: dict) -> str:

@@ -14,7 +14,7 @@ from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
 from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
-from deckhand.steps.captain import Captain, _policy_for
+from deckhand.steps.captain import Captain
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import setup
 from tests.test_queue import asked
@@ -153,7 +153,7 @@ def test_restart_prints_same_queue(clone: Path, state: Path, tmp_path: Path, cap
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text(json.dumps(store.snapshot()))
     restarted = FakeStore.from_snapshot(snapshot)
-    assert [p.name for p in state.iterdir()] == [status.FILE]
+    assert status.read(state) is not None
     assert output(restarted, [], capsys, shell=Shell(row("ACME-1", "working", "busy"))) == first
     assert "## ● ACME-1 needs you" in first.splitlines()
 
@@ -198,13 +198,6 @@ def test_missing_personal_key_degrades_to_a_note(clone: Path, capsys: pytest.Cap
     assert out.splitlines()[0].startswith(" ● personal key unreadable · run /deckhand:setup · updated")
     assert "   cannot tell what needs you: the personal Linear key could not be read; run /deckhand:setup" in out
     assert "nothing needs you" not in out
-
-
-def test_missing_clone_degrades_to_a_note():
-    notes: list[str] = []
-    policy = _policy_for(notes)({"labels": ["widgets"]})
-    assert policy.second_signoff is False
-    assert [n.startswith("no clone for widgets in ") for n in notes] == [True]
 
 
 def test_failed_fleet_read_prints_its_note(clone: Path, capsys: pytest.CaptureFixture[str]):
@@ -398,7 +391,8 @@ def test_a_failed_write_is_a_note(clone: Path, capsys: pytest.CaptureFixture[str
     answers.state_dir().parent.mkdir(parents=True, exist_ok=True)
     answers.state_dir().write_text("not a directory")
     text = output(owned(), [], capsys)
-    assert any(line.startswith(f"cannot write {answers.state_dir() / status.FILE}") for line in text.splitlines())
+    folder = answers.state_dir()
+    assert f"cannot write the snapshot: deckhand.db in the state folder {folder} cannot be opened" in text.splitlines()
     assert "slots 0 of 1" in text.splitlines()
 
 
@@ -407,8 +401,7 @@ def test_a_bad_notified_is_rewritten(clone: Path, notified: object, capsys: pyte
     store = owned()
     asked(store, "s1")
     output(store, [], capsys)
-    path = answers.state_dir() / status.FILE
-    path.write_text(json.dumps(json.loads(path.read_text()) | {"notified": notified}))
+    status.write(answers.state_dir(), written() | {"notified": notified})
     assert "## ● ACME-1 needs you" in output(store, [], capsys).splitlines()
     assert written()["notified"] == []
 

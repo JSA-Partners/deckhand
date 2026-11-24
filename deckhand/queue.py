@@ -285,15 +285,22 @@ def items(
     me: str,
     read: fleet.Fleet,
     policy_for: Callable[[dict], Policy],
+    *,
+    quiet: frozenset[str] = frozenset(),
 ) -> list[Item]:
     found = _after_merge(store, team, me)
     if feature is not None:
-        found += _feature_items(store, feature, me, read, policy_for)
+        found += _feature_items(store, feature, me, read, policy_for, quiet)
     return sorted(found, key=lambda i: (i.rank, -i.unblocks, i.at, i.ref))
 
 
 def _feature_items(
-    store: Store, feature: Feature, me: str, read: fleet.Fleet, policy_for: Callable[[dict], Policy]
+    store: Store,
+    feature: Feature,
+    me: str,
+    read: fleet.Fleet,
+    policy_for: Callable[[dict], Policy],
+    quiet: frozenset[str],
 ) -> list[Item]:
     building = features.phase(feature) is Phase.BUILDING
     rank = 2 if building else 4
@@ -311,7 +318,8 @@ def _feature_items(
                 second = second_due(story, records, policy_for) is not None
                 launch = STORY_HAND if building or story["state"] == order.DONE else DRAFT_HAND
                 found += _prompt(story, records, session, rank)
-                found += _stalled(story, records, session, rank, launch, second)
+                if story["identifier"] not in quiet:
+                    found += _stalled(story, records, session, rank, launch, second)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found]

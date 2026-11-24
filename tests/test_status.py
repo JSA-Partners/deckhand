@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import stat
 from pathlib import Path
 
 import pytest
@@ -9,6 +7,8 @@ import pytest
 from deckhand import fleet, status
 from deckhand.fleet import Session
 from deckhand.queue import Item
+from deckhand.step import Refusal
+from deckhand.store.state import LocalState
 
 AT = "2026-11-20T10:00:00.000Z"
 BUDGET = {"feature": "Alpha", "days_used": 4, "budget_days": 7, "planning_note": False}
@@ -56,6 +56,7 @@ def test_snapshot_shape():
                 "since": "2026-11-20T09:30:00.000Z",
                 "next": ["decide context question q1 --story ACME-1"],
                 "head": None,
+                "lines": ["ACME-1 Orders"],
             }
         ],
         "stories": [ROW],
@@ -96,14 +97,17 @@ def test_notified_keeps_the_keys_of_items_still_waiting():
     assert found["notified"] == [kept]
 
 
-def test_written_file_reads_back(tmp_path: Path):
+def test_the_snapshot_round_trips_through_sqlite(tmp_path: Path):
     state = tmp_path / "state"
     found = snapshot([question("q1")])
     status.write(state, found)
     assert status.read(state) == found
-    assert stat.S_IMODE(state.stat().st_mode) == 0o700
-    assert stat.S_IMODE((state / status.FILE).stat().st_mode) == 0o600
-    assert [p.name for p in state.iterdir()] == [status.FILE]
+    assert LocalState(state / "deckhand.db").get(status.SNAPSHOT) == found
+    assert not (state / "captain.json").exists()
+
+
+def test_a_snapshot_item_carries_its_lines():
+    assert snapshot([question("q1")])["items"][0]["lines"] == ["ACME-1 Orders"]
 
 
 def test_a_write_replaces_the_last_one(tmp_path: Path):
@@ -112,26 +116,17 @@ def test_a_write_replaces_the_last_one(tmp_path: Path):
     assert status.read(tmp_path)["items"] == []
 
 
-def test_a_failed_write_leaves_the_last_file_and_no_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    status.write(tmp_path, snapshot([question("q1")]))
-
-    def refuse(*_):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(status.os, "replace", refuse)
-    with pytest.raises(OSError):
-        status.write(tmp_path, snapshot([]))
-    assert len(status.read(tmp_path)["items"]) == 1
-    assert [p.name for p in tmp_path.iterdir()] == [status.FILE]
+def put(state: Path, body: object) -> None:
+    LocalState(state / "deckhand.db").put(status.SNAPSHOT, body)
 
 
-@pytest.mark.parametrize(
-    "content",
-    [None, b"", b"{not json", b"\xff\xfe", b"[]", json.dumps({"shape": 0}).encode(), json.dumps({}).encode()],
-)
-def test_read_is_none_unless_a_current_shape(tmp_path: Path, content: bytes | None):
-    if content is not None:
-        (tmp_path / status.FILE).write_bytes(content)
+@pytest.mark.parametrize("content", [[], {"shape": 0}, {}])
+def test_read_is_none_unless_a_current_shape(tmp_path: Path, content: object):
+    put(tmp_path, content)
+    assert status.read(tmp_path) is None
+
+
+def test_read_is_none_without_a_snapshot(tmp_path: Path):
     assert status.read(tmp_path) is None
 
 
@@ -148,6 +143,25 @@ def test_read_is_none_without_notified(tmp_path: Path):
     assert status.read(tmp_path) is None
 
 
-def test_read_is_none_when_unreadable(tmp_path: Path):
-    (tmp_path / status.FILE).mkdir()
+def test_read_is_none_when_lines_are_not_strings(tmp_path: Path):
+    found = snapshot([question("q1")])
+    found["items"][0]["lines"] = [1]
+    status.write(tmp_path, found)
     assert status.read(tmp_path) is None
+
+
+@pytest.mark.parametrize("content", [b"not a database, just some bytes" * 100, b"\x00"])
+def test_read_is_none_when_the_database_is_unreadable(tmp_path: Path, content: bytes):
+    (tmp_path / "deckhand.db").write_bytes(content)
+    assert status.read(tmp_path) is None
+
+
+def test_read_is_none_when_the_state_folder_is_a_file(tmp_path: Path):
+    (tmp_path / "state").write_text("not a folder")
+    assert status.read(tmp_path / "state") is None
+
+
+def test_a_write_to_a_state_folder_that_is_a_file_refuses(tmp_path: Path):
+    (tmp_path / "state").write_text("not a folder")
+    with pytest.raises(Refusal):
+        status.write(tmp_path / "state", snapshot([]))
