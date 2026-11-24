@@ -328,3 +328,25 @@ def test_sandbox_write_holding_a_path_dir_refuses(
 def test_the_captain_opens_in_focus_view_and_a_hand_does_not(layout: dict) -> None:
     assert layout["captain"]["viewMode"] == "focus"
     assert "viewMode" not in layout["settings"]
+
+
+LAUNCH_OUTPUT = (
+    "Starting background service…\nbackgrounded · 1444880d · probe-c\n"
+    "  claude agents             list sessions\n  claude attach 1444880d    open in this terminal\n"
+    "  claude logs 1444880d      show recent output\n  claude stop 1444880d      stop this session\n"
+)
+COPY_OUTPUT = (
+    "note: session 1444880d is already running in the background, so this started a copy as 4a65b4bd."
+    " `claude attach 1444880d` opens the original.\nbackgrounded · 4a65b4bd\n"
+    "  claude agents             list sessions\n  claude attach 4a65b4bd    open in this terminal\n"
+)
+
+
+def test_backgrounded_reads_the_short_id_and_a_copy() -> None:
+    assert launch.backgrounded(LAUNCH_OUTPUT) == ("1444880d", None)
+    assert launch.backgrounded(COPY_OUTPUT) == ("4a65b4bd", "4a65b4bd")
+    assert launch.backgrounded("") == (None, None)
+
+
+def test_a_resume_names_the_session_and_the_text_alone() -> None:
+    assert launch.resume_argv("sid-1", "Mail.") == ["claude", "--bg", "--resume", "sid-1", "Mail."]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,9 @@ CLAUDE_CONFIG = (
 )
 PASSED_DIRS = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
 STORY, DRAFT, SPIKE = "story", "draft", "spike"
+PROMPTS = {STORY: "/deckhand:story {}", DRAFT: "/deckhand:draft {}", SPIKE: "/deckhand:spike {}"}
+BACKGROUNDED = re.compile(r"^backgrounded \u00b7 (\w+)", re.MULTILINE)
+COPY = re.compile(r"started a copy as (\w+)")
 
 
 WILDCARDS = frozenset("*?[")
@@ -175,3 +179,12 @@ def hand_argv(
     if resume is not None:
         argv += ["--resume", resume]
     return [*argv, prompt]
+
+
+def resume_argv(session: str, prompt: str) -> list[str]:
+    return ["claude", "--bg", "--resume", session, prompt]
+
+
+def backgrounded(output: str) -> tuple[str | None, str | None]:
+    short, copy = BACKGROUNDED.search(output), COPY.search(output)
+    return short.group(1) if short else None, copy.group(1) if copy else None

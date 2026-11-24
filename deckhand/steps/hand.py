@@ -26,7 +26,7 @@ from deckhand.features import Feature
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
-from deckhand.startable import AFTER, BUILD, DRAFT
+from deckhand.startable import DRAFT
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, make_worktree, require_base, worktree_branch
 from deckhand.store import Store
@@ -36,8 +36,6 @@ USAGE = (
     "hand takes [--team-key KEY]; context [--json], apply start REF, apply fill, apply wake REF,"
     " or apply spike --repository LABEL --file QUESTION.md"
 )
-PROMPTS = {BUILD: "/deckhand:story {}", AFTER: "/deckhand:story {}", DRAFT: "/deckhand:draft {}"}
-SPIKE_PROMPT = "/deckhand:spike {}"
 
 
 @dataclass(frozen=True)
@@ -65,6 +63,20 @@ def _parse(args: list[str]) -> dict:
         else:
             found["words"].append(arg)
     return found
+
+
+def argv(name: str, ref: str, clone: Path, worktree: Path, resume: str | None, kind: str) -> list[str]:
+    protected = launch.protected(config.config_dir(), answers.state_dir())
+    settings = launch.hand_settings(ref, clone, worktree, Policy.load(clone), config.local(), protected, kind=kind)
+    plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
+    prompt = launch.PROMPTS[kind].format(ref)
+    return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
+
+
+def start_record(story: dict, records: list[Record], kind: str) -> Record:
+    newest = max((r.at for r in records), default="")
+    data = {"kind": kind, "session": fleet.hand_name(story["identifier"])}
+    return Record(asks.HAND_START, story["id"], newest, HAND, data)
 
 
 def _resume(session: fleet.Session | None) -> str | None:
@@ -240,14 +252,6 @@ class Hand:
         decision = wake.data["decision"]
         print(f"send to {name}: the person decided {decision} {wake.version[:8]}; carry on with the story")
 
-    def _argv(
-        self, name: str, ref: str, clone: Path, worktree: Path, prompt: str, resume: str | None, kind: str
-    ) -> list[str]:
-        protected = launch.protected(config.config_dir(), answers.state_dir())
-        settings = launch.hand_settings(ref, clone, worktree, Policy.load(clone), config.local(), protected, kind=kind)
-        plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
-        return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
-
     # A hand of another kind, a draft hand once the feature builds, never lends its session.
     def _prepare(
         self, story: dict, records: list[Record], clone: Path, kind: str, session: fleet.Session | None
@@ -258,9 +262,9 @@ class Hand:
         ref, launch_kind = story["identifier"], startable.launch_of(kind)
         resume = _resume(session) if queue.last_start(records, launch_kind) is not None else None
         hand_kind = launch.DRAFT if kind == DRAFT else launch.STORY
-        argv = self._argv(fleet.hand_name(ref), ref, clone, worktree, PROMPTS[kind].format(ref), resume, hand_kind)
+        found = argv(fleet.hand_name(ref), ref, clone, worktree, resume, hand_kind)
         stop = session.id if resume is not None and session is not None else None
-        return Launch(story, records, clone, branch, argv, worktree, launch_kind, stop)
+        return Launch(story, records, clone, branch, found, worktree, launch_kind, stop)
 
     def _spike(self, team: str, label: str, path: str) -> None:
         question = spikes.question_of(inputs.read(path, "--file", USAGE))
@@ -287,13 +291,13 @@ class Hand:
         _free_slot(read)
         require_base(clone, self._runner)
         worktree = git.worktree_path(clone, name)
-        argv = self._argv(name, key, clone, worktree, SPIKE_PROMPT.format(key), _resume(session), launch.SPIKE)
+        found = argv(name, key, clone, worktree, _resume(session), launch.SPIKE)
         asked = spikes.question_path(answers.state_dir(), key)
         asked.parent.mkdir(parents=True, exist_ok=True)
         asked.write_text(question, encoding="utf-8")
         git.worktree_detached(clone, name, DEFAULT_BASE, self._runner)
         self._retire(session.id if _resume(session) and session is not None else None)
-        git.call(argv, worktree, self._runner)
+        git.call(found, worktree, self._runner)
         print(f"started {name}")
 
     # The hand-start is written last, so no record of this launch reads as new since it.
@@ -303,9 +307,7 @@ class Hand:
         make_worktree(store, story, plan.clone, plan.branch, self._runner)
         if wake is not None:
             ops.ensure_record(store, story["id"], wake)
-        newest = max((r.at for r in plan.records), default="")
-        data = {"kind": plan.kind, "session": fleet.hand_name(story["identifier"])}
-        ops.ensure_record(store, story["id"], Record(asks.HAND_START, story["id"], newest, HAND, data))
+        ops.ensure_record(store, story["id"], start_record(story, plan.records, plan.kind))
         self._retire(plan.stop)
         git.call(plan.argv, plan.cwd, self._runner)
 

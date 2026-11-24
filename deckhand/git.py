@@ -283,6 +283,10 @@ def merge_from(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     return conflicts
 
 
+def fetch(clone: Path, runner: Runner = run) -> None:
+    call(["git", "fetch", "origin", "--prune"], clone, runner)
+
+
 def push(worktree: Path, branch: str, runner: Runner = run) -> None:
     call(["git", "push", "--set-upstream", "origin", branch], worktree, runner)
 

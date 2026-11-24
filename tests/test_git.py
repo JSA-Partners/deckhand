@@ -355,3 +355,12 @@ def test_two_commits_in_one_worktree_take_turns(tmp_path: Path, monkeypatch: pyt
     assert calls.index(("A", ["git", "commit"])) < calls.index(("B", ["git", "ls-tree"]))
     log = subprocess.run(["git", "log", "--format=%s"], cwd=worktree, check=True, capture_output=True, text=True)
     assert log.stdout.split("\n")[:3] == ["feat: two", "feat: one", "base"]
+
+
+def test_fetch_prunes_origin_and_raises_on_failure() -> None:
+    fake = Fake((0, "", ""), (128, "", "fatal: unable to access origin"))
+    git.fetch(Path("/clone"), fake)
+    assert fake.calls[0][:2] == (["git", "fetch", "origin", "--prune"], Path("/clone"))
+    with pytest.raises(git.GitError) as raised:
+        git.fetch(Path("/clone"), fake)
+    assert raised.value.stderr_tail == "fatal: unable to access origin"
