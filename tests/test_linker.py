@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from deckhand import linker
+from deckhand import budget, linker
 from deckhand.fleet import Fleet
 from deckhand.store import open as store_open
 from deckhand.store.cached import CachedStore
@@ -42,3 +42,53 @@ def test_links_share_one_memo_of_team_ids_until_it_is_refreshed(monkeypatch: pyt
         linker.link("ACME", Fleet, lambda at=at: at, today=lambda: DAY, kept=kept)
     assert given[0] is given[1] is given[2] is given[3]
     assert given[4] is not given[0]
+
+
+class Links:
+    def __init__(self) -> None:
+        self.made: list[linker.Linked] = []
+
+    def __call__(self, team: str, fleet_now, clock, stores=None, today=None, kept=None) -> linker.Linked:
+        self.made.append(linker.Linked(None, None, clock(), ""))
+        return self.made[-1]
+
+
+def gated(monkeypatch: pytest.MonkeyPatch, found: budget.Budget) -> tuple[linker.Linker, Links, list[float]]:
+    links, now = Links(), [T]
+    monkeypatch.setattr(linker, "link", links)
+    monkeypatch.setattr(budget, "current", lambda: found)
+    return linker.Linker("ACME", Fleet, lambda: now[0]), links, now
+
+
+def test_a_link_with_budget_to_spare_reads_every_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    linked_now, links, now = gated(monkeypatch, budget.Budget(limit=100, remaining=90))
+    for step in range(3):
+        now[0] = T + step
+        assert linked_now() is links.made[-1]
+    assert len(links.made) == 3
+
+
+def test_a_limited_budget_keeps_the_last_link_until_it_lifts(monkeypatch: pytest.MonkeyPatch) -> None:
+    linked_now, links, now = gated(monkeypatch, budget.Budget(until=T + 600))
+    first = linked_now()
+    now[0] = T + 60
+    assert linked_now() is first and len(links.made) == 1
+    now[0] = T + 600
+    assert linked_now() is not first and len(links.made) == 2
+
+
+def test_a_low_budget_reads_every_five_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
+    linked_now, links, now = gated(monkeypatch, budget.Budget(limit=100, remaining=10, reset=T + 3600))
+    first = linked_now()
+    now[0] = T + budget.LOW_EVERY - 1
+    assert linked_now() is first
+    now[0] = T + budget.LOW_EVERY
+    assert linked_now() is not first and len(links.made) == 2
+
+
+def test_a_link_keeps_what_the_meters_heard(monkeypatch: pytest.MonkeyPatch) -> None:
+    flushed: list[bool] = []
+    linked_now, _, _ = gated(monkeypatch, budget.Budget())
+    monkeypatch.setattr(store_open, "flush", lambda: flushed.append(True))
+    linked_now()
+    assert flushed == [True]

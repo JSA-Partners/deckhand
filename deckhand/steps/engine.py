@@ -103,13 +103,14 @@ class Engine:
             raise Refusal(f"the engine already runs in another tab{_holder(state_dir)}")
         from deckhand import tui
 
-        runner, clock, link, kept = self._runner, self._clock, linker.link, linker.Kept()
+        runner, clock = self._runner, self._clock
         fleets = Poller(lambda: fleet.sessions(runner), engine.FLEET_EVERY, tui.fleet_failed, "deckhand-fleet", clock)
+        link = linker.Linker(team, fleets.latest, clock)
 
         # The first Linear read waits for the first fleet read, so a hand is never read as missing.
         def linked() -> linker.Linked:
             fleets.wait(engine.FLEET_EVERY)
-            return link(team, fleets.latest, clock, kept=kept)
+            return link()
 
         linear = Poller(
             linked,

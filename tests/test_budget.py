@@ -34,3 +34,39 @@ def test_a_kept_budget_of_another_shape_reads_as_empty(tmp_path: Path) -> None:
     with LocalState(tmp_path / "deckhand.db") as rows:
         rows.put(budget.KEY, {"app": {"budget": "x"}})
         assert budget.kept(rows) == budget.Budget()
+
+
+NOW = 1_763_546_400.0
+
+
+def test_an_empty_budget_is_neither_low_nor_limited_and_always_due() -> None:
+    found = budget.Budget()
+    assert (found.limited(NOW), found.low(NOW), budget.due(found, NOW, NOW - 1), budget.phrase(found, NOW)) == (
+        False,
+        False,
+        True,
+        "",
+    )
+
+
+def test_a_limited_budget_is_not_due_until_it_lifts() -> None:
+    found = budget.Budget(limit=100, remaining=0, until=NOW + 600)
+    assert found.limited(NOW) and not budget.due(found, NOW, NOW - 3600)
+    assert budget.due(found, NOW + 600, NOW - 3600)
+    assert budget.phrase(found, NOW) == f"Linear paused until {budget.clock(NOW + 600)}"
+
+
+def test_under_a_quarter_left_is_low_and_due_every_five_minutes() -> None:
+    found = budget.Budget(limit=100, remaining=24, reset=NOW + 1200)
+    assert found.low(NOW)
+    assert not budget.due(found, NOW, NOW - budget.LOW_EVERY + 1)
+    assert budget.due(found, NOW, NOW - budget.LOW_EVERY)
+    assert budget.phrase(found, NOW) == "Linear budget low"
+
+
+def test_a_quarter_or_more_left_is_not_low() -> None:
+    assert not budget.Budget(limit=100, remaining=25, reset=NOW + 1200).low(NOW)
+
+
+def test_a_low_budget_past_its_reset_is_not_low() -> None:
+    assert not budget.Budget(limit=100, remaining=5, reset=NOW - 1).low(NOW)

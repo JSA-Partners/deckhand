@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, engine, fleet, linker, queue, status, watch
+from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, status, watch
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
 from deckhand.linker import Linked
@@ -232,6 +232,44 @@ def test_a_turn_end_pokes_the_linear_poller(rig: Rig):
     rig.link()
     rig.step()
     assert rig.engine.note() != engine.READING
+
+
+def test_turn_ends_poke_the_linear_poller_at_most_once_in_thirty_seconds(rig: Rig):
+    held_hand(rig)
+    rig.ready()
+    pokes = rig.linear.pokes
+    rig.state.turn_ended(NAME)
+    rig.step()
+    rig.link()
+    rig.step(10)
+    rig.state.turn_ended(NAME)
+    rig.step()
+    assert rig.linear.pokes == pokes + 1
+    rig.step(budget.POKE_GAP)
+    assert rig.linear.pokes == pokes + 2
+
+
+def kept_budget(rig: Rig, **found: float) -> None:
+    budget.keep(rig.state, "app", {"budget": {"at": rig.clock(), **found}, "costs": {}})
+
+
+def test_a_low_budget_drops_turn_end_pokes_and_says_so(rig: Rig):
+    held_hand(rig)
+    rig.ready()
+    kept_budget(rig, limit=100, remaining=10, reset=rig.clock() + 3600)
+    pokes = rig.linear.pokes
+    rig.state.turn_ended(NAME)
+    rig.step()
+    assert rig.linear.pokes == pokes
+    assert rig.engine.note() == "Linear budget low"
+
+
+def test_a_limited_budget_names_its_end_even_after_a_refresh(rig: Rig):
+    rig.ready()
+    kept_budget(rig, until=rig.clock() + 600)
+    rig.step()
+    rig.engine.refresh()
+    assert rig.engine.note() == f"Linear paused until {budget.clock(rig.clock() + 600)}"
 
 
 def test_a_gap_over_thirty_seconds_pokes_both_and_reconciles_nothing_that_tick(rig: Rig):

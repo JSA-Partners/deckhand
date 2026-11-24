@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, config, features, fleet, git, queue, reading, status, watch
+from deckhand import acts, budget, config, features, fleet, git, queue, reading, status, watch
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
@@ -102,6 +102,8 @@ class Engine:
         self._starting: set[str] = set()
         self._poked_for = 0.0
         self._poked_at: float | None = None
+        self._turn_poked = float("-inf")
+        self._budget = budget.Budget()
 
     def tick(self) -> None:
         now = self._clock()
@@ -122,6 +124,7 @@ class Engine:
 
     def _step(self, now: float) -> None:
         changed = self._state.changed()
+        self._budget = budget.kept(self._state)
         hands = self._state.hands()
         linked = self._take_link(now)
         self._poke_on_turn_end(hands, now)
@@ -167,8 +170,9 @@ class Engine:
     def _poke_on_turn_end(self, hands: dict[str, HandRow], now: float) -> None:
         ended = max((epoch(row.turn_ended) for row in hands.values() if row.turn_ended), default=0.0)
         last = self._newest.at if self._newest is not None else float("-inf")
-        if ended > last and ended > self._poked_for:
-            self._poked_for, self._poked_at = ended, now
+        spare = not self._budget.low(now) and not self._budget.limited(now)
+        if ended > last and ended > self._poked_for and spare and now - self._turn_poked >= budget.POKE_GAP:
+            self._poked_for, self._poked_at, self._turn_poked = ended, now, now
             self._linear.poke()
 
     def _collect(self, now: float) -> frozenset[str]:
@@ -283,6 +287,8 @@ class Engine:
 
     def note(self) -> str:
         newest = self._newest
+        if budget.phrase(self._budget, self._clock()):
+            return budget.phrase(self._budget, self._clock())
         if self._poked_at is not None and (newest is None or newest.at < self._poked_at):
             return READING
         if self._lines.newest():

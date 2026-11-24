@@ -5,11 +5,12 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from deckhand import config, fleet, policy, reading
+from deckhand import budget, config, fleet, policy, reading
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.step import Refusal
+from deckhand.store import open as store_open
 from deckhand.store.open import Stores
 from deckhand.worker import problem
 
@@ -82,3 +83,21 @@ def link(
     except (LinearError, Refusal) as error:
         return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)
     return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken)
+
+
+# The poller calls this on its timer, on a poke and on a wake alike, so the budget gates all three.
+class Linker:
+    def __init__(self, team: str, fleet_now: Callable[[], fleet.Fleet], clock: Callable[[], float]) -> None:
+        self._team, self._fleet_now, self._clock = team, fleet_now, clock
+        self._kept = Kept()
+        self._last: Linked | None = None
+
+    def __call__(self) -> Linked:
+        last = self._last
+        if last is not None and not budget.due(budget.current(), self._clock(), last.at):
+            return last
+        try:
+            self._last = link(self._team, self._fleet_now, self._clock, kept=self._kept)
+        finally:
+            store_open.flush()
+        return self._last
