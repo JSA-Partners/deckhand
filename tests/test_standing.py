@@ -201,3 +201,12 @@ def test_the_working_section_holds_only_hands_that_hold_a_slot():
     )
     sessions = [session("a", "ACME-15"), session("b", "ACME-16", state="blocked", waiting_for=fleet.PERMISSION)]
     assert sum(fleet.holds_slot(s) for s in sessions) == 2
+
+
+def test_a_working_session_with_no_status_holds_no_slot_anywhere():
+    gone = session("c", "ACME-17", status=None)
+    assert not fleet.holds_slot(gone)
+    assert not standing.live([gone])["ACME-17"].holds
+    filed = sample(items=[], hands=[{**filed_hand("hand-ACME-17", "ACME-17", "working"), "alive": False}])
+    assert not standing.filed(filed)["ACME-17"].holds
+    assert standing.filed(quiet())["ACME-15"].holds

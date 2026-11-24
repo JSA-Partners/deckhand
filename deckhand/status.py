@@ -33,6 +33,7 @@ def _hands(sessions: list[fleet.Session], idle: frozenset[str], resuming: frozen
             "started_at": s.started_at,
             "idle": s.name in idle,
             "resuming": s.name in resuming,
+            "alive": fleet.alive(s),
         }
         for ref, s in held
     ]

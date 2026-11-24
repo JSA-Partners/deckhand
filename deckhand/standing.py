@@ -24,6 +24,7 @@ class Hand:
     started_at: str = ""
     idle: bool = False
     resuming: bool = False
+    alive: bool = True
 
     @property
     def live(self) -> bool:
@@ -31,7 +32,7 @@ class Hand:
 
     @property
     def holds(self) -> bool:
-        return self.resuming or (fleet.holds(self.state, self.waiting_for or None) and not self.idle)
+        return self.resuming or (fleet.holds(self.state, self.waiting_for or None, self.alive) and not self.idle)
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ def filed(status: dict) -> dict[str, Hand]:
             started_at=text(h, "started_at"),
             idle=h.get("idle") is True,
             resuming=h.get("resuming") is True,
+            alive=h.get("alive") is not False,
         )
         for h in dicts(status, "hands")
     }
@@ -92,7 +94,16 @@ def live(
     held += [(ref, s, True) for ref, s in fleet.spikes(sessions).items()]
     return {
         ref: Hand(
-            ref, s.state, spike, s.id, s.status or "", s.waiting_for or "", s.started_at, ref in idle, ref in resuming
+            ref,
+            s.state,
+            spike,
+            s.id,
+            s.status or "",
+            s.waiting_for or "",
+            s.started_at,
+            ref in idle,
+            ref in resuming,
+            fleet.alive(s),
         )
         for ref, s, spike in held
     }

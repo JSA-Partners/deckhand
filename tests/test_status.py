@@ -72,6 +72,7 @@ def test_snapshot_shape():
                 "started_at": "2026-11-20T08:00:00.000Z",
                 "idle": False,
                 "resuming": False,
+                "alive": True,
             },
             {
                 "name": "spike-0123456789ab",
@@ -81,6 +82,7 @@ def test_snapshot_shape():
                 "started_at": "2026-11-20T08:00:00.000Z",
                 "idle": False,
                 "resuming": False,
+                "alive": True,
             },
         ],
         "release": False,
