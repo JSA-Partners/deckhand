@@ -140,7 +140,9 @@ def test_a_spike_asked_through_hand_is_launched_by_the_engine(clone: Path, tmp_p
     assert "stalled" not in [item["kind"] for item in status.read(answers.state_dir())["items"]]
 
 
-def test_an_idle_hand_is_nudged_then_resumed_then_brought_to_the_person(clone: Path, state: Path):
+def test_an_idle_hand_is_nudged_then_resumed_then_brought_to_the_person(
+    clone: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
     store = building()
     store.assign("s1", ME)
     store.assign("s2", "someone-else")
@@ -171,3 +173,12 @@ def test_an_idle_hand_is_nudged_then_resumed_then_brought_to_the_person(clone: P
     shown = status.read(answers.state_dir())
     assert [item["kind"] for item in shown["items"]] == ["stalled"]
     assert [m.kind for m in flow.state.pending(NAME)] == [wakes.NUDGE]
+
+    [resumed] = [row for row in flow.world.rows if "status" in row]
+    answer(state, Decide(store), capsys, ["stalled", "ACME-1"], "Restart")
+    resumes = sum("--resume" in call for call in flow.world.calls)
+    for _ in range(5):
+        flow.turn()
+    assert ["claude", "stop", resumed["id"]] in flow.world.calls
+    assert sum("--resume" in call for call in flow.world.calls) == resumes + 1
+    assert "stalled" not in [item["kind"] for item in status.read(answers.state_dir())["items"]]
