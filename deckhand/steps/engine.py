@@ -119,7 +119,10 @@ class Engine:
             clock,
         )
         worker = Worker(lambda: opened_acts(runner))
-        running = engine.Engine(team, LocalState(default_path()), fleets, linear, worker, clock, runner=runner)
+        rows = LocalState(default_path())
+        # A snapshot from an earlier engine is frozen; the captain must not ask from it.
+        rows.drop(status.SNAPSHOT)
+        running = engine.Engine(team, rows, fleets, linear, worker, clock, runner=runner)
         try:
             fleets.start()
             worker.start()

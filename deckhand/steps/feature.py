@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from datetime import date, timedelta
 
-from deckhand import features, ops, planning
+from deckhand import features, launch, ops, planning
 from deckhand.features import Phase
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
@@ -54,7 +54,7 @@ class Feature:
         today = self._today()
         found = features.open_features(store, team)
         parked = [{"id": p["id"], "name": p["name"]} for p in features.parked(store, team)]
-        facts: dict = {"open": [], "parked": parked}
+        facts: dict = {"open": [], "parked": parked, "input_folder": _input_folder()}
         for feature in found:
             budget = features.budget_of(feature.project, today)
             current = features.phase(feature)
@@ -95,6 +95,8 @@ class Feature:
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
+        if facts["input_folder"]:
+            print(f"input folder: {facts['input_folder']}")
         if not facts["open"]:
             print("no feature is open")
         if "anomaly" in facts:
@@ -177,3 +179,10 @@ class Feature:
             raise Refusal(f"{features.describe(project)} is {current.value}, only a feature in planning can be parked")
         ops.ensure_project_dates(store, project["id"], None, None)
         print(f"done: parked {project['name']}")
+
+
+def _input_folder() -> str | None:
+    try:
+        return str(launch.input_folder())
+    except OSError:
+        return None

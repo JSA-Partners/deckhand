@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from datetime import date
+from pathlib import Path
 
 import pytest
 
+from deckhand import launch
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
@@ -178,3 +181,15 @@ def test_feature_writes_as_person(monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(Connected):
         Feature().apply(["new", *TEAM, "--name", "Alpha"])
     assert roles == ["person"]
+
+
+def test_context_names_the_input_folder_it_makes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    step(FakeStore()).context(TEAM)
+    folder = tmp_path / launch.INPUT
+    assert f"input folder: {folder}" in capsys.readouterr().out.splitlines()
+    assert folder.is_dir()
+    step(FakeStore()).context([*TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["input_folder"] == str(folder)

@@ -338,6 +338,8 @@ class Engine:
             return self._lines.newest()
         if watch.deaf(self._fleets.latest(), watch.heard(self._state), self._clock(), self._woke):
             return watch.DEAF
+        if self._reading is not None and self._reading.facts.get("cycle"):
+            return status.cycle_line(self._reading.facts["cycle"])
         if newest is not None and newest.error:
             return f"cannot read Linear: {newest.error}"
         good = self._good

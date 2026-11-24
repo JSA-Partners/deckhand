@@ -47,6 +47,7 @@ def snapshot(
         "slots": facts["slots"],
         "items": [_item(item) for item in waiting],
         "stories": facts["order"],
+        "cycle": facts.get("cycle", []),
         "hands": _hands(sessions),
         "release": facts["release"],
         "stale_since": None,
@@ -126,6 +127,7 @@ def _valid(found: dict) -> bool:
         and isinstance(found.get("release"), bool)
         and isinstance(items, list)
         and all(_item_ok(entry) for entry in items)
+        and _strings(found.get("cycle", []))
         and isinstance(stories, list)
         and all(_story_ok(entry) for entry in stories)
     )
@@ -145,6 +147,10 @@ def get(rows: LocalState) -> dict | None:
     except (Refusal, ValueError):
         return None
     return found if isinstance(found, dict) and _valid(found) else None
+
+
+def cycle_line(cycle: list[str]) -> str:
+    return f"build order cycle: {', '.join(cycle)}; break it in Linear"
 
 
 def stale(previous: dict, at: str) -> dict:

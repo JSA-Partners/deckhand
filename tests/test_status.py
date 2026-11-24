@@ -20,6 +20,7 @@ FACTS = {
     "budget": BUDGET,
     "slots": {"used": 1, "cap": 2},
     "order": [ROW],
+    "cycle": ["ACME-1", "ACME-2"],
     "release": False,
 }
 
@@ -61,6 +62,7 @@ def test_snapshot_shape():
             }
         ],
         "stories": [ROW],
+        "cycle": ["ACME-1", "ACME-2"],
         "hands": [
             {
                 "name": "hand-ACME-1",

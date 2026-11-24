@@ -167,7 +167,7 @@ def test_spike_writes_a_wanted_row_and_launches_nothing(clone: Path, tmp_path: P
     assert (row_.name, row_.ref, row_.issue, row_.kind, row_.cwd) == (name, key, "", launch.SPIKE, worktree)
     assert shell.launches() == []
     assert [a for a, _ in shell.calls if a[:2] == ["git", "worktree"]] == []
-    assert capsys.readouterr().out.strip() == "asked: the engine starts it when a slot is free"
+    assert capsys.readouterr().out.strip() == "asked: the engine starts it"
 
 
 @pytest.mark.parametrize("args", [["fill"], ["start", "ACME-1"], ["wake", "ACME-1"]])

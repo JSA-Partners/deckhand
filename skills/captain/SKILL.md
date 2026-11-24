@@ -17,8 +17,9 @@ the person to type a word to go on. Run each deckhand command as its own bare Ba
 On `engine: not running`, run `deckhand engine apply copy`, tell the person in one line to open a
 new terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
 
-On `deckhand: something needs the person`, and after every answered or dismissed dialog, run
-`deckhand captain context` and ask the top item by its `next:` line:
+At the start, ask the top item above. On `deckhand: something needs the person`, and after every
+answered or dismissed dialog, run `deckhand captain context` and ask the top item by its `next:`
+line:
 
 - A skill line, such as `/deckhand:signoff REF` or `/deckhand:feature`: run that skill.
 - A `decide context` line: run it with `deckhand` in front, pass the JSON it prints unchanged to
@@ -26,8 +27,12 @@ On `deckhand: something needs the person`, and after every answered or dismissed
   recommended; the person may answer a hand's question in their own words.
 - A `claude attach` line: show it in a dialog with Done and Later. A prompt in a hand is the
   person's to answer, never yours.
+- A link, for a spike's answer: give it; the feature skill reads it with the person.
 
-A dismissed dialog is not asked again until the person writes something.
+An item the person put off (Later, Back, a pause, a dismissed dialog) or just answered is not asked
+again until the person writes something or another item is on top.
+
+A `build order cycle` line is the person's to break in Linear; say it once.
 
 Before planning a feature, run `deckhand captain apply hold`. On its approval, or when the person
 pauses, run `deckhand captain apply release`, then read the context.

@@ -125,6 +125,7 @@ def test_captain_context_with_a_stale_heartbeat_withholds_every_item(clone: Path
         "brief": None,
         "top": None,
         "release": None,
+        "cycle": [],
     }
 
 
@@ -253,6 +254,21 @@ def test_a_teammates_started_story_is_never_a_stopped_hand(clone: Path, capsys: 
 def test_planning_past_half_the_week_shows_in_the_brief(clone: Path, capsys: pytest.CaptureFixture[str]):
     engine_wrote(setup(), today=date(2026, 11, 20))
     assert "Alpha day 4 of 7" in output([], capsys)
+
+
+def test_a_build_order_cycle_is_a_line_for_the_person(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    store.relate("s1", "s2")
+    store.relate("s2", "s1")
+    engine_wrote(store)
+    assert "build order cycle: ACME-1, ACME-2; break it in Linear" in output([], capsys).splitlines()
+    assert json.loads(output(["--json"], capsys))["cycle"] == ["ACME-1", "ACME-2"]
+
+
+def test_board_refuses_arguments_it_cannot_combine(state: Path):
+    for args in (["--watch"], ["--no-color"], ["--board", "--json"], ["--board", "--line"], ["--board", "--brief"]):
+        with pytest.raises(Refusal):
+            Captain(Shell(), clock=lambda: NOW).context(args)
 
 
 BAD_FILES = [

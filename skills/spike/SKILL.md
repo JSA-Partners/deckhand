@@ -21,5 +21,7 @@ in the answer names the file, command or output that shows it. Say plainly when 
 
 Write the answer to a temporary file and save it with `deckhand spike apply $key --file ANSWER.md`,
 then stop. A second run with the same text writes nothing. When a command refuses, fix the rule it
-names. A uv cache error or a sandbox refusal means the call was chained: run each deckhand command as
-one bare call.
+names. Run every deckhand call as its own command, never chained after `cd`.
+
+A message reaches you as `deckhand: a message waits`, or as a turn that opens with its text: do what
+`deckhand mail context KEY` says, then run `deckhand mail apply KEY ack SEQ`.

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, config, engine, tui
+from deckhand import answers, config, engine, status, tui
 from deckhand.engine import Linked
 from deckhand.step import Refusal
 from deckhand.steps.engine import Engine, command, invocation
@@ -129,6 +129,21 @@ def test_run_holds_the_lock_while_the_screen_runs_and_drops_the_heartbeat_after(
     with LocalState(default_path()) as rows:
         assert rows.heartbeat() is None
     assert capsys.readouterr().out == ""
+
+
+def test_run_drops_the_snapshot_an_earlier_engine_left(monkeypatch: pytest.MonkeyPatch):
+    seen = {}
+    with LocalState(default_path()) as rows:
+        rows.put(status.SNAPSHOT, {"shape": 1})
+
+    def watch(read_status, poller, clock, color, g, running):
+        with LocalState(default_path()) as rows:
+            seen["snapshot"] = rows.get(status.SNAPSHOT)
+        raise RuntimeError("screen")
+
+    with pytest.raises(RuntimeError):
+        run(monkeypatch, watch)
+    assert seen["snapshot"] is None
 
 
 def test_run_prints_what_stopping_the_hands_left_after_the_screen(

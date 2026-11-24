@@ -183,26 +183,29 @@ def test_the_captain_can_ask_read_and_plan_but_not_send_or_notify(layout: dict) 
         "Glob",
         "Agent",
         "AskUserQuestion",
-        "Skill(deckhand:*)",
+        "Skill(deckhand:feature)",
+        "Skill(deckhand:signoff)",
         "Skill(superpowers:*)",
         "Skill(impeccable:*)",
     ]
     assert permissions["defaultMode"] == "dontAsk"
-    assert {"SendMessage", "PushNotification", "NotebookEdit"} <= set(permissions["deny"])
+    assert {"SendMessage", "PushNotification", "NotebookEdit", "mcp__*"} <= set(permissions["deny"])
     assert "AskUserQuestion" not in permissions["deny"]
     assert layout["captain"]["sandbox"]["autoAllowBashIfSandboxed"] is False
     assert layout["captain"]["env"] == {"DECKHAND_ROLE": "captain"}
 
 
-def test_the_captain_writes_only_in_the_input_folders(layout: dict) -> None:
+def test_the_captain_writes_only_in_the_deckhand_input_folders(layout: dict) -> None:
     permissions = layout["captain"]["permissions"]
-    roots = launch.input_roots()
+    roots = launch.captain_inputs()
+    assert {root.name for root in roots} == {launch.INPUT}
+    assert {root.parent for root in roots} == set(launch.input_roots())
     writes = [rule for rule in permissions["allow"] if rule.startswith(("Write(", "Edit("))]
     assert writes == [rule(tool, root, "/**") for root in roots for tool in ("Write", "Edit")]
     assert not {"Write", "Edit"} & set(permissions["allow"])
     assert permissions["additionalDirectories"] == [str(root) for root in roots]
-    assert str(Path(tempfile.gettempdir()).resolve()) in permissions["additionalDirectories"]
-    assert f"/tmp/claude-{os.getuid()}" in permissions["additionalDirectories"]
+    assert str(Path(tempfile.gettempdir()).resolve() / launch.INPUT) in permissions["additionalDirectories"]
+    assert f"/tmp/claude-{os.getuid()}/{launch.INPUT}" in permissions["additionalDirectories"]
     for path in layout["secrets"]:
         assert rule("Edit", path, "/**") in permissions["deny"]
 
@@ -269,9 +272,9 @@ def test_hand_path_holds_only_trusted_entries(tmp_path: Path, home: Path, monkey
     assert env["PATH"].split(os.pathsep) == ["/plugin/bin", "/usr/bin", "/bin"]
 
 
-def test_resume_argv_carries_settings() -> None:
+def test_hand_argv_carries_settings_and_ends_in_the_prompt() -> None:
     settings = {"env": {"DECKHAND_ROLE": "hand"}, "sandbox": {"enabled": True}}
-    argv = launch.hand_argv("hand-ACME-7", settings, "A decision of the person's is recorded.", None, "sess-1")
+    argv = launch.hand_argv("hand-ACME-7", settings, "A decision of the person's is recorded.", None)
     assert argv[:8] == [
         "claude",
         "--bg",
@@ -283,12 +286,12 @@ def test_resume_argv_carries_settings() -> None:
         argv[7],
     ]
     assert json.loads(argv[7]) == settings
-    assert argv[8:] == ["--resume", "sess-1", "A decision of the person's is recorded."]
+    assert argv[8:] == ["A decision of the person's is recorded."]
     assert "--plugin-dir" not in argv
 
 
 def test_start_argv_names_the_prompt_and_plugin_dir_for_testing() -> None:
-    argv = launch.hand_argv("hand-ACME-7", {}, "/deckhand:story ACME-7", Path("/plugin"), None)
+    argv = launch.hand_argv("hand-ACME-7", {}, "/deckhand:story ACME-7", Path("/plugin"))
     assert argv == [
         "claude",
         "--bg",
@@ -325,7 +328,6 @@ def test_file_tools_write_only_in_working_directories(
 def test_hand_has_no_mcp_tools(layout: dict) -> None:
     assert "mcp__*" in layout["settings"]["permissions"]["deny"]
     assert layout["settings"]["disableClaudeAiConnectors"] is True
-    assert "mcp__*" not in layout["captain"]["permissions"]["deny"]
     assert "disableClaudeAiConnectors" not in layout["captain"]
 
 
@@ -389,3 +391,13 @@ def test_backgrounded_reads_the_short_id_and_a_copy() -> None:
 
 def test_a_resume_names_the_session_and_the_text_alone() -> None:
     assert launch.resume_argv("sid-1", "Mail.") == ["claude", "--bg", "--resume", "sid-1", "Mail."]
+
+
+def test_the_input_folder_is_made_private_under_the_temporary_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    folder = launch.input_folder()
+    assert folder == tmp_path / launch.INPUT
+    assert folder.is_dir() and (folder.stat().st_mode & 0o777) == 0o700
+    assert launch.input_folder() == folder

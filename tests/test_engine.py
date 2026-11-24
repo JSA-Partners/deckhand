@@ -324,6 +324,13 @@ def test_a_live_captain_whose_watcher_is_silent_is_the_note(rig: Rig):
     assert rig.engine.note() == ""
 
 
+def test_a_build_order_cycle_is_the_note(rig: Rig):
+    rig.store.relate("s1", "s2")
+    rig.store.relate("s2", "s1")
+    rig.ready()
+    assert rig.engine.note() == "build order cycle: ACME-1, ACME-2; break it in Linear"
+
+
 def test_the_restart_counts_reach_the_read(rig: Rig, monkeypatch: pytest.MonkeyPatch):
     held_hand(rig, restarts=1)
     seen = []

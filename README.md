@@ -128,9 +128,9 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 Run setup once per machine, and again when a repository joins. Then launch the captain with the line
 it prints, which starts Claude Code under the captain's own settings, in focus view: your prompt, a
 line summing up its tool calls, and its reply. The captain runs deckhand, reads files and asks
-you. It writes files only in the temporary folders deckhand takes input from, and never messages
-another session. It runs the feature and sign-off skills for you when an item needs them. Hands run `story`, `spike` and `draft` on their own; you never
-type those.
+you. It writes files only in deckhand's own input folders, and never messages another session. It
+runs the feature and sign-off skills for you when an item needs them. Hands run `story`, `spike`
+and `draft` on their own; you never type those.
 
 When the engine is not running, the captain copies its start command for you: open a new terminal
 tab, paste and press Enter. Setup writes a `deckhand` launcher in `~/.config/deckhand/` that runs

@@ -27,7 +27,7 @@ def argv(name: str, ref: str, clone: Path, worktree: Path, kind: str) -> list[st
     settings = launch.hand_settings(ref, clone, worktree, Policy.load(clone), config.local(), protected, kind=kind)
     plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
     prompt = launch.PROMPTS[kind].format(ref)
-    return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, None)
+    return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None)
 
 
 def _one_line(text: str) -> str:

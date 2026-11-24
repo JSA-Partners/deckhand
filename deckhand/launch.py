@@ -17,8 +17,9 @@ HAND_EXEMPT = ["deckhand *", "gh pr view *", "gh pr diff *", "gh pr checks *"]
 CAPTAIN_EXEMPT = ["deckhand *"]
 NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "PushNotification", "mcp__*"]
 CAPTAIN_ALLOW = ["Bash(deckhand *)", "Read", "Grep", "Glob", "Agent", "AskUserQuestion"]
-CAPTAIN_ALLOW += ["Skill(deckhand:*)", "Skill(superpowers:*)", "Skill(impeccable:*)"]
-CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit"]
+CAPTAIN_ALLOW += ["Skill(deckhand:feature)", "Skill(deckhand:signoff)", "Skill(superpowers:*)", "Skill(impeccable:*)"]
+CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit", "mcp__*"]
+INPUT = "deckhand-input"
 GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
 CLAUDE_CONFIG = (
     ".claude/settings.json",
@@ -66,6 +67,16 @@ def sandbox_tmp() -> list[Path]:
 
 def input_roots() -> list[Path]:
     return _forms(Path(tempfile.gettempdir()), *sandbox_tmp())
+
+
+def captain_inputs() -> list[Path]:
+    return _forms(*(root / INPUT for root in input_roots()))
+
+
+def input_folder() -> Path:
+    folder = Path(tempfile.gettempdir()) / INPUT
+    folder.mkdir(mode=0o700, exist_ok=True)
+    return folder
 
 
 def protected(config: Path, state: Path) -> Protected:
@@ -173,9 +184,9 @@ def hand_settings(
     }
 
 
-# Planning saves its answers through --file, so the captain writes only where deckhand reads input files.
+# Planning saves its answers through --file, so the captain writes only in deckhand's own input folders.
 def captain_settings(protected: Protected) -> dict[str, Any]:
-    guarded, roots = _guarded(protected, [], []), input_roots()
+    guarded, roots = _guarded(protected, [], []), captain_inputs()
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",
@@ -191,14 +202,10 @@ def captain_settings(protected: Protected) -> dict[str, Any]:
     }
 
 
-def hand_argv(
-    name: str, settings: dict[str, Any], prompt: str, plugin_dir: Path | None, resume: str | None
-) -> list[str]:
+def hand_argv(name: str, settings: dict[str, Any], prompt: str, plugin_dir: Path | None) -> list[str]:
     argv = ["claude", "--bg", "--name", name, "--permission-mode", "auto", "--settings", json.dumps(settings)]
     if plugin_dir is not None:
         argv += ["--plugin-dir", str(plugin_dir)]
-    if resume is not None:
-        argv += ["--resume", resume]
     return [*argv, prompt]
 
 

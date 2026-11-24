@@ -118,7 +118,7 @@ class Hand:
         asked.write_text(question, encoding="utf-8")
         with LocalState(default_path()) as rows:
             rows.want(name, key, "", launch.SPIKE, str(git.worktree_path(clone, name)))
-        print("asked: the engine starts it when a slot is free")
+        print("asked: the engine starts it")
 
 
 def _free_slot(read: fleet.Fleet) -> None:

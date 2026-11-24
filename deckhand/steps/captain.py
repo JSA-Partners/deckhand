@@ -103,13 +103,14 @@ def _encoding() -> str | None:
 
 # A frozen snapshot would ask an answered item again, so a stopped engine shows no item.
 def _facts(shown: dict | None, running: bool, now: float) -> dict:
-    facts: dict = {"engine": RUNNING if running else STOPPED, "brief": None, "top": None, "release": None}
+    facts: dict = {"engine": RUNNING if running else STOPPED, "brief": None, "top": None, "release": None, "cycle": []}
     if not running or shown is None:
         return facts
     items = shown["items"]
     facts["brief"] = brief.text(shown, now, brief.glyphs(_encoding()))
     facts["top"] = {"lines": items[0]["lines"], "next": items[0]["next"]} if items else None
     facts["release"] = shown["feature"] if shown["release"] else None
+    facts["cycle"] = shown.get("cycle", [])
     return facts
 
 
@@ -125,5 +126,7 @@ def _print(facts: dict) -> None:
             print(line)
         for command in facts["top"]["next"]:
             print(f"next: {command}")
+    if facts["cycle"]:
+        print(status.cycle_line(facts["cycle"]))
     if facts["release"]:
         print(f"ready to release: {facts['release']}")

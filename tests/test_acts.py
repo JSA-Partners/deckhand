@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -362,3 +363,28 @@ def test_a_failure_of_several_lines_reads_as_one(rows: LocalState, db: Path):
     world.fail.add(("claude", "stop"))
     line = Acts(rows, LocalRecords(db), building, world).run(Stop(NAME, "old1", "finished"))
     assert line == "ACME-1: claude stop failed: error: one; fatal: two"
+
+
+def launched_settings(shell: Shell) -> tuple[dict, Path]:
+    [(argv, cwd)] = shell.launches()
+    return json.loads(argv[argv.index("--settings") + 1]), cwd
+
+
+@pytest.mark.parametrize(
+    ("kind", "variable", "ref"), [("story", "DECKHAND_STORY", "ACME-1"), ("spike", "DECKHAND_SPIKE", "k1")]
+)
+def test_an_engine_launch_carries_the_hands_settings(
+    clone: Path, rows: LocalState, db: Path, kind: str, variable: str, ref: str
+):
+    store, shell = building(), Shell()
+    action = a_launch(store, clone) if kind == "story" else spike(clone)
+    assert acts(rows, db, shell, store).run(action) is None
+    settings, worktree = launched_settings(shell)
+    env = settings["env"]
+    assert (env["DECKHAND_ROLE"], env[variable], env["DECKHAND_HAND_KIND"]) == ("hand", ref, kind)
+    assert not ({"DECKHAND_STORY", "DECKHAND_SPIKE"} - {variable}) & set(env)
+    deny = settings["permissions"]["deny"]
+    for form in (worktree, worktree.resolve()):
+        assert f"Edit(//{str(form / '.git').lstrip('/')})" in deny
+        assert f"Edit(//{str(form / '.claude/settings.json').lstrip('/')})" in deny
+    assert str(worktree / ".git") in settings["sandbox"]["filesystem"]["denyWrite"]
