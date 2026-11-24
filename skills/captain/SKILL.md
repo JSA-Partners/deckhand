@@ -32,7 +32,7 @@ line:
 - A link, for a spike's answer: give it; the feature skill reads it with the person.
 
 An item the person put off (Later, Back, a pause, a dismissed dialog) or just answered is not asked
-again until the person writes something, another item is on top, or Linear is back.
+again until the person writes something or another item is on top.
 
 A `build order cycle` line is the person's to break in Linear; say it once.
 
