@@ -24,6 +24,7 @@ from deckhand.store.state import STALE_AFTER, LocalState
 from tests.shell import Shell, row
 from tests.test_feature_approval import setup
 from tests.test_queue import asked
+from tests.test_status import write
 from tests.test_step_hand import ME, building, clone, state
 
 __all__ = ["clone", "state"]
@@ -43,7 +44,7 @@ def engine_wrote(
     read = fleet.sessions(shell or Shell())
     found = reading.read(store, lambda: person or store, "ACME", read, config.local(), today)
     shown = status.snapshot(iso(int(clock * 1000)), "ACME", found.facts, found.waiting, read.sessions, found.me is None)
-    status.write(answers.state_dir(), shown)
+    write(answers.state_dir(), shown)
     beat(clock)
 
 
@@ -242,7 +243,7 @@ def test_a_stale_snapshot_shows_when_linear_was_last_read(clone: Path, capsys: p
     store = owned()
     asked(store, "s1")
     engine_wrote(store)
-    status.write(answers.state_dir(), status.stale(status.read(answers.state_dir()), iso(int(NOW * 1000))))
+    write(answers.state_dir(), status.stale(status.read(answers.state_dir()), iso(int(NOW * 1000))))
     beat(NOW + 14 * 60)
     lines = output([], capsys, clock=NOW + 14 * 60).splitlines()
     assert lines[:3] == ["Linear unreachable; showing the state as of 14m ago", "", "## ● ACME-1 needs you"]
@@ -289,7 +290,7 @@ BAD_FILES = [
 @pytest.mark.parametrize("bad", BAD_FILES)
 def test_a_malformed_snapshot_reads_as_none_yet(state: Path, bad: dict, capsys: pytest.CaptureFixture[str]):
     if bad.get("shape"):
-        status.write(answers.state_dir(), bad)
+        write(answers.state_dir(), bad)
     else:
         seeded(answers.state_dir(), **bad)
     beat()
@@ -313,7 +314,7 @@ def seeded(state: Path, **extra) -> None:
         "stale_since": None,
         "person_unknown": False,
     }
-    status.write(state, found | extra)
+    write(state, found | extra)
 
 
 def line_of(args: list[str], capsys: pytest.CaptureFixture[str], shell: Shell | None = None) -> str:

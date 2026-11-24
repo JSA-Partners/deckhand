@@ -71,11 +71,6 @@ def _state(state: Path) -> LocalState:
     return LocalState(state / "deckhand.db")
 
 
-def write(state: Path, status: dict) -> None:
-    with _state(state) as rows:
-        put(rows, status)
-
-
 def put(rows: LocalState, status: dict) -> None:
     rows.put(SNAPSHOT, status)
 

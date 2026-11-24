@@ -114,4 +114,4 @@ def test_hand_context_reads_each_object_at_most_once(
     Hand(None, Shell()).context([*TEAM, "--json"])
     assert json.loads(capsys.readouterr().out)["feature"] == "Alpha"
     assert repeated(opened["app"]) == []
-    assert reads(opened["person"]) == [("viewer", (), ())]
+    assert opened["person"].opens == 0

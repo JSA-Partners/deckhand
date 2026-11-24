@@ -83,15 +83,15 @@ def test_the_real_poller_says_when_the_first_read_landed():
     poller.stop()
 
 
-def test_a_landed_read_says_when_it_began_and_finished():
-    times = iter([10.0, 12.0, 20.0, 21.0])
+def test_a_landed_read_says_when_it_began():
+    times = iter([10.0, 20.0])
 
     def reader() -> fleet.Fleet:
         return fleet.Fleet([])
 
     poller = Poller(reader, 60, tui.fleet_failed, "deckhand-fleet", clock=lambda: next(times))
-    assert (poller.began(), poller.landed()) == (None, None)
+    assert poller.began() is None
     poller.start()
     assert poller.wait(5)
     poller.stop()
-    assert (poller.began(), poller.landed()) == (10.0, 12.0)
+    assert poller.began() == 10.0

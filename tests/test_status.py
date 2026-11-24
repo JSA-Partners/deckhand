@@ -11,6 +11,12 @@ from deckhand.queue import Item
 from deckhand.step import Refusal
 from deckhand.store.state import LocalState
 
+
+def write(state: Path, found: dict) -> None:
+    with LocalState(state / "deckhand.db") as rows:
+        status.put(rows, found)
+
+
 AT = "2026-11-20T10:00:00.000Z"
 BUDGET = {"feature": "Alpha", "days_used": 4, "budget_days": 7, "planning_note": False}
 STAGE = {"name": "plan review", "round": 2, "cap": 3, "since": "2026-11-20T09:00:00.000Z"}
@@ -102,7 +108,7 @@ def test_two_questions_on_one_story_have_two_keys():
 def test_the_snapshot_round_trips_through_sqlite(tmp_path: Path):
     state = tmp_path / "state"
     found = snapshot([question("q1")])
-    status.write(state, found)
+    write(state, found)
     assert status.read(state) == found
     with LocalState(state / "deckhand.db") as rows:
         assert rows.get(status.SNAPSHOT) == found
@@ -115,8 +121,8 @@ def test_a_snapshot_item_carries_its_lines():
 
 
 def test_a_write_replaces_the_last_one(tmp_path: Path):
-    status.write(tmp_path, snapshot([question("q1")]))
-    status.write(tmp_path, snapshot([]))
+    write(tmp_path, snapshot([question("q1")]))
+    write(tmp_path, snapshot([]))
     assert status.read(tmp_path)["items"] == []
 
 
@@ -138,7 +144,7 @@ def test_read_is_none_without_a_snapshot(tmp_path: Path):
 def test_read_is_none_when_lines_are_not_strings(tmp_path: Path):
     found = snapshot([question("q1")])
     found["items"][0]["lines"] = [1]
-    status.write(tmp_path, found)
+    write(tmp_path, found)
     assert status.read(tmp_path) is None
 
 
@@ -156,7 +162,7 @@ def test_read_is_none_when_the_state_folder_is_a_file(tmp_path: Path):
 def test_a_write_to_a_state_folder_that_is_a_file_refuses(tmp_path: Path):
     (tmp_path / "state").write_text("not a folder")
     with pytest.raises(Refusal):
-        status.write(tmp_path / "state", snapshot([]))
+        write(tmp_path / "state", snapshot([]))
 
 
 def test_an_idle_hand_is_marked_in_the_snapshot():

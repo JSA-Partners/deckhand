@@ -23,7 +23,6 @@ class Poller[T]:
         )
         self._latest: T | None = None
         self._began: float | None = None
-        self._landed: float | None = None
         self._thread = threading.Thread(target=self._loop, name=name, daemon=True)
 
     def _loop(self) -> None:
@@ -35,7 +34,7 @@ class Poller[T]:
             except Exception as error:
                 found = self._failed(error)
             with self._lock:
-                self._latest, self._began, self._landed = found, began, self._clock()
+                self._latest, self._began = found, began
             self._first.set()
             self._wake.wait(self._every)
 
@@ -48,10 +47,6 @@ class Poller[T]:
     def latest(self) -> T | None:
         with self._lock:
             return self._latest
-
-    def landed(self) -> float | None:
-        with self._lock:
-            return self._landed
 
     def began(self) -> float | None:
         with self._lock:

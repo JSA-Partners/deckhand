@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 
-from deckhand import answers, claims, config, features, fleet, git, inputs, launch, reading, spikes, startable
-from deckhand.linear.client import LinearError
+from deckhand import answers, config, features, fleet, git, inputs, launch, spikes
 from deckhand.policy import Policy
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import require_base
@@ -32,17 +31,12 @@ def _parse(args: list[str]) -> dict:
 
 @register("hand")
 class Hand:
-    def __init__(
-        self, store: Store | None = None, runner: git.Runner = git.run, *, person: Store | None = None
-    ) -> None:
-        self._stores = Stores(app=store, person=person)
+    def __init__(self, store: Store | None = None, runner: git.Runner = git.run) -> None:
+        self._stores = Stores(app=store)
         self._runner = runner
 
     def _app(self) -> Store:
         return self._stores("app")
-
-    def _person_store(self) -> Store:
-        return self._stores("person")
 
     def _fleet(self) -> fleet.Fleet:
         read = fleet.sessions(self._runner)
@@ -54,28 +48,13 @@ class Hand:
         parsed = _parse(args)
         if parsed["words"]:
             raise Refusal(f"context takes no REF; {USAGE}")
-        store, local = self._app(), config.local()
         read = fleet.sessions(self._runner)
-        feature = features.current(store, team_key(parsed))
-        hands = fleet.hands(read.sessions)
-        held = [*sorted(hands.items()), *sorted(fleet.spikes(read.sessions).items())]
-        live = [s for _, s in held if fleet.live(s)]
-        notes, work = [read.note] if read.note else [], []
-        try:
-            me = claims.me(self._person_store())
-        except (Refusal, LinearError) as error:
-            notes.append(str(error))
-        else:
-            if feature is not None:
-                found = startable.startable(store, feature, me, local.clones)
-                policy = reading.policy_for(notes, local.clones)
-                work = [w for w in found if startable.due(w, feature, hands, policy)]
+        feature = features.current(self._app(), team_key(parsed))
+        held = [*sorted(fleet.hands(read.sessions).items()), *sorted(fleet.spikes(read.sessions).items())]
         facts = {
-            "notes": notes,
+            "notes": [read.note] if read.note else [],
             "feature": feature.project["name"] if feature is not None else None,
-            "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
-            "live": [{"name": s.name, "state": s.state, "status": s.status} for s in live],
-            "startable": [{"ref": w.story["identifier"], "title": w.story["title"], "work": w.kind} for w in work],
+            "live": [{"name": s.name, "state": s.state, "status": s.status} for _, s in held if fleet.live(s)],
         }
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
@@ -130,11 +109,7 @@ def _free_slot(read: fleet.Fleet) -> None:
 def _print(facts: dict) -> None:
     for note in facts["notes"]:
         print(note)
-    print(f"slots: {facts['slots']['used']} of {facts['slots']['cap']}")
     for session in facts["live"]:
         print(f"live: {session['name']} {session['state']}")
     if facts["feature"] is None:
         print("no feature is open")
-    print("startable:" if facts["startable"] else "startable: none")
-    for work in facts["startable"]:
-        print(f"- {work['ref']} {work['work']}")

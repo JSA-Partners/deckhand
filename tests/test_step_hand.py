@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -52,7 +51,7 @@ def building() -> FakeStore:
 
 
 def hand(store: FakeStore, shell: Shell) -> Hand:
-    return Hand(store, shell, person=store)
+    return Hand(store, shell)
 
 
 def decided(store: FakeStore, story: str, nonce: str) -> None:
@@ -88,48 +87,12 @@ def test_an_idle_hand_on_its_own_prompt_is_never_due(clone: Path):
     assert startable.due(work, feature, fleet.hands(fleet.sessions(shell).sessions), lambda _: Policy.load(clone), 0)
 
 
-def test_context_shows_slots_live_hands_and_startable(clone: Path, capsys: pytest.CaptureFixture[str]):
+def test_context_shows_live_hands(clone: Path, capsys: pytest.CaptureFixture[str]):
     store, shell = building(), Shell(row("ACME-1", "working", "busy"))
-    store.assign("s1", ME)
     hand(store, shell).context(TEAM)
-    assert capsys.readouterr().out.splitlines() == [
-        "slots: 1 of 1",
-        "live: hand-ACME-1 working",
-        "startable:",
-        "- ACME-2 build",
-    ]
+    assert capsys.readouterr().out.splitlines() == ["live: hand-ACME-1 working"]
     hand(store, Shell(fleet_fails=True)).context(TEAM)
     assert "the fleet read failed" in capsys.readouterr().out
-
-
-def asked(store: FakeStore, story: str) -> None:
-    question = {"question": "Which queue?", "options": ["Redis", "SQS"], "why": "Both fit."}
-    store.put_record(story, asks.question_record(story, asks.parse_question(json.dumps(question))))
-
-
-def test_context_omits_a_started_story_waiting_on_the_person(clone: Path, capsys: pytest.CaptureFixture[str]):
-    store, shell = building(), Shell()
-    store.assign("s1", ME)
-    store.assign("s2", "someone-else")
-    started(store, "s1")
-    asked(store, "s1")
-    shell.rows = [row("ACME-1", "done")]
-    capsys.readouterr()
-    hand(store, shell).context([*TEAM, "--json"])
-    assert json.loads(capsys.readouterr().out)["startable"] == []
-
-
-class NoKey:
-    def viewer(self) -> dict:
-        raise Refusal("missing credentials file: personal-key")
-
-
-def test_context_prints_without_a_personal_key(clone: Path, capsys: pytest.CaptureFixture[str]):
-    store = building()
-    Hand(store, Shell(row("ACME-1", "working", "busy")), person=NoKey()).context(TEAM)
-    lines = capsys.readouterr().out.splitlines()
-    assert lines[:2] == ["missing credentials file: personal-key", "slots: 1 of 1"]
-    assert "live: hand-ACME-1 working" in lines
 
 
 QUESTION = "Does the queue keep order?"
@@ -246,7 +209,7 @@ def test_spike_refused_by_policy_writes_nothing(clone: Path, tmp_path: Path):
 def test_context_names_a_live_spike(clone: Path, capsys: pytest.CaptureFixture[str]):
     store, shell = empty_feature(), Shell(spike_row("0123456789ab", "working", "busy"))
     hand(store, shell).context(TEAM)
-    assert capsys.readouterr().out.splitlines()[:2] == ["slots: 1 of 1", "live: spike-0123456789ab working"]
+    assert capsys.readouterr().out.splitlines()[:1] == ["live: spike-0123456789ab working"]
 
 
 @pytest.mark.parametrize("text", ["one\ntwo", "x" * 201, "  padded", "", "\n", "a\tb", "a\rb", "q\n\n"])

@@ -9,7 +9,7 @@ from deckhand import status, watch
 from deckhand.step import Refusal, hand_may_apply
 from deckhand.steps.watch import POLL, Watch
 from deckhand.store.state import LocalState
-from tests.test_status import question, snapshot
+from tests.test_status import question, snapshot, write
 
 
 @pytest.fixture
@@ -48,17 +48,17 @@ def test_the_watch_command_prints_a_line_when_a_row_appears(db: Path, capsys, mo
 
 
 def test_the_captain_watcher_starts_silent_with_an_item_already_on_top(db: Path, capsys):
-    status.write(db.parent, snapshot([question("q1")]))
+    write(db.parent, snapshot([question("q1")]))
     with pytest.raises(StopIteration):
         Watch(sleep=passes({}, 3)).apply(["captain"])
     assert capsys.readouterr().out == ""
 
 
 def test_the_captain_watcher_rings_for_a_new_top_item(db: Path, capsys):
-    status.write(db.parent, snapshot([question("q1")]))
+    write(db.parent, snapshot([question("q1")]))
 
     def newer() -> None:
-        status.write(db.parent, snapshot([question("q2")]))
+        write(db.parent, snapshot([question("q2")]))
 
     with pytest.raises(StopIteration):
         Watch(sleep=passes({2: newer}, 4)).apply(["captain"])
@@ -66,17 +66,17 @@ def test_the_captain_watcher_rings_for_a_new_top_item(db: Path, capsys):
 
 
 def test_the_captain_watcher_keeps_its_top_across_a_failed_snapshot_read(db: Path, capsys):
-    status.write(db.parent, snapshot([question("q1")]))
+    write(db.parent, snapshot([question("q1")]))
 
     def broken() -> None:
         with LocalState(db) as rows:
             rows.put(status.SNAPSHOT, {"items": "unreadable"})
 
     def again() -> None:
-        status.write(db.parent, snapshot([question("q1")]))
+        write(db.parent, snapshot([question("q1")]))
 
     def newer() -> None:
-        status.write(db.parent, snapshot([question("q2")]))
+        write(db.parent, snapshot([question("q2")]))
 
     with pytest.raises(StopIteration):
         Watch(sleep=passes({2: broken, 3: again, 5: newer}, 6)).apply(["captain"])
@@ -84,10 +84,10 @@ def test_the_captain_watcher_keeps_its_top_across_a_failed_snapshot_read(db: Pat
 
 
 def test_the_captain_watcher_rings_the_same_item_when_linear_reads_clean_again(db: Path, capsys):
-    status.write(db.parent, status.stale(snapshot([question("q1")]), "2026-11-24T09:00:00.000Z"))
+    write(db.parent, status.stale(snapshot([question("q1")]), "2026-11-24T09:00:00.000Z"))
 
     def recovered() -> None:
-        status.write(db.parent, snapshot([question("q1")]))
+        write(db.parent, snapshot([question("q1")]))
 
     with pytest.raises(StopIteration):
         Watch(sleep=passes({2: recovered}, 4)).apply(["captain"])
@@ -96,7 +96,7 @@ def test_the_captain_watcher_rings_the_same_item_when_linear_reads_clean_again(d
 
 def test_an_engine_that_restarts_rings_once_its_snapshot_is_back(db: Path, capsys):
     now = [1795000000.0]
-    status.write(db.parent, snapshot([question("q1")]))
+    write(db.parent, snapshot([question("q1")]))
     with LocalState(db) as rows:
         rows.beat(1, now[0])
 
@@ -113,7 +113,7 @@ def test_an_engine_that_restarts_rings_once_its_snapshot_is_back(db: Path, capsy
             rows.beat(2, now[0])
 
     def written() -> None:
-        status.write(db.parent, snapshot([question("q1")]))
+        write(db.parent, snapshot([question("q1")]))
         with LocalState(db) as rows:
             rows.beat(2, now[0])
 

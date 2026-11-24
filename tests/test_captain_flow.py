@@ -128,7 +128,7 @@ def test_a_spike_asked_through_hand_is_launched_by_the_engine(clone: Path, tmp_p
     question = tmp_path / "question.md"
     question.write_text(QUESTION)
     flow = Flow(store)
-    Hand(store, flow.world, person=store).apply(["spike", "--repository", "widgets", "--file", str(question), *TEAM])
+    Hand(store, flow.world).apply(["spike", "--repository", "widgets", "--file", str(question), *TEAM])
     assert flow.world.launches() == 0
     flow.turn()
     flow.turn()
