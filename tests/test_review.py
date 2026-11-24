@@ -341,6 +341,10 @@ def test_an_accepted_finding_an_unscoped_later_round_does_not_raise_is_fixed():
 def test_touches_is_optional_and_kept():
     with_line = findings(raw(changes_delivery=True, touches="Contract: greets in English only"))[0]
     assert with_line.touches == "Contract: greets in English only"
+    [kept] = review.round_record("s1", "plan", RoundPlan(1, scoped=False, base_hash=""), "h1", [with_line]).data[
+        "findings"
+    ]
+    assert kept["touches"] == "Contract: greets in English only"
     assert findings(raw(changes_delivery=True))[0].touches == ""
     with pytest.raises(Refusal, match="touches"):
         findings(raw(touches=3))

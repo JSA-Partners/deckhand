@@ -28,7 +28,7 @@ Plan with superpowers:writing-plans and a manifest shaped as
 
 Review the plan in rounds from `deckhand review context REF --stage plan`: one deckhand:reviewer per
 listed lens at once, each given its stage, lens, target and spec paths, and carried findings, then
-deckhand:confidence on the joined list and target. Save with
+deckhand:confidence on the joined list, target and spec. Save with
 `deckhand review apply REF round --stage plan --findings FILE --target HASH`. Record a fix with
 `deckhand review apply REF resolve --stage plan --accept ID`, or propose a decline with `--propose-decline ID --reason TEXT`; declining, a scope change, a cap and any open finding are the person's; no docs decision excuses one. After fixing, rerun the context: clean or proceeded carries on.
 
