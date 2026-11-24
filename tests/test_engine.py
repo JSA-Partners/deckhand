@@ -643,3 +643,17 @@ def test_a_failed_stop_clears_once_its_story_is_reopened(clone: Path):
     rig.step()
     rig.step()
     assert rig.engine.note() == ""
+
+
+def test_a_failing_resume_for_a_reassigned_story_stays_backed_off(clone: Path):
+    configure(clone, 1)
+    rig = Rig(building(), row("ACME-1", "stopped"))
+    held_hand(rig)
+    started(rig.store, "s1")
+    rig.state.post("wake:s1:n1", NAME, asks.ANSWER, "Redis")
+    rig.store.assign("s1", "someone-else")
+    rig.ready()
+    notes = fail_every_submitted(rig, 300, "ACME-1: claude --bg failed: busy", NAME)
+    resumes = [a for a in rig.worker.submitted if isinstance(a, Resume)]
+    assert 2 <= len(resumes) <= 4
+    assert notes[-1] == "ACME-1: claude --bg failed: busy"

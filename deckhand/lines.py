@@ -6,6 +6,7 @@ from deckhand import fleet
 from deckhand.reconcile import RETRY_AFTER, RETRY_CAP, Action, Launch, Remove, Resume, Stop
 
 START, STOP, REMOVE, FINISHED_STOP = "start", "Stop", "Remove", "Stop:finished"
+LAUNCH = f"{START}:Launch"
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ class Stories:
 
 def _key(action: Action) -> tuple[str, str, str]:
     if isinstance(action, Launch | Resume):
-        return START, action.name, ""
+        return f"{START}:{type(action).__name__}", action.name, ""
     if isinstance(action, Stop):
         return f"{STOP}:{action.why}", action.name, action.short
     if isinstance(action, Remove):
@@ -51,7 +52,11 @@ class Lines:
         self._tries.pop(key, None)
 
     def failed(self) -> dict[str, tuple[int, float]]:
-        return {name: tries for (kind, name, _), tries in self._tries.items() if kind == START}
+        found: dict[str, tuple[int, float]] = {}
+        for (kind, name, _), tries in self._tries.items():
+            if kind.startswith(START) and (name not in found or tries[1] > found[name][1]):
+                found[name] = tries
+        return found
 
     def backing_off(self, action: Action, now: float) -> bool:
         if not isinstance(action, Stop | Remove):
@@ -70,7 +75,7 @@ class Lines:
             kind, name, short = key
             if not name:
                 continue
-            if kind == START:
+            if kind.startswith(START):
                 gone = name in alive
             elif kind.startswith(STOP):
                 gone = short not in running
@@ -84,8 +89,10 @@ class Lines:
 
 
 def _settled(kind: str, name: str, stories: Stories) -> bool:
-    if kind == START:
+    if kind == LAUNCH:
         return name.startswith(fleet.HAND) and (name in stories.finished or name not in stories.mine)
+    if kind.startswith(START):
+        return name in stories.finished
     if kind == FINISHED_STOP:
         return name not in stories.finished
     if kind.startswith(STOP) or kind == REMOVE:
