@@ -103,7 +103,7 @@ def _hand_row(entry: Entry, now: float) -> Row:
         own = brief.clean(hand.status)
         state = ", ".join(part for part in (label, "" if own == "busy" else own) if part)
     else:
-        gone = (brief.clean(hand.state) if hand else "") or "stopped"
+        gone = "idle" if hand and hand.idle else (brief.clean(hand.state) if hand else "") or "stopped"
         state = f"{gone} at {label}" if label else gone
     age = _ago(since, now) or (_ago(hand.started_at, now) if hand else "")
     return Row(f"story:{ref}", TONES[entry.kind], ref, title, state, age, _hand_detail(hand))
@@ -181,7 +181,7 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     if not isinstance(status, dict):
         return Board(False)
     live = read is not None and not read.note
-    hands = standing.live(read.sessions) if live else standing.filed(status)
+    hands = standing.live(read.sessions, standing.idle(status)) if live else standing.filed(status)
     entries = standing.classify(status, hands, today)
     used, cap = _slots(status, read)
     rows: dict[str, list[Row]] = {kind: [] for kind in standing.ORDER}

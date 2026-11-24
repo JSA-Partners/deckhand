@@ -22,6 +22,7 @@ class Hand:
     status: str = ""
     waiting_for: str = ""
     started_at: str = ""
+    idle: bool = False
 
     @property
     def live(self) -> bool:
@@ -68,16 +69,21 @@ def filed(status: dict) -> dict[str, Hand]:
             text(h, "name").startswith(fleet.SPIKE),
             waiting_for=text(h, "waiting_for"),
             started_at=text(h, "started_at"),
+            idle=h.get("idle") is True,
         )
         for h in dicts(status, "hands")
     }
 
 
-def live(sessions: list[fleet.Session]) -> dict[str, Hand]:
+def idle(status: dict) -> frozenset[str]:
+    return frozenset(text(h, "ref") for h in dicts(status, "hands") if h.get("idle") is True)
+
+
+def live(sessions: list[fleet.Session], idle: frozenset[str] = frozenset()) -> dict[str, Hand]:
     held = [(ref, s, False) for ref, s in fleet.hands(sessions).items()]
     held += [(ref, s, True) for ref, s in fleet.spikes(sessions).items()]
     return {
-        ref: Hand(ref, s.state, spike, s.id, s.status or "", s.waiting_for or "", s.started_at)
+        ref: Hand(ref, s.state, spike, s.id, s.status or "", s.waiting_for or "", s.started_at, ref in idle)
         for ref, s, spike in held
     }
 
@@ -89,7 +95,7 @@ def started(story: dict) -> bool:
 
 def _story(story: dict, hand: Hand | None) -> str:
     if hand is not None:
-        return WORKING if hand.live else STOPPED
+        return WORKING if hand.live and not hand.idle else STOPPED
     if story.get("mine") is False:
         return TEAM
     return STOPPED if started(story) else QUEUED

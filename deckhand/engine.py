@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, budget, config, features, fleet, git, queue, reading, status, watch
+from deckhand import acts, budget, config, features, fleet, git, idle, queue, reading, status, watch
 from deckhand.actions import Action, Adopt, Launch, Post, Resume
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
@@ -105,6 +105,8 @@ class Engine:
         self._poked_at: float | None = None
         self._turn_poked = float("-inf")
         self._budget = budget.Budget()
+        self._idle: frozenset[str] = frozenset()
+        self._idle_read: frozenset[str] = frozenset()
 
     def tick(self) -> None:
         now = self._clock()
@@ -134,10 +136,12 @@ class Engine:
         if read is None or good is None or good.stores is None:
             return
         due = now - self._reconciled >= RECONCILE_EVERY
+        self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke)
         held = reserved(self._facts(now, read, hands, busy)) | self._starting | set(self._settling)
         quiet = frozenset(fleet.ref_of(name) for name in held)
         fresh = self._fresh_records(good) if due else None
-        moved = changed or read != self._fleet or quiet != self._quiet or fresh is not None
+        moved = changed or read != self._fleet or quiet != self._quiet or self._idle != self._idle_read
+        moved = moved or fresh is not None
         if (moved or linked) and not self._read(good, read, hands, quiet, now) and fresh is not None:
             self._keep_records(fresh)
         began = self._fleets.began()
@@ -206,6 +210,8 @@ class Engine:
             policies=good.policies if good is not None else {},
             unheard=acts.unheard(self._state),
             labels=good.labels if good is not None else {},
+            idle=self._idle,
+            readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
         )
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
@@ -240,15 +246,18 @@ class Engine:
                 self._today(),
                 quiet=quiet,
                 restarts=restarts,
+                idle=frozenset(fleet.ref_of(name) for name in self._idle),
             )
         except (LinearError, Refusal) as error:
             self._lines.say("read", f"cannot read: {problem(error)}")
             return False
-        self._reading, self._fleet, self._quiet = found, read, quiet
+        self._reading, self._fleet, self._quiet, self._idle_read = found, read, quiet, self._idle
         self._lines.clear("read")
         previous = status.get(self._state)
         waiting = queue.ranked([*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting])
-        shown = status.snapshot(self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None)
+        shown = status.snapshot(
+            self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle
+        )
         if self._newest is not None and self._newest.error:
             shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)
         self._write(shown, previous)

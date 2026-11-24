@@ -30,10 +30,11 @@
   and done today, `brief.py` the brief and the status line segment, `board.py` the board's sections
   and rows; `watch.py` when a session's watcher rings and when the captain's has gone silent
 - The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into the
-  actions of `actions.py` and writes nothing, `acts.py` carries one action out and builds every hand's launch, `worker.py`
-  runs them in order on one thread, `poller.py` reads the fleet and Linear on their own threads,
-  `linker.py` the Linear read the engine takes from that thread, `lines.py` the failures the
-  engine shows, and `engine.py` is the loop, its lock, its heartbeat and the snapshot it writes
+  actions of `actions.py` and writes nothing, `idle.py` which live hands sit idle past their turn,
+  `acts.py` carries one action out and builds every hand's launch, `worker.py` runs them in order on
+  one thread, `poller.py` reads the fleet and Linear on their own threads, `linker.py` the Linear
+  read the engine takes from that thread, `lines.py` the failures the engine shows, and `engine.py`
+  is the loop, its lock, its heartbeat and the snapshot it writes
 - `monitors/monitors.json` registers `watch.sh`, the watcher every session runs; in a session that
   is neither captain nor hand it parks rather than exits, since an exit costs a model turn
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain

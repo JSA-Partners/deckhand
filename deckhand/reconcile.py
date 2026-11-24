@@ -33,6 +33,8 @@ class Facts:
     policies: Mapping[Path, Policy] = field(default_factory=dict)
     unheard: frozenset[int] = frozenset()
     labels: Mapping[str, list[str]] = field(default_factory=dict)
+    idle: frozenset[str] = frozenset()
+    readable: bool = True
 
 
 @dataclass
@@ -92,7 +94,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         tick = _Tick(facts, sessions, reading.me, _used(facts), set(facts.busy), set(reserved(facts)))
         feature = reading.feature
         if feature is not None:
-            found += _finished(tick, feature) + _answers(tick, feature)
+            found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature)
             found += _sync(tick, feature) + _deliver(tick, feature) + _start(tick, store, feature)
         else:
             found += _deliver(tick, None)
@@ -205,6 +207,28 @@ def _answers(tick: _Tick, feature: Feature) -> list[Action]:
         body = wakes.body(story, due, _records(feature, story))
         name = fleet.hand_name(story["identifier"])
         found.append(Post(name, f"wake:{story['id']}:{version}", due.kind, body, story["id"], wake))
+    return found
+
+
+# An idle hand's nudge is its one automatic restart; past it, the stalled item waits for the person.
+def _idle(tick: _Tick, feature: Feature) -> list[Action]:
+    found: list[Action] = []
+    for story in feature.live if tick.facts.readable else []:
+        name, records = fleet.hand_name(story["identifier"]), _records(feature, story)
+        row, session = tick.facts.hands.get(name), tick.alive(name)
+        if name not in tick.facts.idle or row is None or not row.turn_ended or session is None:
+            continue
+        launch = startable.launch_of(startable.kind(feature, story))
+        known = startable.clone_of(story, tick.facts.clones) in tick.facts.policies
+        second = known and queue.second_due(story, records, tick.policy_for) is not None
+        if story["assignee"] != tick.me or not queue.stalled(story, records, session, launch, second, idle=True):
+            continue
+        if queue.auto_restart(records, launch, row.restarts):
+            start = asks.hand_start(story, records, launch)
+            key = f"nudge:{story['id']}:{row.turn_ended}"
+            found.append(Post(name, key, wakes.NUDGE, wakes.nudge_body(), story["id"], start, restart=True))
+        elif queue.stall_answer(records, launch) is not None:
+            found.append(tick.take(Stop(name, session.id, "idle"), slot=False))
     return found
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, fleet, linker, spikes, status
+from deckhand import answers, asks, fleet, linker, spikes, status, wakes
 from deckhand.actions import Action
 from deckhand.acts import Acts
 from deckhand.engine import Engine
@@ -138,3 +138,36 @@ def test_a_spike_asked_through_hand_is_launched_by_the_engine(clone: Path, tmp_p
     assert ["git", "worktree", "add", "--detach", launched["cwd"], "origin/HEAD"] in flow.world.calls
     assert flow.world.launches() == 1
     assert "stalled" not in [item["kind"] for item in status.read(answers.state_dir())["items"]]
+
+
+def test_an_idle_hand_is_nudged_then_resumed_then_brought_to_the_person(clone: Path, state: Path):
+    store = building()
+    store.assign("s1", ME)
+    store.assign("s2", "someone-else")
+    flow = Flow(store)
+    flow.turn()
+    flow.turn()
+    [launched] = flow.world.rows
+    flow.hand(state="blocked", status="busy")
+    flow.state.turn_ended(NAME)
+    for _ in range(121):
+        flow.turn()
+    [nudge] = flow.state.pending(NAME)
+    assert (nudge.kind, flow.state.hands()[NAME].restarts) == (wakes.NUDGE, 1)
+    shown = status.read(answers.state_dir())
+    assert [h["idle"] for h in shown["hands"]] == [True]
+    assert "stalled" not in [item["kind"] for item in shown["items"]]
+
+    for _ in range(125):
+        flow.turn()
+    assert ["claude", "stop", launched["id"]] in flow.world.calls
+    assert any("--resume" in call for call in flow.world.calls)
+    assert flow.state.pending(NAME)[0].delivered is not None
+
+    flow.hand(state="blocked", status="busy")
+    flow.state.turn_ended(NAME)
+    for _ in range(121):
+        flow.turn()
+    shown = status.read(answers.state_dir())
+    assert [item["kind"] for item in shown["items"]] == ["stalled"]
+    assert [m.kind for m in flow.state.pending(NAME)] == [wakes.NUDGE]

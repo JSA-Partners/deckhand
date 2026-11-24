@@ -32,12 +32,13 @@ def read(
     quiet: frozenset[str] = frozenset(),
     notes: list[str] | None = None,
     restarts: Mapping[str, int] | None = None,
+    idle: frozenset[str] = frozenset(),
 ) -> Reading:
     if notes is None:
         notes = [fleet_read.note] if fleet_read.note else []
     feature = _current(store, team, notes)
     me = _me(person, notes)
-    waiting = _waiting(store, team, feature, me, fleet_read, local, notes, quiet, restarts)
+    waiting = _waiting(store, team, feature, me, fleet_read, local, notes, quiet, restarts, idle)
     facts = _facts(store, feature, waiting, fleet_read, me, local, today, notes)
     return Reading(team, feature, me, waiting, facts, notes)
 
@@ -123,11 +124,12 @@ def _waiting(
     notes: list[str],
     quiet: frozenset[str],
     restarts: Mapping[str, int] | None,
+    idle: frozenset[str],
 ) -> list[queue.Item]:
     if me is None:
         return []
     policy = policy_for(notes, local.clones)
-    return queue.items(store, team, feature, me, read, policy, quiet=quiet, restarts=restarts)
+    return queue.items(store, team, feature, me, read, policy, quiet=quiet, restarts=restarts, idle=idle)
 
 
 def _facts(

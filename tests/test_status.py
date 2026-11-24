@@ -70,6 +70,7 @@ def test_snapshot_shape():
                 "state": "blocked",
                 "waiting_for": fleet.PERMISSION,
                 "started_at": "2026-11-20T08:00:00.000Z",
+                "idle": False,
             },
             {
                 "name": "spike-0123456789ab",
@@ -77,6 +78,7 @@ def test_snapshot_shape():
                 "state": "working",
                 "waiting_for": None,
                 "started_at": "2026-11-20T08:00:00.000Z",
+                "idle": False,
             },
         ],
         "release": False,
@@ -151,3 +153,9 @@ def test_a_write_to_a_state_folder_that_is_a_file_refuses(tmp_path: Path):
     (tmp_path / "state").write_text("not a folder")
     with pytest.raises(Refusal):
         status.write(tmp_path / "state", snapshot([]))
+
+
+def test_an_idle_hand_is_marked_in_the_snapshot():
+    hand = session(fleet.hand_name("ACME-1"), "blocked")
+    found = status.snapshot(AT, "ACME", FACTS, [], [hand], idle=frozenset({"hand-ACME-1"}))
+    assert [entry["idle"] for entry in found["hands"]] == [True]

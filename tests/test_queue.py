@@ -532,3 +532,28 @@ def test_a_broken_clone_ranks_below_every_item_of_a_story_in_flight(tmp_path: Pa
     found = queue.ranked([*blocked, *waiting(store, sessions=sessions)])
     assert kinds(found)[-1] == (queue.POLICY, queue.POLICY_RANK, "widgets")
     assert [i.kind for i in found].count(queue.POLICY) == 1
+
+
+def idle_items(store: FakeStore, idle: frozenset[str], restarts: dict[str, int]) -> list[queue.Item]:
+    feature = features.open_feature(store, "ACME")
+    blocked = Fleet([hand("ACME-1", "blocked", "busy", None, iso(1795000000500))])
+    found = queue.items(
+        store, "ACME", feature, ME, blocked, lambda story: Policy("widgets"), restarts=restarts, idle=idle
+    )
+    return [i for i in found if i.kind == queue.STALLED]
+
+
+def test_an_idle_hand_past_its_one_restart_is_a_stalled_item():
+    store = alpha()
+    started(store, "s1")
+    [item] = idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1})
+    assert item.lines[1:] == ["its hand is idle, and no record is new since it last started"]
+    assert idle_items(store, frozenset(), {"ACME-1": 1}) == []
+    assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 0}) == []
+
+
+def test_an_idle_hand_waiting_on_the_person_is_not_stalled():
+    store = alpha()
+    started(store, "s1")
+    asked(store, "s1")
+    assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1}) == []

@@ -165,3 +165,21 @@ def test_an_unknown_person_is_never_an_all_clear_on_any_view():
     assert "nothing needs you" not in shown
     assert line == found.lead[0] + " " + found.lead[1] == "● personal key unreadable · run /deckhand:setup"
     assert found.quiet == brief.UNKNOWN
+
+
+def test_an_idle_hand_reads_as_stopped_never_working():
+    idle = [{**h, "idle": True} if h["ref"] == "ACME-17" else h for h in HANDS]
+    status = sample(items=[], hands=idle)
+    filed = standing.filed(status)
+    assert filed["ACME-17"].idle and not filed["ACME-15"].idle
+    assert (standing.STOPPED, "ACME-17") in kinds(status, filed)
+    assert kinds(status, standing.live(SESSIONS, frozenset({"ACME-17"}))) == kinds(status, filed)
+
+
+def test_the_board_shows_an_idle_hand_as_idle_in_stopped():
+    idle = [{**h, "idle": True} if h["ref"] == "ACME-17" else h for h in HANDS]
+    status = sample(items=[], hands=idle)
+    built = board.build(status, fleet.Fleet(SESSIONS), NOW, TODAY, brief.UNICODE)
+    [stopped] = [section for section in built.sections if section.name == standing.STOPPED]
+    [row] = [row for row in stopped.rows if row.ref == "ACME-17"]
+    assert row.state.startswith("idle")

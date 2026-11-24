@@ -15,6 +15,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
 from tests.test_feature_approval import P1, setup
+from tests.test_queue import asked
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
 from tests.test_step_stories import setup as empty_feature
 
@@ -638,3 +639,55 @@ def test_the_sync_reads_repository_labels_from_the_facts(clone: Path):
     store.set_issue_state("s1", "Done")
     found = reconcile(facts(store, hands=(held("ACME-2", issue="s2"),), labels={}), store)
     assert not [a for a in found if isinstance(a, Post)]
+
+
+ENDED = at(T - 200)
+
+
+def idle_facts(store: FakeStore, hand: HandRow, **rest: object) -> Facts:
+    blocked = row("ACME-1", "blocked", "busy")
+    return facts(store, blocked, hands=(hand,), idle=frozenset({"hand-ACME-1"}), **rest)
+
+
+def test_an_idle_hand_is_nudged_once_per_turn_end_as_its_restart(clone: Path):
+    store = alone()
+    store.assign("s1", ME)
+    started(store)
+    hand = held(turn_ended=ENDED)
+    [nudge] = reconcile(idle_facts(store, hand), store)
+    start = asks.hand_start(story(store, "ACME-1"), store.records("s1"), queue.STORY_HAND)
+    assert nudge == Post("hand-ACME-1", f"nudge:s1:{ENDED}", wakes.NUDGE, wakes.nudge_body(), "s1", start, True)
+
+
+def test_no_nudge_while_linear_is_unreadable(clone: Path):
+    store = alone()
+    store.assign("s1", ME)
+    started(store)
+    assert reconcile(idle_facts(store, held(turn_ended=ENDED), readable=False), store) == []
+
+
+def test_an_idle_hand_past_its_restart_waits_for_the_person(clone: Path):
+    store = alone()
+    store.assign("s1", ME)
+    started(store)
+    assert reconcile(idle_facts(store, held(turn_ended=ENDED, restarts=1)), store) == []
+
+
+def test_an_answered_idle_hand_is_stopped_for_the_restart_or_to_stay_stopped(clone: Path):
+    for answer in (queue.RESTART, queue.LEAVE):
+        store = alone()
+        store.assign("s1", ME)
+        started(store)
+        start = queue.last_start(store.records("s1"), queue.STORY_HAND)
+        assert start is not None
+        store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
+        found = reconcile(idle_facts(store, held(turn_ended=ENDED, restarts=1)), store)
+        assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
+
+
+def test_an_idle_hand_waiting_on_the_person_is_left_alone(clone: Path):
+    store = alone()
+    store.assign("s1", ME)
+    started(store)
+    asked(store, "s1")
+    assert reconcile(idle_facts(store, held(turn_ended=ENDED)), store) == []

@@ -214,10 +214,15 @@ def _waiting(story: dict, records: list[Record], second: bool) -> bool:
 
 
 def stalled(
-    story: dict, records: list[Record], session: fleet.Session | None, launch: str, second: bool = False
+    story: dict,
+    records: list[Record],
+    session: fleet.Session | None,
+    launch: str,
+    second: bool = False,
+    idle: bool = False,
 ) -> bool:
     start = last_start(records, launch)
-    if start is None or (session is not None and fleet.alive(session)):
+    if start is None or (session is not None and fleet.alive(session) and not idle):
         return False
     return not _waiting(story, records, second) and not finished(story, records, start)
 
@@ -248,13 +253,14 @@ def _stalled(
     launch: str,
     second: bool,
     restarts: int | None,
+    idle: bool = False,
 ) -> list[Item]:
-    if not stalled(story, records, session, launch, second) or auto_restart(records, launch, restarts):
+    if not stalled(story, records, session, launch, second, idle) or auto_restart(records, launch, restarts):
         return []
     start = last_start(records, launch)
     if start is None or stall_answer(records, launch) is not None:
         return []
-    state = session.state if session is not None else "gone"
+    state = "idle" if idle else session.state if session is not None else "gone"
     lines = [f"its hand is {state}, and no record is new since it last started"]
     next = [f"decide context {STALLED} {story['identifier']}"]
     return [_story_item(STALLED, rank, story, start.at, lines, next)]
@@ -317,10 +323,11 @@ def items(
     *,
     quiet: frozenset[str] = frozenset(),
     restarts: Mapping[str, int] | None = None,
+    idle: frozenset[str] = frozenset(),
 ) -> list[Item]:
     found = _after_merge(store, team, me)
     if feature is not None:
-        found += _feature_items(store, feature, me, read, policy_for, quiet, restarts or {})
+        found += _feature_items(store, feature, me, read, policy_for, quiet, restarts or {}, idle)
     return ranked(found)
 
 
@@ -336,6 +343,7 @@ def _feature_items(
     policy_for: Callable[[dict], Policy],
     quiet: frozenset[str],
     restarts: Mapping[str, int],
+    idle: frozenset[str],
 ) -> list[Item]:
     building = features.phase(feature) is Phase.BUILDING
     rank = 2 if building else 4
@@ -353,8 +361,9 @@ def _feature_items(
                 second = second_due(story, records, policy_for) is not None
                 launch = STORY_HAND if building or story["state"] == order.DONE else DRAFT_HAND
                 found += _prompt(story, records, session, rank)
-                if story["identifier"] not in quiet:
-                    found += _stalled(story, records, session, rank, launch, second, restarts.get(story["identifier"]))
+                ref = story["identifier"]
+                if ref not in quiet:
+                    found += _stalled(story, records, session, rank, launch, second, restarts.get(ref), ref in idle)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found]
