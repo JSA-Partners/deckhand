@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, asks, decisions, features, git, pins, quiz, review, signoff, versions
+from deckhand import answers, asks, decisions, features, git, pins, queue, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
@@ -14,7 +14,7 @@ USAGE = (
     "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
     " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
     " quiz and after-merge take a story and --item N, question takes its id and one --story,"
-    " config-edit takes a story and --item ID,"
+    " config-edit takes a story and --item ID, stalled takes a story,"
     " review-cap takes a story and --stage plan|branch,"
     " sign-off and second-sign-off take a story;"
     " apply NONCE"
@@ -68,7 +68,7 @@ class Decide(StoryStep):
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
         store = self._store_for_run()
-        if kind == signoff.AFTER:
+        if kind in (signoff.AFTER, asks.EDIT, queue.STALLED):
             feature = features.owning(store, team_key(parsed), subject)
         elif kind == asks.ANSWER and len(parsed["stories"]) == 1:
             feature = features.owning(store, team_key(parsed), parsed["stories"][0])
