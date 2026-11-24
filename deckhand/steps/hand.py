@@ -73,12 +73,6 @@ def argv(name: str, ref: str, clone: Path, worktree: Path, resume: str | None, k
     return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
 
 
-def start_record(story: dict, records: list[Record], kind: str) -> Record:
-    newest = max((r.at for r in records), default="")
-    data = {"kind": kind, "session": fleet.hand_name(story["identifier"])}
-    return Record(asks.HAND_START, story["id"], newest, HAND, data)
-
-
 def _resume(session: fleet.Session | None) -> str | None:
     return session.session_id if session is not None and session.session_id else None
 
@@ -307,7 +301,7 @@ class Hand:
         make_worktree(store, story, plan.clone, plan.branch, self._runner)
         if wake is not None:
             ops.ensure_record(store, story["id"], wake)
-        ops.ensure_record(store, story["id"], start_record(story, plan.records, plan.kind))
+        ops.ensure_record(store, story["id"], asks.hand_start(story, plan.records, plan.kind))
         self._retire(plan.stop)
         git.call(plan.argv, plan.cwd, self._runner)
 

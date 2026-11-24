@@ -331,13 +331,13 @@ def test_the_captain_opens_in_focus_view_and_a_hand_does_not(layout: dict) -> No
 
 
 LAUNCH_OUTPUT = (
-    "Starting background service…\nbackgrounded · 1444880d · probe-c\n"
+    "Starting background service\u2026\nbackgrounded \u00b7 1444880d \u00b7 probe-c\n"
     "  claude agents             list sessions\n  claude attach 1444880d    open in this terminal\n"
     "  claude logs 1444880d      show recent output\n  claude stop 1444880d      stop this session\n"
 )
 COPY_OUTPUT = (
     "note: session 1444880d is already running in the background, so this started a copy as 4a65b4bd."
-    " `claude attach 1444880d` opens the original.\nbackgrounded · 4a65b4bd\n"
+    " `claude attach 1444880d` opens the original.\nbackgrounded \u00b7 4a65b4bd\n"
     "  claude agents             list sessions\n  claude attach 4a65b4bd    open in this terminal\n"
 )
 

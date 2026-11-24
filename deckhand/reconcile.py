@@ -288,18 +288,13 @@ def _start(tick: _Tick, store: Store, feature: Feature) -> list[Action]:
         if tick.backing_off(name):
             continue
         if row is not None and row.session and row.kind == launch and tick.listed(row.session):
-            start = _fresh_start(name, story, records, launch)
+            start = asks.hand_start(story, records, launch)
             nudge = Resume(name, row.session, row.cwd, wakes.nudge_body(), (), start, restart)
             found.append(tick.take(nudge, slot=True))
         else:
             ref = story["identifier"]
             found.append(tick.take(Launch(name, ref, launch, work.clone, story, tick.me, restart), slot=True))
     return found
-
-
-def _fresh_start(name: str, story: dict, records: list[Record], launch: str) -> Record:
-    newest = max((r.at for r in records), default="")
-    return Record(asks.HAND_START, story["id"], newest, HAND, {"kind": launch, "session": name})
 
 
 def _spikes(tick: _Tick) -> list[Action]:
@@ -357,7 +352,7 @@ def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Mess
     restarts = row.restarts if row is not None else None
     if not queue.auto_restart(records, launch, restarts) and queue.stall_answer(records, launch) != queue.RESTART:
         return None
-    fresh = _fresh_start(name, story, records, launch) if story is not None else None
+    fresh = asks.hand_start(story, records, launch) if story is not None else None
     return Resume(name, session, cwd, text, seqs, fresh, restart=True)
 
 

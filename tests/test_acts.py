@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from deckhand import asks, launch, queue
+from deckhand import asks, config, features, fleet, launch, queue
 from deckhand.acts import Acts, unheard
 from deckhand.linear.client import LinearError
-from deckhand.reconcile import Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand.policy import Policy
+from deckhand.reading import Reading
+from deckhand.reconcile import Adopt, Facts, Launch, Post, Remove, Resume, Stop, reconcile
 from deckhand.records import HAND, Record
 from deckhand.store.fake import FakeStore
 from deckhand.store.local import LocalRecords
 from deckhand.store.state import LocalState
-from tests.shell import Shell, row
+from tests.shell import Shell, World, row
 from tests.test_reconcile import story
 from tests.test_step_hand import ME, building, clone, state
 
@@ -230,3 +233,107 @@ def test_an_unexpected_error_becomes_a_line_without_its_text(rows: LocalState, d
 
     line = Acts(rows, LocalRecords(db), building, broken).run(Stop(NAME, "old1", "finished"))
     assert line == "ACME-1: RuntimeError"
+
+
+def down() -> FakeStore:
+    raise LinearError("unreachable", "down")
+
+
+class Loop:
+    def __init__(self, rows: LocalState) -> None:
+        self.rows, self.store, self.world = rows, building(), World()
+        self.person: Callable[[], FakeStore] = lambda: self.store
+        self.acts = Acts(rows, self.store, lambda: self.person(), self.world)
+
+    def tick(self) -> list[str | None]:
+        clones = config.local().clones
+        reading = Reading("ACME", features.current(self.store, "ACME"), ME, [], {}, [])
+        policies = {path: Policy.load(path) for path in clones.values()}
+        read = fleet.sessions(self.world)
+        hands, pending = self.rows.hands(), self.rows.pending()
+        found = Facts(time.time(), 0.0, read, hands, pending, reading, 1, clones=clones, policies=policies)
+        return [self.acts.run(action) for action in reconcile(found, self.store) if action.name == NAME]
+
+    def running(self) -> None:
+        assert self.tick() == [None] and self.tick() == [None]
+
+    def restarts(self) -> int:
+        return self.rows.hands()[NAME].restarts
+
+
+@pytest.mark.parametrize("broken", ["claim", "launch"])
+def test_a_first_launch_that_fails_once_spends_no_restart(clone: Path, rows: LocalState, broken: str):
+    loop = Loop(rows)
+    if broken == "claim":
+        loop.person = down
+    else:
+        loop.world.fail.add(("claude", "--bg"))
+    assert loop.tick() != [None]
+    loop.person, loop.world.fail = lambda: loop.store, set()
+    loop.running()
+    assert loop.restarts() == 0 and len(loop.world.rows) == 1
+
+
+def stopped_after_one_restart(loop: Loop) -> None:
+    loop.running()
+    loop.world.stop(NAME)
+    assert loop.tick() == [None]
+    loop.world.rows.clear()
+
+
+def test_a_relaunch_after_progress_that_fails_is_retried(clone: Path, rows: LocalState):
+    loop = Loop(rows)
+    stopped_after_one_restart(loop)
+    loop.store.put_record("s1", Record("note", "s1", "v1", HAND, {}))
+    loop.world.fail.add(("claude", "--bg"))
+    assert loop.tick() == ["ACME-1: claude --bg failed: error: one; fatal: two"]
+    loop.world.fail.clear()
+    launched = loop.world.launches()
+    assert loop.tick() == [None] and loop.world.launches() == launched + 1
+
+
+def test_a_restart_answer_whose_launch_fails_is_retried(clone: Path, rows: LocalState):
+    loop = Loop(rows)
+    stopped_after_one_restart(loop)
+    start = queue.last_start(loop.store.records("s1"))
+    assert start is not None
+    loop.store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": queue.RESTART}))
+    loop.world.fail.add(("claude", "--bg"))
+    assert loop.tick() != [None]
+    loop.world.fail.clear()
+    launched = loop.world.launches()
+    assert loop.tick() == [None] and loop.world.launches() == launched + 1
+
+
+def test_a_silent_relaunch_whose_fleet_read_fails_still_counts_its_restart(clone: Path, rows: LocalState):
+    loop = Loop(rows)
+    loop.running()
+    loop.world.rows.clear()
+    loop.world.silent = True
+    loop.world.reads_before_failing = sum(call[:2] == ["claude", "agents"] for call in loop.world.calls) + 2
+    assert loop.tick() != [None]
+    assert loop.restarts() == 1
+
+
+def test_a_silent_resume_reads_its_short_id_from_the_fleet(rows: LocalState, db: Path):
+    wanted(rows)
+    world = World()
+    world.rows.append({"id": "old1", "name": NAME, "sessionId": "sid-ACME-1", "cwd": "/w", "state": "stopped"})
+    world.silent = True
+    assert Acts(rows, LocalRecords(db), building, world).run(a_resume()) is None
+    assert rows.hands()[NAME].short == world.rows[-1]["id"] != "old1"
+
+
+def test_a_failed_resume_delivers_nothing_writes_nothing_and_counts_nothing(rows: LocalState, db: Path):
+    wanted(rows)
+    start = Record(asks.HAND_START, "s1", "", HAND, {"kind": queue.STORY_HAND, "session": NAME})
+    line = acts(rows, db, Shell(fail=(("claude", "--bg"),))).run(a_resume(start, restart=True))
+    assert line == "ACME-1: claude --bg failed: fatal: unable to access origin"
+    assert rows.pending()[0].delivered is None and kinds(db) == [] and rows.hands()[NAME].restarts == 0
+
+
+def test_a_failure_of_several_lines_reads_as_one(rows: LocalState, db: Path):
+    world = World()
+    world.fail.add(("claude", "stop"))
+    line = Acts(rows, LocalRecords(db), building, world).run(Stop(NAME, "old1", "finished"))
+    assert line == "ACME-1: claude stop failed: error: one; fatal: two"
