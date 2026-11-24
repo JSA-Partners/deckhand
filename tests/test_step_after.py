@@ -190,7 +190,7 @@ class Conflicted(Shell):
     def __call__(self, argv, cwd=None, stdin=None):
         if argv[:2] == ["git", "merge"]:
             self.argvs.append(argv)
-            return subprocess.CompletedProcess(argv, 1, "", "CONFLICT")
+            return subprocess.CompletedProcess(argv, 0 if "--abort" in argv else 1, "", "CONFLICT")
         if argv[:2] == ["git", "diff"] and "--diff-filter=U" in argv:
             self.argvs.append(argv)
             return subprocess.CompletedProcess(argv, 0, "a.txt\n", "")
@@ -200,9 +200,11 @@ class Conflicted(Shell):
 def test_an_after_merge_sync_conflict_leaves_the_item_to_the_person(tmp_path: Path, repo: Path):
     store = labeled(tmp_path, repo)
     store.set_issue_state("s1", "Done")
+    shell = Conflicted()
     with pytest.raises(Refusal, match=r"conflicts in a\.txt") as refused:
-        After(store, Conflicted(), repo).apply(["ACME-1", "sync", *TEAM])
+        After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
     assert refused.value.rule.endswith(LEAVE)
+    assert shell.ran("git", "merge") == [["git", "merge", "--no-edit", "origin/HEAD"], ["git", "merge", "--abort"]]
     assert "build apply" not in refused.value.rule
 
 

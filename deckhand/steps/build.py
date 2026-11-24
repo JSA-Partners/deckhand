@@ -258,6 +258,8 @@ def sync(path: Path, ref: str, runner: git.Runner, leave: str | None = None) -> 
             f"{path} has uncommitted changes; {leave or f'run build apply {ref} commit --message FILE first'}"
         )
     conflicts = git.merge_from(path, DEFAULT_BASE, runner)
+    if conflicts and leave:
+        git.abort_merge(path, runner)
     if conflicts:
         fix = leave or f"resolve the markers, then run build apply {ref} commit --message FILE"
         raise Refusal(f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; {fix}")

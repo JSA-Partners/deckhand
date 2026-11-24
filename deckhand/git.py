@@ -326,6 +326,10 @@ def merge_from(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     return conflicts
 
 
+def abort_merge(worktree: Path, runner: Runner = run) -> None:
+    call(["git", "merge", "--abort"], worktree, runner)
+
+
 def fetch(clone: Path, runner: Runner = run) -> None:
     call(["git", "fetch", "origin", "--prune"], clone, runner)
 
