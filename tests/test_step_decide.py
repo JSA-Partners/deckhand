@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
-from deckhand import answers, claims, decisions, features, planning, versions
+from deckhand import answers, decisions, features, planning, versions
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import content_hash
 from deckhand.step import Refusal
-from deckhand.steps import build
 from deckhand.steps.decide import Decide
+from deckhand.store import open as store_open
 from deckhand.store.fake import FakeStore
 
 P1 = create_id("ACME:Alpha", "feature")
@@ -157,7 +156,7 @@ class Connected(Exception):
     pass
 
 
-def roles_connected(monkeypatch: pytest.MonkeyPatch, *steps: ModuleType) -> list[str]:
+def roles_connected(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     roles: list[str] = []
 
     def connect(credentials: object, role: str) -> None:
@@ -165,14 +164,12 @@ def roles_connected(monkeypatch: pytest.MonkeyPatch, *steps: ModuleType) -> list
         raise Connected
 
     monkeypatch.setattr(Credentials, "load", classmethod(lambda cls, path: object()))
-    monkeypatch.setattr(claims, "connect", connect)
-    for step in steps:
-        monkeypatch.setattr(step, "connect", connect)
+    monkeypatch.setattr(store_open, "connect", connect)
     return roles
 
 
 def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
-    roles = roles_connected(monkeypatch, build)
+    roles = roles_connected(monkeypatch)
     with pytest.raises(Connected):
         Decide().context(["contract", P1, *TEAM])
     assert roles == ["person"]

@@ -7,14 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, tiers, versions
-from deckhand.credentials import Credentials
 from deckhand.features import Phase
-from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import Record
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import open_store
 
 USAGE = (
     "build takes REF and [--team-key KEY] on both verbs; context [--json], apply worktree, commit --message FILE,"
@@ -101,7 +99,7 @@ class StoryStep:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return open_store("app")
 
     def viewer(self) -> str:
         if self._me is not None:

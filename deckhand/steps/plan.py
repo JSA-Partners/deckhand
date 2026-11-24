@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 
-from deckhand import config, features, inputs, planning
-from deckhand.credentials import Credentials
-from deckhand.linear.connect import connect
+from deckhand import features, inputs, planning
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import open_store
 
 USAGE = (
     "plan takes [--team-key KEY] on both verbs, --json on context only; context [SECTION],"
@@ -38,7 +36,7 @@ class Plan:
     def _store_for_run(self) -> Store:
         if self._store is not None:
             return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return open_store("app")
 
     def _feature(self, store: Store, parsed: dict) -> features.Feature:
         feature = features.open_feature(store, team_key(parsed))

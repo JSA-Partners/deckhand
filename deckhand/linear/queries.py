@@ -107,12 +107,6 @@ mutation ProjectUpdate($id: String!, $input: ProjectUpdateInput!) {
 }
 """
 
-ISSUE_ATTACHMENTS = f"""
-query IssueAttachments($id: String!, $after: String) {{
-  issue(id: $id) {{ attachments{AFTER} {{ nodes {{ url metadata updatedAt }} {CURSOR} }} }}
-}}
-"""
-
 PROJECT_DOCUMENTS = f"""
 query ProjectDocuments($id: String!, $after: String) {{
   project(id: $id) {{ documents{AFTER} {{ nodes {{ id title url updatedAt }} {CURSOR} }} }}
@@ -162,12 +156,6 @@ mutation DocumentCreate($input: DocumentCreateInput!) {
 DOCUMENT_UPDATE = """
 mutation DocumentUpdate($id: String!, $input: DocumentUpdateInput!) {
   documentUpdate(id: $id, input: $input) { success }
-}
-"""
-
-ATTACHMENT_CREATE = """
-mutation AttachmentCreate($input: AttachmentCreateInput!) {
-  attachmentCreate(input: $input) { success attachment { id } }
 }
 """
 
