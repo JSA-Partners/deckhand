@@ -14,6 +14,7 @@ from deckhand.store.open import Stores
 from deckhand.worker import problem
 
 NO_FLEET = "the fleet is not read yet"
+REFRESH = 600.0
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,17 @@ class Linked:
     problems: tuple[str, ...] = ()
     labels: Mapping[str, list[str]] = field(default_factory=dict)
     broken: Mapping[Path, str] = field(default_factory=dict)
+
+
+@dataclass
+class Kept:
+    teams: dict[str, str] = field(default_factory=dict)
+    labels: dict[str, list[str]] = field(default_factory=dict)
+    at: float = float("-inf")
+
+    def refresh(self, now: float) -> None:
+        if now - self.at >= REFRESH:
+            self.teams, self.labels, self.at = {}, {}, now
 
 
 def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy], dict[Path, str]]:
@@ -50,16 +62,23 @@ def link(
     team: str,
     fleet_now: Callable[[], fleet.Fleet],
     clock: Callable[[], float],
-    stores: Callable[[], Stores] = Stores,
+    stores: Callable[[], Stores] | None = None,
     today: Callable[[], date] = date.today,
+    kept: Kept | None = None,
 ) -> Linked:
     at, problems = clock(), []
+    kept = kept if kept is not None else Kept()
+    kept.refresh(at)
     local, policies, broken = _configured(problems)
-    held, read = stores(), fleet_now() or fleet.Fleet([], NO_FLEET)
+    held = stores() if stores is not None else Stores(teams=kept.teams)
+    read = fleet_now() or fleet.Fleet([], NO_FLEET)
     try:
         found = reading.read(held("app"), lambda: held("person"), team, read, local, today())
         teams = sorted({team, *(s["team"] for s in found.feature.stories)} if found.feature else {team})
-        labels = {name: held("app").repository_labels(name) for name in teams}
+        for name in teams:
+            if name not in kept.labels:
+                kept.labels[name] = held("app").repository_labels(name)
+        labels = {name: kept.labels[name] for name in teams}
     except (LinearError, Refusal) as error:
         return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)
     return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken)

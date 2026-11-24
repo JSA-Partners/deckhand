@@ -56,7 +56,7 @@ def opened(
 ) -> dict[str, CountingStore]:
     found = {"app": counting_store(team), "person": counting_store(team)}
 
-    def open_store(role: str) -> CachedStore:
+    def open_store(role: str, teams: dict[str, str] | None = None) -> CachedStore:
         found[role].opens += 1
         return CachedStore(found[role])
 

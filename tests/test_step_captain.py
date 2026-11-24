@@ -102,7 +102,7 @@ def test_captain_context_reads_no_linear_and_no_fleet(
     asked(store, "s1")
     engine_wrote(store)
 
-    def opened(role: str) -> None:
+    def opened(role: str, teams: object = None) -> None:
         raise AssertionError(f"the captain opened the {role} store")
 
     monkeypatch.setattr(store_open, "open_store", opened)

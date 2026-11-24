@@ -41,9 +41,10 @@ def _assignee(node: dict[str, Any]) -> dict[str, Any]:
 
 
 class LinearStore(Store):
-    def __init__(self, client: LinearClient, records: LocalRecords) -> None:
+    def __init__(self, client: LinearClient, records: LocalRecords, teams: dict[str, str] | None = None) -> None:
         self._client = client
         self._records = records
+        self._teams = teams if teams is not None else {}
 
     def _paged(self, query: str, variables: dict[str, Any], path: tuple[str, str]) -> list[dict[str, Any]]:
         entity, connection = path
@@ -66,10 +67,12 @@ class LinearStore(Store):
         return [label["name"] for label in nodes]
 
     def _team_id(self, key: str) -> str:
-        nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
-        if not nodes:
-            raise Refusal(f"no Linear team has the key {key}")
-        return nodes[0]["id"]
+        if key not in self._teams:
+            nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
+            if not nodes:
+                raise Refusal(f"no Linear team has the key {key}")
+            self._teams[key] = nodes[0]["id"]
+        return self._teams[key]
 
     def _label_ids(self, team_id: str, names: list[str]) -> list[str]:
         if not names:

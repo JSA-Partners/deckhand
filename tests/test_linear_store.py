@@ -725,3 +725,22 @@ def test_project_documents_carry_their_body_across_pages(records: LocalRecords) 
 def test_project_documents_of_a_missing_project_is_empty(records: LocalRecords) -> None:
     client = FakeClient(ProjectDocuments=LinearError("INPUT_ERROR", "Entity not found: Project"))
     assert LinearStore(client, records).project_documents("proj-1") == []
+
+
+def test_a_store_asks_for_a_team_id_once(records: LocalRecords) -> None:
+    client = FakeClient(
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+        IssueCreate={"issueCreate": {"success": True, "issue": {"id": UUID}}},
+    )
+    store = LinearStore(client, records)
+    store.create_issue(UUID, "ACME", "One", "", None, [])
+    store.create_issue(OTHER, "ACME", "Two", "", None, [])
+    assert client.names == ["TeamId", "IssueCreate", "IssueCreate"]
+
+
+def test_a_store_given_known_team_ids_asks_for_none(records: LocalRecords) -> None:
+    client = FakeClient(IssueCreate={"issueCreate": {"success": True, "issue": {"id": UUID}}})
+    LinearStore(client, records, {"ACME": TEAM_ID}).create_issue(UUID, "ACME", "One", "", None, [])
+    assert client.calls == [
+        ("IssueCreate", {"input": {"id": UUID, "teamId": TEAM_ID, "title": "One", "description": ""}})
+    ]

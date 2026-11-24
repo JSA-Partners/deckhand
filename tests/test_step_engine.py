@@ -86,7 +86,7 @@ def tty(monkeypatch: pytest.MonkeyPatch, terminal: bool = True) -> None:
 def run(monkeypatch: pytest.MonkeyPatch, watch, shell: Shell | None = None) -> Shell:
     shell = shell or Shell()
     tty(monkeypatch)
-    monkeypatch.setattr(linker, "link", lambda team, *rest: Linked(None, None, NOW, "network: down"))
+    monkeypatch.setattr(linker, "link", lambda team, *rest, **named: Linked(None, None, NOW, "network: down"))
     monkeypatch.setattr(tui, "watch", watch)
     Engine(shell, clock=lambda: NOW).apply(["run", "--team-key", "ACME"])
     return shell

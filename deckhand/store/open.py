@@ -14,9 +14,9 @@ from deckhand.store.state import LocalState
 METERS = {"app": Meter(), "person": Meter()}
 
 
-def open_store(role: str) -> Store:
+def open_store(role: str, teams: dict[str, str] | None = None) -> Store:
     client = connect(Credentials.load(config.config_dir()), role, meter=METERS[role])
-    return CachedStore(LinearStore(client, LocalRecords(default_path())))
+    return CachedStore(LinearStore(client, LocalRecords(default_path()), teams))
 
 
 # A meter that cannot be kept never changes what the command printed or how it exited.
@@ -34,11 +34,14 @@ def flush() -> None:
 
 
 class Stores:
-    def __init__(self, app: Store | None = None, person: Store | None = None) -> None:
+    def __init__(
+        self, app: Store | None = None, person: Store | None = None, teams: dict[str, str] | None = None
+    ) -> None:
         self._held: dict[str, Store | None] = {"app": app, "person": person}
+        self._teams = teams
 
     def __call__(self, role: str) -> Store:
         held = self._held[role]
         if held is None:
-            held = self._held[role] = open_store(role)
+            held = self._held[role] = open_store(role, self._teams)
         return held
