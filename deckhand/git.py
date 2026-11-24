@@ -224,6 +224,14 @@ def diff_since(worktree: Path, commit: str, runner: Runner = run) -> str:
     return call(["git", "diff", f"{commit}..HEAD"], worktree, runner)
 
 
+# A base merged in since the review is taken out, so the diff holds only the story's own change.
+def changed_since(worktree: Path, reviewed: str, base: str, runner: Runner = run) -> str:
+    if is_ancestor(worktree, base, reviewed, runner):
+        return diff_since(worktree, reviewed, runner)
+    tree = call(["git", "merge-tree", "--write-tree", reviewed, base], worktree, runner).split("\n", 1)[0]
+    return call(["git", "diff", tree, "HEAD"], worktree, runner)
+
+
 def changed_files(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     out = call(["git", "diff", "--name-only", f"{base}...HEAD"], worktree, runner)
     return out.splitlines()

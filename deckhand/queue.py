@@ -130,7 +130,9 @@ def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
     prefix = f"{story['id']}:{stage}"
     held, _ = review.counted(records, prefix)
     latest = review.last(held)
-    if latest is None or not review.at_cap(held, review.excused(records, prefix), review.proceeded(records, prefix)):
+    excused = review.excused(records, prefix)
+    since = review.proceeded(records, prefix)
+    if latest is None or not review.at_cap(held, excused, since):
         return []
     lines = [f"three {stage} review rounds left a P1 open"]
     next = [f"decide context review-cap {story['identifier']} --stage {stage}"]

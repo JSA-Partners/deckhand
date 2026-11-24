@@ -251,19 +251,21 @@ def test_clean_round_says_nothing_found(tmp_path: Path, repo: Path, capsys: pyte
 
 
 class BranchGit:
-    def __init__(self, head: str, diffs: dict[str, str]) -> None:
+    def __init__(self, head: str, diffs: dict[str, str], ancestor: bool = True) -> None:
         self.head = head
         self.diffs = diffs
+        self.ancestor = ancestor
         self.argvs: list[list[str]] = []
         self.calls: list[tuple[list[str], Path | None]] = []
 
     def __call__(self, argv, cwd=None, stdin=None):
         self.argvs.append(argv)
         self.calls.append((argv, cwd))
-        out = {"merge-base": "base1\n", "rev-parse": f"{self.head}\n"}.get(argv[1], "")
+        out = {"merge-base": "base1\n", "rev-parse": f"{self.head}\n", "merge-tree": "tree1\n"}.get(argv[1], "")
         if argv[1] == "diff":
-            out = self.diffs[argv[2]]
-        return subprocess.CompletedProcess(argv, 0, out, "")
+            out = self.diffs[" ".join(argv[2:])]
+        code = int(argv[2:3] == ["--is-ancestor"] and not self.ancestor)
+        return subprocess.CompletedProcess(argv, code, out, "")
 
 
 def test_branch_revision_is_scoped_to_the_new_commits(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
@@ -280,6 +282,36 @@ def test_branch_revision_is_scoped_to_the_new_commits(tmp_path: Path, repo: Path
     assert (found["round"], found["scoped"], found["diff"]) == (2, True, None)
     assert Path(found["target"]).read_text() == "+two\n"
     assert ["git", "diff", "c1..HEAD"] in git.argvs
+
+
+def test_branch_revision_after_a_sync_leaves_out_the_merged_base(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    worktree(store, repo)
+    checked(store, "c1")
+    record_round(Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo), tmp_path, raw(), stage="branch")
+    checked(store, "c3")
+    git = BranchGit("c3", {"base1...HEAD": "+one\n+fix\n", "tree1 HEAD": "+fix\n"}, ancestor=False)
+    found = shown(Review(store, git, repo), capsys, "s1", "--stage", "branch")
+    assert (found["round"], Path(found["target"]).read_text()) == (2, "+fix\n")
+    assert ["git", "merge-base", "--is-ancestor", "base1", "c1"] in git.argvs
+    assert ["git", "merge-tree", "--write-tree", "c1", "base1"] in git.argvs
+
+
+def test_branch_context_without_passing_checks_stops(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
+    store = planned(tmp_path, repo)
+    worktree(store, repo)
+    step = Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo)
+    capsys.readouterr()
+    step.context(["s1", "--stage", "branch", *TEAM])
+    assert "stop, checks: checks have not passed at this commit; run them first" in capsys.readouterr().out
+    found = shown(step, capsys, "s1", "--stage", "branch")
+    assert (found["stop"], found["round"], found["lenses"], found["target"]) == ("checks", None, [], None)
+    before = list(store.writes)
+    with pytest.raises(Refusal, match="no passing checks"):
+        record_round(step, tmp_path, raw(), stage="branch", target=found["target_hash"])
+    assert store.writes == before
 
 
 def feature_ready() -> FakeStore:

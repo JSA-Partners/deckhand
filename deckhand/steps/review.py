@@ -26,6 +26,7 @@ STOPS = {
     "clean": "the last round holds no accepted P1; the review is done",
     "cap": "three rounds left a P1 open; the person decides whether to proceed or rework",
     "proceeded": "the person chose Proceed at the cap and no other P1 is open; the review is done",
+    "checks": "checks have not passed at this commit; run them first",
     "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
     " carries the last round forward without reviewers",
 }
@@ -66,6 +67,7 @@ class Target:
     text: str | None = None
     head: str = ""
     note: str = ""
+    base: str = ""
 
 
 def _status(item: dict, declined: set[str], waived: set[str], accepted: set[str]) -> str:
@@ -141,7 +143,7 @@ class Review(StoryStep):
         else:
             base = git.merge_base(repo, "HEAD", "origin/HEAD", self._runner)
             diff = git.diff(repo, base, runner=self._runner)
-            found = Target(content_hash(diff), text=diff, head=git.head(repo, self._runner))
+            found = Target(content_hash(diff), text=diff, head=git.head(repo, self._runner), base=base)
             found.note = f"the diff to review is git diff {base}..HEAD in {repo}"
         if subject.stage == "plan" and found.text is None:
             found.note = f"the plan text is not on this machine; read the Implementation plan on {subject.label}"
@@ -152,9 +154,9 @@ class Review(StoryStep):
             if not last.data.get("head"):
                 raise Refusal(f"the last branch round of {subject.label} holds no head to scope the diff from")
             try:
-                return git.diff_since(repo, last.data["head"], self._runner), ""
+                return git.changed_since(repo, last.data["head"], target.base, self._runner), ""
             except git.GitError:
-                return None, "the last reviewed commit is gone; review the whole diff"
+                return None, "the last reviewed commit is gone or does not merge with the base; review the whole diff"
         old = review.saved_text(answers.state_dir(), subject.prefix.split(":")[0], last.data["target_hash"])
         if old is None or target.text is None:
             return None, "the previously reviewed text is not on this machine; review the whole text"
@@ -173,10 +175,12 @@ class Review(StoryStep):
             raise Refusal(f"{subject.label} has no worktree; run build apply {subject.label} worktree")
         return at.path
 
+    def _unchecked(self, subject: Subject, repo: Path) -> bool:
+        head = git.head(repo, self._runner) if subject.stage == "branch" else ""
+        return bool(head) and not passing(subject.records, subject.stories[0], head)
+
     def _checked(self, subject: Subject, repo: Path) -> None:
-        if subject.stage != "branch":
-            return
-        if not passing(subject.records, subject.stories[0], git.head(repo, self._runner)):
+        if self._unchecked(subject, repo):
             raise Refusal(f"{subject.label} has no passing checks at this commit; run checks apply {subject.label}")
 
     def context(self, args: list[str]) -> None:
@@ -184,7 +188,6 @@ class Review(StoryStep):
         subject = self._subject(parsed)
         store, clone = self._store_for_run(), self._clone_of(subject)
         repo = self._worktree(subject, clone)
-        self._checked(subject, repo)
         rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
@@ -195,13 +198,14 @@ class Review(StoryStep):
         last = review.last(rounds)
         target = self._target(store, subject, repo)
         plan = review.next_round(counted, target.hash, excused, target.head, since)
+        plan = review.Stop("checks") if self._unchecked(subject, repo) else plan
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts["note"] = target.note
         if isinstance(plan, review.Stop):
             held = review.last(counted)
-            waived = held is not None and bool(review.open_p1(held, declined)) and plan.reason == "clean"
-            facts["stop"] = "proceeded" if waived else plan.reason
+            proceeded = held is not None and bool(review.open_p1(held, declined)) and plan.reason == "clean"
+            facts["stop"] = "proceeded" if proceeded else plan.reason
         elif plan.carry:
             facts |= {"stop": "carry", "round": plan.n + cut}
         else:
