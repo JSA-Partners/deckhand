@@ -179,14 +179,20 @@ def segment(
     status: dict, since: float | None, now: float, g: Glyphs, entries: list[standing.Entry] | None = None
 ) -> tuple[str, str, str]:
     limited = standing.timestamp(standing.text(status, "limited_until"))
-    if limited is not None and limited > now:
-        return g.queued, f"Linear limited until {clock(limited)}", "stale"
+    paused = limited is not None and limited > now
     if since is None or status.get("stale_since") or since > LINE_STALE_SECONDS:
-        return g.queued, f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
+        stale = f"Linear limited until {clock(limited)}" if paused and limited is not None else ""
+        return g.queued, stale or f"captain stale {age(since) if since is not None else ''}".rstrip(), "stale"
     if unknown(status):
         return g.needs, f"{UNKNOWN_LINE}{g.sep}{SETUP}", "needs"
     head, tail = _line_parts(status, now, g, entries)
-    glyph, tone = (g.needs, "needs") if standing.dicts(status, "items") else (g.working, "working")
+    items = standing.dicts(status, "items")
+    glyph, tone = (g.needs, "needs") if items else (g.working, "working")
+    if paused and limited is not None:
+        limit = f"limited until {clock(limited)}"
+        room = LINE_LIMIT - len(glyph) - 1 - len(head) - 2 * len(g.sep) - len(limit)
+        ref = clean(standing.text(items[0], "ref"))[: max(1, room)] if items else ""
+        return glyph, g.sep.join(part for part in (head, ref, limit) if part), tone
     return glyph, f"{head}{g.sep}{tail}", tone
 
 

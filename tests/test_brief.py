@@ -185,6 +185,14 @@ def test_a_long_rate_limit_pause_names_its_end_not_a_stale_captain():
         assert brief.line(found, NOW, brief.UNICODE) == f"○ Linear limited until {clock(until)}"
 
 
+def test_a_fresh_snapshot_under_a_limit_keeps_its_items_and_names_the_limit():
+    until = NOW + 600
+    found = held([item("ACME-2", "question", 3)], limited_until=iso(int(until * 1000)))
+    assert brief.line(found, NOW, brief.UNICODE) == f"● 1 needs you · ACME-2 · limited until {clock(until)}"
+    quiet = held([], limited_until=iso(int(until * 1000)))
+    assert brief.line(quiet, NOW, brief.UNICODE).endswith(f"working · limited until {clock(until)}")
+
+
 def test_a_lifted_limit_is_not_shown():
     found = held([], written_at=at(45), limited_until=at(1))
     assert brief.line(found, NOW, brief.UNICODE) == "○ captain stale 45m"
