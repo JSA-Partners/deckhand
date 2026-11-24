@@ -60,7 +60,7 @@ _SIGN_OFF = {
 
 _DESCRIPTIONS = {
     "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
-    "finding": ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"],
+    "finding": ["the finding stays unfixed", "the hand fixes the finding"],
     review.CAP_DECISION: [
         "carry on with those P1s open; every later change is still reviewed",
         "the hand reworks it and the rounds count again",
