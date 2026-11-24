@@ -229,7 +229,6 @@ def _saw_the_options(pending: Pending, found: Answer) -> bool:
     return (labels, texts, found.multi) == (pending.options, pending.descriptions, False)
 
 
-# A sign-off answered in the person's own words is a Not yet, the words its reason.
 def in_own_words(pending: Pending, answer: str) -> bool:
     if pending.kind not in _OWN_WORDS or not answer.strip() or answer in pending.options:
         return False
