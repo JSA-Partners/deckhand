@@ -428,13 +428,19 @@ ALONE = """
 import sys, threading
 from deckhand import git
 out = {}
-work = threading.Thread(target=lambda: out.update(rc=git.alone(["sleep", "1"]).returncode))
-work.start()
+done = threading.Event()
+def work():
+    out["rc"] = git.alone(["sleep", "1"]).returncode
+    done.set()
+threading.Thread(target=work).start()
 print("ready", flush=True)
-try:
-    work.join()
-except KeyboardInterrupt:
-    work.join()
+# On Python 3.12 a Thread.join interrupted by Ctrl-C marks the thread finished while it still runs.
+while True:
+    try:
+        done.wait()
+        break
+    except KeyboardInterrupt:
+        pass
 print(out["rc"], flush=True)
 """
 
