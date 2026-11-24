@@ -53,9 +53,10 @@ class Lines:
 
     def failed(self) -> dict[str, tuple[int, float]]:
         found: dict[str, tuple[int, float]] = {}
-        for (kind, name, _), tries in self._tries.items():
-            if kind.startswith(START) and (name not in found or tries[1] > found[name][1]):
-                found[name] = tries
+        for (kind, name, _), (tries, last) in self._tries.items():
+            if kind.startswith(START):
+                held = found.get(name, (0, last))
+                found[name] = (max(held[0], tries), max(held[1], last))
         return found
 
     def backing_off(self, action: Action, now: float) -> bool:
