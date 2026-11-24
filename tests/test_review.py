@@ -29,9 +29,9 @@ def findings(*items: dict) -> list[review.Finding]:
     return review.parse_findings(json.dumps(list(items)))
 
 
-def done(n: int, target: str, *items: dict, stage: str = "plan", head: str = ""):
+def done(n: int, target: str, *items: dict, stage: str = "plan", head: str = "", carried: tuple[str, ...] = ()):
     plan = RoundPlan(n, scoped=n > 1, base_hash=f"h{n - 1}" if n > 1 else "")
-    return review.round_record("s1", stage, plan, target, findings(*items), head)
+    return review.round_record("s1", stage, plan, target, findings(*items), head, list(carried))
 
 
 def id_of(item: dict, stage: str = "plan") -> str:
@@ -241,19 +241,28 @@ def test_an_accepted_finding_with_no_later_round_is_unfixed():
     assert summaries(records) == ["first", "second"]
 
 
-def test_an_accepted_finding_a_later_round_no_longer_raises_is_fixed():
+def test_a_scoped_round_that_did_not_carry_an_accepted_finding_leaves_it_unfixed():
     records = [done(1, "h1", FIRST, SECOND), done(2, "h2", SECOND), person(id_of(FIRST)), person(id_of(SECOND))]
+    assert summaries(records) == ["first", "second"]
+
+
+def test_an_accepted_finding_a_later_round_carried_and_no_longer_raises_is_fixed():
+    later = done(2, "h2", SECOND, carried=(id_of(FIRST), id_of(SECOND)))
+    records = [done(1, "h1", FIRST, SECOND), later, person(id_of(FIRST)), person(id_of(SECOND))]
     assert summaries(records) == ["second"]
 
 
-def test_an_accepted_finding_a_later_round_still_raises_is_unfixed():
-    records = [done(1, "h1", FIRST), done(2, "h2", FIRST), person(id_of(FIRST))]
+def test_an_accepted_finding_a_later_round_carried_and_raised_again_is_unfixed():
+    records = [done(1, "h1", FIRST), done(2, "h2", FIRST, carried=(id_of(FIRST),)), person(id_of(FIRST))]
     assert summaries(records) == ["first"]
 
 
-def test_a_finding_decided_at_the_latest_round_waits_for_the_next_one():
-    records = [done(1, "h1"), done(2, "h2", FIRST), person(id_of(FIRST), version="h2")]
-    assert summaries(records) == ["first"]
+def test_carried_lists_the_open_p1s_and_the_accepted_findings_not_yet_fixed():
+    p1, p2, p3 = raw(severity="P1", summary="p1"), raw(summary="p2"), raw(severity="P3", summary="p3")
+    records = [done(1, "h1", p1, p2, p3), person(id_of(p2)), person(id_of(p1))]
+    assert [f["summary"] for f in review.carried(records, "s1:plan")] == ["p1", "p2"]
+    assert done(2, "h2", carried=(id_of(p1),)).data["carried"] == [id_of(p1)]
+    assert "carried" not in done(2, "h2").data
 
 
 def test_a_declined_or_undecided_finding_is_never_unfixed():

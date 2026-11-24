@@ -103,7 +103,13 @@ def ordered(findings: list[Finding]) -> list[Finding]:
 
 
 def round_record(
-    story: str, stage: str, plan: RoundPlan, target_hash: str, findings: list[Finding], head: str = ""
+    story: str,
+    stage: str,
+    plan: RoundPlan,
+    target_hash: str,
+    findings: list[Finding],
+    head: str = "",
+    carried: list[str] | None = None,
 ) -> Record:
     data = {
         "target_hash": target_hash,
@@ -113,6 +119,8 @@ def round_record(
     }
     if head:
         data["head"] = head
+    if carried:
+        data["carried"] = carried
     return Record(KIND, f"{story}:{stage}:{plan.n}", target_hash, "agent:review", data)
 
 
@@ -142,25 +150,32 @@ def accepted(records: list[Record]) -> set[str]:
     return by_person | {r.subject for r in records if r.kind == HAND_ACCEPT}
 
 
-def _fixed(rounds: list[Record], id: str, version: str) -> bool:
-    raised = [n for n, round in enumerate(rounds) if any(f["id"] == id for f in round.data["findings"])]
-    at = next((n for n in reversed(raised) if rounds[n].version == version), raised[-1])
-    return at < len(rounds) - 1 and raised[-1] != len(rounds) - 1
+def _fixed(rounds: list[Record], id: str) -> bool:
+    raised = max(n for n, round in enumerate(rounds) if any(f["id"] == id for f in round.data["findings"]))
+    return any(id in round.data.get("carried", []) for round in rounds[raised + 1 :])
+
+
+def _unfixed(records: list[Record], prefix: str) -> list[dict]:
+    answers = decided(records)
+    rounds = rounds_of(records, prefix)
+    found: dict[str, dict] = {}
+    for round in rounds:
+        for item in round.data["findings"]:
+            if answers.get(item["id"]) == ACCEPT and item["id"] not in found and not _fixed(rounds, item["id"]):
+                found[item["id"]] = item
+    return list(found.values())
 
 
 def unfixed(records: list[Record]) -> list[dict]:
-    answers = decided(records)
-    versions = {r.subject: r.version for r in records if r.kind == DECISION and r.author.startswith(PERSON)}
-    prefixes = list(dict.fromkeys(r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND))
-    found: dict[str, dict] = {}
-    for prefix in prefixes:
-        rounds = rounds_of(records, prefix)
-        for round in rounds:
-            for item in round.data["findings"]:
-                id = item["id"]
-                if answers.get(id) == ACCEPT and id not in found and not _fixed(rounds, id, versions[id]):
-                    found[id] = item
-    return list(found.values())
+    prefixes = dict.fromkeys(r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND)
+    return [item for prefix in prefixes for item in _unfixed(records, prefix)]
+
+
+def carried(records: list[Record], prefix: str) -> list[dict]:
+    held = last(counted(records, prefix)[0])
+    p1 = open_p1(held, declined(records)) if held else []
+    ids = {f["id"] for f in p1}
+    return p1 + [f for f in _unfixed(records, prefix) if f["id"] not in ids]
 
 
 def accept_record(finding: str, version: str) -> Record:

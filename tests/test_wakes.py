@@ -15,7 +15,8 @@ def not_yet(**extra: str) -> Record:
 
 
 def accepted_two_fixed_one() -> list[Record]:
-    records = [done(1, "h1", OPEN, FIXED, stage="branch"), done(2, "h2", OPEN, stage="branch")]
+    carried = (id_of(OPEN, "branch"), id_of(FIXED, "branch"))
+    records = [done(1, "h1", OPEN, FIXED, stage="branch"), done(2, "h2", OPEN, stage="branch", carried=carried)]
     return [*records, person(id_of(OPEN, "branch")), person(id_of(FIXED, "branch"))]
 
 

@@ -75,10 +75,12 @@ class Clock:
         self.now += seconds
 
 
-def branch_round(store: FakeStore, *items: dict, n: int = 1, head: str = "c2") -> None:
+def branch_round(
+    store: FakeStore, *items: dict, n: int = 1, head: str = "c2", carried: list[str] | None = None
+) -> None:
     found = review.parse_findings(json.dumps(list(items)))
     plan = review.RoundPlan(n, scoped=n > 1, base_hash="")
-    store.put_record("s1", review.round_record("s1", "branch", plan, f"hash{n}", found, head))
+    store.put_record("s1", review.round_record("s1", "branch", plan, f"hash{n}", found, head, carried or []))
 
 
 def save_summary(store: FakeStore, tmp_path: Path, repo: Path, made: dict | None = None) -> None:
@@ -817,10 +819,10 @@ def as_hand(tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None
 def with_unfixed(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> FakeStore:
     store = ready(tmp_path, repo, state, capsys)
     branch_round(store, raw(), OPEN, n=2)
-    for each in (raw(), OPEN):
-        found = review.finding_id(review.parse_findings(json.dumps([each]))[0], "branch")
+    ids = [review.finding_id(found, "branch") for found in review.parse_findings(json.dumps([raw(), OPEN]))]
+    for found in ids:
         store.put_record("s1", Record(review.DECISION, found, "hash2", "person:pat", {"answer": review.ACCEPT}))
-    branch_round(store, OPEN, n=3)
+    branch_round(store, OPEN, n=3, carried=ids)
     return store
 
 

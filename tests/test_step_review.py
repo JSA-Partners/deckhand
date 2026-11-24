@@ -458,3 +458,20 @@ def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path
     with pytest.raises(Refusal, match="another repository"):
         submit(store, tmp_path, repo)
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []
+
+
+def test_a_scoped_round_carries_accepted_findings_and_records_what_it_carried(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    p1, p2 = raw(severity="P1"), raw(summary="Minor.", severity="P2")
+    record_round(step, tmp_path, p1, p2)
+    answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(p2)], "Accept")
+    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
+    facts = shown(step, capsys, "s1", "--stage", "plan")
+    assert [c["id"] for c in facts["carried"]] == [finding_id(p1), finding_id(p2)]
+    record_round(step, tmp_path, p1)
+    latest = max(rounds(store), key=lambda r: r.subject)
+    assert latest.data["carried"] == [finding_id(p1), finding_id(p2)]
+    assert review.unfixed(store.records("s1")) == []
