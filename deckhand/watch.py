@@ -24,6 +24,7 @@ class Seen:
     seq: int
     at: float
     stale: bool = False
+    recovered: str = ""
 
 
 # The captain withholds every item while the engine is down, so an item still on top rings when it returns.
@@ -36,9 +37,11 @@ def captain(
     lines = []
     engine = state.alive(beat, now)
     shown = "" if seen.engine is False and engine else seen.top
-    # A Linear error ends the captain's turn unasked, so the same item rings again once Linear reads clean.
-    if top is not None and seen.stale and not stale:
-        shown = ""
+    # A Linear error ends the captain's turn unasked, so the same item rings again once Linear reads clean,
+    # once per top item so a flapping read does not ring on every recovery.
+    recovered = seen.recovered
+    if top is not None and seen.stale and not stale and top != recovered:
+        shown, recovered = "", top
     if top == "":
         shown = ""
     elif top is not None and top != shown and not held:
@@ -46,7 +49,7 @@ def captain(
         shown = top
     if seen.engine is not None and engine != seen.engine:
         lines.append(RUNNING if engine else STOPPED)
-    return Seen(shown, engine, seen.seq, now, seen.stale if top is None else stale), lines
+    return Seen(shown, engine, seen.seq, now, seen.stale if top is None else stale, recovered), lines
 
 
 def hand(seen: Seen, newest: int, now: float) -> tuple[Seen, list[str]]:

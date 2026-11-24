@@ -152,3 +152,14 @@ def test_a_recovery_while_held_rings_on_release():
     assert lines == []
     _, lines = watch.captain(seen, "k1", False, T + 3, T + 3)
     assert lines == [QUEUE]
+
+
+def test_a_flapping_linear_read_rings_once_for_one_top_item():
+    seen, rung = Seen("k1", True, 0, T), []
+    for n, stale in enumerate((True, False, True, False, True, False), start=1):
+        seen, lines = watch.captain(seen, "k1", False, T + n, T + n, stale=stale)
+        rung += lines
+    assert rung == [QUEUE]
+    seen, _ = watch.captain(seen, "k2", False, T + 10, T + 10, stale=True)
+    _, lines = watch.captain(seen, "k2", False, T + 11, T + 11)
+    assert lines == [QUEUE]
