@@ -12,7 +12,8 @@
   `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
   planning work (`spike`, `draft`), its questions (`ask`) and its messages (`mail`), and the
   person's fleet (`hand` starts, fills and wakes hands, `captain` prints the brief, the queue, the
-  status line segment and the board); `commit` and `document` only report
+  status line segment and the board, `engine` says whether the engine runs and how to start it,
+  `watch` rings a session's doorbell); `commit` and `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
@@ -25,7 +26,11 @@
   read the captain shares, `status.py` the snapshot kept in deckhand's local SQLite file,
   `standing.py` how the snapshot and the fleet sort into needs you, working, stopped, queued, team
   and done today, `brief.py` the brief, the notify text and the status line segment, `board.py` the
-  board's sections and rows
+  board's sections and rows; `watch.py` when a session's watcher rings
+- The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into actions
+  and writes nothing, `acts.py` carries one action out, `worker.py` runs them in order on one
+  thread, `poller.py` reads the fleet and Linear on their own threads, and `engine.py` is the loop,
+  its lock, its heartbeat and the only writer of the snapshot
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
   escape codes; `statusline.py` installs and removes the captain's segment in the person's status
   line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`
@@ -33,8 +38,9 @@
 - `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
   setup reads and plans for a team, and a client for the app or the person
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
-  tests use, and the store backed by Linear; `ops.py` the idempotent ensure operations over any
-  store, with deterministic ids
+  tests use, and the store backed by Linear; `local.py` the records in deckhand's local SQLite
+  file, `state.py` its message, hand and engine rows; `ops.py` the idempotent ensure operations over
+  any store, with deterministic ids
 - `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
   a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
   person's machine; `launch.py` the sandboxed settings a hand or the captain runs under
