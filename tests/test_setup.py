@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import io
+import http.client
 import json
 import os
 import re
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -13,6 +11,7 @@ import pytest
 from deckhand import answers, launch
 from deckhand.cli import main
 from deckhand.config import LocalConfig
+from deckhand.linear import client
 from deckhand.linear.client import LinearError
 from deckhand.linear.workspace import Workspace
 from deckhand.statusline import Places
@@ -311,13 +310,31 @@ def through_main(tmp_path, monkeypatch: pytest.MonkeyPatch):
         path.chmod(0o600)
     monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config))
     monkeypatch.setitem(REGISTRY, "setup", Setup())
-    requests: list[urllib.request.Request] = []
+    requests: list[str] = []
 
-    def urlopen(request: urllib.request.Request, timeout: float) -> object:
-        requests.append(request)
-        raise urllib.error.HTTPError(request.full_url, 401, "x", {}, io.BytesIO(b""))
+    class Revoked:
+        status = 401
+        reason = "x"
+        headers = http.client.HTTPMessage()
 
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+        def read(self) -> bytes:
+            return b""
+
+    class Connection:
+        def __init__(self, host: str, timeout: float) -> None:
+            pass
+
+        def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+            requests.append(url)
+
+        def getresponse(self) -> Revoked:
+            return Revoked()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", Connection)
+    monkeypatch.setattr(client.default_transport, "_connection", None)
     return config, requests
 
 

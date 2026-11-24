@@ -10,7 +10,7 @@ import urllib.request
 import pytest
 
 from deckhand.credentials import APP_FILE
-from deckhand.linear.client import DuplicateId, LinearClient, LinearError
+from deckhand.linear.client import DuplicateId, KeepAliveTransport, LinearClient, LinearError
 from deckhand.linear.oauth import fetch_app_token
 from deckhand.step import Refusal
 
@@ -208,3 +208,134 @@ def test_token_unfit_for_a_header_is_linear_error_without_the_token() -> None:
         leaky.query("q", {})
     assert "lin_api" not in str(raised.value)
     assert raised.value.__context__ is None or raised.value.__suppress_context__
+
+
+def test_after_a_network_failure_later_queries_fail_without_sending() -> None:
+    transport = Transport(urllib.error.URLError("down"), ok({"x": 1}))
+    linear = client(transport)
+    with pytest.raises(LinearError) as first:
+        linear.query("q", {})
+    with pytest.raises(LinearError) as second:
+        linear.query("q", {})
+    assert second.value is first.value
+    assert second.value.code == "network"
+    assert len(transport.requests) == 1
+
+
+def test_an_http_error_does_not_latch() -> None:
+    linear = client(Transport(http_error(500), ok({"x": 1})))
+    with pytest.raises(LinearError) as raised:
+        linear.query("q", {})
+    assert raised.value.code == "http"
+    assert linear.query("q", {}) == {"x": 1}
+
+
+class Response:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self.reason = "x"
+        self.headers = http.client.HTTPMessage()
+        self.body = body
+
+    def read(self) -> bytes:
+        return self.body
+
+
+class Connection:
+    def __init__(self, responses: list[Response | Exception]) -> None:
+        self.responses = responses
+        self.requests: list[tuple[str, str, bytes | None, dict]] = []
+        self.closed = False
+
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+        self.requests.append((method, url, body, dict(headers or {})))
+
+    def getresponse(self) -> Response:
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class Connections:
+    def __init__(self, *scripts: list[Response | Exception]) -> None:
+        self.scripts = list(scripts)
+        self.made: list[Connection] = []
+
+    def __call__(self) -> Connection:
+        connection = Connection(self.scripts.pop(0))
+        self.made.append(connection)
+        return connection
+
+
+def test_keep_alive_reuses_one_connection() -> None:
+    connections = Connections([Response(200, ok({"n": n})) for n in range(3)])
+    linear = client(KeepAliveTransport(connections))
+    assert [linear.query("q", {}) for _ in range(3)] == [{"n": 0}, {"n": 1}, {"n": 2}]
+    assert len(connections.made) == 1
+    requests = connections.made[0].requests
+    assert len(requests) == 3
+    assert requests[0][:2] == ("POST", "/graphql")
+    assert requests[0][3]["Authorization"] == BEARER
+
+
+def test_keep_alive_reconnects_once_after_a_dropped_connection() -> None:
+    connections = Connections(
+        [Response(200, ok({"n": 0})), http.client.RemoteDisconnected("closed")],
+        [Response(200, ok({"n": 1}))],
+    )
+    linear = client(KeepAliveTransport(connections))
+    assert linear.query("q", {}) == {"n": 0}
+    assert linear.query("q", {}) == {"n": 1}
+    assert len(connections.made) == 2
+    assert connections.made[0].closed
+
+
+def test_keep_alive_a_drop_on_a_fresh_connection_is_a_network_failure() -> None:
+    connections = Connections([http.client.RemoteDisconnected("closed")], [Response(200, ok({}))])
+    with pytest.raises(LinearError) as raised:
+        client(KeepAliveTransport(connections)).query("q", {})
+    assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_keep_alive_keeps_the_status_handling() -> None:
+    unauthorized = Unauthorized()
+    connections = Connections(
+        [
+            Response(401, b""),
+            Response(200, ok({"x": 1})),
+            Response(400, json.dumps(DUPLICATE).encode()),
+            Response(503, b"<html>"),
+        ]
+    )
+    linear = client(KeepAliveTransport(connections), unauthorized)
+    assert linear.query("q", {}) == {"x": 1}
+    assert unauthorized.calls == 1
+    with pytest.raises(DuplicateId):
+        linear.query("q", {})
+    with pytest.raises(LinearError) as raised:
+        linear.query("q", {})
+    assert raised.value.code == "http"
+    assert len(connections.made) == 1
+
+
+def test_a_network_failure_fetching_the_token_latches() -> None:
+    calls = []
+
+    def token() -> str:
+        calls.append(1)
+        raise LinearError("network", "could not reach Linear")
+
+    transport = Transport(ok({}))
+    linear = LinearClient(token, Unauthorized(), transport)
+    with pytest.raises(LinearError) as first:
+        linear.query("q", {})
+    with pytest.raises(LinearError) as second:
+        linear.query("q", {})
+    assert second.value is first.value
+    assert len(calls) == 1
+    assert transport.requests == []
