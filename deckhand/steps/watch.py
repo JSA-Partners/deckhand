@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable
 
 from deckhand import answers, fleet, status, watch
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, own_ref, register
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 
@@ -41,7 +40,7 @@ class Watch:
         if args == ["captain"]:
             self._captain()
         elif args == ["hand"]:
-            self._hand(os.environ.get("DECKHAND_STORY", ""))
+            self._hand(own_ref())
         else:
             raise Refusal(USAGE)
 

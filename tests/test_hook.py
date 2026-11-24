@@ -427,3 +427,24 @@ def test_a_captain_startup_clears_the_hold_and_a_compact_keeps_it(tmp_path: Path
         assert (rows.get(HOLD) is not None) is kept
     assert context == [[]]
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("payload", ["", "not json", "[1]"])
+def test_a_captain_session_with_unreadable_input_still_prints_its_context_as_a_startup(
+    tmp_path: Path, monkeypatch, capsys, payload
+):
+    from deckhand.steps.captain import Captain
+    from deckhand.store.local import default_path
+    from deckhand.store.state import LocalState
+    from deckhand.watch import HOLD
+
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    Captain().apply(["hold"])
+    capsys.readouterr()
+    context = []
+    stub = type("Stub", (), {"context": lambda self, args: context.append(args)})()
+    hook_with(monkeypatch, Raising(), ["session"], payload, stub)
+    with LocalState(default_path()) as rows:
+        assert rows.get(HOLD) is None
+    assert context == [[]]
+    assert capsys.readouterr().err == ""

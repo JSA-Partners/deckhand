@@ -31,6 +31,14 @@ def _read() -> dict:
     return data
 
 
+# Unreadable input still starts the captain, so it counts as a fresh start.
+def _source() -> object:
+    try:
+        return _read().get("source")
+    except ValueError:
+        return "startup"
+
+
 def _deckhand_items(hook_input: dict) -> list[dict]:
     found = []
     for item in (hook_input.get("tool_input") or {}).get("questions") or []:
@@ -87,7 +95,7 @@ class Hook(StoryStep):
             return
         if os.environ.get("DECKHAND_ROLE") != "captain":
             return
-        if _read().get("source") == "startup":
+        if _source() == "startup":
             with LocalState(default_path()) as rows:
                 rows.drop(HOLD)
         buffer = io.StringIO()

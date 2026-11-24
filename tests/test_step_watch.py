@@ -72,12 +72,25 @@ def test_a_hand_may_run_only_the_hand_watcher(monkeypatch):
     assert not hand_may_apply("watch", ["captain"])
 
 
-def test_a_spike_watcher_parks_without_printing(db: Path, monkeypatch, capsys):
+def test_a_spike_watcher_rings_for_its_own_mail(db: Path, monkeypatch, capsys):
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     monkeypatch.setenv("DECKHAND_HAND_KIND", "spike")
     monkeypatch.setenv("DECKHAND_SPIKE", "a1b2c3d4e5f6")
+
+    def post() -> None:
+        with LocalState(db) as rows:
+            rows.post("k1", "hand-a1b2c3d4e5f6", "answer", "not the spike's")
+            rows.post("k2", "spike-a1b2c3d4e5f6", "answer", "Go ahead.")
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: post}, 4)).apply(["hand"])
+    assert capsys.readouterr().out == watch.MAIL + "\n"
+
+
+def test_a_hand_watcher_with_no_ref_parks_without_printing(db: Path, monkeypatch, capsys):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
     with LocalState(db) as rows:
-        rows.post("k1", "spike-a1b2c3d4e5f6", "answer", "Go ahead.")
+        rows.post("k1", "hand-", "answer", "Go ahead.")
     with pytest.raises(StopIteration):
         Watch(sleep=passes({}, 5)).apply(["hand"])
     assert capsys.readouterr().out == ""
