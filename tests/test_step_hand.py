@@ -150,6 +150,27 @@ def test_start_with_live_hand_starts_nothing(clone: Path, capsys: pytest.Capture
     assert capsys.readouterr().out.strip() == "hand-ACME-1 is already live"
 
 
+def test_start_on_an_idle_but_alive_hand_starts_nothing(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = building(), Shell(row("ACME-1", "idle", "idle") | {"waitingFor": "input needed"})
+    written = list(store.writes)
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    assert store.writes == written
+    assert shell.launches() == []
+    assert not [argv for argv, _ in shell.calls if argv[:2] == ["claude", "stop"]]
+    assert capsys.readouterr().out.strip() == "hand-ACME-1 is already live"
+
+
+def test_spike_on_an_idle_but_alive_session_starts_nothing(
+    clone: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = empty_feature()
+    key = spikes.key(P1, QUESTION)
+    shell = Shell(spike_row(key, "idle", "idle"))
+    hand(store, shell).apply(["spike", "--repository", "widgets", "--file", question_file(tmp_path), *TEAM])
+    assert shell.launches() == []
+    assert capsys.readouterr().out.strip() == f"spike-{key} is already live"
+
+
 def test_apply_refuses_when_the_fleet_read_failed(clone: Path):
     store, shell = building(), Shell(fleet_fails=True)
     store.put_record("s1", Record(asks.HAND_START, "s1", "", HAND, {"kind": "story", "session": "hand-ACME-1"}))

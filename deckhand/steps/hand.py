@@ -138,7 +138,7 @@ class Hand:
         feature = features.owning(store, team, ref)
         story = features.story(store, feature, ref)
         session = fleet.hands(read.sessions).get(story["identifier"])
-        if session is not None and fleet.live(session):
+        if session is not None and fleet.alive(session):
             print(f"{session.name} is already live")
             return
         person = self._person_store()
@@ -273,7 +273,7 @@ class Hand:
         key = spikes.key(feature.project["id"], question)
         name = fleet.spike_name(key)
         session = fleet.spikes(read.sessions).get(key)
-        if session is not None and fleet.live(session):
+        if session is not None and fleet.alive(session):
             print(f"{name} is already live")
             return
         _free_slot(read)
