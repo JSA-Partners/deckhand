@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from deckhand import answers, decisions, features, gaps, ops, spec
+from deckhand import answers, decisions, features, gaps, launch, ops, spec
 from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
@@ -14,6 +14,7 @@ from deckhand.steps.captain import Captain
 from deckhand.store import Store
 
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
+POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
 USAGE = "hook apply answer|ask|permission reads one hook event as JSON on stdin; hook apply session reads none"
 
 
@@ -72,9 +73,11 @@ class Hook(StoryStep):
         self._captain = captain
 
     def _session(self) -> None:
-        ref = os.environ.get("DECKHAND_STORY", "")
-        if hand_role() and ref:
-            print(spec.pointer(ref))
+        if hand_role():
+            pointer = POINTERS.get(os.environ.get("DECKHAND_HAND_KIND", ""))
+            ref = os.environ.get("DECKHAND_STORY", "")
+            if pointer is not None and ref:
+                print(pointer(ref))
             return
         if os.environ.get("DECKHAND_ROLE") != "captain":
             return

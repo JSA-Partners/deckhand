@@ -111,9 +111,9 @@ def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.Captu
     out = capsys.readouterr().out
     assert "ACME-1 Orders" in out
     assert "Outcome: an order is placed." in out
-    assert "The Contract of Alpha." in out
-    assert "The Examples of Alpha." in out
-    assert "never settled here" in out
+    for name in ("Frame", "Shape", "Contract", "Examples"):
+        assert f"# {name}\n\nWritten by the person.\n\nThe {name} of Alpha.\n" in out
+    assert out.index("# Examples") < out.index("never settled here")
 
 
 def test_draft_refused_once_the_draft_is_taken(tmp_path: Path):

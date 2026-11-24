@@ -68,3 +68,18 @@ def test_the_pointer_names_the_build_context_read():
         "You are the hand of ACME-1. Before anything else run: deckhand build context ACME-1. It prints what"
         " the person approved (Contract, Examples, Invariants, scope, decisions) and your plan."
     )
+
+
+def test_the_draft_pointer_names_the_draft_context_read():
+    assert spec.draft_pointer("ACME-1") == (
+        "You are the draft hand of ACME-1. Before anything else run: deckhand draft context ACME-1. It prints"
+        " the story's stub, the feature's Frame, Shape, Contract and Examples, and what the draft holds."
+    )
+
+
+def test_planning_text_prints_each_named_section_or_not_written():
+    store = feature_store()
+    feature, _ = loaded(store)
+    assert spec.planning_text(store, feature, ("Frame", "Contract")) == (
+        "# Frame\n\nnot written\n\n# Contract\n\nWritten by the person.\n\nPOST /orders.\n"
+    )

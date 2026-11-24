@@ -233,12 +233,10 @@ class Hand:
         print(f"send to {name}: the person decided {decision} {wake.version[:8]}; carry on with the story")
 
     def _argv(
-        self, name: str, ref: str, clone: Path, worktree: Path, prompt: str, resume: str | None, spike: bool = False
+        self, name: str, ref: str, clone: Path, worktree: Path, prompt: str, resume: str | None, kind: str
     ) -> list[str]:
         protected = launch.protected(config.config_dir(), answers.state_dir())
-        settings = launch.hand_settings(
-            ref, clone, worktree, Policy.load(clone), config.local(), protected, spike=spike
-        )
+        settings = launch.hand_settings(ref, clone, worktree, Policy.load(clone), config.local(), protected, kind=kind)
         plugin = os.environ.get("DECKHAND_PLUGIN_DIR")
         return launch.hand_argv(name, settings, prompt, Path(plugin) if plugin else None, resume)
 
@@ -251,7 +249,8 @@ class Hand:
         worktree = git.worktree_path(clone, branch)
         ref, launch_kind = story["identifier"], startable.launch_of(kind)
         resume = _resume(session) if queue.last_start(records, launch_kind) is not None else None
-        argv = self._argv(fleet.hand_name(ref), ref, clone, worktree, PROMPTS[kind].format(ref), resume)
+        hand_kind = launch.DRAFT if kind == DRAFT else launch.STORY
+        argv = self._argv(fleet.hand_name(ref), ref, clone, worktree, PROMPTS[kind].format(ref), resume, hand_kind)
         stop = session.id if resume is not None and session is not None else None
         return Launch(story, records, clone, branch, argv, worktree, launch_kind, stop)
 
@@ -280,7 +279,7 @@ class Hand:
         _free_slot(read)
         require_base(clone, self._runner)
         worktree = git.worktree_path(clone, name)
-        argv = self._argv(name, key, clone, worktree, SPIKE_PROMPT.format(key), _resume(session), spike=True)
+        argv = self._argv(name, key, clone, worktree, SPIKE_PROMPT.format(key), _resume(session), launch.SPIKE)
         asked = spikes.question_path(answers.state_dir(), key)
         asked.parent.mkdir(parents=True, exist_ok=True)
         asked.write_text(question, encoding="utf-8")

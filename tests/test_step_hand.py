@@ -104,6 +104,7 @@ def test_start_runs_bg_in_worktree(clone: Path, capsys: pytest.CaptureFixture[st
     assert argv == launch.hand_argv("hand-ACME-1", settings, PROMPT.format("ACME-1"), None, None)
     assert cwd == worktree
     assert (settings["env"]["DECKHAND_ROLE"], settings["env"]["DECKHAND_STORY"]) == ("hand", "ACME-1")
+    assert settings["env"]["DECKHAND_HAND_KIND"] == "story"
     [add] = [a for a, _ in shell.calls if a[:3] == ["git", "worktree", "add"]]
     assert str(worktree) in add
     assert store.issue("s1")["assignee"] == ME
@@ -475,6 +476,7 @@ def test_spike_starts_a_detached_hand_with_its_own_key(clone: Path, tmp_path: Pa
     story_settings = launch.hand_settings(key, clone, worktree, Policy.load(clone), config.local(), protected)
     story_settings["env"].pop("DECKHAND_STORY")
     story_settings["env"]["DECKHAND_SPIKE"] = key
+    story_settings["env"]["DECKHAND_HAND_KIND"] = "spike"
     assert settings == story_settings
     assert settings["sandbox"]["enabled"] is True
     assert "AskUserQuestion" in settings["permissions"]["deny"]
@@ -604,6 +606,7 @@ def test_start_picks_the_draft_prompt_while_planning(clone: Path):
     hand(store, shell).apply(["start", "ACME-1", *TEAM])
     [(argv, cwd)] = shell.launches()
     assert argv[-1] == "/deckhand:draft ACME-1"
+    assert settings_of(argv)["env"]["DECKHAND_HAND_KIND"] == "draft"
     assert cwd == clone / ".worktrees" / "acme-1-orders"
     assert ("put_record", "s1", "worktree", "s1") in [w for w in store.writes if w[0] == "put_record"]
 

@@ -208,6 +208,7 @@ def test_a_hand_session_start_prints_the_pointer_and_reads_no_linear(capsys, mon
     from deckhand import spec
 
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "story")
     monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     from deckhand.steps.hook import Hook
@@ -217,8 +218,35 @@ def test_a_hand_session_start_prints_the_pointer_and_reads_no_linear(capsys, mon
     assert (out.out, out.err) == (spec.pointer("ACME-1") + "\n", "")
 
 
+def test_a_draft_session_start_points_at_the_draft_context(capsys, monkeypatch):
+    from deckhand import spec
+
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "draft")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == (spec.draft_pointer("ACME-1") + "\n", "")
+
+
+@pytest.mark.parametrize("kind", ["", "unknown"])
+def test_a_hand_of_no_known_kind_prints_nothing(capsys, monkeypatch, kind):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", kind)
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    assert capsys.readouterr().out == ""
+
+
 def test_a_spike_session_start_prints_nothing(capsys, monkeypatch):
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_HAND_KIND", "spike")
     monkeypatch.setenv("DECKHAND_SPIKE", "ACME-1")
     monkeypatch.delenv("DECKHAND_STORY", raising=False)
     monkeypatch.setattr("sys.stdin", io.StringIO(""))

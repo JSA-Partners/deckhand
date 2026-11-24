@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from deckhand import claims, features, inputs, ops, planning, queue
+from deckhand import claims, features, inputs, ops, queue, spec
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -49,9 +49,7 @@ class Draft(StoryStep):
         for name in ("unknowns", "new_here", "decisions"):
             for item in stub.data.get(name, []) if stub else []:
                 print(f"{name}: {item}")
-        for name in ("Contract", "Examples"):
-            print(f"{name.lower()}:")
-            print(planning.section(store, feature, name) or "none saved")
+        print(spec.planning_text(store, feature, spec.DRAFT_SECTIONS))
         print("the draft holds, in this order:")
         for part in SHAPE:
             print(f"- {part}")

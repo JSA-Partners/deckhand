@@ -194,6 +194,7 @@ def test_hand_env_carries_dirs_and_plugin_bin_first(
     env = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)["env"]
     assert env == {
         "DECKHAND_ROLE": "hand",
+        "DECKHAND_HAND_KIND": "story",
         "DECKHAND_STORY": "ACME-7",
         "DECKHAND_CONFIG_DIR": "/c",
         "DECKHAND_STATE_DIR": "/s",
@@ -205,6 +206,15 @@ def test_hand_env_carries_dirs_and_plugin_bin_first(
     monkeypatch.delenv("PATH")
     env = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected)["env"]
     assert env["PATH"] == "/plugin/bin"
+
+
+@pytest.mark.parametrize(("kind", "variable"), [("draft", "DECKHAND_STORY"), ("spike", "DECKHAND_SPIKE")])
+def test_hand_env_names_the_kind_of_hand(tmp_path: Path, home: Path, kind: str, variable: str) -> None:
+    protected = launch.protected(tmp_path / "config", tmp_path / "state")
+    policy = Policy(repository_label="widgets")
+    env = launch.hand_settings("ACME-7", tmp_path, tmp_path, policy, LocalConfig(), protected, kind=kind)["env"]
+    assert (env["DECKHAND_HAND_KIND"], env[variable]) == (kind, "ACME-7")
+    assert {"DECKHAND_STORY", "DECKHAND_SPIKE"} & env.keys() == {variable}
 
 
 def test_hand_path_holds_only_trusted_entries(tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

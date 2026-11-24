@@ -8,6 +8,7 @@ from deckhand.records import Record
 from deckhand.store import Store
 
 MISSING = "not written"
+DRAFT_SECTIONS = ("Frame", "Shape", "Contract", "Examples")
 
 
 @dataclass(frozen=True)
@@ -48,20 +49,36 @@ def _decision(entry: dict) -> str:
     return f"- {entry['item']}: {entry['answer']}{note}"
 
 
+def _blocks(parts: list[tuple[str, str | None]]) -> str:
+    return "\n\n".join(f"# {name}\n\n{body or MISSING}" for name, body in parts) + "\n"
+
+
 def text(spec: Spec) -> str:
     decisions = "\n".join(_decision(entry) for entry in spec.decisions)
-    parts = [
-        ("Contract", spec.contract),
-        ("Examples", spec.examples),
-        ("Invariants", spec.invariants),
-        ("Scope", spec.scope),
-        ("Decisions", decisions),
-    ]
-    return "\n\n".join(f"# {name}\n\n{body or MISSING}" for name, body in parts) + "\n"
+    return _blocks(
+        [
+            ("Contract", spec.contract),
+            ("Examples", spec.examples),
+            ("Invariants", spec.invariants),
+            ("Scope", spec.scope),
+            ("Decisions", decisions),
+        ]
+    )
+
+
+def planning_text(store: Store, feature: Feature, names: tuple[str, ...]) -> str:
+    return _blocks([(name, planning.section(store, feature, name)) for name in names])
 
 
 def pointer(ref: str) -> str:
     return (
         f"You are the hand of {ref}. Before anything else run: deckhand build context {ref}. It prints what"
         " the person approved (Contract, Examples, Invariants, scope, decisions) and your plan."
+    )
+
+
+def draft_pointer(ref: str) -> str:
+    return (
+        f"You are the draft hand of {ref}. Before anything else run: deckhand draft context {ref}. It prints"
+        " the story's stub, the feature's Frame, Shape, Contract and Examples, and what the draft holds."
     )

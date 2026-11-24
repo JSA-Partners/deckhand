@@ -29,6 +29,7 @@ CLAUDE_CONFIG = (
     ".mcp.json",
 )
 PASSED_DIRS = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
+STORY, DRAFT, SPIKE = "story", "draft", "spike"
 
 
 WILDCARDS = frozenset("*?[")
@@ -90,8 +91,12 @@ def _sandbox(exempt: list[str], filesystem: dict, credentials: dict) -> dict[str
     }
 
 
-def _hand_env(ref: str, roots: list[Path], spike: bool) -> dict[str, str]:
-    env = {"DECKHAND_ROLE": "hand", ("DECKHAND_SPIKE" if spike else "DECKHAND_STORY"): ref}
+def _hand_env(ref: str, roots: list[Path], kind: str) -> dict[str, str]:
+    env = {
+        "DECKHAND_ROLE": "hand",
+        "DECKHAND_HAND_KIND": kind,
+        ("DECKHAND_SPIKE" if kind == SPIKE else "DECKHAND_STORY"): ref,
+    }
     env.update({name: os.environ[name] for name in PASSED_DIRS if os.environ.get(name)})
     plugin_dir = os.environ.get("DECKHAND_PLUGIN_DIR")
     plugin_bin = Path(plugin_dir) / "bin" if plugin_dir else Path(__file__).resolve().parent.parent / "bin"
@@ -120,11 +125,11 @@ def hand_settings(
     policy: Policy,
     local: LocalConfig,
     protected: Protected,
-    spike: bool = False,
+    kind: str = STORY,
 ) -> dict[str, Any]:
     clones = _forms(clone)
     worktrees = _forms(worktree)
-    env = _hand_env(ref, clones + worktrees, spike)
+    env = _hand_env(ref, clones + worktrees, kind)
     _refuse_path_writes(local.sandbox_write, env["PATH"])
     git_credentials = _forms(*(Path.home() / name for name in GIT_CREDENTIALS))
     deny = list(NO_DIALOG)
