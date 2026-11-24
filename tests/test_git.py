@@ -381,3 +381,38 @@ def test_a_claude_call_carries_no_token_and_a_git_call_keeps_them(monkeypatch: p
     git.run(["git", "fetch", "origin"])
     assert not set(git.SECRET_ENV) & set(seen["claude"])
     assert set(git.SECRET_ENV) <= set(seen["git"])
+
+
+ALONE = """
+import sys, threading
+from deckhand import git
+out = {}
+work = threading.Thread(target=lambda: out.update(rc=git.alone(["sleep", "1"]).returncode))
+work.start()
+print("ready", flush=True)
+try:
+    work.join()
+except KeyboardInterrupt:
+    work.join()
+print(out["rc"], flush=True)
+"""
+
+
+def test_a_child_run_alone_survives_a_ctrl_c_sent_to_its_parents_group():
+    import signal
+    import sys
+    import time
+
+    root = Path(__file__).resolve().parent.parent
+    parent = subprocess.Popen(
+        [sys.executable, "-c", ALONE], cwd=root, stdout=subprocess.PIPE, text=True, start_new_session=True
+    )
+    assert parent.stdout is not None and parent.stdout.readline() == "ready\n"
+    time.sleep(0.3)
+    os.killpg(parent.pid, signal.SIGINT)
+    out, _ = parent.communicate(timeout=10)
+    assert out.strip() == "0"
+
+
+def test_alone_gives_a_child_no_terminal_input():
+    assert git.alone(["cat"]).stdout == ""

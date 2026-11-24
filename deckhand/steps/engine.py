@@ -54,10 +54,6 @@ def _running(now: float) -> int | None:
     return beat[0] if beat is not None and alive(beat[1], now) else None
 
 
-def _quiet(runner: git.Runner) -> git.Runner:
-    return lambda argv, cwd, stdin: runner(argv, cwd, "" if stdin is None else stdin)
-
-
 def _holder(state_dir: Path) -> str:
     try:
         with LocalState(default_path()) as rows:
@@ -75,7 +71,7 @@ def _holder(state_dir: Path) -> str:
 
 @register("engine")
 class Engine:
-    def __init__(self, runner: git.Runner = git.run, clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, runner: git.Runner = git.alone, clock: Callable[[], float] = time.time) -> None:
         self._runner = runner
         self._clock = clock
 
@@ -107,7 +103,7 @@ class Engine:
             raise Refusal(f"the engine already runs in another tab{_holder(state_dir)}")
         from deckhand import tui
 
-        runner, clock, link = _quiet(self._runner), self._clock, engine.link
+        runner, clock, link = self._runner, self._clock, engine.link
         fleets = Poller(lambda: fleet.sessions(runner), engine.FLEET_EVERY, tui.fleet_failed, "deckhand-fleet", clock)
 
         # The first Linear read waits for the first fleet read, so a hand is never read as missing.
@@ -131,7 +127,9 @@ class Engine:
             g = brief.glyphs(getattr(sys.stdout, "encoding", None))
             said = tui.watch(lambda: status.read(state_dir), fleets, clock, brief.colored(os.environ), g, running)
         finally:
+            if running.finishing():
+                print(tui.FINISHING.strip(), flush=True)
             running.close()
             held.close()
         for line in said:
-            print(line)
+            print(brief.clean(line))

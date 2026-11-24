@@ -97,6 +97,9 @@ class Engine:
         self.stopped = True
         return self.failures
 
+    def finishing(self) -> bool:
+        return False
+
 
 def run(
     keys: list, reader: Reader | None = None, poller: Poller | None = None, engine: Engine | None = None, **kw
@@ -166,15 +169,27 @@ def test_a_note_with_control_characters_draws_on_one_line():
     assert all("\n" not in line and "\x1b[2J" not in line for line in term.lines)
 
 
-def test_the_bell_rings_when_the_needs_you_count_rises():
-    one, two = sample(), sample()
+def test_the_bell_rings_when_a_new_item_needs_you():
+    one, two, other = sample(), sample(), sample()
     one["items"] = one["items"][:1]
+    other["items"] = other["items"][1:]
     none = sample(items=[])
     ticks = int(tui.STATUS_EVERY / tui.TICK)
     term, _, _ = run([None] * ticks * 4, Reader(none, one, None, two, one))
     assert term.bells == 2
-    term, _, _ = run([None] * ticks, Reader(two))
+    term, _, _ = run([None] * ticks * 2, Reader(two))
+    assert term.bells == 0
+    term, _, _ = run([None] * ticks * 2, Reader(one, other))
     assert term.bells == 1
+
+
+def test_stopping_says_it_finishes_an_action_in_flight():
+    engine = Engine()
+    engine.finishing = lambda: True
+    shown = []
+    engine.stop_all = lambda: shown.append(list(engine.term.lines)) or []
+    run(["q", "s"], engine=engine)
+    assert shown == [[tui.FINISHING]] and tui.FINISHING == " finishing an action"
 
 
 def test_the_screen_says_it_reads_the_fleet_until_the_first_read():

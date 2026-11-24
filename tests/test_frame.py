@@ -66,6 +66,15 @@ def test_a_long_note_is_cut_so_the_budget_and_slots_stay_in_the_header():
     assert "cannot" not in head and "slots 0/2" in head
 
 
+def test_on_a_narrow_tab_the_question_wraps_and_keeps_its_keys():
+    found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
+    for cols in (80, 47):
+        lines = texts(frame.render(found, G, cols, 30, keys=True, asking=True))
+        assert lines[-2:][0] == " Leave hands running (l) or stop all hands (s)?"
+        assert lines[-1].startswith(" Their conversations are kept.")
+        assert len(lines) == 30
+
+
 def test_asking_puts_the_question_in_the_footer():
     found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
     lines = texts(frame.render(found, G, 100, 30, keys=True, asking=True))

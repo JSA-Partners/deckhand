@@ -134,25 +134,17 @@ def test_run_holds_the_lock_while_the_screen_runs_and_drops_the_heartbeat_after(
 def test_run_prints_what_stopping_the_hands_left_after_the_screen(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    run(monkeypatch, lambda *args: ["ACME-1: boom"])
-    assert capsys.readouterr().out == "ACME-1: boom\n"
+    run(monkeypatch, lambda *args: ["ACME-1: error: one\nfatal: \x1b[2Jtwo"])
+    assert capsys.readouterr().out == "ACME-1: error: one fatal: [2Jtwo\n"
 
 
-def test_the_fleet_is_read_with_no_terminal_input(monkeypatch: pytest.MonkeyPatch):
-    seen = []
-
+def test_leaving_says_it_finishes_an_action_in_flight(monkeypatch: pytest.MonkeyPatch, capsys):
     def watch(read_status, poller, clock, color, g, running):
-        poller.wait(5)
+        monkeypatch.setattr(running, "finishing", lambda: True)
         return []
 
-    shell = Shell()
-
-    def runner(argv, cwd=None, stdin=None):
-        seen.append((argv[:2], stdin))
-        return shell(argv, cwd, stdin)
-
-    run(monkeypatch, watch, runner)
-    assert (["claude", "agents"], "") in seen
+    run(monkeypatch, watch)
+    assert capsys.readouterr().out == "finishing an action\n"
 
 
 @pytest.mark.parametrize("args", [[], ["start"], ["run", "copy"], ["--json"]])

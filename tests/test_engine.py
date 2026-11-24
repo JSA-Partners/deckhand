@@ -82,6 +82,9 @@ class FakeWorker:
     def stop(self) -> None:
         pass
 
+    def working(self) -> bool:
+        return False
+
 
 class Down:
     def __init__(self, inner: FakeStore) -> None:
@@ -468,6 +471,50 @@ def test_a_launch_in_flight_past_five_seconds_during_stop_all_ends_stopped(rig: 
     said = Engine("ACME", rig.state, rig.fleets, rig.linear, worker, rig.clock, lambda: DAY, 42, shell).stop_all()
     stops = [argv for argv, _ in shell.calls if argv[1] == "stop"]
     assert stops == [["claude", "stop", "id-ACME-1"], ["claude", "stop", "id-ACME-2"]] and said == []
+
+
+def test_ctrl_c_during_stop_all_says_which_hands_stopped_and_which_did_not(rig: Rig):
+    shell = Shell(row("ACME-1", "idle", "idle"), row("ACME-2", "idle", "idle"), row("ACME-3", "idle", "idle"))
+
+    def runner(argv, cwd=None, stdin=None):
+        if argv[:3] == ["claude", "stop", "id-ACME-2"]:
+            raise KeyboardInterrupt
+        return shell(argv, cwd, stdin)
+
+    assert rig.engine.stop_all(runner) == ["stopped: ACME-1", "not stopped: ACME-2, ACME-3"]
+
+
+def test_ctrl_c_while_stop_all_waits_for_the_worker_stops_no_hand(rig: Rig):
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    rig.worker.stop = interrupted
+    shell = Shell(row("ACME-1", "idle", "idle"))
+    assert rig.engine.stop_all(shell) == ["stopped: none", "not stopped: every hand still running"]
+    assert shell.calls == []
+
+
+def test_finishing_is_true_only_while_an_action_runs():
+    began, release = threading.Event(), threading.Event()
+
+    class Held:
+        def run(self, action: Action) -> str | None:
+            began.set()
+            release.wait(5)
+            return None
+
+    @contextmanager
+    def opened() -> Iterator[Held]:
+        yield Held()
+
+    worker = Worker(opened)
+    assert worker.working() is False
+    worker.start()
+    worker.submit(Launch("hand-ACME-2", "ACME-2", "story", Path("/w"), None, "me"))
+    assert began.wait(5) and worker.working() is True
+    release.set()
+    worker.stop()
+    assert worker.working() is False
 
 
 def test_stop_all_runs_through_the_engines_runner_by_default(rig: Rig):

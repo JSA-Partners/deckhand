@@ -154,7 +154,9 @@ def _body(found: Board, g: Glyphs, width: int, selected: str | None, expanded: s
 
 def _footer(found: Board, width: int, g: Glyphs, asking: bool) -> list[Line]:
     if asking:
-        return [_rule("", 0, g, width), Line(((" ", ""), (ASK, "warn")))]
+        first, rest = ASK.split("? ", 1)
+        asked = [ASK] if cells(ASK) < width else [f"{first}?", rest]
+        return [_rule("", 0, g, width), *(Line(((" ", ""), (part, "warn"))) for part in asked)]
     rows = [row for section in found.sections for row in section.rows]
     keys = [("q", "quit"), ("r", "refresh")]
     keys += [("j/k", "move")] if len(rows) > 1 else []

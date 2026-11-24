@@ -106,6 +106,8 @@ class Works(Protocol):
 
     def stop(self) -> None: ...
 
+    def working(self) -> bool: ...
+
 
 def _stories(facts: Facts) -> Stories | None:
     found = facts.reading
@@ -339,21 +341,39 @@ class Engine:
         good = self._good
         return "; ".join(good.problems) if good is not None else ""
 
+    def finishing(self) -> bool:
+        return self._worker.working()
+
+    # Ctrl-C while stopping still says which hands stopped, since the screen is gone after it.
     def stop_all(self, runner: git.Runner | None = None) -> list[str]:
-        self._worker.stop()
         runner = runner or self._runner
-        read = fleet.sessions(runner)
-        if read.note:
-            said = [f"cannot stop the hands: {read.note}"]
-        else:
-            said = [line for session in read.sessions if (line := self._stop(session, runner))]
+        stopped: list[str] = []
+        left: list[fleet.Session] | None = None
+        said: list[str] = []
+        try:
+            self._worker.stop()
+            read = fleet.sessions(runner)
+            if read.note:
+                said = [f"cannot stop the hands: {read.note}"]
+            else:
+                left = [s for s in read.sessions if fleet.alive(s) and s.name.startswith((fleet.HAND, fleet.SPIKE))]
+            while left:
+                line = self._stop(left[0], runner)
+                ref = fleet.ref_of(left.pop(0).name)
+                if line:
+                    said.append(line)
+                else:
+                    stopped.append(ref)
+        except KeyboardInterrupt:
+            named = ", ".join(fleet.ref_of(s.name) for s in left) if left else ""
+            said.append(f"stopped: {', '.join(stopped) or 'none'}")
+            if named or left is None:
+                said.append(f"not stopped: {named or 'every hand still running'}")
         for line in said:
             self._lines.say("stop", line)
         return said
 
     def _stop(self, session: fleet.Session, runner: git.Runner) -> str:
-        if not fleet.alive(session) or not session.name.startswith((fleet.HAND, fleet.SPIKE)):
-            return ""
         try:
             git.call(["claude", "stop", session.id], None, runner)
         except git.GitError as error:

@@ -73,7 +73,9 @@ def _environment(program: str, search: str) -> dict[str, str]:
     return {k: v for k, v in held.items() if k not in SECRET_ENV} if program == "claude" else held
 
 
-def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    argv: list[str], cwd: Path | None = None, stdin: str | None = None, alone: bool = False
+) -> subprocess.CompletedProcess[str]:
     command = " ".join(argv[:2])
     search = trusted_path()
     program = _program(argv[0], search)
@@ -89,6 +91,7 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
             text=True,
             check=False,
             timeout=TIMEOUT,
+            start_new_session=alone,
         )
     except subprocess.TimeoutExpired:
         raise GitError(command, -1, f"timed out after {TIMEOUT} seconds") from None
@@ -96,6 +99,11 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
         raise GitError(command, -1, f"{argv[0]} not found") from None
     except OSError as error:
         raise GitError(command, -1, f"{argv[0]} could not run: {error.strerror or error}") from None
+
+
+# For a process that owns a terminal: Ctrl-C there never reaches the child, and the child never reads its keys.
+def alone(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    return run(argv, cwd, "" if stdin is None else stdin, alone=True)
 
 
 class GitError(Exception):

@@ -17,7 +17,7 @@ FIRST_READ = 1.0
 KEYS = {"q": "quit", "\x1b": "quit", "j": "down", "k": "up", "r": "refresh", "\r": "enter", "\n": "enter"}
 KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
 LEAVE, STOP = "l", "s"
-READING_FLEET = " reading the fleet"
+READING_FLEET, FINISHING = " reading the fleet", " finishing an action"
 ESC, ESC_WAIT = "\x1b", 0.025
 ENTER_SCREEN, LEAVE_SCREEN = "\x1b[?1049h\x1b[?25l", "\x1b[?25h\x1b[?1049l"
 
@@ -56,6 +56,8 @@ class Drives(Protocol):
 
     def stop_all(self) -> list[str]: ...
 
+    def finishing(self) -> bool: ...
+
 
 class Watch:
     def __init__(
@@ -74,7 +76,7 @@ class Watch:
         self._read_at = float("-inf")
         self._keys: list[str] = []
         self._shown: tuple[int, int, list[str]] | None = None
-        self._needs = 0
+        self._needs: frozenset[str] | None = None
         self._asking = False
         self._said: list[str] = []
         self.selected: str | None = None
@@ -94,12 +96,13 @@ class Watch:
             at = self._keys.index(self.selected) + step
             self.selected = self._keys[max(0, min(at, len(self._keys) - 1))]
 
-    # A snapshot that failed to read is not a drop to zero, or the next good read would ring again.
+    # The first snapshot sets what is already known; a failed read changes nothing, so neither rings.
     def _ring(self, found: board.Board) -> None:
         if self._status is None:
             return
-        needs = sum(len(section.rows) for section in found.sections if section.name == standing.NEEDS)
-        if needs > self._needs:
+        rows = (section.rows for section in found.sections if section.name == standing.NEEDS)
+        needs = frozenset(row.key for found_rows in rows for row in found_rows)
+        if self._needs is not None and needs - self._needs:
             self._term.bell()
         self._needs = needs
 
@@ -119,6 +122,8 @@ class Watch:
     def _answer(self, key: str) -> bool:
         self._asking = False
         if key == STOP:
+            if self._engine.finishing():
+                self._term.show([FINISHING])
             self._said = self._engine.stop_all()
         return key not in (LEAVE, STOP)
 
