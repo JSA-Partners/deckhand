@@ -25,7 +25,9 @@ NESTED = "a commit takes no nested repository: {}; remove it or list it in .giti
 
 CLAUDE_ENV = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "SSH_AUTH_SOCK")
 CLAUDE_ENV += ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
-CLAUDE_ENV_PREFIXES = ("LC_", "ANTHROPIC_", "CLAUDE_", "DECKHAND_")
+CLAUDE_ENV += ("GIT_SSH_COMMAND", "GIT_SSH", "GIT_CONFIG_GLOBAL", "GIT_ASKPASS", "SSH_ASKPASS")
+CLAUDE_ENV += ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "AWS_REGION", "AWS_PROFILE", "CLOUD_ML_REGION")
+CLAUDE_ENV_PREFIXES = ("LC_", "XDG_", "ANTHROPIC_", "CLAUDE_", "DECKHAND_")
 # A running Claude Code session sets these for itself; a process started under it would take them as its own.
 SESSION_ENV = frozenset(
     {
