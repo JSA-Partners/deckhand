@@ -26,3 +26,12 @@ def idle(
         if row.turn_ended and now - max(epoch(row.turn_ended), woke) > IDLE_AFTER:
             found.add(name)
     return frozenset(found)
+
+
+# A nudge the hand has not heard yet still has its unheard window to run before anyone asks the person.
+def nudged(pending: list[Message], now: float, woke: float) -> frozenset[str]:
+    return frozenset(
+        m.hand
+        for m in pending
+        if m.kind == wakes.NUDGE and m.delivered is None and now - max(epoch(m.written), woke) <= IDLE_AFTER
+    )

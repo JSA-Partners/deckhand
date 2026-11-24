@@ -142,7 +142,8 @@ class Engine:
         self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke)
         now_facts = self._facts(now, read, hands, busy)
         resuming = reserved(now_facts)
-        held = resuming | self._starting | set(self._settling)
+        nudged = idle.nudged(now_facts.pending, now, self._woke)
+        held = resuming | nudged | self._starting | set(self._settling)
         quiet = frozenset(fleet.ref_of(name) for name in held)
         fresh = self._fresh_records(good) if due else None
         slots = used(now_facts)

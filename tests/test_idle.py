@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from deckhand import asks, fleet, queue, wakes
-from deckhand.idle import IDLE_AFTER, idle
+from deckhand.idle import IDLE_AFTER, idle, nudged
 from deckhand.records import iso
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
@@ -62,3 +62,11 @@ def test_the_idle_clock_restarts_on_a_wake_from_sleep() -> None:
 
 def test_a_failed_fleet_read_finds_no_idle_hand() -> None:
     assert idle(fleet.sessions(Shell(fleet_fails=True)), {NAME: hand()}, [], T + 600, 0.0) == frozenset()
+
+
+def test_a_hand_is_nudged_while_its_nudge_is_unheard_inside_the_window() -> None:
+    nudge = message(wakes.NUDGE)
+    assert nudged([nudge], T + IDLE_AFTER, 0.0) == {NAME}
+    assert nudged([nudge], T + IDLE_AFTER + 1, 0.0) == frozenset()
+    assert nudged([message(asks.ANSWER)], T + 1, 0.0) == frozenset()
+    assert nudged([Message(1, "k", NAME, wakes.NUDGE, "b", at(T), at(T + 5), None)], T + 10, 0.0) == frozenset()
