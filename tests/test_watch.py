@@ -125,3 +125,30 @@ def test_an_unreadable_snapshot_neither_rings_nor_clears_the_top():
     assert (seen.top, lines) == ("k1", [])
     _, lines = watch.captain(seen, "k1", False, T + 2, T + 2)
     assert lines == []
+
+
+def test_the_same_top_item_rings_again_when_linear_recovers():
+    seen, lines = watch.captain(Seen("k1", True, 0, T), "k1", False, T + 1, T + 1, stale=True)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k1", False, T + 2, T + 2, stale=True)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k1", False, T + 3, T + 3)
+    assert lines == [QUEUE]
+    _, lines = watch.captain(seen, "k1", False, T + 4, T + 4)
+    assert lines == []
+
+
+def test_an_unreadable_snapshot_keeps_the_linear_error_until_a_clear_one():
+    seen, _ = watch.captain(Seen("k1", True, 0, T), "k1", False, T + 1, T + 1, stale=True)
+    seen, lines = watch.captain(seen, None, False, T + 2, T + 2)
+    assert lines == []
+    _, lines = watch.captain(seen, "k1", False, T + 3, T + 3)
+    assert lines == [QUEUE]
+
+
+def test_a_recovery_while_held_rings_on_release():
+    seen, _ = watch.captain(Seen("k1", True, 0, T), "k1", False, T + 1, T + 1, stale=True)
+    seen, lines = watch.captain(seen, "k1", True, T + 2, T + 2)
+    assert lines == []
+    _, lines = watch.captain(seen, "k1", False, T + 3, T + 3)
+    assert lines == [QUEUE]

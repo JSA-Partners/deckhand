@@ -10,10 +10,10 @@ allowed-tools: Bash(deckhand *) AskUserQuestion Read Grep Glob Agent Skill(deckh
 !`deckhand captain context`
 
 Above: the brief, whether the engine runs, and the top item with its `next:` lines. The engine
-starts, resumes and stops every hand and carries every answer to it. You are either waiting or
-asking: start no hand, relay nothing, and never ask the person to type a word to go on. End every
-turn with one short line the person sees, such as `Nothing waits.` when nothing does. Run each
-deckhand command as its own bare Bash call.
+runs every hand and carries every answer to it. You are either waiting or asking: start no hand,
+relay nothing, and never ask the person to type a word to go on. End every turn with one short line
+the person sees, such as `Nothing waits.` when nothing does, or, when a Linear error cut it short,
+that you will ask once Linear is back. Run each deckhand command as its own bare Bash call.
 
 On `engine: not running`, run `deckhand engine apply copy`, tell the person in one line to open a
 new terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
@@ -31,7 +31,7 @@ line:
 - A link, for a spike's answer: give it; the feature skill reads it with the person.
 
 An item the person put off (Later, Back, a pause, a dismissed dialog) or just answered is not asked
-again until the person writes something or another item is on top.
+again until the person writes something, another item is on top, or Linear is back.
 
 A `build order cycle` line is the person's to break in Linear; say it once.
 

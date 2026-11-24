@@ -23,16 +23,22 @@ class Seen:
     engine: bool | None
     seq: int
     at: float
+    stale: bool = False
 
 
 # The captain withholds every item while the engine is down, so an item still on top rings when it returns.
 # A top of None is a snapshot that could not be read: it neither rings nor clears what was shown.
-def captain(seen: Seen, top: str | None, held: bool, beat: float | None, now: float) -> tuple[Seen, list[str]]:
+def captain(
+    seen: Seen, top: str | None, held: bool, beat: float | None, now: float, stale: bool = False
+) -> tuple[Seen, list[str]]:
     if now - seen.at > state.SLEEP_GAP:
         return replace(seen, at=now), []
     lines = []
     engine = state.alive(beat, now)
     shown = "" if seen.engine is False and engine else seen.top
+    # A Linear error ends the captain's turn unasked, so the same item rings again once Linear reads clean.
+    if top is not None and seen.stale and not stale:
+        shown = ""
     if top == "":
         shown = ""
     elif top is not None and top != shown and not held:
@@ -40,7 +46,7 @@ def captain(seen: Seen, top: str | None, held: bool, beat: float | None, now: fl
         shown = top
     if seen.engine is not None and engine != seen.engine:
         lines.append(RUNNING if engine else STOPPED)
-    return Seen(shown, engine, seen.seq, now), lines
+    return Seen(shown, engine, seen.seq, now, seen.stale if top is None else stale), lines
 
 
 def hand(seen: Seen, newest: int, now: float) -> tuple[Seen, list[str]]:

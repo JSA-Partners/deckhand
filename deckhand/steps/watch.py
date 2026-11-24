@@ -12,13 +12,14 @@ USAGE = "watch apply captain|hand blocks and prints one line per event"
 POLL = 1.0
 
 
-def _captain_facts(rows: LocalState) -> tuple[str | None, bool, float | None]:
+def _captain_facts(rows: LocalState) -> tuple[str | None, bool, float | None, bool]:
     read, top = status.read(answers.state_dir()), None
     if read is not None:
         items = read.get("items") or []
         top = items[0]["key"] if items else ""
     beat = rows.heartbeat()
-    return top, rows.get(watch.HOLD) is not None, beat[1] if beat else None
+    stale = read is not None and bool(read.get("stale_since"))
+    return top, rows.get(watch.HOLD) is not None, beat[1] if beat else None, stale
 
 
 def _newest(rows: LocalState, hand: str) -> int:
@@ -59,16 +60,16 @@ class Watch:
     def _captain(self) -> None:
         with LocalState(default_path()) as rows:
             rows.changed()
-            top, held, beat = _captain_facts(rows)
-            seen = watch.Seen(top or "", None, 0, self._clock())
+            top, held, beat, stale = _captain_facts(rows)
+            seen = watch.Seen(top or "", None, 0, self._clock(), stale)
             beaten = _beat(rows, self._clock())
             while True:
                 self._sleep(POLL)
                 if self._clock() - beaten >= watch.BEAT_EVERY:
                     beaten = _beat(rows, self._clock())
                 if rows.changed():
-                    top, held, beat = _captain_facts(rows)
-                seen, lines = watch.captain(seen, top, held, beat, self._clock())
+                    top, held, beat, stale = _captain_facts(rows)
+                seen, lines = watch.captain(seen, top, held, beat, self._clock(), stale)
                 _say(lines)
 
     def _hand(self, ref: str) -> None:

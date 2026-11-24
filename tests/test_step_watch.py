@@ -83,6 +83,17 @@ def test_the_captain_watcher_keeps_its_top_across_a_failed_snapshot_read(db: Pat
     assert capsys.readouterr().out == watch.QUEUE + "\n"
 
 
+def test_the_captain_watcher_rings_the_same_item_when_linear_reads_clean_again(db: Path, capsys):
+    status.write(db.parent, status.stale(snapshot([question("q1")]), "2026-11-24T09:00:00.000Z"))
+
+    def recovered() -> None:
+        status.write(db.parent, snapshot([question("q1")]))
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: recovered}, 4)).apply(["captain"])
+    assert capsys.readouterr().out == watch.QUEUE + "\n"
+
+
 def test_an_engine_that_restarts_rings_once_its_snapshot_is_back(db: Path, capsys):
     now = [1795000000.0]
     status.write(db.parent, snapshot([question("q1")]))
