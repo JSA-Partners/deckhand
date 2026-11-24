@@ -135,7 +135,7 @@ def test_working_rows_show_the_stage_and_the_hands_own_status():
 
 def test_a_round_past_three_reads_its_number_alone():
     stories = sample()["stories"]
-    stories[3] = stories[3] | {"stage": stage("branch review", 6, 4) | {"cap": 3}}
+    stories[3] = stories[3] | {"stage": stage("branch review", 6, 4)}
     rows = section(shown(sample(stories=stories)), "working")
     assert rows[0].split()[-4:] == ["branch", "review", "4", "6m"]
 

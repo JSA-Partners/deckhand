@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import fleet, status
+from deckhand import fleet, stage, status
 from deckhand.fleet import Session
 from deckhand.queue import Item
 from deckhand.step import Refusal
@@ -19,7 +19,7 @@ def write(state: Path, found: dict) -> None:
 
 AT = "2026-11-20T10:00:00.000Z"
 BUDGET = {"feature": "Alpha", "days_used": 4, "budget_days": 7, "planning_note": False}
-STAGE = {"name": "plan review", "round": 2, "cap": 3, "since": "2026-11-20T09:00:00.000Z"}
+STAGE = {"name": "plan review", "round": 2, "since": "2026-11-20T09:00:00.000Z"}
 ROW = {"ref": "ACME-1", "title": "Orders", "state": "In Progress", "owner": "Pat", "blocked_by": [], "stage": STAGE}
 FACTS = {
     "feature": "Alpha",
@@ -114,6 +114,13 @@ def test_the_snapshot_round_trips_through_sqlite(tmp_path: Path):
         assert rows.get(status.SNAPSHOT) == found
     assert not (state / "captain.json").exists()
     assert {p.name: stat.S_IMODE(p.stat().st_mode) for p in state.iterdir()} == {"deckhand.db": 0o600}
+
+
+def test_a_story_stage_with_a_round_round_trips(tmp_path: Path):
+    row = ROW | {"stage": stage.as_data(stage.Stage("branch review", 2, None))}
+    found = status.snapshot(AT, "ACME", FACTS | {"order": [row]}, [], [])
+    write(tmp_path, found)
+    assert status.read(tmp_path)["stories"][0]["stage"] == {"name": "branch review", "round": 2, "since": None}
 
 
 def test_a_snapshot_item_carries_its_lines():
