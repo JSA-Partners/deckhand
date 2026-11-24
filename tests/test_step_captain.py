@@ -15,6 +15,7 @@ from deckhand.linear.client import LinearError
 from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
 from deckhand.steps.captain import Captain
+from deckhand.steps.engine import invocation
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import LocalState
 from tests.shell import Shell, row
@@ -633,13 +634,12 @@ def test_the_full_view_names_the_installed_board_launcher(
 def test_the_board_line_carries_no_folders_at_their_defaults(
     clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    from deckhand.steps import captain
-
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("DECKHAND_CONFIG_DIR", raising=False)
     monkeypatch.delenv("DECKHAND_STATE_DIR", raising=False)
     monkeypatch.setattr(sys, "argv", ["/opt/deckhand/bin/deckhand"])
-    assert captain._board_command() == "/opt/deckhand/bin/deckhand captain context --board --watch"
+    expected = "/opt/deckhand/bin/deckhand captain context --board --watch"
+    assert invocation("captain", "context", "--board", "--watch") == expected
 
 
 def test_without_a_launcher_the_board_line_names_this_deckhand(

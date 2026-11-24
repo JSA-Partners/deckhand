@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -20,7 +19,6 @@ from deckhand import (
     fleet,
     frame,
     git,
-    hosts,
     reading,
     status,
     watch,
@@ -28,6 +26,7 @@ from deckhand import (
 from deckhand.linear.client import LinearError
 from deckhand.records import iso
 from deckhand.step import Refusal, register, team_key
+from deckhand.steps.engine import invocation
 from deckhand.store import Store
 from deckhand.store.local import default_path
 from deckhand.store.open import Stores
@@ -35,7 +34,6 @@ from deckhand.store.state import LocalState
 
 REFRESH_LIMIT = 120.0
 NOT_RUN = 127
-PLACES = ("DECKHAND_CONFIG_DIR", "DECKHAND_STATE_DIR")
 USAGE = (
     "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]], "
     "or apply hold|release"
@@ -137,7 +135,7 @@ class Captain:
         if not parsed["brief"]:
             print()
             _print(facts)
-            print(f"board: {_board_command()}")
+            print(f"board: {invocation('captain', 'context', '--board', '--watch')}")
 
     def _line(self, color: bool) -> None:
         try:
@@ -184,14 +182,6 @@ def _save(state: Path, found: dict, notes: list[str]) -> None:
         status.write(state, found)
     except Refusal as error:
         notes.append(f"cannot write the snapshot: {error}")
-
-
-def _board_command() -> str:
-    launcher = config.config_dir() / hosts.LAUNCHER
-    program = launcher if os.access(launcher, os.X_OK) else Path(sys.argv[0]).resolve()
-    places = [f"{name}={os.environ[name]}" for name in PLACES if os.environ.get(name)]
-    prefix = ["env", *places] if places else []
-    return shlex.join([*prefix, str(program), "captain", "context", "--board", "--watch"])
 
 
 # The board's r runs the captain's full read, which leaves the notified list to the captain's brief.

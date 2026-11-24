@@ -4,13 +4,13 @@ import os
 import select
 import sys
 import termios
-import threading
 import tty
 from collections.abc import Callable
 from typing import Protocol
 
 from deckhand import board, fleet, frame, standing
 from deckhand.brief import Glyphs
+from deckhand.poller import Poller
 
 TICK = 0.25
 STATUS_EVERY = 2.0
@@ -42,54 +42,12 @@ class Terminal(Protocol):
     def show(self, lines: list[str]) -> None: ...
 
 
-class Poller:
-    def __init__(self, read: Callable[[], fleet.Fleet], every: float = FLEET_EVERY) -> None:
-        self._read, self._every = read, every
-        self._lock, self._wake, self._stop, self._first = (
-            threading.Lock(),
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-        )
-        self._latest: fleet.Fleet | None = None
-        self._thread = threading.Thread(target=self._loop, name="deckhand-fleet", daemon=True)
-
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            self._wake.clear()
-            try:
-                found = self._read()
-            except Exception as error:
-                found = fleet.Fleet([], f"the fleet read failed: {type(error).__name__}")
-            with self._lock:
-                self._latest = found
-            self._first.set()
-            self._wake.wait(self._every)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def wait(self, timeout: float) -> bool:
-        return self._first.wait(timeout)
-
-    def latest(self) -> fleet.Fleet | None:
-        with self._lock:
-            return self._latest
-
-    def poke(self) -> None:
-        self._wake.set()
-
-    def stop(self) -> None:
-        self._stop.set()
-        self._wake.set()
-
-
 class Watch:
     def __init__(
         self,
         term: Terminal,
         read_status: Callable[[], dict | None],
-        poller: Poller,
+        poller: Poller[fleet.Fleet],
         clock: Callable[[], float],
         g: Glyphs,
         color: bool,
@@ -226,6 +184,10 @@ class Screen:
         self._out.flush()
 
 
+def fleet_failed(error: Exception) -> fleet.Fleet:
+    return fleet.Fleet([], f"the fleet read failed: {type(error).__name__}")
+
+
 def watch(
     read_status: Callable[[], dict | None],
     read_fleet: Callable[[], fleet.Fleet],
@@ -234,7 +196,7 @@ def watch(
     g: Glyphs,
     refresh: Refresh | None = None,
 ) -> None:
-    poller = Poller(read_fleet)
+    poller = Poller(read_fleet, FLEET_EVERY, fleet_failed, "deckhand-fleet")
     poller.start()
     try:
         with Screen(sys.stdin.fileno(), sys.stdout) as screen:
