@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,7 +34,7 @@ class DuplicateId(LinearError):
         self.entity = message.removeprefix(CONFLICT_PREFIX).strip()
 
 
-DROPPED = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError)
+DROPPED = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError, ssl.SSLEOFError)
 
 
 def _connect() -> http.client.HTTPSConnection:

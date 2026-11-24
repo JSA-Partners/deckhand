@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -290,6 +291,27 @@ def test_keep_alive_a_drop_on_a_fresh_connection_is_a_network_failure() -> None:
     with pytest.raises(LinearError) as raised:
         client(KeepAliveTransport(connections)).query("q", {})
     assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_keep_alive_reconnects_once_after_a_tls_end_of_file_on_a_reused_connection() -> None:
+    connections = Connections(
+        [Response(200, ok({"n": 0})), ssl.SSLEOFError("EOF occurred in violation of protocol")],
+        [Response(200, ok({"n": 1}))],
+    )
+    linear = client(KeepAliveTransport(connections))
+    assert linear.query("q", {}) == {"n": 0}
+    assert linear.query("q", {}) == {"n": 1}
+    assert len(connections.made) == 2
+
+
+def test_keep_alive_a_tls_end_of_file_on_a_fresh_connection_latches() -> None:
+    connections = Connections([ssl.SSLEOFError("EOF occurred in violation of protocol")], [Response(200, ok({}))])
+    linear = client(KeepAliveTransport(connections))
+    for _ in range(2):
+        with pytest.raises(LinearError) as raised:
+            linear.query("q", {})
+        assert raised.value.code == "network"
     assert len(connections.made) == 1
 
 
