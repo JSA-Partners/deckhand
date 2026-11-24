@@ -50,6 +50,8 @@ class Resume:
     cwd: str
     text: str
     seqs: tuple[int, ...]
+    record: Record | None = None
+    restart: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,9 +139,9 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         feature = reading.feature
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature)
-            found += _sync(tick, store, feature) + _deliver(tick) + _start(tick, store, feature)
+            found += _sync(tick, store, feature) + _deliver(tick, feature) + _start(tick, store, feature)
         else:
-            found += _deliver(tick)
+            found += _deliver(tick, None)
         found += _spikes(tick)
     return [action for action in found if action.name not in facts.busy]
 
@@ -253,10 +255,14 @@ def _start(tick: _Tick, store: Store, feature: Feature) -> list[Action]:
     return found
 
 
-def _nudge(name: str, story: dict, records: list[Record], launch: str, restart: bool) -> Post:
+def _fresh_start(name: str, story: dict, records: list[Record], launch: str) -> Record:
     newest = max((r.at for r in records), default="")
-    start = Record(asks.HAND_START, story["id"], newest, HAND, {"kind": launch, "session": name})
-    key = f"nudge:{story['id']}:{newest}"
+    return Record(asks.HAND_START, story["id"], newest, HAND, {"kind": launch, "session": name})
+
+
+def _nudge(name: str, story: dict, records: list[Record], launch: str, restart: bool) -> Post:
+    start = _fresh_start(name, story, records, launch)
+    key = f"nudge:{story['id']}:{start.version}"
     return Post(name, key, wakes.NUDGE, wakes.nudge_body(), story["id"], start, restart)
 
 
@@ -272,7 +278,7 @@ def _spikes(tick: _Tick) -> list[Action]:
     return found
 
 
-def _deliver(tick: _Tick) -> list[Action]:
+def _deliver(tick: _Tick, feature: Feature | None) -> list[Action]:
     waiting: dict[str, list[Message]] = {}
     for message in tick.facts.pending:
         waiting.setdefault(message.hand, []).append(message)
@@ -283,7 +289,7 @@ def _deliver(tick: _Tick) -> list[Action]:
         unseen = [m for m in messages if m.delivered is None]
         session = tick.alive(name)
         if session is None:
-            resume = _resume(tick, name, messages)
+            resume = _resume(tick, feature, name, messages)
             if resume is not None:
                 found.append(tick.take(resume, slot=True))
         elif unseen and session.state != WORKING and not session.waiting_for and _deaf(tick, unseen):
@@ -291,14 +297,28 @@ def _deliver(tick: _Tick) -> list[Action]:
     return found
 
 
-def _resume(tick: _Tick, name: str, messages: list[Message]) -> Resume | None:
+def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Message]) -> Resume | None:
     row = tick.facts.hands.get(name)
     last = max((s for s in tick.sessions if s.name == name), key=_started, default=None)
     session = row.session if row is not None and row.session else (last.session_id if last else None)
     cwd = row.cwd if row is not None else (last.cwd if last else "")
     if session is None or not tick.listed(session) or not tick.free() or tick.backing_off(name):
         return None
-    return Resume(name, session, cwd, wakes.prompt(messages), tuple(m.seq for m in messages))
+    story = _story_of(feature, name)
+    records = _records(feature, story) if feature is not None and story is not None else []
+    start = queue.last_start(records)
+    launch = row.kind if row is not None else str(start.data.get("kind")) if start is not None else queue.STORY_HAND
+    restarts = row.restarts if row is not None else None
+    if not queue.auto_restart(records, launch, restarts) and queue.stall_answer(records, launch) != queue.RESTART:
+        return None
+    fresh = _fresh_start(name, story, records, launch) if story is not None else None
+    return Resume(name, session, cwd, wakes.prompt(messages), tuple(m.seq for m in messages), fresh, restart=True)
+
+
+def _story_of(feature: Feature | None, name: str) -> dict | None:
+    if feature is None or not name.startswith(fleet.HAND):
+        return None
+    return next((s for s in feature.live if fleet.hand_name(s["identifier"]) == name), None)
 
 
 def _deaf(tick: _Tick, messages: list[Message]) -> bool:

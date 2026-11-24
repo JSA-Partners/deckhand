@@ -191,7 +191,7 @@ def test_a_stopped_hand_with_mail_is_resumed_with_the_text(clone: Path):
     store = alone()
     m = mail()
     found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(m,)), store)
-    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([m]), (m.seq,))]
+    assert found == [resume(store, [m])]
 
 
 def test_a_stopped_hand_with_mail_waits_for_a_slot(clone: Path):
@@ -234,14 +234,14 @@ def test_a_resume_carries_mail_delivered_but_not_acknowledged(clone: Path):
     started(store)
     seen, fresh = mail(1, delivered=at(T)), mail(2)
     found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(seen, fresh)), store)
-    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([seen, fresh]), (1, 2))]
+    assert found == [resume(store, [seen, fresh])]
 
 
 def test_mail_for_a_stopped_hand_wins_the_last_slot_over_a_new_story(clone: Path):
     store = building()
     m = mail()
     found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(m,)), store)
-    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([m]), (m.seq,))]
+    assert found == [resume(store, [m])]
 
 
 def test_reconcile_works_from_facts_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -270,6 +270,34 @@ def test_a_wake_from_sleep_restarts_the_deaf_clock(clone: Path):
     idle = row("ACME-1", "idle", "idle")
     woken = facts(store, idle, hands=(held(),), pending=(mail(),), woke=T + 3600, now=T + 3610)
     assert reconcile(woken, store) == []
+
+
+def fresh_start(store: FakeStore) -> Record:
+    newest = max((r.at for r in store.records("s1")), default="")
+    return Record(asks.HAND_START, "s1", newest, HAND, {"kind": queue.STORY_HAND, "session": "hand-ACME-1"})
+
+
+def resume(store: FakeStore, messages: list[Message]) -> Resume:
+    text, seqs = wakes.prompt(messages), tuple(m.seq for m in messages)
+    return Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", text, seqs, fresh_start(store), restart=True)
+
+
+def test_a_first_stop_with_unacknowledged_mail_is_resumed_once_as_its_restart(clone: Path):
+    store = alone()
+    store.assign("s1", ME)
+    started(store)
+    m = mail()
+    stopped = row("ACME-1", "stopped")
+    [found] = reconcile(facts(store, stopped, hands=(held(),), pending=(m,)), store)
+    assert found == resume(store, [m])
+    assert isinstance(found, Resume) and found.record is not None
+    store.put_record("s1", found.record)
+    seen = mail(delivered=at(T))
+    assert reconcile(facts(store, stopped, hands=(held(restarts=1),), pending=(seen,)), store) == []
+    feature = features.current(store, "ACME")
+    read = fleet.sessions(Shell(stopped))
+    waiting = queue.items(store, "ACME", feature, ME, read, lambda _: Policy("widgets"), restarts={"ACME-1": 1})
+    assert [(item.kind, item.ref) for item in waiting] == [(queue.STALLED, "ACME-1")]
 
 
 def nudge(store: FakeStore) -> Post:
