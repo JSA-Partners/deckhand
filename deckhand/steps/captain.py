@@ -102,15 +102,14 @@ class Captain:
         local = _local(notes)
         state, alert = answers.state_dir(), None
         try:
-            found = reading.read(store, self._person_store, team, read, local, self._today())
+            found = reading.read(store, self._person_store, team, read, local, self._today(), notes=notes)
         except LinearError as error:
             notes.append(str(error))
             shown = status.read(state)
             shown = status.stale(shown, self._now()) if shown is not None else None
             facts = _stale(reading.empty(notes, read, local), shown)
         else:
-            notes += found.notes[1 if read.note else 0 :]
-            facts = found.facts | {"notes": notes}
+            facts = found.facts
             previous, unknown = status.read(state), found.me is None
             shown = status.snapshot(self._now(), team, facts, found.waiting, read.sessions, previous, unknown)
             alert = brief.notify(shown, self._clock()) if parsed["brief"] and not parsed["json"] else None

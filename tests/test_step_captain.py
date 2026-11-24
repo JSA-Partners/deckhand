@@ -358,6 +358,18 @@ def test_an_unreachable_viewer_is_never_an_all_clear(clone: Path, capsys: pytest
     assert shown[:2] == ["Linear unreachable; no earlier state", "network: could not reach Linear"]
 
 
+def test_notes_before_linear_fails_are_kept(clone: Path, capsys: pytest.CaptureFixture[str]):
+    class NoKey:
+        def viewer(self):
+            raise Refusal("no personal key")
+
+    Captain(unreachable(owned(), "relations"), Shell(), person=NoKey(), today=lambda: DAY, clock=lambda: NOW).context(
+        TEAM
+    )
+    shown = paragraphs(capsys.readouterr().out)
+    assert shown[:3] == ["Linear unreachable; no earlier state", "no personal key", "network: could not reach Linear"]
+
+
 def test_unreachable_shows_the_last_state_and_marks_it_stale(clone: Path, capsys: pytest.CaptureFixture[str]):
     store = owned()
     asked(store, "s1")

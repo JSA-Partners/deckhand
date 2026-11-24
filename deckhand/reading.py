@@ -30,8 +30,10 @@ def read(
     local: config.LocalConfig,
     today: date,
     quiet: frozenset[str] = frozenset(),
+    notes: list[str] | None = None,
 ) -> Reading:
-    notes = [fleet_read.note] if fleet_read.note else []
+    if notes is None:
+        notes = [fleet_read.note] if fleet_read.note else []
     feature = _current(store, team, notes)
     me = _me(person, notes)
     waiting = _waiting(store, team, feature, me, fleet_read, local, notes, quiet)
