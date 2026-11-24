@@ -29,8 +29,8 @@
   board's sections and rows; `watch.py` when a session's watcher rings
 - The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into actions
   and writes nothing, `acts.py` carries one action out, `worker.py` runs them in order on one
-  thread, `poller.py` reads the fleet and Linear on their own threads, and `engine.py` is the loop,
-  its lock, its heartbeat and the only writer of the snapshot
+  thread, `poller.py` reads the fleet and Linear on their own threads, `lines.py` the failures the
+  engine shows, and `engine.py` is the loop, its lock, its heartbeat and the snapshot it writes
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
   escape codes; `statusline.py` installs and removes the captain's segment in the person's status
   line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`
