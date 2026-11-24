@@ -318,7 +318,15 @@ def test_push_waits_for_the_person_on_a_delivery_finding(
     delivery = raw(changes_delivery=True)
     record_round(Review(store, Git(BASE), repo), tmp_path, delivery)
     shell = Shell()
-    with pytest.raises(Refusal, match=f"{finding_id(delivery)} changes what the story delivers"):
+    found = finding_id(delivery)
+    with pytest.raises(Refusal, match=f"{found} changes what the story delivers; propose an answer") as refused:
+        push(store, shell, repo)
+    assert "review apply ACME-1 resolve --propose-accept" in str(refused.value)
+    assert "decide" not in str(refused.value)
+    Review(store, Git(BASE), repo).apply(
+        ["s1", "resolve", "--stage", "plan", *TEAM, "--propose-decline", found, "--reason", "out of scope"]
+    )
+    with pytest.raises(Refusal, match=f"{found} waits for the person's decision"):
         push(store, shell, repo)
     assert shell.ran("git", "push") == []
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(delivery)], "Accept")

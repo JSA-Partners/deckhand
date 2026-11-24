@@ -133,15 +133,58 @@ def test_agent_decline_refuses(tmp_path: Path, repo: Path):
     resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
     with pytest.raises(Refusal, match="only the person declines a finding.*--propose-decline"):
         step.apply([*resolve, "--decline", finding_id(p1)])
-    with pytest.raises(Refusal, match="changes what the story delivers"):
-        step.apply([*resolve, "--accept", finding_id(p1), "--accept", finding_id(delivery)])
+    found = finding_id(delivery)
+    with pytest.raises(
+        Refusal, match=f"changes what the story delivers.*--propose-accept {found}.*--propose-decline {found}"
+    ):
+        step.apply([*resolve, "--accept", finding_id(p1), "--accept", found])
     with pytest.raises(Refusal, match="not a finding of the last round"):
         step.apply([*resolve, "--accept", "000000000000"])
+    with pytest.raises(Refusal, match="takes one resolution in a call"):
+        step.apply([*resolve, "--accept", finding_id(p1), "--propose-decline", finding_id(p1), "--reason", "r"])
     assert store.writes == before
     step.apply([*resolve, "--accept", finding_id(p1)])
     [accept] = [r for r in store.records("s1") if r.kind == review.HAND_ACCEPT]
     assert (accept.subject, accept.author, accept.data["answer"]) == (finding_id(p1), "agent:review", "Accept")
     assert review.declined(store.records("s1")) == set()
+
+
+def test_one_resolve_takes_accepts_and_proposals_together(tmp_path: Path, repo: Path, capsys):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    p1, p2 = raw(severity="P1"), raw(summary="Another gap.")
+    delivery = raw(summary="Orders ship a day later.", changes_delivery=True)
+    record_round(step, tmp_path, p1, p2, delivery)
+    before = len(store.writes)
+    resolve = ["s1", "resolve", "--stage", "plan", *TEAM, "--accept", finding_id(p1), "--accept", finding_id(p2)]
+    step.apply([*resolve, "--propose-accept", finding_id(delivery), "--reason", "The spec allows a day."])
+    written = store.writes[before:]
+    assert len(written) == 3
+    held = store.records("s1")
+    assert {r.subject for r in held if r.kind == review.HAND_ACCEPT} == {finding_id(p1), finding_id(p2)}
+    [proposal] = [r for r in held if r.kind == asks.PROPOSAL]
+    assert (proposal.subject, proposal.data) == (
+        finding_id(delivery),
+        {"reason": "The spec allows a day.", "answer": review.ACCEPT},
+    )
+    assert "accepted 2 and proposed 1 findings" in capsys.readouterr().out
+
+
+def test_a_delivery_finding_of_an_earlier_round_can_still_be_proposed(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    delivery = raw(summary="Orders ship a day later.", changes_delivery=True)
+    record_round(step, tmp_path, delivery)
+    [first] = rounds(store)
+    submit(store, tmp_path, repo, PLAN + "- [ ] send the receipt\n")
+    record_round(step, tmp_path)
+    resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
+    step.apply([*resolve, "--propose-decline", finding_id(delivery), "--reason", "out of scope"])
+    [proposal] = [r for r in store.records("s1") if r.kind == asks.PROPOSAL]
+    assert (proposal.subject, proposal.version) == (finding_id(delivery), first.version)
+    assert review.delivery_gaps(store.records("s1"), "s1", "plan") == [
+        f"{finding_id(delivery)} waits for the person's decision"
+    ]
 
 
 def test_decline_proposal_awaits_person(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):

@@ -12,6 +12,7 @@ from deckhand.step import Refusal
 KIND = "review-round"
 DECISION = "finding"
 HAND_ACCEPT = "finding-accept"
+PROPOSAL = "decline-proposal"
 CAP_DECISION = "review-cap"
 PROCEED, REWORK = "Proceed", "Rework"
 DECLINE, ACCEPT = "Decline", "Accept"
@@ -222,11 +223,18 @@ def undecided_delivery(records: list[Record], story: str, stage: str) -> list[di
     return [f for id, f in found.items() if id not in by_person]
 
 
+def delivery_line(item: dict) -> str:
+    return f"touches: {item['touches']}" if item.get("touches") else "it changes what the story delivers"
+
+
 def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
+    proposed = {r.subject for r in records if r.kind == PROPOSAL}
     return [
-        f"{f['id']} changes what the story delivers and the person has not decided it:"
-        f" decide context finding {ref} --finding {f['id']}"
-        for f in undecided_delivery(records, story, stage)
+        f"{id} waits for the person's decision"
+        if id in proposed
+        else f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve"
+        f" --propose-accept {id} or --propose-decline {id} --reason TEXT"
+        for id in (f["id"] for f in undecided_delivery(records, story, stage))
     ]
 
 

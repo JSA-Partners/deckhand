@@ -16,9 +16,10 @@ from deckhand.store import Store
 USAGE = (
     "review takes REF, --stage plan|branch and [--team-key KEY], feature-review [--team-key KEY] alone; context takes"
     " --json; apply takes round --findings FINDINGS.json --target HASH (the target_hash context printed),"
-    " round --target HASH alone when context stops at carry, or resolve with --accept ID or --propose-decline ID"
-    " --reason TEXT (repeat for each)"
+    " round --target HASH alone when context stops at carry, or resolve with --accept ID, --propose-accept ID or"
+    " --propose-decline ID, one --reason TEXT for the proposals (repeat each)"
 )
+PROPOSING = {"--propose-accept": review.ACCEPT, "--propose-decline": review.DECLINE}
 FEATURE = "feature"
 ACTIONS = ("round", "resolve")
 STOPS = {
@@ -40,8 +41,10 @@ def _parse(args: list[str]) -> dict:
             found["json"] = True
         elif arg in ("--team-key", "--stage", "--findings", "--target", "--reason"):
             found[arg[2:].replace("-", "_")] = next(rest, "")
-        elif arg in ("--accept", "--decline", "--propose-decline"):
-            found[arg[2:].replace("propose-decline", "propose")].append(next(rest, ""))
+        elif arg in ("--accept", "--decline"):
+            found[arg[2:]].append(next(rest, ""))
+        elif arg in PROPOSING:
+            found["propose"].append((next(rest, ""), PROPOSING[arg]))
         elif arg.startswith("--"):
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
@@ -298,36 +301,21 @@ class Review(StoryStep):
 
     def _resolve(self, parsed: dict) -> None:
         subject = self._writable(parsed)
-        ref = subject.story["identifier"] if subject.story else subject.feature.live[0]["identifier"]
         if parsed["decline"]:
             ids = " ".join(f"--propose-decline {id}" for id in parsed["decline"])
             raise Refusal(f"only the person declines a finding; propose it with {ids} --reason TEXT")
         if not parsed["accept"] and not parsed["propose"]:
-            raise Refusal(f"resolve takes --accept ID or --propose-decline ID; {USAGE}")
+            raise Refusal(f"resolve takes --accept ID, --propose-accept ID or --propose-decline ID; {USAGE}")
         if parsed["propose"] and not parsed.get("reason", "").strip():
-            raise Refusal(f"--propose-decline needs --reason TEXT; {USAGE}")
+            raise Refusal(f"a proposal needs --reason TEXT; {USAGE}")
+        reason, where = parsed.get("reason", "").strip(), f"{subject.label} {subject.stage}"
+        found = asks.resolutions(subject.records, subject.prefix, parsed["accept"], parsed["propose"], reason, where)
         store = self._store_for_run()
-        last = review.last(review.rounds_of(subject.records, subject.prefix))
-        held = {item["id"]: item for item in last.data["findings"]} if last else {}
-        by_person = review.decided(subject.records)
-        for id in parsed["accept"] + parsed["propose"]:
-            if id not in held:
-                raise Refusal(f"{id} is not a finding of the last round of {subject.label} {subject.stage}")
-            if id in by_person:
-                raise Refusal(f"{id} is already decided: the person decided {by_person[id]}")
-            if id in parsed["accept"] and held[id].get("changes_delivery"):
-                raise Refusal(
-                    f"{id} changes what the story delivers; the person decides it: decide context finding"
-                    f" {ref} --finding {id}"
-                )
-        for id in parsed["accept"]:
+        for record in found:
             for story in subject.stories:
-                ops.ensure_record(store, story, review.accept_record(id, last.version))
-        for id in parsed["propose"]:
-            for story in subject.stories:
-                ops.ensure_record(store, story, asks.proposal_record(id, last.version, parsed["reason"].strip()))
+                ops.ensure_record(store, story, record)
         print(
-            f"done: accepted {len(parsed['accept'])} and proposed declining {len(parsed['propose'])} findings"
+            f"done: accepted {len(parsed['accept'])} and proposed {len(parsed['propose'])} findings"
             f" on {subject.label} {subject.stage}"
         )
 

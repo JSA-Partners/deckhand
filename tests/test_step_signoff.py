@@ -432,7 +432,11 @@ def test_sign_off_waits_for_the_person_on_a_delivery_finding(
     store = ready(tmp_path, repo, state, capsys)
     delivery = raw(changes_delivery=True)
     branch_round(store, delivery, n=2)
-    assert f"{_id(delivery)} changes what the story delivers" in gaps_at_head(store, repo)
+    [line] = [g for g in signoff.gaps(store.records("s1"), "s1", "c2") if g.startswith(_id(delivery))]
+    assert line.startswith(f"{_id(delivery)} changes what the story delivers; propose an answer")
+    assert "decide" not in line
+    store.put_record("s1", asks.proposal_record(_id(delivery), "v", "out of scope"))
+    assert f"{_id(delivery)} waits for the person's decision" in gaps_at_head(store, repo)
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", _id(delivery)], "Decline")
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")

@@ -115,3 +115,22 @@ def test_open_proposals_are_those_without_a_person_decision():
     proposals = [asks.proposal_record("f1", "v1", "noise"), asks.proposal_record("f2", "v1", "noise")]
     decision = Record("finding", "f1", "v1", "person:s1", {"answer": "Accept"})
     assert [r.subject for r in asks.open_proposals([*proposals, decision])] == ["f2"]
+
+
+def test_a_proposal_holds_its_answer_and_defaults_to_decline():
+    accept = asks.proposal_record("f1", "v1", "in scope", "Accept")
+    assert (accept.kind, accept.data) == ("decline-proposal", {"reason": "in scope", "answer": "Accept"})
+    assert asks.proposal_record("f1", "v1", "noise").data["answer"] == "Decline"
+    legacy = Record(asks.PROPOSAL, "f2", "v1", "agent:review", {"reason": "old"})
+    assert asks.proposed_answer(legacy) == "Decline"
+
+
+def test_proposed_is_the_newest_open_proposal_for_a_finding():
+    first = asks.proposal_record("f1", "v1", "noise")
+    second = asks.proposal_record("f1", "v1", "in scope", "Accept")
+    other = asks.proposal_record("f2", "v1", "noise")
+    assert asks.proposed([first, second, other], "f1") == second
+    assert asks.proposed([first, second, other], "f3") is None
+    decision = Record("finding", "f1", "v1", "person:s1", {"answer": "Accept"})
+    assert asks.proposed([first, second, decision], "f1") is None
+    assert asks.open_proposals([first, second, other]) == [second, other]

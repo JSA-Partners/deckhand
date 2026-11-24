@@ -115,3 +115,19 @@ def test_cap_pin_refuses_off_the_cap_and_after_proceed():
     feature = features.open_feature(store, "ACME")
     with pytest.raises(Refusal, match="has not reached its cap"):
         pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="branch")
+
+
+def test_finding_pin_shows_what_the_finding_touches_and_the_proposal():
+    store, _ = asked()
+    delivery = P2 | {"changes_delivery": True, "touches": "Contract: ships the same day"}
+    found = review.parse_findings(json.dumps([delivery]))
+    round = review.round_record("s1", "branch", review.RoundPlan(1, False, ""), "hash1", found, "c1")
+    store.put_record("s1", round)
+    [finding] = round.data["findings"]
+    store.put_record("s1", asks.proposal_record(finding["id"], round.version, "the spec allows it", review.ACCEPT))
+    feature = features.open_feature(store, "ACME")
+    held = pins.pin(store, feature, review.DECISION, "ACME-1", [], finding=finding["id"])
+    assert held.detail == (
+        "P2 correctness a.py:1 A hole.; touches: Contract: ships the same day;"
+        " the hand proposes to accept it: the spec allows it"
+    )

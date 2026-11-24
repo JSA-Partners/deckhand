@@ -105,23 +105,21 @@ def finding_line(records: list[Record], finding: str) -> tuple[str, str]:
     return round.at, f"{item['severity']} {item['lens']} {item['path']}:{item['line']} {item['summary']}"
 
 
+def finding_lines(records: list[Record], finding: str) -> list[str]:
+    _, line = finding_line(records, finding)
+    found = review.locate(records, finding)
+    lines = [line] + ([review.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
+    proposal = asks.proposed(records, finding)
+    return lines + ([asks.proposal_line(proposal)] if proposal else [])
+
+
 def _findings(story: dict, records: list[Record]) -> list[Item]:
     ref, found = story["identifier"], []
-    proposed = set()
     for proposal in asks.open_proposals(records):
-        proposed.add(proposal.subject)
-        _, line = finding_line(records, proposal.subject)
-        lines = [line, f"the hand proposes to decline it: {proposal.data.get('reason', '')}"]
+        lines = finding_lines(records, proposal.subject)
         next = [f"decide context finding {ref} --finding {proposal.subject}"]
         found.append(_story_item(review.DECISION, 1, story, proposal.at, lines, next))
     for stage in STAGES:
-        for finding in review.undecided_delivery(records, story["id"], stage):
-            if finding["id"] in proposed:
-                continue
-            at, line = finding_line(records, finding["id"])
-            lines = [line, "it changes what the story delivers"]
-            next = [f"decide context finding {ref} --finding {finding['id']}"]
-            found.append(_story_item(review.DECISION, 1, story, at, lines, next))
         found += _cap(story, records, stage)
     return found
 

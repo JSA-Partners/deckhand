@@ -276,6 +276,20 @@ def test_a_delivery_finding_without_a_person_decision_is_undecided():
     assert review.undecided_delivery([*records, person], "s1", "plan") == []
 
 
+def test_delivery_gaps_split_by_who_acts():
+    delivery = raw(changes_delivery=True)
+    records = [done(1, "h1", delivery)]
+    finding = id_of(delivery)
+    assert review.delivery_gaps(records, "s1", "plan", "ACME-1") == [
+        f"{finding} changes what the story delivers; propose an answer with review apply ACME-1 resolve"
+        f" --propose-accept {finding} or --propose-decline {finding} --reason TEXT"
+    ]
+    proposal = Record(review.PROPOSAL, finding, "h1", "agent:review", {"reason": "r", "answer": review.ACCEPT})
+    assert review.delivery_gaps([*records, proposal], "s1", "plan") == [f"{finding} waits for the person's decision"]
+    person = Record(review.DECISION, finding, "h1", "person:pat", {"answer": review.ACCEPT})
+    assert review.delivery_gaps([*records, proposal, person], "s1", "plan") == []
+
+
 def test_feature_gaps_need_the_current_target_at_any_count():
     def feature(n: int, target: str) -> Record:
         return review.round_record("p1", "feature", RoundPlan(n, n > 1, ""), target, [])

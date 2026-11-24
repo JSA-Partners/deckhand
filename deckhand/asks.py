@@ -13,7 +13,7 @@ QUESTION = "hand-question"
 ANSWER = "question"
 EDIT = "config-edit"
 EDIT_REQUEST = "config-edit-request"
-PROPOSAL = "decline-proposal"
+PROPOSAL = review.PROPOSAL
 HAND_START = "hand-start"
 WAKE = "wake"
 EDIT_OPTIONS = ["Done", "Not doing it"]
@@ -85,13 +85,60 @@ def edit_record(story: str, found: dict) -> Record:
     return Record(EDIT_REQUEST, f"{story}:{edit_id(found)}", edit_id(found), HAND, found)
 
 
-def proposal_record(finding: str, version: str, reason: str) -> Record:
-    return Record(PROPOSAL, finding, version, "agent:review", {"reason": reason})
+def proposal_record(finding: str, version: str, reason: str, answer: str = review.DECLINE) -> Record:
+    return Record(PROPOSAL, finding, version, "agent:review", {"reason": reason, "answer": answer})
+
+
+def proposed_answer(proposal: Record) -> str:
+    return proposal.data.get("answer", review.DECLINE)
 
 
 def open_proposals(records: list[Record]) -> list[Record]:
     settled = review.decided(records)
-    return [r for r in records if r.kind == PROPOSAL and r.subject not in settled]
+    newest = {r.subject: r for r in records if r.kind == PROPOSAL and r.subject not in settled}
+    return [r for r in records if newest.get(r.subject) is r]
+
+
+def proposed(records: list[Record], finding: str) -> Record | None:
+    return next((r for r in open_proposals(records) if r.subject == finding), None)
+
+
+def proposal_line(proposal: Record) -> str:
+    verb = "accept" if proposed_answer(proposal) == review.ACCEPT else "decline"
+    return f"the hand proposes to {verb} it: {proposal.data.get('reason', '')}"
+
+
+def resolutions(
+    records: list[Record],
+    prefix: str,
+    accept: list[str],
+    propose: list[tuple[str, str]],
+    reason: str,
+    where: str,
+) -> list[Record]:
+    last = review.last(review.rounds_of(records, prefix))
+    held = {item["id"]: item for item in last.data["findings"]} if last else {}
+    owner, stage = prefix.rsplit(":", 1)
+    earlier = {f["id"]: f for f in review.undecided_delivery(records, owner, stage)}
+    by_person = review.decided(records)
+    ids = accept + [id for id, _ in propose]
+    for id in ids:
+        if id not in held and (id in accept or id not in earlier):
+            raise Refusal(f"{id} is not a finding of the last round of {where}")
+        if id in by_person:
+            raise Refusal(f"{id} is already decided: the person decided {by_person[id]}")
+        if ids.count(id) > 1:
+            raise Refusal(f"{id} takes one resolution in a call")
+        if id in accept and held[id].get("changes_delivery"):
+            raise Refusal(
+                f"{id} changes what the story delivers, so the person answers it; propose an answer with"
+                f" --propose-accept {id} or --propose-decline {id} --reason TEXT"
+            )
+    found = [review.accept_record(id, last.version) for id in accept]
+    for id, answer in propose:
+        version = last.version if id in held else review.locate(records, id)[0].version
+        found.append(proposal_record(id, version, reason, answer))
+    return found
 
 
 def _person(record: Record) -> bool:
