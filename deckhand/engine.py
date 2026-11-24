@@ -9,13 +9,12 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, budget, config, features, fleet, git, idle, queue, reading, status, watch
+from deckhand import acts, budget, config, features, fleet, git, idle, reading, shown, status, watch
 from deckhand.actions import Action, Adopt, Launch, Post, Resume
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
-from deckhand.reading import Reading
-from deckhand.reconcile import Facts, reconcile, reserved, used
+from deckhand.reconcile import Facts, reconcile
 from deckhand.records import Record, epoch, iso
 from deckhand.step import Refusal
 from deckhand.store.state import HEARTBEAT, SLEEP_GAP, HandRow, LocalState
@@ -86,8 +85,8 @@ class Engine:
         pid: int | None = None,
         runner: git.Runner = git.run,
     ) -> None:
-        self._team, self._state, self._fleets, self._linear, self._worker = team, state, fleets, linear, worker
-        self._clock, self._today, self._pid = clock, today, pid if pid is not None else os.getpid()
+        self._state, self._fleets, self._linear, self._worker = state, fleets, linear, worker
+        self._clock, self._pid = clock, pid if pid is not None else os.getpid()
         self._runner = runner
         self._woke = clock()
         self._slept: float | None = None
@@ -95,20 +94,16 @@ class Engine:
         self._beat = self._reconciled = float("-inf")
         self._newest: Linked | None = None
         self._good: Linked | None = None
-        self._reading: Reading | None = None
-        self._fleet: fleet.Fleet | None = None
-        self._quiet: frozenset[str] = frozenset()
-        self._settling: dict[str, float] = {}
+        self._reading: reading.Reading | None = None
         self._lines = Lines()
+        self._shown = shown.Shown(team, state, self._lines, today)
+        self._settling: dict[str, float] = {}
         self._starting: set[str] = set()
         self._poked_for = 0.0
         self._poked_at: float | None = None
         self._turn_poked = float("-inf")
         self._budget = budget.Budget()
         self._idle: frozenset[str] = frozenset()
-        self._idle_read: frozenset[str] = frozenset()
-        self._used: int | None = None
-        self._limit_shown: str | None = None
 
     def tick(self) -> None:
         now = self._clock()
@@ -131,7 +126,7 @@ class Engine:
         changed = self._state.changed()
         self._budget = budget.kept(self._state)
         hands = self._state.hands()
-        self._show_limit(now)
+        self._shown.limit(self._limit(now))
         linked = self._take_link(now)
         self._poke_on_turn_end(hands, now)
         busy = self._collect(now)
@@ -150,15 +145,12 @@ class Engine:
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
             busy = busy | self._reconcile(good, now_facts)
-        resuming = reserved(now_facts)
-        nudged = idle.nudged(now_facts.pending, now, self._woke)
-        held = resuming | nudged | self._starting | busy | self._worker.busy()
-        quiet = frozenset(fleet.ref_of(name) for name in held)
-        slots = used(self._facts(now, read, hands, busy | self._worker.busy()))
-        moved = changed or read != self._fleet or quiet != self._quiet or self._idle != self._idle_read
-        moved = moved or slots != self._used or fresh is not None
-        if moved or linked:
-            self._read(good, read, hands, quiet, now, (slots, resuming))
+        quiet, slots, resuming = shown.held(now_facts, self._starting | busy | self._worker.busy())
+        if changed or linked or fresh is not None or self._shown.moved(read, quiet, self._idle, slots):
+            stale = self._iso(now) if self._newest is not None and self._newest.error else None
+            found = self._shown.read(good, read, hands, self._idle, quiet, (slots, resuming), self._limit(now), stale)
+            if found is not None:
+                self._reading = found
 
     def _heartbeat(self, now: float) -> None:
         try:
@@ -177,21 +169,12 @@ class Engine:
         if not newest.error:
             self._good, self._reading = newest, newest.reading
             return True
-        previous = status.get(self._state)
-        if previous is not None:
-            self._write(status.stale(previous, self._iso(now)), previous)
+        self._shown.stale(self._iso(now))
         return False
 
     def _limit(self, now: float) -> str | None:
         until = self._budget.until
         return self._iso(until) if until is not None and self._budget.limited(now) else None
-
-    def _show_limit(self, now: float) -> None:
-        limit = self._limit(now)
-        previous = status.get(self._state) if limit != self._limit_shown else None
-        if previous is not None:
-            self._write(previous | {"limited_until": limit}, previous)
-            self._limit_shown = limit
 
     def _poke_on_turn_end(self, hands: dict[str, HandRow], now: float) -> None:
         ended = max((epoch(row.turn_ended) for row in hands.values() if row.turn_ended), default=0.0)
@@ -250,57 +233,6 @@ class Engine:
         held = self._reading
         if held is not None and held.feature is not None:
             self._reading = replace(held, feature=replace(held.feature, records=fresh))
-
-    def _read(
-        self,
-        good: Linked,
-        read: fleet.Fleet,
-        hands: dict[str, HandRow],
-        quiet: frozenset[str],
-        now: float,
-        slots: tuple[int, frozenset[str]],
-    ) -> bool:
-        stores = good.stores
-        assert stores is not None
-        restarts = {row.ref: row.restarts for row in hands.values()}
-        try:
-            found = reading.read(
-                stores("app"),
-                lambda: stores("person"),
-                self._team,
-                read,
-                good.local,
-                self._today(),
-                quiet=quiet,
-                restarts=restarts,
-                idle=frozenset(fleet.ref_of(name) for name in self._idle),
-            )
-        except (LinearError, Refusal) as error:
-            self._lines.say("read", f"cannot read: {problem(error)}")
-            return False
-        self._reading, self._fleet, self._quiet, self._idle_read = found, read, quiet, self._idle
-        self._used = slots[0]
-        self._lines.clear("read")
-        previous = status.get(self._state)
-        waiting = queue.ranked([*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting])
-        shown = status.snapshot(
-            self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None, self._idle, *slots
-        )
-        shown["limited_until"] = self._limit_shown = self._limit(now)
-        if self._newest is not None and self._newest.error:
-            shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)
-        self._write(shown, previous)
-        return True
-
-    def _write(self, shown: dict, previous: dict | None) -> None:
-        if shown == previous:
-            return
-        try:
-            status.put(self._state, shown)
-        except Refusal as error:
-            self._lines.say("snapshot", f"cannot write the snapshot: {error.rule}")
-        else:
-            self._lines.clear("snapshot")
 
     def _reconcile(self, good: Linked, facts: Facts) -> frozenset[str]:
         assert good.stores is not None
