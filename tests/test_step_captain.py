@@ -695,3 +695,18 @@ def test_the_board_refresh_survives_a_missing_program_and_a_hung_read(monkeypatc
     assert running() is None
     now[0] = captain.REFRESH_LIMIT + 1
     assert running() == -9 and Hung.killed
+
+
+def test_context_names_a_corrupt_record_file_through_the_cli_and_exits_zero(
+    state: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    from deckhand import cli
+    from deckhand.store import open as store_open
+
+    state.mkdir(parents=True)
+    (state / "deckhand.db").write_bytes(b"not a database, just some bytes" * 100)
+    monkeypatch.setattr(store_open.Credentials, "load", staticmethod(lambda folder: "credentials"))
+    monkeypatch.setattr(store_open, "connect", lambda credentials, role: object())
+    monkeypatch.setitem(REGISTRY, "captain", Captain(clock=lambda: NOW))
+    assert cli.main(["captain", "context", *TEAM]) == 0
+    assert capsys.readouterr().out == f"deckhand: captain context: deckhand.db in the state folder {state} is corrupt\n"

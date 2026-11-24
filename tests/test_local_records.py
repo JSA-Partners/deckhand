@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import multiprocessing
 import sqlite3
+import sys
 import threading
+from multiprocessing.synchronize import Barrier
 from pathlib import Path
 
 import pytest
 
 from deckhand.records import Record
 from deckhand.step import Refusal
+from deckhand.store import local
 from deckhand.store.local import SCHEMA_VERSION, LocalRecords, default_path
 
 ID = "7c1f3a52-0b7e-4c1e-9a55-3f7a1d2b9e10"
@@ -69,6 +73,33 @@ def test_two_connections_write_at_once_without_locking_errors(tmp_path: Path) ->
     assert len(LocalRecords(path).records(ID)) == 200
 
 
+def _open_and_write(paths: list[Path], start: Barrier, name: str) -> None:
+    failed = 0
+    for path in paths:
+        start.wait(30)
+        try:
+            store = LocalRecords(path)
+            store.put_record(ID, tier(subject=name))
+            store.records(ID)
+        except Exception:
+            failed += 1
+    sys.exit(failed)
+
+
+def test_two_processes_open_a_fresh_file_at_once(tmp_path: Path) -> None:
+    paths = [tmp_path / str(n) / "deckhand.db" for n in range(40)]
+    spawn = multiprocessing.get_context("spawn")
+    start = spawn.Barrier(2)
+    workers = [spawn.Process(target=_open_and_write, args=(paths, start, name)) for name in ("a", "b")]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(60)
+    assert [worker.exitcode for worker in workers] == [0, 0]
+    for path in paths:
+        assert sorted(r.subject for r in LocalRecords(path).records(ID)) == ["a", "b"]
+
+
 def test_a_second_process_reads_what_the_first_wrote(tmp_path: Path) -> None:
     path = tmp_path / "deckhand.db"
     LocalRecords(path).put_record(ID, tier())
@@ -102,3 +133,59 @@ def test_records_refuses_an_identifier(tmp_path: Path) -> None:
     store = LocalRecords(tmp_path / "deckhand.db")
     with pytest.raises(Refusal):
         store.records("ACME-5")
+
+
+def test_a_corrupt_file_is_refused_in_plain_words(tmp_path: Path) -> None:
+    path = tmp_path / "deckhand.db"
+    path.write_bytes(b"not a database, just some bytes" * 100)
+    with pytest.raises(Refusal) as refused:
+        LocalRecords(path)
+    assert refused.value.rule == f"deckhand.db in the state folder {tmp_path} is corrupt"
+
+
+def test_a_path_that_cannot_be_opened_is_refused_in_plain_words(tmp_path: Path) -> None:
+    path = tmp_path / "deckhand.db"
+    path.mkdir()
+    with pytest.raises(Refusal) as refused:
+        LocalRecords(path)
+    assert refused.value.rule == f"deckhand.db in the state folder {tmp_path} cannot be opened"
+
+
+def test_a_read_only_file_is_refused_in_plain_words(tmp_path: Path) -> None:
+    path = tmp_path / "deckhand.db"
+    store = LocalRecords(path)
+    path.chmod(0o444)
+    try:
+        with pytest.raises(Refusal) as refused:
+            store.put_record(ID, tier())
+    finally:
+        path.chmod(0o644)
+    assert refused.value.rule == f"deckhand.db in the state folder {tmp_path} is read-only"
+
+
+def test_a_file_locked_by_another_process_is_refused_in_plain_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "deckhand.db"
+    store = LocalRecords(path)
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN EXCLUSIVE")
+    monkeypatch.setattr(local, "BUSY_SECONDS", 0)
+    try:
+        with pytest.raises(Refusal) as refused:
+            store.put_record(ID, tier())
+    finally:
+        holder.close()
+    assert refused.value.rule == f"deckhand.db in the state folder {tmp_path} is locked by another process"
+
+
+def test_opening_an_existing_file_does_not_wait_for_a_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "deckhand.db"
+    LocalRecords(path).put_record(ID, tier())
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    monkeypatch.setattr(local, "BUSY_SECONDS", 0, raising=False)
+    try:
+        assert [r.subject for r in LocalRecords(path).records(ID)] == ["s"]
+    finally:
+        holder.close()
