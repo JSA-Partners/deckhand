@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from collections.abc import Callable, Iterator
@@ -115,6 +116,7 @@ class LocalRecords:
 def connect(path: Path) -> sqlite3.Connection:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _create_owner_only(path)
     except OSError:
         raise _refusal(path, "cannot be opened") from None
     with guard(path):
@@ -125,6 +127,14 @@ def connect(path: Path) -> sqlite3.Connection:
             db.close()
             raise
         return db
+
+
+# SQLite creates its sidecar files with the main file's mode, so this keeps them owner-only too.
+def _create_owner_only(path: Path) -> None:
+    try:
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    except FileExistsError:
+        return
 
 
 @contextmanager

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -102,8 +103,10 @@ def test_the_snapshot_round_trips_through_sqlite(tmp_path: Path):
     found = snapshot([question("q1")])
     status.write(state, found)
     assert status.read(state) == found
-    assert LocalState(state / "deckhand.db").get(status.SNAPSHOT) == found
+    with LocalState(state / "deckhand.db") as rows:
+        assert rows.get(status.SNAPSHOT) == found
     assert not (state / "captain.json").exists()
+    assert {p.name: stat.S_IMODE(p.stat().st_mode) for p in state.iterdir()} == {"deckhand.db": 0o600}
 
 
 def test_a_snapshot_item_carries_its_lines():
@@ -117,7 +120,8 @@ def test_a_write_replaces_the_last_one(tmp_path: Path):
 
 
 def put(state: Path, body: object) -> None:
-    LocalState(state / "deckhand.db").put(status.SNAPSHOT, body)
+    with LocalState(state / "deckhand.db") as rows:
+        rows.put(status.SNAPSHOT, body)
 
 
 @pytest.mark.parametrize("content", [[], {"shape": 0}, {}])

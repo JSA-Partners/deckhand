@@ -57,6 +57,15 @@ class LocalState:
         self._db = connect(path)
         self._version: int | None = None
 
+    def __enter__(self) -> LocalState:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._db.close()
+
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
         with guard(self._path):

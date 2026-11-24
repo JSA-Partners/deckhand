@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+import stat
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -21,8 +23,36 @@ def ticking() -> Callable[[], str]:
     return lambda: f"2026-11-19T10:00:{next(count):02d}.000Z"
 
 
+OPENED: list[LocalState] = []
+
+
+@pytest.fixture(autouse=True)
+def close_every_state() -> Iterator[None]:
+    yield
+    while OPENED:
+        OPENED.pop().close()
+
+
+def opened(path: Path, now: Callable[[], str] | None = None) -> LocalState:
+    rows = LocalState(path, now=now)
+    OPENED.append(rows)
+    return rows
+
+
 def state(tmp_path: Path, now: Callable[[], str] | None = None) -> LocalState:
-    return LocalState(tmp_path / "deckhand.db", now=now)
+    return opened(tmp_path / "deckhand.db", now=now)
+
+
+def test_a_state_used_in_a_with_block_closes_its_connection(tmp_path: Path) -> None:
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        rows.put("x", {"n": 1})
+    with pytest.raises(Refusal):
+        rows.get("x")
+
+
+def test_a_new_file_is_owner_only(tmp_path: Path) -> None:
+    state(tmp_path)
+    assert stat.S_IMODE((tmp_path / "deckhand.db").stat().st_mode) == 0o600
 
 
 def test_a_posted_message_is_pending_for_its_hand_in_order(tmp_path: Path) -> None:
@@ -160,9 +190,9 @@ def test_two_states_write_at_once_without_locking_errors(tmp_path: Path) -> None
 
     def write(start: int) -> None:
         try:
-            rows = LocalState(path)
-            for n in range(start, 200, 2):
-                rows.post(f"k{n:03d}", "hand-ACME-1", "answer", str(n))
+            with LocalState(path) as rows:
+                for n in range(start, 200, 2):
+                    rows.post(f"k{n:03d}", "hand-ACME-1", "answer", str(n))
         except Exception as error:
             errors.append(error)
 
@@ -172,7 +202,7 @@ def test_two_states_write_at_once_without_locking_errors(tmp_path: Path) -> None
     for thread in threads:
         thread.join()
     assert errors == []
-    assert len(LocalState(path).pending()) == 200
+    assert len(opened(path).pending()) == 200
 
 
 def test_opening_an_up_to_date_file_is_not_a_change(tmp_path: Path) -> None:
@@ -184,15 +214,15 @@ def test_opening_an_up_to_date_file_is_not_a_change(tmp_path: Path) -> None:
 
 def test_a_version_1_file_gains_the_new_tables(tmp_path: Path) -> None:
     path = tmp_path / "deckhand.db"
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute(
             "CREATE TABLE records (issue TEXT NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL, "
             "body TEXT NOT NULL, written TEXT NOT NULL, PRIMARY KEY (issue, kind, subject))"
         )
         db.execute("INSERT INTO records VALUES ('i', 'tier', 's', '{}', 'w')")
         db.execute("PRAGMA user_version=1")
-    LocalState(path).want("hand", "ACME-1", ISSUE, STORY_HAND, "/work")
-    with sqlite3.connect(path) as db:
+    opened(path).want("hand", "ACME-1", ISSUE, STORY_HAND, "/work")
+    with closing(sqlite3.connect(path)) as db, db:
         assert db.execute("SELECT issue FROM records").fetchall() == [("i",)]
         assert db.execute("PRAGMA user_version").fetchone() == (2,)
         assert db.execute("SELECT restarts FROM hands").fetchall() == [(0,)]
@@ -200,10 +230,10 @@ def test_a_version_1_file_gains_the_new_tables(tmp_path: Path) -> None:
 
 def test_a_newer_file_is_not_stamped_back(tmp_path: Path) -> None:
     path = tmp_path / "deckhand.db"
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute("PRAGMA user_version=3")
-    LocalState(path)
-    with sqlite3.connect(path) as db:
+    opened(path)
+    with closing(sqlite3.connect(path)) as db, db:
         assert db.execute("PRAGMA user_version").fetchone() == (3,)
         assert db.execute("SELECT name FROM sqlite_master").fetchall() == []
 
@@ -212,7 +242,7 @@ def test_a_corrupt_file_refuses_in_the_records_wording(tmp_path: Path) -> None:
     path = tmp_path / "deckhand.db"
     path.write_bytes(b"not a database, just some bytes" * 100)
     with pytest.raises(Refusal) as refused:
-        LocalState(path)
+        opened(path)
     assert refused.value.rule == f"deckhand.db in the state folder {tmp_path} is corrupt"
 
 
@@ -220,9 +250,9 @@ def test_a_write_past_the_busy_timeout_refuses_in_the_records_wording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "deckhand.db"
-    LocalState(path)
+    opened(path)
     monkeypatch.setattr(local, "BUSY_SECONDS", 0)
-    rows = LocalState(path)
+    rows = opened(path)
     holder = sqlite3.connect(path, isolation_level=None)
     holder.execute("BEGIN IMMEDIATE")
     try:
@@ -236,8 +266,8 @@ def test_a_write_past_the_busy_timeout_refuses_in_the_records_wording(
 
 def test_a_read_that_meets_a_broken_table_refuses_in_the_records_wording(tmp_path: Path) -> None:
     path = tmp_path / "deckhand.db"
-    rows = LocalState(path)
-    with sqlite3.connect(path) as db:
+    rows = opened(path)
+    with closing(sqlite3.connect(path)) as db, db:
         db.execute("DROP TABLE messages")
     with pytest.raises(Refusal) as refused:
         rows.pending()
