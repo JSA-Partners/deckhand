@@ -252,15 +252,15 @@ class Build(StoryStep):
         print(f"done: pushed {branch} and opened the draft pull request {found['url']}")
 
 
-def sync(path: Path, ref: str, runner: git.Runner) -> None:
+def sync(path: Path, ref: str, runner: git.Runner, leave: str | None = None) -> None:
     if git.dirty(path, runner):
-        raise Refusal(f"{path} has uncommitted changes; run build apply {ref} commit --message FILE first")
+        raise Refusal(
+            f"{path} has uncommitted changes; {leave or f'run build apply {ref} commit --message FILE first'}"
+        )
     conflicts = git.merge_from(path, DEFAULT_BASE, runner)
     if conflicts:
-        raise Refusal(
-            f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; resolve the markers,"
-            f" then run build apply {ref} commit --message FILE"
-        )
+        fix = leave or f"resolve the markers, then run build apply {ref} commit --message FILE"
+        raise Refusal(f"merging {DEFAULT_BASE} into {ref} conflicts in {', '.join(conflicts)}; {fix}")
     print(f"done: merged {DEFAULT_BASE} into {ref} at {git.head(path, runner)}")
 
 

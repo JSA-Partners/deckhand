@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -173,12 +174,36 @@ def test_after_merge_sync_refuses_before_the_merge_and_on_a_dirty_worktree(tmp_p
     with pytest.raises(Refusal, match="ACME-1 is not Done"):
         After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
     store.set_issue_state("s1", "Done")
-    with pytest.raises(Refusal, match="uncommitted changes"):
+    with pytest.raises(Refusal, match="uncommitted changes") as refused:
         After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
+    assert refused.value.rule.endswith(LEAVE)
     (repo / ".worktrees" / BRANCH).rmdir()
     with pytest.raises(Refusal, match="ACME-1 has no worktree"):
         After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
     assert shell.ran("git", "fetch") == [] and shell.ran("git", "merge") == []
+
+
+LEAVE = "leave the item that needs main to the person with after apply ACME-1 person N --why TEXT"
+
+
+class Conflicted(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:2] == ["git", "merge"]:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 1, "", "CONFLICT")
+        if argv[:2] == ["git", "diff"] and "--diff-filter=U" in argv:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "a.txt\n", "")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_an_after_merge_sync_conflict_leaves_the_item_to_the_person(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    store.set_issue_state("s1", "Done")
+    with pytest.raises(Refusal, match=r"conflicts in a\.txt") as refused:
+        After(store, Conflicted(), repo).apply(["ACME-1", "sync", *TEAM])
+    assert refused.value.rule.endswith(LEAVE)
+    assert "build apply" not in refused.value.rule
 
 
 def test_the_after_merge_queue_loads_a_released_feature_only_for_an_item_left_in_the_records(

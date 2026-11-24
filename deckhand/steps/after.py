@@ -105,4 +105,9 @@ class After(StoryStep):
         if path is None or not path.is_dir():
             raise Refusal(f"{ref} has no worktree to bring main into")
         require_base(clone, self._runner)
-        sync(path, ref, self._runner)
+        sync(
+            path,
+            ref,
+            self._runner,
+            f"leave the item that needs main to the person with after apply {ref} person N --why TEXT",
+        )
