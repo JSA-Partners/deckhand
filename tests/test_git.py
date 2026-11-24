@@ -457,3 +457,19 @@ def test_a_child_run_alone_survives_a_ctrl_c_sent_to_its_parents_group():
 
 def test_alone_gives_a_child_no_terminal_input():
     assert git.alone(["cat"]).stdout == ""
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "fatal: could not read Username for 'https://github.com': Device not configured\n",
+        "ssh_askpass: exec(/usr/bin/ssh-askpass): No such file or directory\n"
+        "Host key verification failed: read_passphrase: can't open /dev/tty: Device not configured\n",
+    ],
+)
+def test_a_prompt_with_no_terminal_says_how_to_load_the_key(stderr: str) -> None:
+    fake = Fake((128, "", stderr))
+    with pytest.raises(git.GitError) as caught:
+        git.push(WT, "b", fake)
+    assert caught.value.stderr_tail == git.NO_PROMPT
+    assert "Device not configured" not in str(caught.value)

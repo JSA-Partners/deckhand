@@ -16,6 +16,11 @@ from deckhand.step import Refusal, hand_role
 TIMEOUT = 120
 TAIL_LINES = 5
 TOKEN = re.compile(r"(gh[pousr]_|github_pat_|lin_api_|lin_oauth_)\w+")
+NO_TERMINAL = "Device not configured"
+NO_PROMPT = (
+    "git needs a passphrase or password, and its prompt cannot run in the engine or a hand; "
+    "load the key into the SSH agent with ssh-add, or use a git credential helper"
+)
 
 UNHOOKED = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
 # Without it, status and worktree diffs run git inside a nested repository a hand configured.
@@ -136,6 +141,7 @@ def alone(argv: list[str], cwd: Path | None = None, stdin: str | None = None) ->
 
 class GitError(Exception):
     def __init__(self, command: str, code: int, stderr_tail: str) -> None:
+        stderr_tail = NO_PROMPT if NO_TERMINAL in stderr_tail else stderr_tail
         super().__init__(f"{command} failed with exit code {code}: {stderr_tail}")
         self.command = command
         self.code = code
