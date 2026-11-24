@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from deckhand.store.fake import FakeStore
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,3 +38,25 @@ def isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+
+
+class CountingStore:
+    def __init__(self, inner: FakeStore) -> None:
+        self._inner = inner
+        self.calls: dict[str, int] = {}
+        self.log: list[tuple[str, tuple, tuple]] = []
+
+    def __getattr__(self, name: str) -> Any:
+        method = getattr(self._inner, name)
+
+        def counted(*args: Any, **kwargs: Any) -> Any:
+            self.calls[name] = self.calls.get(name, 0) + 1
+            self.log.append((name, args, tuple(sorted(kwargs.items()))))
+            return method(*args, **kwargs)
+
+        return counted
+
+
+@pytest.fixture
+def counting_store() -> Callable[[FakeStore], CountingStore]:
+    return CountingStore

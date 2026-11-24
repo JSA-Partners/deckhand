@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
 
 import pytest
 
-from deckhand import features, planning
+from deckhand import features, planning, versions
 from deckhand.ops import create_id
 from deckhand.step import Refusal
+from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
+from tests.conftest import CountingStore
 
 P1 = create_id("ACME:Alpha", "feature")
 
@@ -69,30 +71,12 @@ def test_next_section_follows_order():
     assert planning.next_section(store, refreshed) is None
 
 
-class CountingStore:
-    def __init__(self, inner: FakeStore) -> None:
-        self._inner = inner
-        self.calls: dict[str, int] = {}
-
-    def __getattr__(self, name: str):
-        method = getattr(self._inner, name)
-
-        def counted(*args, **kwargs):
-            self.calls[name] = self.calls.get(name, 0) + 1
-            return method(*args, **kwargs)
-
-        return counted
-
-
-def test_all_seven_sections_cost_one_document_read():
-    from deckhand import versions
-    from deckhand.store.cached import CachedStore
-
+def test_all_seven_sections_cost_one_document_read(counting_store: Callable[[FakeStore], CountingStore]):
     fake = FakeStore()
     feature = open_feature(fake)
     for name in planning.SECTIONS:
         planning.save_section(fake, feature, name, f"{name} text.", drafted=False)
-    counting: Any = CountingStore(fake)
+    counting = counting_store(fake)
     versions.feature_version(CachedStore(counting), feature)
     assert counting.calls == {"project_documents": 1}
 

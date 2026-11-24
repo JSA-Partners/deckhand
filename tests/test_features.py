@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 
 import pytest
@@ -21,7 +22,7 @@ from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
-from tests.test_planning import CountingStore
+from tests.conftest import CountingStore
 
 APPROVAL = Record("feature-approval", "s", "1", "me", {})
 
@@ -132,37 +133,36 @@ def started_feature(store: FakeStore, name: str, states: list[str]) -> None:
         store.set_issue_state(f"{name}_{n}", state)
 
 
-def counted(fake: FakeStore) -> tuple[CachedStore, CountingStore]:
-    counting = CountingStore(fake)
-    return CachedStore(counting), counting
-
-
-def test_a_released_feature_reads_only_its_issues():
+def test_a_released_feature_reads_only_its_issues(counting_store: Callable[[FakeStore], CountingStore]):
     fake = FakeStore()
     started_feature(fake, "Alpha", ["Done", "Done"])
-    store, counting = counted(fake)
+    counting = counting_store(fake)
+    store = CachedStore(counting)
     found = load(store, store.team_projects("ACME")[0])
     assert phase(found) is Phase.RELEASED
     assert counting.calls["project_issues"] == 1
     assert "project_documents" not in counting.calls
 
 
-def test_current_with_three_released_and_one_open_feature_reads_each_project_once():
+def test_current_with_three_released_and_one_open_feature_reads_each_project_once(
+    counting_store: Callable[[FakeStore], CountingStore],
+):
     fake = FakeStore()
     for name in ("Alpha", "Beta", "Gamma"):
         started_feature(fake, name, ["Done"])
     started_feature(fake, "Delta", ["Backlog"])
-    store, counting = counted(fake)
+    counting = counting_store(fake)
+    store = CachedStore(counting)
     found = current(store, "ACME")
     assert found is not None and found.project["name"] == "Delta"
     assert counting.calls["project_issues"] == 4
     assert counting.calls["project_documents"] == 1
 
 
-def test_phase_of_an_open_feature_is_unchanged():
+def test_phase_of_an_open_feature_is_unchanged(counting_store: Callable[[FakeStore], CountingStore]):
     fake = FakeStore()
     started_feature(fake, "Alpha", ["Backlog"])
-    store, _ = counted(fake)
+    store = CachedStore(counting_store(fake))
     found = load(store, store.team_projects("ACME")[0])
     assert phase(found) is Phase.PLANNING
     assert found.version is not None
