@@ -144,7 +144,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
     found: list[Action] = [*removed, *_adopt(facts, sessions)]
     reading = facts.reading
     if reading is not None and reading.me is not None:
-        tick = _Tick(facts, sessions, reading.me, _used(facts), set(facts.busy), _reserved(facts))
+        tick = _Tick(facts, sessions, reading.me, _used(facts), set(facts.busy), set(reserved(facts)))
         feature = reading.feature
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature)
@@ -160,13 +160,31 @@ def _holding(facts: Facts) -> set[str]:
 
 
 # A hand stopped as unheard keeps its slot until the Resume that carries its mail.
-def _reserved(facts: Facts) -> set[str]:
+def reserved(facts: Facts) -> frozenset[str]:
     stopped = {m.hand for m in facts.pending if m.delivered is None and m.seq in facts.unheard}
-    return stopped - _holding(facts) - facts.busy
+    return frozenset(name for name in stopped - _holding(facts) - facts.busy if _resumable(facts, name))
+
+
+def _resumable(facts: Facts, name: str) -> bool:
+    sessions = [s for s in facts.read.sessions if s.name == name]
+    if any(fleet.alive(s) for s in sessions):
+        return False
+    row = facts.hands.get(name)
+    newest = max(sessions, key=_started, default=None)
+    session = row.session if row is not None else newest.session_id if newest is not None else None
+    if not session or not any(s.session_id == session for s in facts.read.sessions):
+        return False
+    feature = facts.reading.feature if facts.reading is not None else None
+    story = _story_of(feature, name)
+    if feature is None or story is None:
+        return True
+    records = _records(feature, story)
+    start = queue.last_start(records)
+    return start is None or not queue.finished(story, records, start)
 
 
 def _used(facts: Facts) -> int:
-    return fleet.slots_used(facts.read.sessions) + len(facts.busy - _holding(facts)) + len(_reserved(facts))
+    return fleet.slots_used(facts.read.sessions) + len(facts.busy - _holding(facts)) + len(reserved(facts))
 
 
 def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:

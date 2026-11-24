@@ -8,7 +8,7 @@ import pytest
 from deckhand import asks, config, features, fleet, queue, wakes
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import Action, Adopt, Facts, Launch, Post, Remove, Resume, Stop, reconcile
+from deckhand.reconcile import Action, Adopt, Facts, Launch, Post, Remove, Resume, Stop, reconcile, reserved
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
@@ -566,3 +566,39 @@ def test_an_unheard_stop_waits_for_a_slot_to_resume_into(clone: Path):
     sync = Message(1, "sync:s3:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-3 merged.", at(T), None, None)
     sessions = (row("ACME-1", "idle", "idle"), row("ACME-9", "working", "busy"))
     assert reconcile(facts(store, *sessions, hands=(held(),), pending=(sync,), now=T + 121), store) == []
+
+
+def unheard_hand() -> tuple[FakeStore, Message, HandRow]:
+    store = building()
+    store.assign("s1", ME)
+    started(store)
+    sync = Message(1, "sync:s3:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-3 merged.", at(T), None, None)
+    return store, sync, held(restarts=1)
+
+
+def after_stop(store: FakeStore, *sessions: dict, hand: HandRow, sync: Message, **rest: object) -> Facts:
+    return facts(store, *sessions, hands=(hand,), pending=(sync,), now=T + 130, unheard=frozenset({1}), **rest)
+
+
+def test_a_reservation_holds_only_while_a_resume_is_possible(clone: Path):
+    store, sync, hand = unheard_hand()
+    stopped = after_stop(store, row("ACME-1", "stopped"), hand=hand, sync=sync)
+    assert reserved(stopped) == frozenset({"hand-ACME-1"})
+    gone = after_stop(store, hand=hand, sync=sync)
+    assert reserved(gone) == frozenset()
+    assert reconcile(gone, store) == [launch(store, clone, "ACME-2")]
+
+
+def test_a_hand_alive_again_with_its_mail_undelivered_holds_no_reservation(clone: Path):
+    store, sync, hand = unheard_hand()
+    again = after_stop(store, row("ACME-1", "idle", "idle"), hand=hand, sync=sync)
+    assert reserved(again) == frozenset()
+    assert reconcile(again, store) == [launch(store, clone, "ACME-2")]
+
+
+def test_a_story_finished_while_its_hand_was_stopped_holds_no_reservation(clone: Path):
+    store, sync, hand = unheard_hand()
+    store.set_issue_state("s1", "Done")
+    done = after_stop(store, row("ACME-1", "stopped"), hand=hand, sync=sync)
+    assert reserved(done) == frozenset()
+    assert reconcile(done, store) == [launch(store, clone, "ACME-2")]
