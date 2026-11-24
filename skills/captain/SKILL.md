@@ -26,8 +26,8 @@ line:
 - A `decide context` line: run it with `deckhand` in front, pass the JSON it prints unchanged to
   the dialog, then run `deckhand decide apply NONCE` once answered. Never mark an option
   recommended; the person may answer a hand's question in their own words.
-- A `claude attach` line: show it in a dialog with Done and Later. A prompt in a hand is the
-  person's to answer, never yours.
+- A `claude attach` line, or none: show the item in a dialog with Done and Later. A prompt in a
+  hand is the person's to answer, never yours.
 - A link, for a spike's answer: give it; the feature skill reads it with the person.
 
 An item the person put off (Later, Back, a pause, a dismissed dialog) or just answered is not asked

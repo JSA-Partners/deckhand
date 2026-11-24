@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand import policy as policies
 from deckhand.policy import Policy
 from deckhand.step import Refusal
 
@@ -177,3 +178,21 @@ def test_policy_sandbox_domains(tmp_path):
         path.write_text(f'repository_label = "acme/widgets"\n{bad}')
         with pytest.raises(Refusal, match=rule):
             Policy.load(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        (None, ".claude/deckhand.toml is missing in clone widgets"),
+        ("repository_label = [", ".claude/deckhand.toml is not valid TOML in clone widgets"),
+        ('repository_label = "w"\nbogus = 1\n', "unknown key bogus in .claude/deckhand.toml of clone widgets"),
+    ],
+)
+def test_a_load_refusal_is_described_in_words_with_the_clone_name(tmp_path: Path, text: str | None, said: str):
+    clone = tmp_path / "widgets"
+    clone.mkdir()
+    if text is not None:
+        write_policy(clone, text)
+    with pytest.raises(Refusal) as refused:
+        Policy.load(clone)
+    assert policies.described(refused.value.rule, clone) == said

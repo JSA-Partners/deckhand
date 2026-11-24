@@ -504,3 +504,20 @@ def test_spike_hand_on_a_prompt_is_shown(state: Path):
     )
     found = [i for i in waiting(store, me=OTHER, sessions=(blocked,)) if i.kind == "prompt"]
     assert [(i.rank, i.ref, i.next) for i in found] == [(4, key, ["claude attach id-s"])]
+
+
+def test_a_broken_clone_is_one_item_for_the_clones_its_stories_use(tmp_path: Path):
+    store = setup()
+    store.create_issue(
+        "s3", "ACME", "Gadget", "Outcome.", features.open_feature(store, "ACME").project["id"], ["gadgets"]
+    )
+    feature = features.open_feature(store, "ACME")
+    widgets, gadgets, unused = tmp_path / "widgets", tmp_path / "gadgets", tmp_path / "unused"
+    clones = {"widgets": widgets, "gadgets": gadgets, "unused": unused}
+    broken = {widgets: "widgets is broken", gadgets: "gadgets is broken", unused: "unused is broken"}
+    found = queue.policy_items(feature, clones, broken)
+    assert [(i.kind, i.ref, i.lines, i.next) for i in found] == [
+        (queue.POLICY, "gadgets", ["gadgets is broken", queue.POLICY_LINE], []),
+        (queue.POLICY, "widgets", ["widgets is broken", queue.POLICY_LINE], []),
+    ]
+    assert queue.policy_items(None, clones, broken) == []

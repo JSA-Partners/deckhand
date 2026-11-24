@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from deckhand import (
     answers,
@@ -31,6 +32,8 @@ SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
 STALLED = "stalled"
 RESTART, LEAVE = "Restart", "Leave it stopped"
+POLICY = "policy"
+POLICY_LINE = "its stories do not start until it is fixed"
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,13 @@ class Item:
     lines: list[str]
     next: list[str]
     head: str = ""
+
+
+def policy_items(feature: Feature | None, clones: Mapping[str, Path], broken: Mapping[Path, str]) -> list[Item]:
+    stories = feature.live if feature is not None else []
+    held = {clones[label] for s in stories for label in s["labels"] if label in clones}
+    named = sorted(held & set(broken), key=lambda clone: clone.name)
+    return [Item(POLICY, 0, c.name, f"clone {c.name}", "", 0, [broken[c], POLICY_LINE], []) for c in named]
 
 
 def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], next: list[str], head: str = "") -> Item:

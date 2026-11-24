@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, config, features, fleet, git, reading, status, watch
+from deckhand import acts, config, features, fleet, git, policy, queue, reading, status, watch
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.policy import Policy
@@ -37,6 +37,7 @@ class Linked:
     policies: Mapping[Path, Policy] = field(default_factory=dict)
     problems: tuple[str, ...] = ()
     labels: Mapping[str, list[str]] = field(default_factory=dict)
+    broken: Mapping[Path, str] = field(default_factory=dict)
 
 
 def lock(state_dir: Path) -> IO[str] | None:
@@ -53,19 +54,21 @@ def lock(state_dir: Path) -> IO[str] | None:
     return handle
 
 
-def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy]]:
+def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy], dict[Path, str]]:
     try:
         local = config.local()
     except Refusal as error:
         problems.append(error.rule)
         local = config.LocalConfig()
     policies: dict[Path, Policy] = {}
+    broken: dict[Path, str] = {}
     for clone in local.clones.values():
         try:
             policies[clone] = Policy.load(clone)
         except Refusal as error:
-            problems.append(f"{error.rule}; its stories do not start")
-    return local, policies
+            broken[clone] = policy.described(error.rule, clone)
+            problems.append(f"{broken[clone]}; its stories do not start")
+    return local, policies, broken
 
 
 def link(
@@ -76,15 +79,15 @@ def link(
     today: Callable[[], date] = date.today,
 ) -> Linked:
     at, problems = clock(), []
-    local, policies = _configured(problems)
+    local, policies, broken = _configured(problems)
     held, read = stores(), fleet_now() or fleet.Fleet([], NO_FLEET)
     try:
         found = reading.read(held("app"), lambda: held("person"), team, read, local, today())
         teams = sorted({team, *(s["team"] for s in found.feature.stories)} if found.feature else {team})
         labels = {name: held("app").repository_labels(name) for name in teams}
     except (LinearError, Refusal) as error:
-        return Linked(None, None, at, problem(error), local, policies, tuple(problems))
-    return Linked(held, found, at, "", local, policies, tuple(problems), labels)
+        return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)
+    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken)
 
 
 class Polled[T](Protocol):
@@ -290,9 +293,8 @@ class Engine:
         self._reading, self._fleet, self._quiet = found, read, quiet
         self._lines.clear("read")
         previous = status.get(self._state)
-        shown = status.snapshot(
-            self._iso(good.at), self._team, found.facts, found.waiting, read.sessions, found.me is None
-        )
+        waiting = [*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting]
+        shown = status.snapshot(self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None)
         if self._newest is not None and self._newest.error:
             shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)
         self._write(shown, previous)

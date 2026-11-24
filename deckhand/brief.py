@@ -26,6 +26,7 @@ ACTIONS = {
     "after-merge": "has an after-merge chore for you",
     "planning": "needs planning",
     "spike": "has a spike answer to read",
+    "policy": "needs its repository policy fixed",
 }
 
 
