@@ -271,6 +271,14 @@ def require_base(clone: Path, runner: git.Runner) -> None:
         raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")
 
 
+def fetch_origin(clone: Path, runner: git.Runner) -> None:
+    try:
+        git.fetch(clone, runner)
+    except git.GitError as error:
+        raise Refusal(f"cannot fetch origin: {error.stderr_tail}") from None
+    require_base(clone, runner)
+
+
 def worktree_branch(story: dict, records: list[Record]) -> str:
     branch = branch_of(records, story) or story["branch_name"]
     if not branch:
@@ -279,6 +287,7 @@ def worktree_branch(story: dict, records: list[Record]) -> str:
 
 
 def make_worktree(store: Store, story: dict, clone: Path, branch: str, runner: git.Runner) -> Path:
+    fetch_origin(clone, runner)
     path = git.worktree_add(clone, branch, DEFAULT_BASE, runner)
     ops.ensure_record(store, story["id"], Record(WORKTREE, story["id"], branch, "agent:build", {"branch": branch}))
     return path

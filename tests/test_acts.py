@@ -62,6 +62,7 @@ def test_a_launch_records_intent_fetches_then_starts_then_records_the_id(clone: 
     assert acts(rows, db, shell, store).run(a_launch(store, clone)) is None
     worktree = clone / ".worktrees" / "acme-1-orders"
     calls = argvs(shell)
+    assert calls.count(FETCH) == 1
     assert calls.index(FETCH) < calls.index(
         ["git", "worktree", "add", "-b", "acme-1-orders", str(worktree), "origin/HEAD"]
     )
@@ -123,6 +124,7 @@ def test_a_spike_launch_claims_nothing_and_writes_no_hand_start(clone: Path, row
     assert acts(rows, db, shell, store).run(spike(clone)) is None
     worktree = clone / ".worktrees" / "spike-k1"
     assert ["git", "worktree", "add", "--detach", str(worktree), "origin/HEAD"] in argvs(shell)
+    assert argvs(shell).count(FETCH) == 1
     [(argv, cwd)] = shell.launches()
     assert cwd == worktree and argv[-1] == "/deckhand:spike k1"
     assert store.writes == before and kinds(db, "") == []
