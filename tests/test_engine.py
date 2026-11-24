@@ -10,7 +10,7 @@ import pytest
 from deckhand import acts, answers, asks, engine, fleet, queue, status
 from deckhand.engine import Engine, Linked
 from deckhand.linear.client import LinearError
-from deckhand.reconcile import Action, Launch, Post, Remove, Resume
+from deckhand.reconcile import RETRY_AFTER, Action, Launch, Post, Remove, Resume, Stop
 from deckhand.records import iso
 from deckhand.step import Refusal
 from deckhand.store.cached import CachedStore
@@ -167,8 +167,8 @@ def test_the_first_tick_writes_a_heartbeat_and_then_every_five_seconds(rig: Rig)
 
 def test_a_link_writes_the_snapshot_and_an_unchanged_one_is_not_rewritten(rig: Rig, monkeypatch: pytest.MonkeyPatch):
     writes = []
-    real = status.write
-    monkeypatch.setattr(status, "write", lambda folder, shown: writes.append(shown) or real(folder, shown))
+    real = status.put
+    monkeypatch.setattr(status, "put", lambda rows, shown: writes.append(shown) or real(rows, shown))
     rig.ready()
     assert rig.shown()["feature"] == "Alpha" and rig.shown()["written_at"] == iso(int(T * 1000))
     rig.step()
@@ -206,7 +206,7 @@ def test_a_failed_action_is_counted_and_its_line_is_the_note(rig: Rig):
     rig.step()
     assert rig.engine.note() == "ACME-1: cannot fetch origin"
     assert len(rig.worker.submitted) == 1
-    rig.wait(engine.RETRY_AFTER)
+    rig.wait(RETRY_AFTER)
     assert len(rig.worker.submitted) == 2
 
 
@@ -235,7 +235,7 @@ def test_a_gap_over_thirty_seconds_pokes_both_and_reconciles_nothing_that_tick(r
     assert rig.state.heartbeat() == (42, T + 31)
 
 
-def test_no_reconcile_until_a_fleet_read_lands_after_a_wake(rig: Rig):
+def test_no_reconcile_until_a_fleet_read_and_a_link_land_after_a_wake(rig: Rig):
     rig.link()
     rig.landed()
     rig.engine.tick()
@@ -243,6 +243,9 @@ def test_no_reconcile_until_a_fleet_read_lands_after_a_wake(rig: Rig):
     rig.step()
     assert rig.worker.submitted == []
     rig.landed()
+    rig.step()
+    assert rig.worker.submitted == []
+    rig.link()
     rig.step()
     assert [a.name for a in rig.worker.submitted] == [NAME]
 
@@ -362,36 +365,87 @@ def test_a_hand_stopped_as_unheard_shows_no_stalled_item_while_its_mail_waits(cl
     assert [(type(a), a.seqs) for a in rig.worker.submitted] == [(Resume, (message.seq,))]
 
 
-def test_a_copy_whose_removal_failed_is_removed_again(clone: Path):
+def two_sessions(copy_state: str = "working") -> tuple[dict, dict]:
+    copy = row("ACME-1", copy_state, "busy" if copy_state == "working" else None, at=1795000001000)
+    return row("ACME-1", "working", "busy"), copy | {"id": "copy", "sessionId": "sid-copy"}
+
+
+def test_a_completed_remove_is_not_repeated_on_a_stale_fleet_read_and_its_line_clears(clone: Path):
     configure(clone, 1)
-    copy = row("ACME-1", "working", "busy", at=1795000001000) | {"id": "copy", "sessionId": "sid-copy"}
-    rig = Rig(building(), row("ACME-1", "working", "busy"), copy)
+    original, copy = two_sessions()
+    rig = Rig(building(), original, copy)
     held_hand(rig)
     rig.ready()
     removal = Remove(NAME, "copy")
-    assert removal in rig.worker.submitted
-    rig.worker.finish(removal, "ACME-1: claude rm failed: busy")
-    rig.fleets.value = fleet.Fleet([], "the fleet read failed: claude vanished")
+    assert rig.worker.submitted == [removal]
+    rig.worker.finish(removal, "ACME-1: claude stop failed: error: no running session copy")
+    rig.step()
+    rig.step()
+    assert rig.worker.submitted == [removal]
+    assert rig.engine.note() == "ACME-1: claude stop failed: error: no running session copy"
+    rig.clock.t += 0.5
+    rig.sessions(original)
+    rig.step()
+    assert rig.worker.submitted == [removal] and rig.engine.note() == ""
+
+
+def test_a_completed_stop_is_not_repeated_on_a_stale_fleet_read(clone: Path):
+    configure(clone, 1)
+    rig = Rig(building(), row("ACME-1", "idle", "idle"))
+    held_hand(rig)
+    started(rig.store, "s1")
+    rig.store.set_issue_state("s1", "Done")
+    rig.ready()
+    [stop] = [a for a in rig.worker.submitted if a.name == NAME]
+    assert isinstance(stop, Stop) and stop.why == "finished"
+    rig.worker.finish(stop)
+    rig.step()
+    rig.step()
+    assert [a.name for a in rig.worker.submitted].count(NAME) == 1
+
+
+def test_after_a_failed_rm_a_fresh_engine_removes_the_stopped_copy_and_starts_no_second_hand(clone: Path):
+    configure(clone, 1)
+    original, copy = two_sessions("stopped")
+    rig = Rig(building(), original, copy)
+    held_hand(rig)
+    rig.ready()
+    assert rig.worker.submitted == [Remove(NAME, "copy", stop=False)]
+
+
+def test_an_outage_with_a_done_sibling_still_delivers_mail_as_a_resume(clone: Path):
+    configure(clone, 1)
+    rig = Rig(building(), row("ACME-1", "stopped"))
+    held_hand(rig)
+    rig.state.post("wake:s1:n1", NAME, asks.ANSWER, "Redis")
+    started(rig.store, "s1")
+    rig.store.set_issue_state("s2", "Done")
+    rig.link()
+    rig.down.down = True
+    calls = rig.down.calls
+    rig.clock.t += 0.5
     rig.landed()
+    rig.engine.tick()
     rig.step()
-    rig.sessions(row("ACME-1", "working", "busy"), copy | {"state": "stopped", "status": None})
-    rig.step()
-    assert rig.worker.submitted.count(removal) == 1
-    rig.wait(engine.RETRY_AFTER)
-    assert rig.worker.submitted.count(removal) == 2
-    rig.worker.finish(removal)
-    rig.sessions(row("ACME-1", "working", "busy"))
-    rig.wait(engine.RETRY_CAP)
-    assert rig.worker.submitted.count(removal) == 2
+    assert [type(a) for a in rig.worker.submitted if a.name == NAME] == [Resume]
+    assert rig.down.calls == calls
 
 
 def test_stop_all_stops_every_alive_hand_and_spike(rig: Rig):
     spike = row("ACME-2", "working", "busy") | {"id": "id-spike", "name": "spike-k1"}
     captain = row("ACME-3", "working", "busy") | {"id": "id-captain", "name": "captain"}
     shell = Shell(row("ACME-1", "idle", "idle"), row("ACME-4", "stopped"), spike, captain)
-    rig.engine.stop_all(shell)
+    order = []
+    rig.worker.stop = lambda: order.append("worker")
+    rig.engine.stop_all(lambda argv, cwd=None, stdin=None: order.append(argv[1]) or shell(argv, cwd, stdin))
     stops = [argv for argv, _ in shell.calls if argv[1] == "stop"]
     assert stops == [["claude", "stop", "id-ACME-1"], ["claude", "stop", "id-spike"]]
+    assert order[0] == "worker"
+
+
+def test_stop_all_says_when_the_fleet_read_failed(rig: Rig):
+    rig.engine.stop_all(Shell(row("ACME-1", "working", "busy"), fleet_fails=True))
+    assert rig.engine.note().startswith("cannot stop the hands: the fleet read failed")
 
 
 def test_a_second_lock_on_one_folder_is_refused_and_a_released_one_is_free(tmp_path: Path):
@@ -421,12 +475,14 @@ def test_a_record_reaches_reconcile_when_the_read_fails(rig: Rig, monkeypatch: p
     assert rig.engine.note() == "cannot read: network: Linear is unreachable"
 
 
-def test_a_later_post_keeps_a_failed_launch_backing_off(rig: Rig):
+def test_a_later_post_keeps_a_failed_launch_backing_off(clone: Path):
+    configure(clone, 2)
+    rig = Rig(building())
     rig.ready()
-    [launch] = rig.worker.submitted
+    [launch] = [a for a in rig.worker.submitted if a.name == NAME]
     rig.worker.finish(launch, "ACME-1: cannot fetch origin")
     rig.worker.finish(Post(NAME, "sync:s2:hand-ACME-1", "sync", "body", "s1", None))
-    rig.wait(engine.RETRY_AFTER - 10)
+    rig.wait(RETRY_AFTER - 10)
     assert [a.name for a in rig.worker.submitted].count(NAME) == 1
     assert rig.engine.note() == "ACME-1: cannot fetch origin"
 
@@ -440,3 +496,47 @@ def test_a_state_read_that_fails_is_the_note_and_the_tick_survives(rig: Rig, mon
     monkeypatch.setattr(rig.state, "hands", broken)
     rig.step()
     assert rig.engine.note() == "cannot read the state: deckhand.db is locked"
+    monkeypatch.undo()
+    rig.step()
+    assert rig.engine.note() == ""
+
+
+def test_a_heartbeat_that_fails_is_the_note_until_one_lands(rig: Rig, monkeypatch: pytest.MonkeyPatch):
+    def broken(pid: int, at: float) -> None:
+        raise Refusal("deckhand.db is locked")
+
+    monkeypatch.setattr(rig.state, "beat", broken)
+    rig.engine.tick()
+    assert rig.engine.note() == "cannot write the heartbeat: deckhand.db is locked"
+    monkeypatch.undo()
+    rig.step(5)
+    assert rig.engine.note() == ""
+
+
+def test_a_link_before_the_first_fleet_read_is_good(rig: Rig):
+    rig.fleets.value = None
+    found = rig.link()
+    assert found.error == "" and found.reading is not None
+
+
+def test_the_snapshot_goes_through_the_engine_state(rig: Rig, tmp_path: Path):
+    rig.state.close()
+    rig.state = LocalState(tmp_path / "elsewhere.db")
+    rig.engine = Engine("ACME", rig.state, rig.fleets, rig.linear, rig.worker, rig.clock, lambda: DAY, 42)
+    rig.ready()
+    found = status.get(rig.state)
+    assert found is not None and found["feature"] == "Alpha"
+    assert status.read(answers.state_dir()) is None
+
+
+def test_a_failed_launch_whose_hand_turns_up_running_clears_its_line(rig: Rig):
+    rig.ready()
+    [launch] = rig.worker.submitted
+    rig.worker.finish(launch, "ACME-1: cannot fetch origin")
+    rig.step()
+    held_hand(rig)
+    rig.clock.t += 0.5
+    rig.sessions(row("ACME-1", "working", "busy"))
+    rig.step()
+    rig.step()
+    assert rig.engine.note() == "" and len(rig.worker.submitted) == 1

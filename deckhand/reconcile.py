@@ -31,6 +31,7 @@ class Facts:
     clones: Mapping[str, Path] = field(default_factory=dict)
     policies: Mapping[Path, Policy] = field(default_factory=dict)
     unheard: frozenset[int] = frozenset()
+    labels: Mapping[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class Stop:
 class Remove:
     name: str
     short: str
+    stop: bool = True
 
 
 @dataclass(frozen=True)
@@ -148,7 +150,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         feature = reading.feature
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature)
-            found += _sync(tick, store, feature) + _deliver(tick, feature) + _start(tick, store, feature)
+            found += _sync(tick, feature) + _deliver(tick, feature) + _start(tick, store, feature)
         else:
             found += _deliver(tick, None)
         found += _spikes(tick)
@@ -198,8 +200,21 @@ def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:
         recorded = [s for s in group if row is not None and row.session and s.session_id == row.session]
         kept = recorded[0] if recorded else max(group, key=_started)
         removed += [Remove(name, s.id) for s in group if s is not kept]
+    removed += _stopped_copies(facts)
     gone = {r.short for r in removed}
     return removed, [s for s in facts.read.sessions if s.id not in gone]
+
+
+# A stopped session of a hand's name that is not the recorded one is a copy a failed removal left behind.
+def _stopped_copies(facts: Facts) -> list[Remove]:
+    listed = {s.session_id for s in facts.read.sessions}
+    found = []
+    for row in sorted(facts.hands.values(), key=lambda held: held.name):
+        if not row.session or row.session not in listed:
+            continue
+        stale = [s for s in facts.read.sessions if s.name == row.name and s.session_id != row.session]
+        found += [Remove(row.name, s.id, stop=False) for s in stale if not fleet.alive(s)]
+    return found
 
 
 def _adopt(facts: Facts, sessions: list[fleet.Session]) -> list[Action]:
@@ -250,12 +265,12 @@ def _answers(tick: _Tick, feature: Feature) -> list[Action]:
     return found
 
 
-def _sync(tick: _Tick, store: Store, feature: Feature) -> list[Action]:
+def _sync(tick: _Tick, feature: Feature) -> list[Action]:
     found: list[Action] = []
     for done in feature.live:
         if done["state"] != order.DONE or not done.get("completed_at"):
             continue
-        labels = set(store.repository_labels(done["team"])) & set(done["labels"])
+        labels = set(tick.facts.labels.get(done["team"], [])) & set(done["labels"])
         for other in feature.live:
             if other["state"] == order.DONE or not labels & set(other["labels"]):
                 continue

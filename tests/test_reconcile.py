@@ -67,6 +67,8 @@ def facts(
     **rest: object,
 ) -> Facts:
     reading = Reading("ACME", features.current(store, "ACME"), me, [], {}, [])
+    if "labels" not in rest:
+        rest["labels"] = {"ACME": store.repository_labels("ACME")}
     if "clones" not in rest:
         clones = config.local().clones
         rest |= {"clones": clones, "policies": {path: Policy.load(path) for path in clones.values()}}
@@ -611,3 +613,27 @@ def test_an_unlisted_short_adopts_the_one_alive_session_of_its_name(clone: Path)
     other = running | {"id": "id-other", "sessionId": "sid-other", "startedAt": 1795000060000}
     found = reconcile(facts(store, running, other, hands=(held(),)), store)
     assert found == [Remove("hand-ACME-1", "id-new"), Adopt("hand-ACME-1", "id-other", "sid-other")]
+
+
+def test_a_stopped_unrecorded_copy_is_removed_without_a_stop_and_holds_no_slot(clone: Path):
+    store = building()
+    original = row("ACME-1", "working", "busy", at=1795000000000)
+    copy = row("ACME-1", "stopped", at=1795000060000) | {"id": "copy", "sessionId": "sid-copy"}
+    assert reconcile(facts(store, original, copy, hands=(held(),)), store) == [
+        Remove("hand-ACME-1", "copy", stop=False)
+    ]
+
+
+def test_a_stopped_session_is_kept_when_the_recorded_one_is_not_listed(clone: Path):
+    store = building()
+    stopped = row("ACME-1", "stopped") | {"id": "old", "sessionId": "sid-old"}
+    found = reconcile(facts(store, stopped, hands=(held(session="sid-gone"),)), store)
+    assert not [a for a in found if isinstance(a, Remove)]
+
+
+def test_the_sync_reads_repository_labels_from_the_facts(clone: Path):
+    store = alone()
+    store.assign("s2", ME)
+    store.set_issue_state("s1", "Done")
+    found = reconcile(facts(store, hands=(held("ACME-2", issue="s2"),), labels={}), store)
+    assert not [a for a in found if isinstance(a, Post)]

@@ -39,32 +39,35 @@ class Worker:
         self._opened = opened
         self._queue: queue.SimpleQueue[Action | None] = queue.SimpleQueue()
         self._lock = threading.Lock()
+        self._halt = threading.Event()
         self._busy: dict[str, int] = {}
         self._done: list[tuple[Action, str | None]] = []
         self._thread = threading.Thread(target=self._loop, name="deckhand-worker", daemon=True)
 
     def _loop(self) -> None:
         with ExitStack() as stack:
-            try:
-                run = stack.enter_context(self._opened()).run
-            except Exception as error:
-                failure = problem(error)
+            acts: Runs | None = None
+            while (action := self._queue.get()) is not None and not self._halt.is_set():
+                if acts is None:
+                    try:
+                        acts = stack.enter_context(self._opened())
+                    except Exception as error:
+                        self._done_with(action, f"{fleet.ref_of(action.name)}: {problem(error)}")
+                        continue
+                self._done_with(action, acts.run(action))
 
-                def run(action: Action) -> str | None:
-                    return f"{fleet.ref_of(action.name)}: {failure}"
-
-            while (action := self._queue.get()) is not None:
-                line = run(action)
-                with self._lock:
-                    self._busy[action.name] -= 1
-                    if not self._busy[action.name]:
-                        del self._busy[action.name]
-                    self._done.append((action, line))
+    def _done_with(self, action: Action, line: str | None) -> None:
+        with self._lock:
+            self._busy[action.name] -= 1
+            if not self._busy[action.name]:
+                del self._busy[action.name]
+            self._done.append((action, line))
 
     def start(self) -> None:
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
+        self._halt.set()
         self._queue.put(None)
         if self._thread.is_alive():
             self._thread.join(timeout)

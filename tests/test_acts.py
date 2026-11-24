@@ -227,6 +227,12 @@ def test_a_remove_stops_then_removes_and_an_adopt_records_the_session(rows: Loca
     assert (rows.hands()[NAME].short, rows.hands()[NAME].session) == ("n3w", "sid-new")
 
 
+def test_a_remove_of_a_stopped_copy_only_removes_it(rows: LocalState, db: Path):
+    shell = Shell()
+    assert acts(rows, db, shell).run(Remove(NAME, "c0py", stop=False)) is None
+    assert argvs(shell) == [["claude", "rm", "c0py"]]
+
+
 def test_an_unexpected_error_becomes_a_line_without_its_text(rows: LocalState, db: Path):
     def broken(argv, cwd=None, stdin=None):
         raise RuntimeError("secret detail")

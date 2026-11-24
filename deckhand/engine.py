@@ -9,11 +9,12 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, answers, config, fleet, git, reading, status
+from deckhand import acts, config, fleet, git, reading, status
 from deckhand.linear.client import LinearError
+from deckhand.lines import Lines
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import RETRY_AFTER, RETRY_CAP, Action, Facts, Launch, Remove, Resume, reconcile, reserved
+from deckhand.reconcile import Action, Adopt, Facts, Launch, Post, Resume, reconcile, reserved
 from deckhand.records import Record, epoch, iso
 from deckhand.step import Refusal
 from deckhand.store.open import Stores
@@ -23,7 +24,7 @@ from deckhand.worker import problem
 FLEET_EVERY, LINEAR_EVERY, RECONCILE_EVERY, HEARTBEAT_EVERY = 5.0, 60.0, 1.0, 5.0
 LOCK = "engine.lock"
 READING = "reading Linear"
-ENGINE = "engine"
+NO_FLEET = "the fleet is not read yet"
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class Linked:
     local: config.LocalConfig = field(default_factory=config.LocalConfig)
     policies: Mapping[Path, Policy] = field(default_factory=dict)
     problems: tuple[str, ...] = ()
+    labels: Mapping[str, list[str]] = field(default_factory=dict)
 
 
 def lock(state_dir: Path) -> IO[str] | None:
@@ -75,12 +77,14 @@ def link(
 ) -> Linked:
     at, problems = clock(), []
     local, policies = _configured(problems)
-    held = stores()
+    held, read = stores(), fleet_now() or fleet.Fleet([], NO_FLEET)
     try:
-        found = reading.read(held("app"), lambda: held("person"), team, fleet_now(), local, today())
+        found = reading.read(held("app"), lambda: held("person"), team, read, local, today())
+        teams = sorted({team, *(s["team"] for s in found.feature.stories)} if found.feature else {team})
+        labels = {name: held("app").repository_labels(name) for name in teams}
     except (LinearError, Refusal) as error:
         return Linked(None, None, at, problem(error), local, policies, tuple(problems))
-    return Linked(held, found, at, "", local, policies, tuple(problems))
+    return Linked(held, found, at, "", local, policies, tuple(problems), labels)
 
 
 class Polled[T](Protocol):
@@ -103,10 +107,6 @@ class Works(Protocol):
     def stop(self) -> None: ...
 
 
-def _backing_off(tries: int, last: float, now: float) -> bool:
-    return now - last < min(RETRY_AFTER * 2 ** (tries - 1), RETRY_CAP)
-
-
 class Engine:
     def __init__(
         self,
@@ -121,8 +121,8 @@ class Engine:
     ) -> None:
         self._team, self._state, self._fleets, self._linear, self._worker = team, state, fleets, linear, worker
         self._clock, self._today, self._pid = clock, today, pid if pid is not None else os.getpid()
-        self._folder = answers.state_dir()
         self._woke = clock()
+        self._slept: float | None = None
         self._ticked: float | None = None
         self._beat = self._reconciled = float("-inf")
         self._newest: Linked | None = None
@@ -131,9 +131,7 @@ class Engine:
         self._fleet: fleet.Fleet | None = None
         self._quiet: frozenset[str] = frozenset()
         self._settling: dict[str, float] = {}
-        self._failed: dict[str, tuple[int, float]] = {}
-        self._unremoved: dict[str, tuple[Remove, int, float]] = {}
-        self._lines: dict[str, str] = {}
+        self._lines = Lines()
         self._starting: set[str] = set()
         self._poked_for = 0.0
         self._poked_at: float | None = None
@@ -142,7 +140,7 @@ class Engine:
         now = self._clock()
         woke, self._ticked = self._ticked is not None and now - self._ticked > SLEEP_GAP, now
         if woke:
-            self._woke = now
+            self._woke = self._slept = now
             self.refresh()
             self._heartbeat(now)
             return
@@ -151,7 +149,9 @@ class Engine:
         try:
             self._step(now)
         except Refusal as error:
-            self._say(ENGINE, f"cannot read the state: {error.rule}")
+            self._lines.say("state", f"cannot read the state: {error.rule}")
+        else:
+            self._lines.clear("state")
 
     def _step(self, now: float) -> None:
         changed = self._state.changed()
@@ -170,17 +170,19 @@ class Engine:
         if (moved or linked) and not self._read(good, read, hands, quiet, now) and fresh is not None:
             self._keep_records(fresh)
         began = self._fleets.began()
-        if due and began is not None and began > self._woke and self._reading is not None:
+        linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
+        if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
-            self._reconcile(good, self._facts(now, read, hands, busy), read, busy)
+            self._reconcile(good, self._facts(now, read, hands, busy), began)
 
     def _heartbeat(self, now: float) -> None:
         try:
             self._state.beat(self._pid, now)
         except Refusal as error:
-            self._say(ENGINE, f"cannot write the heartbeat: {error.rule}")
+            self._lines.say("heartbeat", f"cannot write the heartbeat: {error.rule}")
         else:
             self._beat = now
+            self._lines.clear("heartbeat")
 
     def _take_link(self, now: float) -> bool:
         newest = self._linear.latest()
@@ -190,7 +192,7 @@ class Engine:
         if not newest.error:
             self._good, self._reading = newest, newest.reading
             return True
-        previous = status.read(self._folder)
+        previous = status.get(self._state)
         if previous is not None:
             self._write(status.stale(previous, self._iso(now)), previous)
         return False
@@ -205,38 +207,15 @@ class Engine:
     def _collect(self, now: float) -> frozenset[str]:
         busy = self._worker.busy()
         for action, line in self._worker.results():
-            if isinstance(action, (Launch, Resume)):
-                self._started(action.name, line, now)
-            elif isinstance(action, Remove):
-                self._removed(action, line, now)
-            key = f"{type(action).__name__}:{action.name}"
-            if line is None:
-                self._lines.pop(key, None)
-            else:
-                self._say(key, line)
+            if isinstance(action, Launch | Resume):
+                self._starting.discard(action.name)
+            self._lines.heard(action, line, now)
+            if not isinstance(action, Post | Adopt):
+                self._settling[action.name] = now
+                self._fleets.poke()
         began = self._fleets.began()
         self._settling = {n: at for n, at in self._settling.items() if began is None or began <= at}
         return busy | frozenset(self._settling)
-
-    def _started(self, name: str, line: str | None, now: float) -> None:
-        self._starting.discard(name)
-        self._settling[name] = now
-        self._fleets.poke()
-        if line is None:
-            self._failed.pop(name, None)
-        else:
-            self._failed[name] = (self._failed.get(name, (0, now))[0] + 1, now)
-
-    def _removed(self, action: Remove, line: str | None, now: float) -> None:
-        if line is None:
-            self._unremoved.pop(action.short, None)
-            return
-        tries = self._unremoved[action.short][1] + 1 if action.short in self._unremoved else 1
-        self._unremoved[action.short] = (action, tries, now)
-
-    def _say(self, key: str, line: str) -> None:
-        self._lines.pop(key, None)
-        self._lines[key] = line
 
     def _facts(self, now: float, read: fleet.Fleet, hands: dict[str, HandRow], busy: frozenset[str]) -> Facts:
         good = self._good
@@ -250,10 +229,11 @@ class Engine:
             reading=self._reading,
             cap=local.slot_cap,
             busy=busy,
-            failed=dict(self._failed),
+            failed=self._lines.failed(),
             clones=local.clones,
             policies=good.policies if good is not None else {},
             unheard=acts.unheard(self._state),
+            labels=good.labels if good is not None else {},
         )
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
@@ -290,11 +270,11 @@ class Engine:
                 restarts=restarts,
             )
         except (LinearError, Refusal) as error:
-            self._say(ENGINE, f"cannot read: {problem(error)}")
+            self._lines.say("read", f"cannot read: {problem(error)}")
             return False
         self._reading, self._fleet, self._quiet = found, read, quiet
-        self._lines.pop(ENGINE, None)
-        previous = status.read(self._folder)
+        self._lines.clear("read")
+        previous = status.get(self._state)
         shown = status.snapshot(
             self._iso(good.at), self._team, found.facts, found.waiting, read.sessions, previous, found.me is None
         )
@@ -307,33 +287,27 @@ class Engine:
         if shown == previous:
             return
         try:
-            status.write(self._folder, shown)
+            status.put(self._state, shown)
         except Refusal as error:
-            self._say(ENGINE, f"cannot write the snapshot: {error.rule}")
+            self._lines.say("snapshot", f"cannot write the snapshot: {error.rule}")
+        else:
+            self._lines.clear("snapshot")
 
-    def _reconcile(self, good: Linked, facts: Facts, read: fleet.Fleet, busy: frozenset[str]) -> None:
+    def _reconcile(self, good: Linked, facts: Facts, began: float) -> None:
         assert good.stores is not None
+        store = good.stores("app")
         try:
-            found = reconcile(facts, good.stores("app"))
+            found = reconcile(facts, store)
+            wanted = {a.name for a in reconcile(replace(facts, failed={}), store)} if self._lines.named() else set()
         except (LinearError, Refusal) as error:
-            self._say(ENGINE, f"cannot reconcile: {problem(error)}")
-            found = []
-        for action in [*found, *self._retries(read, busy, facts.now)]:
+            self._lines.say("reconcile", f"cannot reconcile: {problem(error)}")
+            return
+        self._lines.clear("reconcile")
+        self._lines.settle(wanted | facts.busy, began)
+        for action in found:
             if isinstance(action, (Launch, Resume)):
                 self._starting.add(action.name)
             self._worker.submit(action)
-
-    # A copy stopped but not removed is no longer alive, so reconcile never names it again.
-    def _retries(self, read: fleet.Fleet, busy: frozenset[str], now: float) -> list[Remove]:
-        if read.note:
-            return []
-        listed = {s.id: s for s in read.sessions}
-        self._unremoved = {short: held for short, held in self._unremoved.items() if short in listed}
-        return [
-            action
-            for short, (action, tries, last) in self._unremoved.items()
-            if not fleet.alive(listed[short]) and action.name not in busy and not _backing_off(tries, last, now)
-        ]
 
     def refresh(self) -> None:
         self._poked_at = self._clock()
@@ -344,20 +318,25 @@ class Engine:
         newest = self._newest
         if self._poked_at is not None and (newest is None or newest.at < self._poked_at):
             return READING
-        if self._lines:
-            return list(self._lines.values())[-1]
+        if self._lines.newest():
+            return self._lines.newest()
         if newest is not None and newest.error:
             return f"cannot read Linear: {newest.error}"
         good = self._good
         return "; ".join(good.problems) if good is not None else ""
 
     def stop_all(self, runner: git.Runner = git.run) -> None:
-        for session in fleet.sessions(runner).sessions:
+        self._worker.stop()
+        read = fleet.sessions(runner)
+        if read.note:
+            self._lines.say("stop", f"cannot stop the hands: {read.note}")
+            return
+        for session in read.sessions:
             if fleet.alive(session) and session.name.startswith((fleet.HAND, fleet.SPIKE)):
                 try:
                     git.call(["claude", "stop", session.id], None, runner)
                 except git.GitError as error:
-                    self._say(f"Stop:{session.name}", f"{fleet.ref_of(session.name)}: {error.stderr_tail}")
+                    self._lines.say("stop", f"{fleet.ref_of(session.name)}: {error.stderr_tail}")
 
     def close(self) -> None:
         try:

@@ -4,6 +4,7 @@ import json
 import subprocess
 
 from deckhand import fleet
+from deckhand.fleet import Session
 from deckhand.git import GitError
 from deckhand.records import iso
 
@@ -138,7 +139,7 @@ def test_waiting_hand_frees_its_slot():
         session("widgets-2e", "working", "busy"),
     ]
     assert fleet.slots_used(held) == 3
-    assert fleet.slots_used(held + [session("hand-ACME-1", "done", None, at=1)]) == 2
+    assert fleet.slots_used(held + [session("hand-ACME-1", "done", None, at=1)]) == 3
 
 
 def test_only_working_or_permission_blocked_hands_hold_a_slot():
@@ -164,3 +165,10 @@ def test_alive_is_any_status_and_live_needs_a_working_state():
     assert not fleet.alive(session("hand-A", "failed", None))
     assert not fleet.live(session("hand-A", "idle", "idle", "input needed"))
     assert fleet.live(session("hand-A", "blocked", "waiting"))
+
+
+def test_an_alive_session_wins_over_a_newer_stopped_one():
+    working = Session("a1", "hand-ACME-1", "sid-a", "/w", "2026-11-18T10:00:00.000Z", "working", "busy", None)
+    stopped = Session("a2", "hand-ACME-1", "sid-b", "/w", "2026-11-18T11:00:00.000Z", "stopped", None, None)
+    assert fleet.hands([working, stopped])["ACME-1"].id == "a1"
+    assert fleet.slots_used([working, stopped]) == 1

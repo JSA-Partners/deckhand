@@ -65,7 +65,11 @@ def _state(state: Path) -> LocalState:
 
 def write(state: Path, status: dict) -> None:
     with _state(state) as rows:
-        rows.put(SNAPSHOT, status)
+        put(rows, status)
+
+
+def put(rows: LocalState, status: dict) -> None:
+    rows.put(SNAPSHOT, status)
 
 
 def _strings(value: object) -> bool:
@@ -136,7 +140,14 @@ def _valid(found: dict) -> bool:
 def read(state: Path) -> dict | None:
     try:
         with _state(state) as rows:
-            found = rows.get(SNAPSHOT)
+            return get(rows)
+    except Refusal:
+        return None
+
+
+def get(rows: LocalState) -> dict | None:
+    try:
+        found = rows.get(SNAPSHOT)
     except (Refusal, ValueError):
         return None
     return found if isinstance(found, dict) and _valid(found) else None

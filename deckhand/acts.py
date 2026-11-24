@@ -66,7 +66,8 @@ class Acts:
             if action.seqs:
                 _heard_not(self._state, action.seqs)
         elif isinstance(action, Remove):
-            self._claude("stop", action.short)
+            if action.stop:
+                self._claude("stop", action.short)
             self._claude("rm", action.short)
         elif isinstance(action, Adopt):
             self._state.adopt(action.name, action.short, action.session)

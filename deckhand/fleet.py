@@ -84,13 +84,17 @@ def ref_of(name: str) -> str:
     return name.removeprefix(SPIKE) if name.startswith(SPIKE) else name.removeprefix(HAND)
 
 
+def _rank(session: Session) -> tuple[bool, str]:
+    return session.status is not None, session.started_at
+
+
 def _newest(sessions: list[Session], prefix: str) -> dict[str, Session]:
     found: dict[str, Session] = {}
     for session in sessions:
         if not session.name.startswith(prefix):
             continue
         name = session.name.removeprefix(prefix)
-        if name not in found or session.started_at > found[name].started_at:
+        if name not in found or _rank(session) > _rank(found[name]):
             found[name] = session
     return found
 

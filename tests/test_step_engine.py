@@ -35,6 +35,12 @@ def test_context_with_no_heartbeat_says_not_running(capsys):
     assert context(capsys)[0] == "engine: not running"
 
 
+def test_context_with_a_malformed_heartbeat_says_not_running(capsys):
+    with LocalState(default_path()) as rows:
+        rows.put("heartbeat", {"pid": 1})
+    assert context(capsys)[0] == "engine: not running"
+
+
 def test_copy_pipes_the_start_command_to_pbcopy(capsys, monkeypatch: pytest.MonkeyPatch):
     piped = []
     shell = Shell()

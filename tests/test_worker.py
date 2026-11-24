@@ -80,3 +80,53 @@ def test_a_state_that_cannot_open_answers_every_action_with_a_line(tmp_path: Pat
     worker.submit(adopt)
     assert drained(worker, 1) == [(adopt, "ACME-1: deckhand.db cannot be opened")]
     worker.stop()
+
+
+def test_a_state_that_opens_on_a_later_try_runs_the_next_action():
+    tries = []
+
+    class Ran:
+        def run(self, action: Action) -> str | None:
+            return None
+
+    @contextmanager
+    def opened() -> Iterator[Runs]:
+        tries.append(1)
+        if len(tries) == 1:
+            raise Refusal("deckhand.db cannot be opened")
+        yield Ran()
+
+    worker = Worker(opened)
+    worker.start()
+    adopt = Adopt(NAME, "id-ACME-1", "sid-ACME-1")
+    worker.submit(adopt)
+    assert drained(worker, 1) == [(adopt, "ACME-1: deckhand.db cannot be opened")]
+    worker.submit(adopt)
+    assert drained(worker, 1) == [(adopt, None)]
+    worker.stop()
+
+
+def test_a_stopped_worker_drops_what_is_still_queued():
+    gate, inside = threading.Event(), threading.Event()
+    ran: list[Action] = []
+
+    class Slow:
+        def run(self, action: Action) -> str | None:
+            ran.append(action)
+            inside.set()
+            gate.wait(5)
+            return None
+
+    @contextmanager
+    def opened() -> Iterator[Runs]:
+        yield Slow()
+
+    worker = Worker(opened)
+    worker.start()
+    first, second = Adopt(NAME, "id-1", "sid-1"), Adopt("hand-ACME-2", "id-2", "sid-2")
+    worker.submit(first)
+    worker.submit(second)
+    assert inside.wait(5)
+    threading.Timer(0.1, gate.set).start()
+    worker.stop()
+    assert ran == [first]

@@ -168,8 +168,11 @@ class LocalState:
         self.put(HEARTBEAT, {"pid": pid, "at": at})
 
     def heartbeat(self) -> tuple[int, float] | None:
-        body = self.get(HEARTBEAT)
-        return None if body is None else (body["pid"], body["at"])
+        body = self.get(HEARTBEAT) or {}
+        pid, at = body.get("pid"), body.get("at")
+        if not isinstance(pid, int) or isinstance(pid, bool) or isinstance(at, bool) or not isinstance(at, int | float):
+            return None
+        return pid, float(at)
 
     def changed(self) -> bool:
         version = self._read("PRAGMA data_version")[0][0]

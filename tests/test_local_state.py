@@ -288,3 +288,10 @@ def test_want_for_another_kind_clears_the_last_turn_end(tmp_path: Path) -> None:
     rows.turn_ended("hand")
     rows.want("hand", "ACME-1", ISSUE, STORY_HAND, "/work")
     assert rows.hands()["hand"].turn_ended is None
+
+
+def test_a_heartbeat_of_another_shape_reads_as_none(tmp_path: Path) -> None:
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        for body in ({"pid": 1}, {"pid": "1", "at": 2.0}, {"pid": 1, "at": "soon"}):
+            rows.put("heartbeat", body)
+            assert rows.heartbeat() is None
