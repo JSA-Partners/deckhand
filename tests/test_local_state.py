@@ -295,3 +295,10 @@ def test_a_heartbeat_of_another_shape_reads_as_none(tmp_path: Path) -> None:
         for body in ({"pid": 1}, {"pid": "1", "at": 2.0}, {"pid": 1, "at": "soon"}):
             rows.put("heartbeat", body)
             assert rows.heartbeat() is None
+
+
+def test_a_heartbeat_that_is_not_a_table_reads_as_none(tmp_path: Path) -> None:
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        for body in ([1, 2], "x", 7):
+            rows.put("heartbeat", body)  # type: ignore[arg-type]
+            assert rows.heartbeat() is None

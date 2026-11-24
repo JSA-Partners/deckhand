@@ -540,3 +540,76 @@ def test_a_failed_launch_whose_hand_turns_up_running_clears_its_line(rig: Rig):
     rig.step()
     rig.step()
     assert rig.engine.note() == "" and len(rig.worker.submitted) == 1
+
+
+def fail_every_submitted(rig: Rig, seconds: float, line: str) -> list[str]:
+    notes, answered = [], 0
+    for _ in range(int(seconds // 5)):
+        for action in rig.worker.submitted[answered:]:
+            rig.worker.finish(action, line)
+        answered = len(rig.worker.submitted)
+        rig.landed()
+        rig.step(5)
+        notes.append(rig.engine.note())
+    return notes
+
+
+def test_a_dead_network_at_cap_one_keeps_both_launches_backing_off_and_the_line_shown(rig: Rig):
+    rig.ready()
+    notes = fail_every_submitted(rig, 1800, "cannot fetch origin")
+    launches = [a for a in rig.worker.submitted if isinstance(a, Launch)]
+    assert len(launches) <= 14
+    assert "" not in notes[1:]
+
+
+def test_one_failed_fleet_read_keeps_a_failed_launch_backing_off(rig: Rig):
+    rig.ready()
+    [launch] = rig.worker.submitted
+    rig.worker.finish(launch, "ACME-1: cannot fetch origin")
+    rig.step()
+    rig.fleets.value = fleet.Fleet([], "the fleet read failed: claude vanished")
+    rig.landed()
+    rig.step()
+    rig.sessions()
+    rig.wait(30)
+    assert rig.engine.note() == "ACME-1: cannot fetch origin"
+    assert [a.name for a in rig.worker.submitted].count(NAME) == 1
+
+
+def test_a_failed_launch_clears_when_its_story_is_finished(rig: Rig):
+    rig.ready()
+    [launch] = rig.worker.submitted
+    rig.worker.finish(launch, "ACME-1: cannot fetch origin")
+    rig.step()
+    rig.store.set_issue_state("s1", "Done")
+    rig.clock.t += 0.5
+    rig.link()
+    rig.sessions()
+    rig.step()
+    rig.step()
+    assert rig.engine.note() == ""
+
+
+def test_five_minutes_of_a_failing_rm_make_a_bounded_number_of_calls(clone: Path):
+    configure(clone, 1)
+    original, copy = two_sessions("stopped")
+    rig = Rig(building(), original, copy)
+    held_hand(rig)
+    rig.ready()
+    notes = fail_every_submitted(rig, 300, "ACME-1: claude rm failed: busy")
+    removals = [a for a in rig.worker.submitted if isinstance(a, Remove)]
+    assert 2 <= len(removals) <= 4
+    assert notes[-1] == "ACME-1: claude rm failed: busy"
+
+
+def test_a_stop_that_keeps_failing_for_a_finished_story_backs_off_and_shows(clone: Path):
+    configure(clone, 1)
+    rig = Rig(building(), row("ACME-1", "idle", "idle"))
+    held_hand(rig)
+    started(rig.store, "s1")
+    rig.store.set_issue_state("s1", "Done")
+    rig.ready()
+    notes = fail_every_submitted(rig, 120, "ACME-1: claude stop failed: busy")
+    stops = [a for a in rig.worker.submitted if isinstance(a, Stop) and a.name == NAME]
+    assert 2 <= len(stops) <= 3
+    assert notes[-1] == "ACME-1: claude stop failed: busy"

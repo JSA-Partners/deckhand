@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, config, fleet, git, reading, status
+from deckhand import acts, config, features, fleet, git, reading, status
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines
 from deckhand.policy import Policy
@@ -107,6 +107,12 @@ class Works(Protocol):
     def stop(self) -> None: ...
 
 
+def _finished(found: Reading | None) -> frozenset[str]:
+    feature = found.feature if found is not None else None
+    live = feature.live if feature is not None else []
+    return frozenset(fleet.hand_name(s["identifier"]) for s in live if s["state"] in features.FINISHED)
+
+
 class Engine:
     def __init__(
         self,
@@ -173,7 +179,7 @@ class Engine:
         linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
-            self._reconcile(good, self._facts(now, read, hands, busy), began)
+            self._reconcile(good, self._facts(now, read, hands, busy))
 
     def _heartbeat(self, now: float) -> None:
         try:
@@ -293,18 +299,19 @@ class Engine:
         else:
             self._lines.clear("snapshot")
 
-    def _reconcile(self, good: Linked, facts: Facts, began: float) -> None:
+    def _reconcile(self, good: Linked, facts: Facts) -> None:
         assert good.stores is not None
         store = good.stores("app")
         try:
             found = reconcile(facts, store)
-            wanted = {a.name for a in reconcile(replace(facts, failed={}), store)} if self._lines.named() else set()
         except (LinearError, Refusal) as error:
             self._lines.say("reconcile", f"cannot reconcile: {problem(error)}")
             return
         self._lines.clear("reconcile")
-        self._lines.settle(wanted | facts.busy, began)
+        self._lines.settle(facts.read, _finished(facts.reading))
         for action in found:
+            if self._lines.backing_off(action, facts.now):
+                continue
             if isinstance(action, (Launch, Resume)):
                 self._starting.add(action.name)
             self._worker.submit(action)

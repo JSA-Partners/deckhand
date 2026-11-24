@@ -168,7 +168,9 @@ class LocalState:
         self.put(HEARTBEAT, {"pid": pid, "at": at})
 
     def heartbeat(self) -> tuple[int, float] | None:
-        body = self.get(HEARTBEAT) or {}
+        body = self.get(HEARTBEAT)
+        if not isinstance(body, dict):
+            return None
         pid, at = body.get("pid"), body.get("at")
         if not isinstance(pid, int) or isinstance(pid, bool) or isinstance(at, bool) or not isinstance(at, int | float):
             return None
