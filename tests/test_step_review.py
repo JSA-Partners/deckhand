@@ -482,6 +482,21 @@ def test_branch_commit_after_context_refuses_the_round(tmp_path: Path, repo: Pat
     assert store.writes == before
 
 
+def test_the_feature_cap_names_the_proposal_route(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    store = feature_ready()
+    step = FeatureReview(store)
+    for n in (1, 2, 3, 4):
+        planning.save_section(store, load(store), "Contract", f"POST /orders returns 20{n}.", False)
+        if n < 4:
+            record_round(step, tmp_path, raw(severity="P1", summary=f"Hole {n}."))
+    capsys.readouterr()
+    step.context([*TEAM])
+    out = capsys.readouterr().out
+    assert "stop, cap: three rounds left a P1 open; propose declining each open P1" in out
+    assert "--propose-decline ID --reason TEXT" in out
+    assert "proceed or rework" not in out
+
+
 def test_feature_review_is_mandatory_until_a_round_runs(tmp_path: Path):
     store = feature_ready()
     assert features.approval_gaps(store, load(store)) == ["the feature review has not run"]

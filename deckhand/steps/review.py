@@ -31,6 +31,14 @@ STOPS = {
     "carry": "the story's own change is unchanged at a new head; record apply round --target HASH with no"
     " --findings, which carries the last round forward without reviewers",
 }
+FEATURE_CAP = (
+    "three rounds left a P1 open; propose declining each open P1 with apply resolve --propose-decline ID"
+    " --reason TEXT, and no round runs until none is open"
+)
+
+
+def _stop_text(reason: str, stage: str) -> str:
+    return FEATURE_CAP if (reason, stage) == ("cap", FEATURE) else STOPS[reason]
 
 
 def _parse(args: list[str]) -> dict:
@@ -279,7 +287,7 @@ class Review(StoryStep):
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
         plan, _, _ = self._due(subject, target, repo)
         if isinstance(plan, review.Stop):
-            raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
+            raise Refusal(f"no review round is due: {plan.reason}, {_stop_text(plan.reason, subject.stage)}")
         if plan.carry and parsed.get("findings"):
             raise Refusal(
                 f"the story's own change is unchanged at {target.head}, so this round carries the last round forward;"
@@ -346,7 +354,7 @@ def _line(item: dict) -> str:
 def _print(facts: dict) -> None:
     head = f"review {facts['subject']} {facts['stage']}"
     if facts["stop"]:
-        print(f"{head}: stop, {facts['stop']}: {STOPS[facts['stop']]}")
+        print(f"{head}: stop, {facts['stop']}: {_stop_text(facts['stop'], facts['stage'])}")
         print(f"target_hash: {facts['target_hash']}")
     else:
         scope = "scoped to the revision" if facts["scoped"] else "the whole target"
