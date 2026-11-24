@@ -265,6 +265,15 @@ def test_a_low_budget_drops_turn_end_pokes_and_says_so(rig: Rig):
     assert rig.engine.note() == "Linear budget low"
 
 
+def test_a_failed_action_still_wins_over_the_budget_line(rig: Rig):
+    rig.ready()
+    [launch] = rig.worker.submitted
+    kept_budget(rig, until=rig.clock() + 600)
+    rig.worker.finish(launch, "ACME-1: cannot fetch origin")
+    rig.step()
+    assert rig.engine.note() == "ACME-1: cannot fetch origin"
+
+
 def test_a_limited_budget_names_its_end_even_after_a_refresh(rig: Rig):
     rig.ready()
     kept_budget(rig, until=rig.clock() + 600)

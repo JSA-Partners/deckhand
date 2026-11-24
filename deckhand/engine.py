@@ -297,8 +297,9 @@ class Engine:
 
     def note(self) -> str:
         newest = self._newest
-        if budget.phrase(self._budget, self._clock()):
-            return budget.phrase(self._budget, self._clock())
+        paused = budget.phrase(self._budget, self._clock())
+        if paused:
+            return self._lines.newest() or paused
         if self._poked_at is not None and (newest is None or newest.at < self._poked_at):
             return READING
         if self._lines.newest():
