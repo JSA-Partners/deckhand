@@ -220,10 +220,16 @@ def test_the_after_merge_queue_loads_a_released_feature_only_for_an_item_left_in
     store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
     store.set_project_dates(beta, "2026-11-23", "2026-11-30")
     store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
+    gamma = create_id("ACME:Gamma", "feature")
+    store.create_project(gamma, "ACME", "Gamma", "", [FEATURE_LABEL])
+    store.set_project_dates(gamma, "2026-11-02", "2026-11-09")
+    store.create_issue("s4", "ACME", "Four", "Outcome.", gamma, [])
+    store.set_issue_state("s4", "Done")
+    alpha = store.issue("s1")["project"]
     counting = counting_store(store)
     assert signoff.after_merge_queue(CachedStore(counting), "ACME", me) == []
     assert [call[1] for call in counting.log if call[0] == "project_issues"] == [(beta,)]
     After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
     counting.log.clear()
     assert len(signoff.after_merge_queue(CachedStore(counting), "ACME", me)) == 1
-    assert len([call for call in counting.log if call[0] == "project_issues"]) == 2
+    assert sorted(call[1] for call in counting.log if call[0] == "project_issues") == sorted([(beta,), (alpha,)])
