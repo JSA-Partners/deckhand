@@ -22,6 +22,7 @@ READ_ONLY = ("ls", "cat", "head", "tail", "wc", "grep", "git status")
 CAPTAIN_ALLOW += [f"Bash({command} *)" for command in READ_ONLY]
 CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit", "mcp__*"]
 INPUT = "deckhand-input"
+CAPTAIN_SETTINGS = "captain-settings.json"
 CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg", ".aws", ".config/gcloud")
 CLAUDE_CONFIG = (
     ".claude/settings.json",
@@ -68,12 +69,12 @@ def sandbox_tmp() -> list[Path]:
     return _forms(Path(f"/tmp/claude-{os.getuid()}"))
 
 
-def input_roots() -> list[Path]:
-    return _forms(Path(tempfile.gettempdir()), *sandbox_tmp())
+def input_roots(temp: Path | None = None) -> list[Path]:
+    return _forms(temp or Path(tempfile.gettempdir()), *sandbox_tmp())
 
 
-def captain_inputs() -> list[Path]:
-    return _forms(*(root / INPUT for root in input_roots()))
+def captain_inputs(temp: Path | None = None) -> list[Path]:
+    return _forms(*(root / INPUT for root in input_roots(temp)))
 
 
 def input_folder() -> Path:
@@ -187,8 +188,8 @@ def hand_settings(
 
 
 # Planning saves its answers through --file, so the captain writes only in deckhand's own input folders.
-def captain_settings(protected: Protected) -> dict[str, Any]:
-    guarded, roots = _guarded(protected, [], []), captain_inputs()
+def captain_settings(protected: Protected, temp: Path | None = None) -> dict[str, Any]:
+    guarded, roots = _guarded(protected, [], []), captain_inputs(temp)
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",
@@ -203,6 +204,14 @@ def captain_settings(protected: Protected) -> dict[str, Any]:
         },
         "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"], auto_allow=False),
     }
+
+
+# Setup and the captain may see different $TMPDIRs, so the temp folder is taken from the installed file.
+def captain_current(installed: object, protected: Protected) -> bool:
+    permissions = installed.get("permissions") if isinstance(installed, dict) else None
+    listed = permissions.get("additionalDirectories") if isinstance(permissions, dict) else None
+    temps = [Path(entry).parent for entry in listed if isinstance(entry, str)] if isinstance(listed, list) else []
+    return any(installed == captain_settings(protected, temp) for temp in temps)
 
 
 def hand_argv(name: str, settings: dict[str, Any], prompt: str, plugin_dir: Path | None) -> list[str]:

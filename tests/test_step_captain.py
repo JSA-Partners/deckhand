@@ -4,15 +4,17 @@ import io
 import json
 import sqlite3
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
-from deckhand import answers, checks, config, fleet, reading, status, watch
+from deckhand import answers, checks, config, fleet, launch, reading, status, watch
 from deckhand.git import GitError
 from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
+from deckhand.steps import captain
 from deckhand.steps.captain import Captain
 from deckhand.store import local
 from deckhand.store import open as store_open
@@ -128,6 +130,7 @@ def test_captain_context_with_a_stale_heartbeat_withholds_every_item(clone: Path
         "top": None,
         "release": None,
         "cycle": [],
+        "settings": None,
     }
 
 
@@ -471,3 +474,44 @@ def test_context_with_an_unreadable_record_file_prints_one_line_and_exits_zero(
         (state / "deckhand.db").chmod(0o600)
     expected = f"deckhand: captain context: deckhand.db in the state folder {state} cannot be opened\n"
     assert capsys.readouterr().out == expected
+
+
+def installed(settings: dict | str) -> Path:
+    path = config.config_dir() / launch.CAPTAIN_SETTINGS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(settings if isinstance(settings, str) else json.dumps(settings, indent=2) + "\n")
+    return path
+
+
+def written() -> dict:
+    return launch.captain_settings(launch.protected(config.config_dir(), answers.state_dir()))
+
+
+def test_captain_settings_this_version_writes_add_no_line(state: Path, capsys: pytest.CaptureFixture[str]):
+    installed(written())
+    assert output([], capsys) == "engine: not running\n"
+
+
+@pytest.mark.parametrize("setup_temp", ["sandbox", "other"])
+def test_captain_settings_written_under_another_temp_folder_add_no_line(
+    state: Path, tmp_path: Path, setup_temp: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    other = tmp_path / "setup-temp"
+    other.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(launch.sandbox_tmp()[0] if setup_temp == "sandbox" else other))
+    installed(written())
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    assert output([], capsys) == "engine: not running\n"
+
+
+@pytest.mark.parametrize("settings", [{"permissions": {"allow": ["Read"]}}, "{not json"])
+def test_out_of_date_captain_settings_say_to_run_setup(
+    state: Path, settings: dict | str, capsys: pytest.CaptureFixture[str]
+):
+    installed(settings)
+    assert output([], capsys) == f"engine: not running\n{captain.OUTDATED}\n"
+    assert "/deckhand:setup" in captain.OUTDATED
+
+
+def test_no_installed_captain_settings_add_no_line(state: Path, capsys: pytest.CaptureFixture[str]):
+    assert output([], capsys) == "engine: not running\n"

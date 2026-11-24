@@ -15,7 +15,6 @@ from deckhand.statusline import Places, Report
 from deckhand.step import Refusal, register
 
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-CAPTAIN_SETTINGS = "captain-settings.json"
 USAGE = (
     "setup takes --team-key KEY, --repository LABEL=owner/name (repeatable), --clone LABEL=PATH (repeatable), "
     "--slot-cap N, and --json on context only; or --statusline or --statusline-remove alone"
@@ -99,7 +98,7 @@ def _local_files(parsed: dict[str, Any]) -> dict[Path, str]:
         {**current.clones, **parsed["clones"]},
     )
     captain = launch.captain_settings(launch.protected(directory, answers.state_dir()))
-    return {directory / config.FILE: text, directory / CAPTAIN_SETTINGS: json.dumps(captain, indent=2) + "\n"}
+    return {directory / config.FILE: text, directory / launch.CAPTAIN_SETTINGS: json.dumps(captain, indent=2) + "\n"}
 
 
 def _differs(path: Path, text: str) -> bool:
@@ -118,7 +117,7 @@ def _configured_key() -> str:
 
 
 def _launch_line() -> str:
-    settings = shlex.quote(str(config.config_dir() / CAPTAIN_SETTINGS))
+    settings = shlex.quote(str(config.config_dir() / launch.CAPTAIN_SETTINGS))
     return f'claude --settings {settings} --name captain "/deckhand:captain"'
 
 

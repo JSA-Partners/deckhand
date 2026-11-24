@@ -7,7 +7,7 @@ import sys
 import time
 from collections.abc import Callable
 
-from deckhand import answers, board, brief, fleet, frame, git, status, watch
+from deckhand import answers, board, brief, config, fleet, frame, git, launch, status, watch
 from deckhand.step import Refusal, register
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState, alive
@@ -17,6 +17,7 @@ ACTIONS = ("hold", "release")
 FLAGS = ("--json", "--line", "--color", "--board", "--no-color")
 RUNNING, STOPPED = "engine: running", "engine: not running"
 UNREAD = "the engine has not read Linear yet"
+OUTDATED = f"the captain's settings are out of date; {brief.SETUP}, then restart the captain"
 
 
 def _parse(args: list[str]) -> dict:
@@ -63,7 +64,7 @@ class Captain:
             return
         now = self._clock()
         shown, beat = _read()
-        facts = _facts(shown, alive(beat, now), now)
+        facts = _facts(shown, alive(beat, now), now) | {"settings": _outdated()}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
@@ -114,6 +115,21 @@ def _facts(shown: dict | None, running: bool, now: float) -> dict:
     return facts
 
 
+def _outdated() -> str | None:
+    path = config.config_dir() / launch.CAPTAIN_SETTINGS
+    try:
+        installed = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        installed = None
+    try:
+        protected = launch.protected(config.config_dir(), answers.state_dir())
+        return None if launch.captain_current(installed, protected) else OUTDATED
+    except Refusal:
+        return None
+
+
 def _print(facts: dict) -> None:
     if facts["brief"] is not None:
         print(facts["brief"])
@@ -130,3 +146,5 @@ def _print(facts: dict) -> None:
         print(status.cycle_line(facts["cycle"]))
     if facts["release"]:
         print(f"ready to release: {facts['release']}")
+    if facts["settings"]:
+        print(facts["settings"])
