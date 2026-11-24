@@ -18,6 +18,7 @@ from deckhand import (
     ops,
     order,
     queue,
+    reading,
     spikes,
     startable,
 )
@@ -94,7 +95,7 @@ class Hand:
         parsed = _parse(args)
         if parsed["words"]:
             raise Refusal(f"context takes no REF; {USAGE}")
-        store, cap = self._app(), config.local().slot_cap
+        store, local = self._app(), config.local()
         read = fleet.sessions(self._runner)
         feature = features.current(store, team_key(parsed))
         hands = fleet.hands(read.sessions)
@@ -107,11 +108,13 @@ class Hand:
             notes.append(str(error))
         else:
             if feature is not None:
-                work = [w for w in startable.startable(store, feature, me) if startable.due(w, feature, hands)]
+                found = startable.startable(store, feature, me, local.clones)
+                policy = reading.policy_for(notes, local.clones)
+                work = [w for w in found if startable.due(w, feature, hands, policy)]
         facts = {
             "notes": notes,
             "feature": feature.project["name"] if feature is not None else None,
-            "slots": {"used": fleet.slots_used(read.sessions), "cap": cap},
+            "slots": {"used": fleet.slots_used(read.sessions), "cap": local.slot_cap},
             "live": [{"name": s.name, "state": s.state, "status": s.status} for s in live],
             "startable": [{"ref": w.story["identifier"], "title": w.story["title"], "work": w.kind} for w in work],
         }
@@ -143,12 +146,14 @@ class Hand:
             return
         person = self._person_store()
         me = claims.me(person)
-        reason = startable.why_not(store, feature, story, me, order.edges(store, feature))
+        clones = config.local().clones
+        reason = startable.why_not(store, feature, story, me, order.edges(store, feature), clones)
         if reason is not None:
             raise Refusal(reason)
         _free_slot(read)
         records = feature.records.get(story["id"], [])
-        plan = self._prepare(story, records, startable.clone_of(story), startable.kind(feature, story), session)
+        clone = startable.clone_of(story, clones)
+        plan = self._prepare(story, records, clone, startable.kind(feature, story), session)
         self._launch(plan, person, me)
         print(f"started {fleet.hand_name(story['identifier'])}")
 
@@ -161,7 +166,8 @@ class Hand:
             return
         person = self._person_store()
         me = claims.me(person)
-        cap, used = config.local().slot_cap, fleet.slots_used(read.sessions)
+        local, used = config.local(), fleet.slots_used(read.sessions)
+        cap = local.slot_cap
         hands = fleet.hands(read.sessions)
         wakes = []
         for story in feature.live:
@@ -170,12 +176,13 @@ class Hand:
             slot = not (live and fleet.holds_slot(session))
             if story["assignee"] != me or due is None or (slot and used >= cap):
                 continue
-            if live or startable.clone_of(story) is not None:
+            if live or startable.clone_of(story, local.clones) is not None:
                 wakes.append((story, *self._waking(feature, story, session, due)))
                 used += slot
         plans = []
-        for work in startable.startable(store, feature, me):
-            if used >= cap or not startable.due(work, feature, hands):
+        policy = reading.policy_for([], local.clones)
+        for work in startable.startable(store, feature, me, local.clones):
+            if used >= cap or not startable.due(work, feature, hands, policy):
                 continue
             story = work.story
             records = feature.records.get(story["id"], [])
@@ -208,7 +215,7 @@ class Hand:
         if not (live and fleet.holds_slot(session)) and fleet.slots_used(read.sessions) >= config.local().slot_cap:
             print("waits for a slot")
             return
-        if not live and startable.clone_of(story) is None:
+        if not live and startable.clone_of(story, config.local().clones) is None:
             raise Refusal(f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}")
         self._serve(story, *self._waking(feature, story, session, due), person, me)
 
@@ -220,7 +227,8 @@ class Hand:
             return wake, None
         records = feature.records.get(story["id"], [])
         kind = startable.kind(feature, story)
-        return wake, self._prepare(story, records, startable.clone_of(story), kind, session)
+        clone = startable.clone_of(story, config.local().clones)
+        return wake, self._prepare(story, records, clone, kind, session)
 
     def _serve(self, story: dict, wake: Record, plan: Launch | None, person: Store, me: str) -> None:
         name = fleet.hand_name(story["identifier"])

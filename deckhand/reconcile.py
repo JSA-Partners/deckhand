@@ -7,6 +7,7 @@ from pathlib import Path
 from deckhand import asks, fleet, order, queue, startable, wakes
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
+from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.records import HAND, Record, epoch
 from deckhand.store import Store
@@ -27,6 +28,8 @@ class Facts:
     cap: int
     busy: frozenset[str] = frozenset()
     failed: Mapping[str, tuple[int, float]] = field(default_factory=dict)
+    clones: Mapping[str, Path] = field(default_factory=dict)
+    policies: Mapping[Path, Policy] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,9 @@ class _Tick:
     def mail(self, name: str) -> list[Message]:
         return [m for m in self.facts.pending if m.hand == name]
 
+    def policy_for(self, story: dict) -> Policy:
+        return self.facts.policies[startable.clone_of(story, self.facts.clones)]
+
     def take(self, action: Launch | Resume | Stop, slot: bool) -> Action:
         self.acted.add(action.name)
         self.used += slot
@@ -131,8 +137,10 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         feature = reading.feature
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature)
-            found += _sync(tick, store, feature) + _start(tick, store, feature)
-        found += _spikes(tick) + _deliver(tick)
+            found += _sync(tick, store, feature) + _deliver(tick) + _start(tick, store, feature)
+        else:
+            found += _deliver(tick)
+        found += _spikes(tick)
     return [action for action in found if action.name not in facts.busy]
 
 
@@ -222,15 +230,17 @@ def _held_elsewhere(story: dict, records: list[Record], me: str) -> bool:
 def _start(tick: _Tick, store: Store, feature: Feature) -> list[Action]:
     hands = fleet.hands(tick.sessions)
     found: list[Action] = []
-    for work in startable.startable(store, feature, tick.me):
+    for work in startable.startable(store, feature, tick.me, tick.facts.clones):
         if not tick.free():
             break
+        if work.clone not in tick.facts.policies:
+            continue
         story, records = work.story, _records(feature, work.story)
         name = fleet.hand_name(story["identifier"])
         row = tick.facts.hands.get(name)
         if name in tick.acted or tick.alive(name) is not None or _held_elsewhere(story, records, tick.me):
             continue
-        if not startable.due(work, feature, hands, restarts=row.restarts if row is not None else None):
+        if not startable.due(work, feature, hands, tick.policy_for, row.restarts if row is not None else None):
             continue
         launch = startable.launch_of(work.kind)
         restart = queue.last_start(records, launch) is not None
@@ -253,10 +263,11 @@ def _nudge(name: str, story: dict, records: list[Record], launch: str, restart: 
 def _spikes(tick: _Tick) -> list[Action]:
     found = []
     for row in tick.facts.hands.values():
-        if row.kind != SPIKE or row.short or any(s.name == row.name for s in tick.sessions):
+        if row.kind != SPIKE or row.short or tick.alive(row.name) is not None:
             continue
         if tick.free() and row.name not in tick.acted and not tick.backing_off(row.name):
-            spike = Launch(row.name, row.ref, SPIKE, Path(row.cwd).parents[1], None, tick.me)
+            restart = any(s.name == row.name for s in tick.sessions)
+            spike = Launch(row.name, row.ref, SPIKE, Path(row.cwd).parents[1], None, tick.me, restart)
             found.append(tick.take(spike, slot=True))
     return found
 
@@ -264,18 +275,18 @@ def _spikes(tick: _Tick) -> list[Action]:
 def _deliver(tick: _Tick) -> list[Action]:
     waiting: dict[str, list[Message]] = {}
     for message in tick.facts.pending:
-        if message.delivered is None:
-            waiting.setdefault(message.hand, []).append(message)
+        waiting.setdefault(message.hand, []).append(message)
     found = []
     for name, messages in sorted(waiting.items()):
         if name in tick.acted:
             continue
+        unseen = [m for m in messages if m.delivered is None]
         session = tick.alive(name)
         if session is None:
             resume = _resume(tick, name, messages)
             if resume is not None:
                 found.append(tick.take(resume, slot=True))
-        elif session.state != WORKING and not session.waiting_for and _deaf(tick, messages):
+        elif unseen and session.state != WORKING and not session.waiting_for and _deaf(tick, unseen):
             found.append(tick.take(Stop(name, session.id, "unheard"), slot=False))
     return found
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,8 +20,7 @@ class Work:
     clone: Path
 
 
-def clone_of(story: dict) -> Path | None:
-    clones = config.local().clones
+def clone_of(story: dict, clones: Mapping[str, Path]) -> Path | None:
     return next((clones[label] for label in story["labels"] if label in clones), None)
 
 
@@ -48,7 +48,9 @@ def why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
     return None
 
 
-def why_not(store: Store, feature: Feature, story: dict, me: str, edges: list[tuple[str, str]]) -> str | None:
+def why_not(
+    store: Store, feature: Feature, story: dict, me: str, edges: list[tuple[str, str]], clones: Mapping[str, Path]
+) -> str | None:
     ref = story["identifier"]
     if story["assignee"] not in (None, me):
         return f"{ref} belongs to {story['assignee_name']}"
@@ -68,17 +70,17 @@ def why_not(store: Store, feature: Feature, story: dict, me: str, edges: list[tu
         if waiting:
             verb = "is" if len(waiting) == 1 else "are"
             return f"{ref} waits on {', '.join(waiting)}, which {verb} not Done"
-    if clone_of(story) is None:
+    if clone_of(story, clones) is None:
         return f"no clone for {', '.join(story['labels'])} in {config.config_dir() / config.FILE}"
     return None
 
 
-def startable(store: Store, feature: Feature, me: str) -> list[Work]:
+def startable(store: Store, feature: Feature, me: str, clones: Mapping[str, Path]) -> list[Work]:
     edges = order.edges(store, feature)
     ordered, _ = order.build_order(feature.live, edges)
-    found = [s for s in ordered if why_not(store, feature, s, me, edges) is None]
-    build = [Work(s, kind(feature, s), clone_of(s)) for s in found if s["state"] != order.DONE]
-    after = [Work(s, AFTER, clone_of(s)) for s in found if s["state"] == order.DONE]
+    found = [s for s in ordered if why_not(store, feature, s, me, edges, clones) is None]
+    build = [Work(s, kind(feature, s), clone_of(s, clones)) for s in found if s["state"] != order.DONE]
+    after = [Work(s, AFTER, clone_of(s, clones)) for s in found if s["state"] == order.DONE]
     return [w for w in build + after if w.clone is not None]
 
 
@@ -86,7 +88,13 @@ def launch_of(kind: str) -> str:
     return queue.DRAFT_HAND if kind == DRAFT else queue.STORY_HAND
 
 
-def due(work: Work, feature: Feature, hands: dict[str, fleet.Session], restarts: int | None = None) -> bool:
+def due(
+    work: Work,
+    feature: Feature,
+    hands: dict[str, fleet.Session],
+    policy_for: Callable[[dict], Policy],
+    restarts: int | None = None,
+) -> bool:
     story = work.story
     session = hands.get(story["identifier"])
     if session is not None and fleet.alive(session):
@@ -95,8 +103,7 @@ def due(work: Work, feature: Feature, hands: dict[str, fleet.Session], restarts:
     launch = launch_of(work.kind)
     if queue.last_start(records, launch) is None:
         return True
-    policy = Policy.load(work.clone)
-    second = queue.second_due(story, records, lambda _: policy) is not None
+    second = queue.second_due(story, records, policy_for) is not None
     if not queue.stalled(story, records, session, launch, second):
         return False
     return queue.auto_restart(records, launch, restarts) or queue.stall_answer(records, launch) == queue.RESTART

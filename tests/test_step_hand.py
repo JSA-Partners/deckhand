@@ -254,10 +254,11 @@ def test_an_idle_hand_on_its_own_prompt_is_never_due(clone: Path):
     shell.rows = [row("ACME-1", "idle", "idle") | {"waitingFor": "input needed"}]
     feature = features.open_feature(store, "ACME")
     hands = fleet.hands(fleet.sessions(shell).sessions)
-    [work] = [w for w in startable.startable(store, feature, ME) if w.story["identifier"] == "ACME-1"]
-    assert not startable.due(work, feature, hands, 0)
+    clones = config.local().clones
+    [work] = [w for w in startable.startable(store, feature, ME, clones) if w.story["identifier"] == "ACME-1"]
+    assert not startable.due(work, feature, hands, lambda _: Policy.load(clone), 0)
     shell.rows = [row("ACME-1", "failed")]
-    assert startable.due(work, feature, fleet.hands(fleet.sessions(shell).sessions), 0)
+    assert startable.due(work, feature, fleet.hands(fleet.sessions(shell).sessions), lambda _: Policy.load(clone), 0)
 
 
 def test_each_start_records_a_fresh_time(clone: Path):

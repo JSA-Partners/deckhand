@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from deckhand import asks, features, fleet, queue, wakes
+import pytest
+
+from deckhand import asks, config, features, fleet, queue, wakes
+from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.reconcile import Adopt, Facts, Launch, Post, Remove, Resume, Stop, reconcile
 from deckhand.records import HAND, Record, iso
@@ -61,6 +64,9 @@ def facts(
     **rest: object,
 ) -> Facts:
     reading = Reading("ACME", features.current(store, "ACME"), me, [], {}, [])
+    if "clones" not in rest:
+        clones = config.local().clones
+        rest |= {"clones": clones, "policies": {path: Policy.load(path) for path in clones.values()}}
     return Facts(
         now=now,
         woke=woke,
@@ -219,7 +225,37 @@ def test_a_due_story_with_unacknowledged_mail_is_not_nudged(clone: Path):
     store = alone()
     started(store)
     seen = mail(delivered=at(T))
-    assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(seen,)), store) == []
+    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(seen,)), store)
+    assert [type(action) for action in found] == [Resume]
+
+
+def test_a_resume_carries_mail_delivered_but_not_acknowledged(clone: Path):
+    store = alone()
+    started(store)
+    seen, fresh = mail(1, delivered=at(T)), mail(2)
+    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(seen, fresh)), store)
+    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([seen, fresh]), (1, 2))]
+
+
+def test_mail_for_a_stopped_hand_wins_the_last_slot_over_a_new_story(clone: Path):
+    store = building()
+    m = mail()
+    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(m,)), store)
+    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([m]), (m.seq,))]
+
+
+def test_reconcile_works_from_facts_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def unread(*_: object) -> None:
+        raise AssertionError("reconcile read a file")
+
+    monkeypatch.setattr(config, "local", unread)
+    monkeypatch.setattr(Policy, "load", unread)
+    store = alone()
+    clone = tmp_path / "nowhere"
+    known = {"clones": {"widgets": clone}, "policies": {clone: Policy("widgets")}}
+    assert reconcile(facts(store, **known), store) == [launch(store, clone)]
+    started(store)
+    assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), **known), store) == [nudge(store)]
 
 
 def test_a_session_the_fleet_no_longer_lists_is_launched_anew(clone: Path):
@@ -302,6 +338,15 @@ def test_a_wanted_spike_is_launched_within_the_slot_cap(clone: Path):
     assert reconcile(facts(store, spike_row(key, "working", "busy"), hands=(spike,), cap=2), store) == [
         Adopt(name, "id-x", "sid-x")
     ]
+
+
+def test_a_wanted_spike_with_a_stopped_session_restarts(clone: Path):
+    store = empty_feature()
+    key = "a1b2c3d4e5f6"
+    name = fleet.spike_name(key)
+    spike = HandRow(name, key, P1, "spike", str(clone / ".worktrees" / name), BEFORE, None, None, None, 0)
+    found = reconcile(facts(store, spike_row(key, "stopped"), hands=(spike,)), store)
+    assert found == [Launch(name, key, "spike", clone, None, ME, restart=True)]
 
 
 def test_a_first_stop_is_restarted_once_with_the_restart_flag(clone: Path):
