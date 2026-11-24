@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import multiprocessing
 import sqlite3
-import sys
 import threading
+from multiprocessing.queues import Queue
 from multiprocessing.synchronize import Barrier
 from pathlib import Path
 
@@ -73,29 +73,30 @@ def test_two_connections_write_at_once_without_locking_errors(tmp_path: Path) ->
     assert len(LocalRecords(path).records(ID)) == 200
 
 
-def _open_and_write(paths: list[Path], start: Barrier, name: str) -> None:
-    failed = 0
+def _open_and_write(paths: list[Path], start: Barrier, name: str, report: Queue) -> None:
+    errors = []
     for path in paths:
         start.wait(30)
         try:
             store = LocalRecords(path)
             store.put_record(ID, tier(subject=name))
             store.records(ID)
-        except Exception:
-            failed += 1
-    sys.exit(failed)
+        except Exception as error:
+            errors.append(f"{type(error).__name__}: {error}")
+    report.put(errors)
 
 
 def test_two_processes_open_a_fresh_file_at_once(tmp_path: Path) -> None:
     paths = [tmp_path / str(n) / "deckhand.db" for n in range(40)]
     spawn = multiprocessing.get_context("spawn")
-    start = spawn.Barrier(2)
-    workers = [spawn.Process(target=_open_and_write, args=(paths, start, name)) for name in ("a", "b")]
+    start, report = spawn.Barrier(2), spawn.Queue()
+    workers = [spawn.Process(target=_open_and_write, args=(paths, start, name, report)) for name in ("a", "b")]
     for worker in workers:
         worker.start()
+    errors = [error for _ in workers for error in report.get(timeout=60)]
     for worker in workers:
         worker.join(60)
-    assert [worker.exitcode for worker in workers] == [0, 0]
+    assert errors == []
     for path in paths:
         assert sorted(r.subject for r in LocalRecords(path).records(ID)) == ["a", "b"]
 

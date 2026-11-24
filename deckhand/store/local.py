@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -53,8 +54,7 @@ class LocalRecords:
         except OSError:
             raise self._refusal("cannot be opened") from None
         with self._connection() as db:
-            if db.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
-                _create(db)
+            _prepare(db)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -65,7 +65,7 @@ class LocalRecords:
             finally:
                 db.close()
         except sqlite3.Error as error:
-            problem = _PROBLEMS.get(getattr(error, "sqlite_errorcode", 0) & 0xFF, "cannot be used")
+            problem = _PROBLEMS.get(_code(error), "cannot be used")
             raise self._refusal(problem) from None
 
     def _refusal(self, problem: str) -> Refusal:
@@ -86,6 +86,25 @@ class LocalRecords:
                 (issue,),
             ).fetchall()
         return [replace(Record.from_json(body), at=written) for body, written in rows]
+
+
+def _code(error: sqlite3.Error) -> int:
+    return getattr(error, "sqlite_errorcode", 0) & 0xFF
+
+
+def _prepare(db: sqlite3.Connection) -> None:
+    deadline = time.monotonic() + BUSY_SECONDS
+    while True:
+        try:
+            if db.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+                _create(db)
+            return
+        except sqlite3.OperationalError as error:
+            if _code(error) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or time.monotonic() >= deadline:
+                raise
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            time.sleep(0.01)
 
 
 def _create(db: sqlite3.Connection) -> None:
