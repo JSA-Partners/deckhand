@@ -61,22 +61,24 @@ def _pad(text: str, width: int) -> str:
     return text + " " * max(0, width - cells(text))
 
 
-def _header(found: Board, g: Glyphs, note: str) -> Line:
-    if not found.read:
-        return Line(((" ", ""), ("Captain", "bold"), *(((g.sep, "dim"), (note, "warn")) if note else ())))
-    glyph, words, tone = found.lead
+def _header(found: Board, g: Glyphs, note: str, width: int) -> Line:
     sep = (g.sep, "dim")
-    spans: list[Span] = [(" ", ""), (glyph, tone), (" ", ""), (words, tone)]
-    if note:
-        spans += [sep, (note, "warn")]
-    elif found.updated:
-        spans += [sep, (f"updated {found.updated} ago", "dim")]
+    if not found.read:
+        return Line(((" ", ""), ("Captain", "bold"), *((sep, (note, "warn")) if note else ())))
+    glyph, words, tone = found.lead
+    lead: list[Span] = [(" ", ""), (glyph, tone), (" ", ""), (words, tone)]
+    rest: list[Span] = []
     for fact in found.facts:
-        spans += [sep, (fact, "")]
-    spans += [sep, ("slots ", ""), (found.slots[0], "bold"), (f"/{found.slots[1]}", "dim")]
+        rest += [sep, (fact, "")]
+    rest += [sep, ("slots ", ""), (found.slots[0], "bold"), (f"/{found.slots[1]}", "dim")]
     if found.captain:
-        spans += [sep, (found.captain, "warn" if found.captain == NO_CAPTAIN else "dim")]
-    return Line(tuple(spans))
+        rest += [sep, (found.captain, "warn" if found.captain == NO_CAPTAIN else "dim")]
+    room = width - sum(cells(text) for text, _ in (*lead, *rest)) - cells(g.sep)
+    if note:
+        middle = [sep, (fit(note, room, g.ellipsis), "warn")] if room > cells(g.ellipsis) + SHORT else []
+    else:
+        middle = [sep, (f"updated {found.updated} ago", "dim")] if found.updated else []
+    return Line((*lead, *middle, *rest))
 
 
 def _fleet(found: Board, g: Glyphs) -> list[Line]:
@@ -199,7 +201,7 @@ def render(
     asking: bool = False,
 ) -> list[Line]:
     width = cols
-    top = [_header(found, g, note), *_banner(found, g, width), *_fleet(found, g)]
+    top = [_header(found, g, note, width), *_banner(found, g, width), *_fleet(found, g)]
     if rows is not None and rows < SHORT:
         return [_clip(line, width, g) for line in top[:2][:rows]]
     body, end = _body(found, g, width, selected, expanded)

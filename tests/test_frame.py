@@ -55,6 +55,17 @@ def test_the_footer_shows_only_keys_that_act():
     assert texts(frame.render(empty, G, 100, 30, keys=True))[-1] == " q quit  r refresh"
 
 
+def test_a_long_note_is_cut_so_the_budget_and_slots_stay_in_the_header():
+    found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
+    note = "cannot read Linear: " + "x" * 300
+    for cols, kept in ((100, "cannot read..."), (160, "cannot read Linear: xx")):
+        head = texts(frame.render(found, G, cols, 30, note=note))[0]
+        assert frame.cells(head) == cols and kept in head
+        assert "day 2 of 7" in head and "slots 0/2" in head and head.endswith("captain idle")
+    head = texts(frame.render(found, G, 86, 30, note=note))[0]
+    assert "cannot" not in head and "slots 0/2" in head
+
+
 def test_asking_puts_the_question_in_the_footer():
     found = board.build(sample(), fleet.Fleet([CAPTAIN]), NOW, TODAY, G)
     lines = texts(frame.render(found, G, 100, 30, keys=True, asking=True))

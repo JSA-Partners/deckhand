@@ -66,7 +66,8 @@ class Worker:
     def start(self) -> None:
         self._thread.start()
 
-    def stop(self, timeout: float = 5.0) -> None:
+    # No bound of its own: an action in flight ends within its commands' timeouts, and a launch must land first.
+    def stop(self, timeout: float | None = None) -> None:
         self._halt.set()
         self._queue.put(None)
         if self._thread.is_alive():

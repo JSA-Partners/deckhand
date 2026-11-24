@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import threading
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -18,6 +21,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
 from deckhand.store.open import Stores
 from deckhand.store.state import LocalState
+from deckhand.worker import Worker
 from tests.shell import Shell, row
 from tests.test_queue import asked, started
 from tests.test_step_hand import building, clone, configure, state
@@ -441,6 +445,29 @@ def test_stop_all_stops_every_alive_hand_and_spike(rig: Rig):
     stops = [argv for argv, _ in shell.calls if argv[1] == "stop"]
     assert stops == [["claude", "stop", "id-ACME-1"], ["claude", "stop", "id-spike"]]
     assert order[0] == "worker"
+
+
+def test_a_launch_in_flight_past_five_seconds_during_stop_all_ends_stopped(rig: Rig):
+    began, shell = threading.Event(), Shell(row("ACME-1", "idle", "idle"))
+
+    class Slow:
+        def run(self, action: Action) -> str | None:
+            began.set()
+            time.sleep(5.2)
+            shell.rows.append(row("ACME-2", "working", "busy"))
+            return None
+
+    @contextmanager
+    def opened() -> Iterator[Slow]:
+        yield Slow()
+
+    worker = Worker(opened)
+    worker.start()
+    worker.submit(Launch("hand-ACME-2", "ACME-2", "story", Path("/w"), None, "me"))
+    assert began.wait(5)
+    said = Engine("ACME", rig.state, rig.fleets, rig.linear, worker, rig.clock, lambda: DAY, 42, shell).stop_all()
+    stops = [argv for argv, _ in shell.calls if argv[1] == "stop"]
+    assert stops == [["claude", "stop", "id-ACME-1"], ["claude", "stop", "id-ACME-2"]] and said == []
 
 
 def test_stop_all_runs_through_the_engines_runner_by_default(rig: Rig):

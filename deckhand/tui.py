@@ -17,6 +17,7 @@ FIRST_READ = 1.0
 KEYS = {"q": "quit", "\x1b": "quit", "j": "down", "k": "up", "r": "refresh", "\r": "enter", "\n": "enter"}
 KEYS |= {"\x1b[A": "up", "\x1b[B": "down", "\x1bOA": "up", "\x1bOB": "down"}
 LEAVE, STOP = "l", "s"
+READING_FLEET = " reading the fleet"
 ESC, ESC_WAIT = "\x1b", 0.025
 ENTER_SCREEN, LEAVE_SCREEN = "\x1b[?1049h\x1b[?25l", "\x1b[?25h\x1b[?1049l"
 
@@ -137,6 +138,7 @@ class Watch:
         return True
 
     def run(self) -> list[str]:
+        self._term.show([READING_FLEET])
         self._poller.wait(FIRST_READ)
         while True:
             self._engine.tick()

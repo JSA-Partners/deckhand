@@ -149,11 +149,11 @@ def test_the_lines_a_stop_all_left_come_back_from_the_run():
 def test_each_loop_ticks_the_engine_before_it_draws():
     engine = Engine()
     term, _, _ = run(["j", "k"], engine=engine)
-    assert engine.ticks[0] == 0 and len(engine.ticks) == len(term.frames)
+    assert engine.ticks[0] == 1 and term.frames and len(engine.ticks) == len(term.frames)
 
 
 def test_the_engine_note_shows_in_the_header():
-    term, _, _ = run([], engine=Engine("cannot read Linear: network: down"))
+    term, _, _ = run([], engine=Engine("cannot read Linear: network: down"), size=(30, 160))
     assert " | cannot read Linear: network: down" in term.frames[0][0]
     assert "updated" not in term.frames[0][0]
     term, _, _ = run([], Reader(None), engine=Engine("cannot read Linear: network: down"))
@@ -161,7 +161,7 @@ def test_the_engine_note_shows_in_the_header():
 
 
 def test_a_note_with_control_characters_draws_on_one_line():
-    term, _, _ = run([], engine=Engine("ACME-1: error: one\nfatal: \x1b[2Jtwo"))
+    term, _, _ = run([], engine=Engine("ACME-1: error: one\nfatal: \x1b[2Jtwo"), size=(30, 160))
     assert "ACME-1: error: one fatal: [2Jtwo" in term.frames[0][0]
     assert all("\n" not in line and "\x1b[2J" not in line for line in term.lines)
 
@@ -175,6 +175,19 @@ def test_the_bell_rings_when_the_needs_you_count_rises():
     assert term.bells == 2
     term, _, _ = run([None] * ticks, Reader(two))
     assert term.bells == 1
+
+
+def test_the_screen_says_it_reads_the_fleet_until_the_first_read():
+    clock, seen = Clock(), []
+    term = Term([], clock)
+
+    class First(Poller):
+        def wait(self, timeout: float) -> bool:
+            seen.append(list(term.lines))
+            return super().wait(timeout)
+
+    tui.Watch(term, Reader(), First(fleet.Fleet(LIVE)), clock, brief.ASCII, True, Engine()).run()
+    assert seen == [[tui.READING_FLEET]] and tui.READING_FLEET == " reading the fleet"
 
 
 def test_the_first_frame_waits_for_the_first_fleet_read():
@@ -268,7 +281,7 @@ def test_a_time_out_of_range_never_kills_the_watch():
 
 def test_an_unchanged_frame_is_not_written_again():
     term, _, _ = run([None, None, None])
-    assert term.shows == 2
+    assert term.shows == 3
 
 
 def test_application_cursor_keys_move_too():
@@ -327,7 +340,7 @@ def test_an_arrow_split_across_reads_is_not_a_quit():
 
 def test_a_resize_that_keeps_the_lines_still_redraws():
     term, _, _ = run([(30, 140), (40, 140)], size=(30, 120))
-    assert term.shows == 4
+    assert term.shows == 5
 
 
 def test_the_board_fills_a_wide_terminal():

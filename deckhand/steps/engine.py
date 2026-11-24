@@ -109,8 +109,14 @@ class Engine:
 
         runner, clock, link = _quiet(self._runner), self._clock, engine.link
         fleets = Poller(lambda: fleet.sessions(runner), engine.FLEET_EVERY, tui.fleet_failed, "deckhand-fleet", clock)
+
+        # The first Linear read waits for the first fleet read, so a hand is never read as missing.
+        def linked() -> engine.Linked:
+            fleets.wait(engine.FLEET_EVERY)
+            return link(team, fleets.latest, clock)
+
         linear = Poller(
-            lambda: link(team, fleets.latest, clock),
+            linked,
             engine.LINEAR_EVERY,
             lambda error: engine.Linked(None, None, clock(), problem(error)),
             "deckhand-linear",
@@ -121,7 +127,6 @@ class Engine:
         try:
             fleets.start()
             worker.start()
-            fleets.wait(engine.FLEET_EVERY)
             linear.start()
             g = brief.glyphs(getattr(sys.stdout, "encoding", None))
             said = tui.watch(lambda: status.read(state_dir), fleets, clock, brief.colored(os.environ), g, running)
