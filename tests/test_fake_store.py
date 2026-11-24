@@ -9,6 +9,7 @@ import pytest
 from deckhand.linear.client import DuplicateId
 from deckhand.records import Record
 from deckhand.ref import Ref
+from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore, WriteFailed
 
 
@@ -297,7 +298,27 @@ def test_project_documents_listed() -> None:
     store.put_document("d1", "p1", "One", "b")
     store.put_document("d3", "i1", "Other", "b")
     assert store.project_documents("p1") == [
-        {"id": "d1", "title": "One", "url": "https://linear.invalid/document/d1", "at": "2026-11-19T11:00:00.000Z"},
-        {"id": "d2", "title": "Two", "url": "https://linear.invalid/document/d2", "at": "2026-11-19T10:00:00.000Z"},
+        {
+            "id": "d1",
+            "title": "One",
+            "url": "https://linear.invalid/document/d1",
+            "at": "2026-11-19T11:00:00.000Z",
+            "body": "b",
+        },
+        {
+            "id": "d2",
+            "title": "Two",
+            "url": "https://linear.invalid/document/d2",
+            "at": "2026-11-19T10:00:00.000Z",
+            "body": "b",
+        },
     ]
     assert "at" not in store.document("d1")
+
+
+def test_records_are_refused_by_identifier() -> None:
+    store = FakeStore()
+    with pytest.raises(Refusal):
+        store.put_record("ACME-5", Record("tier", "s", "v1", "person", {"level": 1}))
+    with pytest.raises(Refusal):
+        store.records("ACME-5")

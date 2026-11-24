@@ -3,14 +3,16 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 
 import pytest
 
+from deckhand import __version__
 from deckhand.credentials import APP_FILE
-from deckhand.linear.client import DuplicateId, LinearClient, LinearError
+from deckhand.linear.client import DuplicateId, KeepAliveTransport, LinearClient, LinearError
 from deckhand.linear.oauth import fetch_app_token
 from deckhand.step import Refusal
 
@@ -208,3 +210,239 @@ def test_token_unfit_for_a_header_is_linear_error_without_the_token() -> None:
         leaky.query("q", {})
     assert "lin_api" not in str(raised.value)
     assert raised.value.__context__ is None or raised.value.__suppress_context__
+
+
+class Response:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self.reason = "x"
+        self.headers = http.client.HTTPMessage()
+        self.body = body
+
+    def read(self) -> bytes:
+        return self.body
+
+
+class Connection:
+    def __init__(self, responses: list[Response | Exception]) -> None:
+        self.responses = responses
+        self.requests: list[tuple[str, str, bytes | None, dict]] = []
+        self.closed = False
+
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+        self.requests.append((method, url, body, dict(headers or {})))
+
+    def getresponse(self) -> Response:
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class Validating(Connection):
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+        connection = http.client.HTTPConnection("localhost")
+        connection.putrequest(method, url)
+        for name, value in (headers or {}).items():
+            connection.putheader(name, value)
+        super().request(method, url, body, headers)
+
+
+class Connections:
+    def __init__(self, *scripts: list[Response | Exception], kind: type[Connection] = Connection) -> None:
+        self.scripts = list(scripts)
+        self.kind = kind
+        self.made: list[Connection] = []
+
+    def __call__(self) -> Connection:
+        connection = self.kind(self.scripts.pop(0))
+        self.made.append(connection)
+        return connection
+
+
+def test_keep_alive_reuses_one_connection() -> None:
+    connections = Connections([Response(200, ok({"n": n})) for n in range(3)])
+    linear = client(KeepAliveTransport(connections))
+    assert [linear.query("q", {}) for _ in range(3)] == [{"n": 0}, {"n": 1}, {"n": 2}]
+    assert len(connections.made) == 1
+    requests = connections.made[0].requests
+    assert len(requests) == 3
+    assert requests[0][:2] == ("POST", "/graphql")
+    assert requests[0][3]["Authorization"] == BEARER
+
+
+def test_keep_alive_reconnects_once_after_a_dropped_connection() -> None:
+    connections = Connections(
+        [Response(200, ok({"n": 0})), http.client.RemoteDisconnected("closed")],
+        [Response(200, ok({"n": 1}))],
+    )
+    linear = client(KeepAliveTransport(connections))
+    assert linear.query("q", {}) == {"n": 0}
+    assert linear.query("q", {}) == {"n": 1}
+    assert len(connections.made) == 2
+    assert connections.made[0].closed
+
+
+def test_keep_alive_a_drop_on_a_fresh_connection_is_a_network_failure() -> None:
+    connections = Connections([http.client.RemoteDisconnected("closed")], [Response(200, ok({}))])
+    with pytest.raises(LinearError) as raised:
+        client(KeepAliveTransport(connections)).query("q", {})
+    assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_keep_alive_reconnects_once_after_a_tls_end_of_file_on_a_reused_connection() -> None:
+    connections = Connections(
+        [Response(200, ok({"n": 0})), ssl.SSLEOFError("EOF occurred in violation of protocol")],
+        [Response(200, ok({"n": 1}))],
+    )
+    linear = client(KeepAliveTransport(connections))
+    assert linear.query("q", {}) == {"n": 0}
+    assert linear.query("q", {}) == {"n": 1}
+    assert len(connections.made) == 2
+
+
+def test_keep_alive_a_tls_end_of_file_on_a_fresh_connection_latches() -> None:
+    connections = Connections([ssl.SSLEOFError("EOF occurred in violation of protocol")], [Response(200, ok({}))])
+    linear = client(KeepAliveTransport(connections))
+    for _ in range(2):
+        with pytest.raises(LinearError) as raised:
+            linear.query("q", {})
+        assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_keep_alive_keeps_the_status_handling() -> None:
+    unauthorized = Unauthorized()
+    connections = Connections(
+        [
+            Response(401, b""),
+            Response(200, ok({"x": 1})),
+            Response(400, json.dumps(DUPLICATE).encode()),
+            Response(503, b"<html>"),
+        ]
+    )
+    linear = client(KeepAliveTransport(connections), unauthorized)
+    assert linear.query("q", {}) == {"x": 1}
+    assert unauthorized.calls == 1
+    with pytest.raises(DuplicateId):
+        linear.query("q", {})
+    with pytest.raises(LinearError) as raised:
+        linear.query("q", {})
+    assert raised.value.code == "http"
+    assert len(connections.made) == 1
+
+
+def test_an_http_error_does_not_latch() -> None:
+    connections = Connections([Response(500, b""), Response(200, ok({"x": 1}))])
+    linear = client(KeepAliveTransport(connections))
+    with pytest.raises(LinearError) as raised:
+        linear.query("q", {})
+    assert raised.value.code == "http"
+    assert linear.query("q", {}) == {"x": 1}
+
+
+def test_after_a_network_failure_the_transport_fails_without_sending() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({}))])
+    transport = KeepAliveTransport(connections)
+    linear = client(transport)
+    for _ in range(2):
+        with pytest.raises(LinearError) as raised:
+            linear.query("q", {})
+        assert raised.value.code == "network"
+    assert len(connections.made) == 1
+    assert len(connections.made[0].requests) == 1
+
+
+def test_a_second_client_on_a_down_transport_fails_without_sending() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({}))])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    with pytest.raises(LinearError) as raised:
+        LinearClient(lambda: "lin_api_person", Unauthorized(), transport).query("q", {})
+    assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_a_down_transport_also_stops_the_token_request() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, b"{}")])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    with pytest.raises(LinearError) as raised:
+        fetch_app_token("id1", "sec1", transport)
+    assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_reset_brings_a_down_transport_back() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({"x": 1}))])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    transport.reset()
+    assert client(transport).query("q", {}) == {"x": 1}
+
+
+def test_requests_name_deckhand_as_the_user_agent() -> None:
+    transport = Transport(ok({}), json.dumps({"access_token": "tok", "expires_in": 1}).encode())
+    client(transport).query("q", {})
+    fetch_app_token("id1", "sec1", transport)
+    assert [r.get_header("User-agent") for r in transport.requests] == [f"deckhand/{__version__}"] * 2
+
+
+def test_a_token_unfit_for_a_header_through_keep_alive_is_a_credentials_error() -> None:
+    connections = Connections([Response(200, ok({}))], kind=Validating)
+    leaky = LinearClient(lambda: "lin_api_first\nlin_api_second", Unauthorized(), KeepAliveTransport(connections))
+    with pytest.raises(LinearError) as raised:
+        leaky.query("q", {})
+    assert raised.value.code == "credentials"
+    assert "lin_api" not in str(raised.value)
+    assert "lin_api" not in raised.value.message
+
+
+class Proxied:
+    made: list[Proxied] = []
+
+    def __init__(self, host: str, port: int | None = None, timeout: float | None = None) -> None:
+        self.address = (host, port)
+        self.tunnel: str | None = None
+        Proxied.made.append(self)
+
+    def set_tunnel(self, host: str) -> None:
+        self.tunnel = host
+
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+        pass
+
+    def getresponse(self) -> Response:
+        return Response(200, ok({}))
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def proxied(monkeypatch: pytest.MonkeyPatch) -> list[Proxied]:
+    for name in ("https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(http.client, "HTTPSConnection", Proxied)
+    monkeypatch.setattr(Proxied, "made", [])
+    return Proxied.made
+
+
+def test_an_https_proxy_tunnels_to_linear(proxied: list[Proxied], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    client(KeepAliveTransport()).query("q", {})
+    assert [(made.address, made.tunnel) for made in proxied] == [(("proxy.example", 3128), "api.linear.app")]
+
+
+def test_no_proxy_for_linear_connects_directly(proxied: list[Proxied], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("NO_PROXY", "api.linear.app")
+    client(KeepAliveTransport()).query("q", {})
+    assert [(made.address[0], made.tunnel) for made in proxied] == [("api.linear.app", None)]

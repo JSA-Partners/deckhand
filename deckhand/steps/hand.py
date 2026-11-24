@@ -21,17 +21,15 @@ from deckhand import (
     spikes,
     startable,
 )
-from deckhand.credentials import Credentials
 from deckhand.features import Feature
 from deckhand.linear.client import LinearError
-from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.startable import AFTER, BUILD, DRAFT
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, make_worktree, require_base, worktree_branch
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import Stores
 
 USAGE = (
     "hand takes [--team-key KEY]; context [--json], apply start REF, apply fill, apply wake REF,"
@@ -77,17 +75,14 @@ class Hand:
     def __init__(
         self, store: Store | None = None, runner: git.Runner = git.run, *, person: Store | None = None
     ) -> None:
-        self._store = store
+        self._stores = Stores(app=store, person=person)
         self._runner = runner
-        self._person = person
 
     def _app(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return self._stores("app")
 
     def _person_store(self) -> Store:
-        return self._person if self._person is not None else claims.person_store()
+        return self._stores("person")
 
     def _fleet(self) -> fleet.Fleet:
         read = fleet.sessions(self._runner)

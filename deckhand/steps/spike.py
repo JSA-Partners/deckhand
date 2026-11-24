@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from deckhand import answers, config, features, git, inputs, ops, spikes
-from deckhand.credentials import Credentials
-from deckhand.linear.connect import connect
+from deckhand import answers, features, git, inputs, ops, spikes
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import Stores
 
 USAGE = "spike takes KEY and [--team-key KEY] on both verbs, and on apply --file ANSWER.md"
 SHAPE = (
@@ -33,13 +31,11 @@ def _parse(args: list[str]) -> dict:
 @register("spike")
 class Spike:
     def __init__(self, store: Store | None = None, runner: git.Runner = git.run) -> None:
-        self._store = store
+        self._stores = Stores(app=store)
         self._runner = runner
 
     def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return self._stores("app")
 
     def context(self, args: list[str]) -> None:
         key = _parse(args)["words"][0]

@@ -4,12 +4,10 @@ import json
 from collections.abc import Callable
 from datetime import datetime
 
-from deckhand import answers, config, features, inputs, ops, sitting, tiers, versions
-from deckhand.credentials import Credentials
-from deckhand.linear.connect import connect
+from deckhand import answers, features, inputs, ops, sitting, tiers, versions
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import Stores
 
 USAGE = (
     "sitting takes REF and [--team-key KEY] on both verbs; context [--contract NAME ...] [--json],"
@@ -42,13 +40,11 @@ def _parse(args: list[str]) -> dict:
 @register("sitting")
 class Sitting:
     def __init__(self, store: Store | None = None, now: Callable[[], datetime] = datetime.now) -> None:
-        self._store = store
+        self._stores = Stores(app=store)
         self._now = now
 
     def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return self._stores("app")
 
     def _story(self, store: Store, parsed: dict) -> tuple[features.Feature, dict]:
         feature = features.open_feature(store, team_key(parsed))

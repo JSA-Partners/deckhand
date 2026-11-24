@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import http.client
+import io
 import json
+import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
+from deckhand import __version__
 from deckhand.step import Refusal
 
-URL = "https://api.linear.app/graphql"
+HOST = "api.linear.app"
+URL = f"https://{HOST}/graphql"
 TIMEOUT_SECONDS = 30
 CONFLICT_PREFIX = "conflict on insert of"
+USER_AGENT = f"deckhand/{__version__}"
 
 Transport = Callable[[urllib.request.Request], bytes]
 
@@ -28,9 +34,72 @@ class DuplicateId(LinearError):
         self.entity = message.removeprefix(CONFLICT_PREFIX).strip()
 
 
-def default_transport(request: urllib.request.Request) -> bytes:
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-        return response.read()
+DROPPED = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError, ssl.SSLEOFError)
+
+
+def _connect() -> http.client.HTTPSConnection:
+    proxy = urllib.request.getproxies().get("https")
+    if not proxy or urllib.request.proxy_bypass(HOST):
+        return http.client.HTTPSConnection(HOST, timeout=TIMEOUT_SECONDS)
+    address = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+    connection = http.client.HTTPSConnection(address.hostname, address.port, timeout=TIMEOUT_SECONDS)
+    connection.set_tunnel(HOST)
+    return connection
+
+
+class KeepAliveTransport:
+    def __init__(self, connect: Callable[[], http.client.HTTPSConnection] = _connect) -> None:
+        self._connect = connect
+        self._connection: http.client.HTTPSConnection | None = None
+        self._down: OSError | http.client.HTTPException | None = None
+
+    def reset(self) -> None:
+        if self._connection is not None:
+            self._connection.close()
+        self._connection = None
+        self._down = None
+
+    def __call__(self, request: urllib.request.Request) -> bytes:
+        if self._down is not None:
+            raise self._down
+        try:
+            return self._send(request)
+        except urllib.error.HTTPError:
+            raise
+        except (OSError, http.client.HTTPException) as error:
+            self._down = error
+            raise
+
+    def _send(self, request: urllib.request.Request) -> bytes:
+        reused = self._connection is not None
+        try:
+            return self._exchange(request)
+        except DROPPED:
+            if not reused:
+                raise
+            return self._exchange(request)
+
+    def _exchange(self, request: urllib.request.Request) -> bytes:
+        if self._connection is None:
+            self._connection = self._connect()
+        try:
+            self._connection.request(
+                request.get_method(), request.selector, body=request.data, headers=dict(request.header_items())
+            )
+            response = self._connection.getresponse()
+            body = response.read()
+        except BaseException:
+            self._connection.close()
+            self._connection = None
+            raise
+        if not 200 <= response.status < 300:
+            raise urllib.error.HTTPError(
+                request.full_url, response.status, response.reason, response.headers, io.BytesIO(body)
+            )
+        return body
+
+
+default_transport = KeepAliveTransport()
 
 
 def _error_from(errors: list) -> LinearError:
@@ -91,7 +160,7 @@ class LinearClient:
         request = urllib.request.Request(
             URL,
             data=payload,
-            headers={"Content-Type": "application/json", "Authorization": self._token()},
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, "Authorization": self._token()},
         )
         try:
             return self._transport(request)

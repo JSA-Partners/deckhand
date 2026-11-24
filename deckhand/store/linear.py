@@ -1,23 +1,15 @@
 from __future__ import annotations
 
-import time
-from collections.abc import Callable
-from dataclasses import replace
 from typing import Any
 
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
 from deckhand.linear.workspace import GROUP
-from deckhand.records import Record, iso
+from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
 from deckhand.store import Store
-
-RECORD_URL = "https://deckhand.invalid/record/"
-
-
-def _now() -> str:
-    return iso(time.time_ns() // 1_000_000)
+from deckhand.store.local import LocalRecords
 
 
 def _missing(error: LinearError) -> bool:
@@ -49,9 +41,9 @@ def _assignee(node: dict[str, Any]) -> dict[str, Any]:
 
 
 class LinearStore(Store):
-    def __init__(self, client: LinearClient, now: Callable[[], str] = _now) -> None:
+    def __init__(self, client: LinearClient, records: LocalRecords) -> None:
         self._client = client
-        self._now = now
+        self._records = records
 
     def _paged(self, query: str, variables: dict[str, Any], path: tuple[str, str]) -> list[dict[str, Any]]:
         entity, connection = path
@@ -197,30 +189,10 @@ class LinearStore(Store):
         }
 
     def put_record(self, issue: str, record: Record) -> None:
-        attachment = {
-            "issueId": self._uuid(issue),
-            "url": f"{RECORD_URL}{record.kind}/{record.subject}",
-            "title": f"deckhand {record.kind}",
-            "metadata": {"record": record.to_json(), "written": self._now()},
-        }
-        self._client.query(queries.ATTACHMENT_CREATE, {"input": attachment})
+        self._records.put_record(issue, record)
 
     def records(self, issue: str) -> list[Record]:
-        try:
-            attachments = self._paged(queries.ISSUE_ATTACHMENTS, {"id": issue}, ("issue", "attachments"))
-        except LinearError as error:
-            if _missing(error):
-                return []
-            raise
-        held = [n for n in attachments if n["url"].startswith(RECORD_URL)]
-        found = []
-        for node in sorted(held, key=lambda n: n["url"]):
-            try:
-                meta = node["metadata"]
-                found.append(replace(Record.from_json(meta["record"]), at=meta.get("written", node["updatedAt"])))
-            except (KeyError, TypeError, ValueError) as error:
-                raise Refusal(f"{issue} holds a malformed record at {node['url']}: {error}") from None
-        return found
+        return self._records.records(issue)
 
     def relate(self, blocker: str, blocked: str) -> None:
         relation = {"issueId": self._uuid(blocker), "relatedIssueId": self._uuid(blocked), "type": "blocks"}
@@ -304,7 +276,10 @@ class LinearStore(Store):
             if _missing(error):
                 return []
             raise
-        return [{"id": n["id"], "title": n["title"], "url": n["url"], "at": n["updatedAt"]} for n in nodes]
+        return [
+            {"id": n["id"], "title": n["title"], "url": n["url"], "at": n["updatedAt"], "body": n["content"]}
+            for n in nodes
+        ]
 
     def assign(self, issue: str, user: str) -> None:
         self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": {"assigneeId": user}})

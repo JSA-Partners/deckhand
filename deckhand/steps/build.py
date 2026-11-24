@@ -7,14 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, tiers, versions
-from deckhand.credentials import Credentials
 from deckhand.features import Phase
-from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import Record
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import Stores
 
 USAGE = (
     "build takes REF and [--team-key KEY] on both verbs; context [--json], apply worktree, commit --message FILE,"
@@ -85,6 +83,8 @@ class Located:
 
 
 class StoryStep:
+    role = "app"
+
     def __init__(
         self,
         store: Store | None = None,
@@ -93,20 +93,18 @@ class StoryStep:
         *,
         me: Callable[[], str] | None = None,
     ) -> None:
-        self._store = store
+        self._stores = Stores(app=store, person=store)
         self._runner = runner
         self._repo = repo
         self._me = me
 
     def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return self._stores(self.role)
 
     def viewer(self) -> str:
         if self._me is not None:
             return self._me()
-        return claims.me(self._store if self._store is not None else claims.person_store())
+        return claims.me(self._stores("person"))
 
     def owned(self, at: Located) -> None:
         claims.owned(at.story, self.viewer())

@@ -4,10 +4,11 @@ import json
 from collections.abc import Callable
 from datetime import date, timedelta
 
-from deckhand import claims, features, ops, planning
+from deckhand import features, ops, planning
 from deckhand.features import Phase
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
+from deckhand.store.open import Stores
 
 USAGE = (
     "feature takes [--team-key KEY] on both verbs, --json on context only, and on apply one of: new --name N"
@@ -43,13 +44,11 @@ def _description(references: list[str]) -> str:
 @register("feature")
 class Feature:
     def __init__(self, store: Store | None = None, today: Callable[[], date] = date.today) -> None:
-        self._store = store
+        self._stores = Stores(person=store)
         self._today = today
 
     def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return claims.person_store()
+        return self._stores("person")
 
     def _facts(self, store: Store, team: str) -> dict:
         today = self._today()

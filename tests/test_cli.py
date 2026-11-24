@@ -228,6 +228,21 @@ def test_apply_linear_error_prints_code_and_message_and_exits_1(registry, capsys
     assert capsys.readouterr().err == "deckhand: network: could not reach Linear\n"
 
 
+def test_a_context_names_the_linear_error(registry, capsys):
+    from deckhand.linear.client import LinearError
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            raise LinearError("network", "could not reach Linear")
+
+        def apply(self, args):
+            return None
+
+    assert main(["probe", "context"]) == 0
+    assert capsys.readouterr().out == "deckhand: probe context could not be read: network: could not reach Linear\n"
+
+
 def test_apply_git_error_prints_command_code_and_tail_and_exits_1(registry, capsys):
     from deckhand.git import GitError
 

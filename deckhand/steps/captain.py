@@ -29,15 +29,13 @@ from deckhand import (
     startable,
     status,
 )
-from deckhand.credentials import Credentials
 from deckhand.features import Feature, Phase
 from deckhand.linear.client import LinearError
-from deckhand.linear.connect import connect
 from deckhand.policy import Policy
 from deckhand.records import iso
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.linear import LinearStore
+from deckhand.store.open import Stores
 
 REFRESH_LIMIT = 120.0
 NOT_RUN = 127
@@ -149,19 +147,16 @@ class Captain:
         today: Callable[[], date] = date.today,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        self._store = store
+        self._stores = Stores(app=store, person=person)
         self._runner = runner
-        self._person = person
         self._today = today
         self._clock = clock
 
     def _app(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return LinearStore(connect(Credentials.load(config.config_dir()), "app"))
+        return self._stores("app")
 
     def _person_store(self) -> Store:
-        return self._person if self._person is not None else claims.person_store()
+        return self._stores("person")
 
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)

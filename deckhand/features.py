@@ -179,7 +179,8 @@ def crosses_repositories(store: Store, feature: Feature, story: dict) -> bool:
 def load(store: Store, project: dict) -> Feature:
     stories = store.project_issues(project["id"])
     feature = Feature(project, stories, {s["id"]: store.records(s["id"]) for s in stories})
-    feature.version = versions.feature_version(store, feature)
+    if phase(feature) is not Phase.RELEASED:
+        feature.version = versions.feature_version(store, feature)
     return feature
 
 

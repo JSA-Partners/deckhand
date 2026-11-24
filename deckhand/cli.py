@@ -58,6 +58,8 @@ def main(argv: list[str]) -> int:
             print(f"deckhand: {argv[0]} context: {refusal.rule}")
         except GitError as error:
             print(f"deckhand: {argv[0]} context: {error.command} failed (exit {error.code}): {error.stderr_tail}")
+        except LinearError as error:
+            print(f"deckhand: {argv[0]} context could not be read: {error.code}: {error.message}")
         except Exception as problem:
             print(f"deckhand: {argv[0]} context could not be read: {type(problem).__name__}")
         return 0

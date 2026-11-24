@@ -116,7 +116,8 @@ install reaches them when the next fix or feature does.
   `.claude/deckhand/lenses/`, and any other change becomes a queue item through `ask apply --edit`
 - `checks apply` runs a hand's tests and check commands with deckhand's access, a gap the README
   names
-- Records live in issue attachments; documents hold only text a person reads
+- Records live in deckhand's local SQLite file; Linear holds only what a teammate reads, and documents
+  hold only text a person reads
 - Never parse prose to decide; read typed records, and print prose only for people
 - Every skill calls the bare `deckhand`, its injection line included, which the plugin puts on the
   path, so each call matches the sandbox's exempt `deckhand *` pattern; a chained, piped or

@@ -3,16 +3,16 @@ from __future__ import annotations
 import copy
 import json
 import re
-import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
-from deckhand.records import Record, iso
+from deckhand.records import Clock, Record
 from deckhand.ref import Ref
 from deckhand.store import Store
+from deckhand.store.local import require_id
 
 
 def _branch_name(team: str, number: int, title: str) -> str:
@@ -27,19 +27,9 @@ class WriteFailed(Exception):
     pass
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self._last = 0
-
-    # Linear stamps sequential writes in order; the wall clock repeats within one millisecond.
-    def __call__(self) -> str:
-        self._last = max(self._last + 1, time.time_ns() // 1_000_000)
-        return iso(self._last)
-
-
 class FakeStore(Store):
     def __init__(self, now: Callable[[], str] | None = None, viewer: str = "viewer-1") -> None:
-        self._now = now or _Clock()
+        self._now = now or Clock()
         self._viewer = viewer
         self._issues: dict[str, dict[str, Any]] = {}
         self._projects: dict[str, dict[str, Any]] = {}
@@ -160,11 +150,12 @@ class FakeStore(Store):
     def project_documents(self, project: str) -> list[dict]:
         held = [d for d in self._documents.values() if d["parent"] == project]
         return [
-            {"id": d["id"], "title": d["title"], "url": f"{DOCUMENT_URL}{d['id']}", "at": d["at"]}
+            {"id": d["id"], "title": d["title"], "url": f"{DOCUMENT_URL}{d['id']}", "at": d["at"], "body": d["body"]}
             for d in sorted(held, key=lambda d: d["id"])
         ]
 
     def put_record(self, issue: str, record: Record) -> None:
+        require_id(issue)
         url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"
         now = self._now()
         held = self._attachments.setdefault(issue, {})
@@ -173,6 +164,7 @@ class FakeStore(Store):
         self._wrote("put_record", issue, record.kind, record.subject)
 
     def records(self, issue: str) -> list[Record]:
+        require_id(issue)
         held = self._attachments.get(issue, {})
         found = []
         for url in sorted(held):

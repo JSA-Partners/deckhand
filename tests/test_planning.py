@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
-from deckhand import features, planning
+from deckhand import features, planning, versions
 from deckhand.ops import create_id
 from deckhand.step import Refusal
+from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
+from tests.conftest import CountingStore
 
 P1 = create_id("ACME:Alpha", "feature")
 
@@ -65,3 +69,31 @@ def test_next_section_follows_order():
     refreshed = features.open_feature(store, "ACME")
     assert refreshed is not None
     assert planning.next_section(store, refreshed) is None
+
+
+def test_all_seven_sections_cost_one_document_read(counting_store: Callable[[FakeStore], CountingStore]):
+    fake = FakeStore()
+    feature = open_feature(fake)
+    for name in planning.SECTIONS:
+        planning.save_section(fake, feature, name, f"{name} text.", drafted=False)
+    counting = counting_store(fake)
+    versions.feature_version(CachedStore(counting), feature)
+    assert counting.calls == {"project_documents": 1}
+
+
+def test_a_missing_section_is_still_none():
+    store = FakeStore()
+    feature = open_feature(store)
+    planning.save_section(store, feature, "Frame", "Text.", drafted=False)
+    assert planning.section(store, feature, "Shape") is None
+
+
+def test_a_saved_section_reads_back_through_the_cache_in_the_same_command():
+    fake = FakeStore()
+    feature = open_feature(fake)
+    store = CachedStore(fake)
+    assert planning.section(store, feature, "Frame") is None
+    planning.save_section(store, feature, "Frame", "First.", drafted=False)
+    assert planning.section(store, feature, "Frame") == "Written by the person.\n\nFirst."
+    planning.save_section(store, feature, "Frame", "Second.", drafted=True)
+    assert planning.section(store, feature, "Frame") == f"{planning.DRAFTED}\n\nSecond."

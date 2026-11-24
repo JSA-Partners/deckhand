@@ -31,7 +31,8 @@ def save_section(store: Store, feature: Feature, name: str, body: str, drafted: 
 
 
 def section(store: Store, feature: Feature, name: str) -> str | None:
-    found = store.document(ops.create_id(*_id(feature, name)))
+    id = ops.create_id(*_id(feature, name))
+    found = next((d for d in store.project_documents(feature.project["id"]) if d["id"] == id), None)
     return found["body"] if found else None
 
 
