@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from deckhand import features, planning
@@ -65,3 +67,38 @@ def test_next_section_follows_order():
     refreshed = features.open_feature(store, "ACME")
     assert refreshed is not None
     assert planning.next_section(store, refreshed) is None
+
+
+class CountingStore:
+    def __init__(self, inner: FakeStore) -> None:
+        self._inner = inner
+        self.calls: dict[str, int] = {}
+
+    def __getattr__(self, name: str):
+        method = getattr(self._inner, name)
+
+        def counted(*args, **kwargs):
+            self.calls[name] = self.calls.get(name, 0) + 1
+            return method(*args, **kwargs)
+
+        return counted
+
+
+def test_all_seven_sections_cost_one_document_read():
+    from deckhand import versions
+    from deckhand.store.cached import CachedStore
+
+    fake = FakeStore()
+    feature = open_feature(fake)
+    for name in planning.SECTIONS:
+        planning.save_section(fake, feature, name, f"{name} text.", drafted=False)
+    counting: Any = CountingStore(fake)
+    versions.feature_version(CachedStore(counting), feature)
+    assert counting.calls == {"project_documents": 1}
+
+
+def test_a_missing_section_is_still_none():
+    store = FakeStore()
+    feature = open_feature(store)
+    planning.save_section(store, feature, "Frame", "Text.", drafted=False)
+    assert planning.section(store, feature, "Shape") is None

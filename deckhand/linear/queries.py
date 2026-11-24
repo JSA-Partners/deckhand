@@ -109,7 +109,7 @@ mutation ProjectUpdate($id: String!, $input: ProjectUpdateInput!) {
 
 PROJECT_DOCUMENTS = f"""
 query ProjectDocuments($id: String!, $after: String) {{
-  project(id: $id) {{ documents{AFTER} {{ nodes {{ id title url updatedAt }} {CURSOR} }} }}
+  project(id: $id) {{ documents{AFTER} {{ nodes {{ id title url content updatedAt }} {CURSOR} }} }}
 }}
 """
 

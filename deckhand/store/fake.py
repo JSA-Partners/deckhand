@@ -150,7 +150,7 @@ class FakeStore(Store):
     def project_documents(self, project: str) -> list[dict]:
         held = [d for d in self._documents.values() if d["parent"] == project]
         return [
-            {"id": d["id"], "title": d["title"], "url": f"{DOCUMENT_URL}{d['id']}", "at": d["at"]}
+            {"id": d["id"], "title": d["title"], "url": f"{DOCUMENT_URL}{d['id']}", "at": d["at"], "body": d["body"]}
             for d in sorted(held, key=lambda d: d["id"])
         ]
 

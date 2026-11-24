@@ -665,7 +665,7 @@ def test_viewer(records: LocalRecords) -> None:
     assert LinearStore(client, records).viewer() == {"id": "user-1", "name": "Ada"}
 
 
-def test_project_documents_listed_across_pages(records: LocalRecords) -> None:
+def test_project_documents_carry_their_body_across_pages(records: LocalRecords) -> None:
     client = FakeClient(
         ProjectDocuments=[
             {
@@ -676,6 +676,7 @@ def test_project_documents_listed_across_pages(records: LocalRecords) -> None:
                                 "id": "d1",
                                 "title": "One",
                                 "url": "https://linear.app/d1",
+                                "content": "First.",
                                 "updatedAt": "2026-11-19T10:00:00.000Z",
                             }
                         ],
@@ -691,6 +692,7 @@ def test_project_documents_listed_across_pages(records: LocalRecords) -> None:
                                 "id": "d2",
                                 "title": "Two",
                                 "url": "https://linear.app/d2",
+                                "content": "Second.",
                                 "updatedAt": "2026-11-19T11:00:00.000Z",
                             }
                         ],
@@ -701,8 +703,20 @@ def test_project_documents_listed_across_pages(records: LocalRecords) -> None:
         ]
     )
     assert LinearStore(client, records).project_documents("proj-1") == [
-        {"id": "d1", "title": "One", "url": "https://linear.app/d1", "at": "2026-11-19T10:00:00.000Z"},
-        {"id": "d2", "title": "Two", "url": "https://linear.app/d2", "at": "2026-11-19T11:00:00.000Z"},
+        {
+            "id": "d1",
+            "title": "One",
+            "url": "https://linear.app/d1",
+            "at": "2026-11-19T10:00:00.000Z",
+            "body": "First.",
+        },
+        {
+            "id": "d2",
+            "title": "Two",
+            "url": "https://linear.app/d2",
+            "at": "2026-11-19T11:00:00.000Z",
+            "body": "Second.",
+        },
     ]
     assert client.calls[1] == ("ProjectDocuments", {"id": "proj-1", "after": "c1"})
 

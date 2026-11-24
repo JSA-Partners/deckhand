@@ -298,8 +298,20 @@ def test_project_documents_listed() -> None:
     store.put_document("d1", "p1", "One", "b")
     store.put_document("d3", "i1", "Other", "b")
     assert store.project_documents("p1") == [
-        {"id": "d1", "title": "One", "url": "https://linear.invalid/document/d1", "at": "2026-11-19T11:00:00.000Z"},
-        {"id": "d2", "title": "Two", "url": "https://linear.invalid/document/d2", "at": "2026-11-19T10:00:00.000Z"},
+        {
+            "id": "d1",
+            "title": "One",
+            "url": "https://linear.invalid/document/d1",
+            "at": "2026-11-19T11:00:00.000Z",
+            "body": "b",
+        },
+        {
+            "id": "d2",
+            "title": "Two",
+            "url": "https://linear.invalid/document/d2",
+            "at": "2026-11-19T10:00:00.000Z",
+            "body": "b",
+        },
     ]
     assert "at" not in store.document("d1")
 
