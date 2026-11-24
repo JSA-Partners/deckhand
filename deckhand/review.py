@@ -128,17 +128,17 @@ def round_record(
     return Record(KIND, f"{story}:{stage}:{plan.n}", target_hash, "agent:review", data)
 
 
-def _n(record: Record) -> int:
+def round_number(record: Record) -> int:
     return int(record.subject.rsplit(":", 1)[1])
 
 
 def rounds_of(records: list[Record], prefix: str) -> list[Record]:
     found = {r.subject: r for r in records if r.kind == KIND and r.subject.rsplit(":", 1)[0] == prefix}
-    return sorted(found.values(), key=_n)
+    return sorted(found.values(), key=round_number)
 
 
 def last(rounds: list[Record]) -> Record | None:
-    return max(rounds, key=_n) if rounds else None
+    return max(rounds, key=round_number) if rounds else None
 
 
 def decided(records: list[Record]) -> dict[str, str]:
@@ -218,10 +218,6 @@ def carry_when_empty(plan: RoundPlan, scoped_diff: str | None) -> RoundPlan:
     return replace(plan, carry=True) if plan.scoped and scoped_diff == "" else plan
 
 
-def reviewed_count(rounds: list[Record]) -> int:
-    return sum(not r.data.get("carry") for r in rounds)
-
-
 def undecided_delivery(records: list[Record], story: str, stage: str) -> list[dict]:
     held, _ = counted(records, f"{story}:{stage}")
     settled = set(decided(records)) | waived(records, f"{story}:{stage}")
@@ -262,7 +258,7 @@ def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "RE
 
 
 def p1_rounds(rounds: list[Record], excused: set[str], since: int = 0) -> int:
-    return sum(_n(r) > since and not r.data.get("carry") and bool(open_p1(r, excused)) for r in rounds)
+    return sum(round_number(r) > since and not r.data.get("carry") and bool(open_p1(r, excused)) for r in rounds)
 
 
 def next_round(
@@ -317,7 +313,7 @@ def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     if stage not in ("plan", "branch"):
         return rounds, 0
     cut = max(map(_cap_cut, _cap_answers(records, cap_subject(story, stage), REWORK)), default=0)
-    return [r for r in rounds if _n(r) > cut], cut
+    return [r for r in rounds if round_number(r) > cut], cut
 
 
 def waived(records: list[Record], prefix: str) -> set[str]:

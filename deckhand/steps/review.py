@@ -260,7 +260,7 @@ class Review(StoryStep):
         if last is not None:
             waived = excused - declined
             items = [item | {"status": _status(item, declined, waived, accepted)} for item in last.data["findings"]]
-            facts["last_round"] = {"n": int(last.subject.rsplit(":", 1)[1]), "findings": items}
+            facts["last_round"] = {"n": review.round_number(last), "findings": items}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return

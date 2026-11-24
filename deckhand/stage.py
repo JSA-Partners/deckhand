@@ -32,7 +32,7 @@ def _rounds(records: list[Record], story: str, stage: str) -> list[Record]:
 
 def _review(name: str, held: list[Record]) -> Stage | None:
     latest = review.last(held)
-    return Stage(name, review.reviewed_count(held), latest.at) if latest is not None else None
+    return Stage(name, review.round_number(latest), latest.at) if latest is not None else None
 
 
 def _signing(records: list[Record], story: str, head: str) -> Stage | None:

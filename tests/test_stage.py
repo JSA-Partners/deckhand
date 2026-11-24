@@ -176,6 +176,30 @@ def test_rework_at_the_plan_cap_returns_the_story_to_planning():
     assert log.of() == stage.Stage(stage.PLANNING, None, start.at)
 
 
+def test_a_round_after_rework_reads_its_own_number():
+    log = Log()
+    built(log)
+    checked(log)
+    branch_round(log, 1, [P1])
+    branch_round(log, 2, [P1], "c" * 40)
+    third = branch_round(log, 3, [P1], "d" * 40)
+    cap_answer(log, "branch", third, review.REWORK)
+    checked(log, "e" * 40)
+    fourth = branch_round(log, 4, [P1], "e" * 40)
+    assert log.of() == stage.Stage(stage.BRANCH_REVIEW, 4, fourth.at)
+
+
+def test_a_carried_round_reads_its_own_number():
+    log = Log()
+    built(log)
+    checked(log)
+    first = branch_round(log, 1, [P1])
+    checked(log, MOVED)
+    plan = RoundPlan(2, scoped=True, base_hash=first.data["target_hash"], carry=True)
+    carried = log.add(review.carry_record("s1", "branch", plan, first, MOVED))
+    assert log.of() == stage.Stage(stage.BRANCH_REVIEW, 2, carried.at)
+
+
 def test_a_checks_record_is_checks_since_it_ran():
     log = Log()
     built(log)
