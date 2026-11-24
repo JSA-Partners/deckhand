@@ -86,3 +86,14 @@ def test_a_missing_section_is_still_none():
     feature = open_feature(store)
     planning.save_section(store, feature, "Frame", "Text.", drafted=False)
     assert planning.section(store, feature, "Shape") is None
+
+
+def test_a_saved_section_reads_back_through_the_cache_in_the_same_command():
+    fake = FakeStore()
+    feature = open_feature(fake)
+    store = CachedStore(fake)
+    assert planning.section(store, feature, "Frame") is None
+    planning.save_section(store, feature, "Frame", "First.", drafted=False)
+    assert planning.section(store, feature, "Frame") == "Written by the person.\n\nFirst."
+    planning.save_section(store, feature, "Frame", "Second.", drafted=True)
+    assert planning.section(store, feature, "Frame") == f"{planning.DRAFTED}\n\nSecond."

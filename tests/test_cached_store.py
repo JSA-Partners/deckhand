@@ -40,6 +40,10 @@ def test_every_store_method_is_a_read_a_write_or_a_record_call() -> None:
     assert not READS & WRITES
 
 
+def test_every_store_method_is_defined_on_the_cache_itself() -> None:
+    assert READS | WRITES | {"put_record", "records"} <= set(vars(CachedStore))
+
+
 def test_a_repeated_read_reaches_the_inner_store_once() -> None:
     inner, cached = seeded()
     first = cached.project_issues(PROJECT)
