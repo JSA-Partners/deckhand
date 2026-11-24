@@ -321,7 +321,7 @@ def test_push_waits_for_the_person_on_a_delivery_finding(
     found = finding_id(delivery)
     with pytest.raises(Refusal, match=f"{found} changes what the story delivers; propose an answer") as refused:
         push(store, shell, repo)
-    assert "review apply ACME-1 resolve --propose-accept" in str(refused.value)
+    assert "review apply ACME-1 resolve --stage plan --propose-accept" in str(refused.value)
     assert "decide" not in str(refused.value)
     Review(store, Git(BASE), repo).apply(
         ["s1", "resolve", "--stage", "plan", *TEAM, "--propose-decline", found, "--reason", "out of scope"]

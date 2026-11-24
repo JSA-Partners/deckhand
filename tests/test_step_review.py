@@ -187,6 +187,23 @@ def test_a_delivery_finding_of_an_earlier_round_can_still_be_proposed(tmp_path: 
     ]
 
 
+def test_a_re_proposal_after_a_change_of_mind_is_the_newest(tmp_path: Path, repo: Path, capsys):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    delivery = raw(summary="Orders ship a day later.", changes_delivery=True)
+    record_round(step, tmp_path, delivery)
+    resolve = ["s1", "resolve", "--stage", "plan", *TEAM]
+    found = finding_id(delivery)
+    step.apply([*resolve, "--propose-decline", found, "--reason", "out of scope"])
+    step.apply([*resolve, "--propose-accept", found, "--reason", "in scope"])
+    step.apply([*resolve, "--propose-decline", found, "--reason", "out of scope"])
+    proposal = asks.proposed(store.records("s1"), found)
+    assert proposal is not None and asks.proposed_answer(proposal) == review.DECLINE
+    before = list(store.writes)
+    step.apply([*resolve, "--propose-decline", found, "--reason", "out of scope"])
+    assert store.writes == before
+
+
 def test_decline_proposal_awaits_person(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
     store = planned(tmp_path, repo)
     step = Review(store, Git(BASE), repo)

@@ -232,7 +232,7 @@ def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF
     return [
         f"{id} waits for the person's decision"
         if id in proposed
-        else f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve"
+        else f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve --stage {stage}"
         f" --propose-accept {id} or --propose-decline {id} --reason TEXT"
         for id in (f["id"] for f in undecided_delivery(records, story, stage))
     ]

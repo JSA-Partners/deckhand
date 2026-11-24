@@ -281,7 +281,7 @@ def test_delivery_gaps_split_by_who_acts():
     records = [done(1, "h1", delivery)]
     finding = id_of(delivery)
     assert review.delivery_gaps(records, "s1", "plan", "ACME-1") == [
-        f"{finding} changes what the story delivers; propose an answer with review apply ACME-1 resolve"
+        f"{finding} changes what the story delivers; propose an answer with review apply ACME-1 resolve --stage plan"
         f" --propose-accept {finding} or --propose-decline {finding} --reason TEXT"
     ]
     proposal = Record(review.PROPOSAL, finding, "h1", "agent:review", {"reason": "r", "answer": review.ACCEPT})

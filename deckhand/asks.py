@@ -108,6 +108,11 @@ def proposal_line(proposal: Record) -> str:
     return f"the hand proposes to {verb} it: {proposal.data.get('reason', '')}"
 
 
+def _holding(records: list[Record], prefix: str, finding: str) -> Record:
+    held, _ = review.counted(records, prefix)
+    return next(r for r in reversed(held) if any(f["id"] == finding for f in r.data["findings"]))
+
+
 def resolutions(
     records: list[Record],
     prefix: str,
@@ -136,7 +141,7 @@ def resolutions(
             )
     found = [review.accept_record(id, last.version) for id in accept]
     for id, answer in propose:
-        version = last.version if id in held else review.locate(records, id)[0].version
+        version = last.version if id in held else _holding(records, prefix, id).version
         found.append(proposal_record(id, version, reason, answer))
     return found
 
