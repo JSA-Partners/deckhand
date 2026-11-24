@@ -24,9 +24,8 @@ ACTIONS = ("round", "resolve")
 STOPS = {
     "unchanged": "the target is unchanged since the last round; nothing to review",
     "clean": "the last round holds no accepted P1; the review is done",
-    "cap": "three rounds ran and a P1 is open; the person decides with review-cap",
-    "cap-clear": "three rounds ran and no P1 is open; the review is done",
-    "proceeded": "the person chose Proceed at the cap; the review is done",
+    "cap": "three rounds left a P1 open; the person decides whether to proceed or rework",
+    "proceeded": "the person chose Proceed at the cap and no other P1 is open; the review is done",
     "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
     " carries the last round forward without reviewers",
 }
@@ -187,17 +186,17 @@ class Review(StoryStep):
         rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
+        excused = review.excused(subject.records, subject.prefix)
         last = review.last(rounds)
         target = self._target(store, subject, repo)
-        plan = review.next_round(counted, target.hash, declined, target.head)
+        plan = review.next_round(counted, target.hash, excused, target.head)
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts["note"] = target.note
         if isinstance(plan, review.Stop):
-            proceeded = plan.reason == "cap" and review.cleared(
-                subject.records, subject.stories[0], subject.stage, target.hash
-            )
-            facts["stop"] = "proceeded" if proceeded else plan.reason
+            held = review.last(counted)
+            waived = held is not None and bool(review.open_p1(held, declined)) and plan.reason == "clean"
+            facts["stop"] = "proceeded" if waived else plan.reason
         elif plan.carry:
             facts |= {"stop": "carry", "round": plan.n + cut}
         else:
@@ -250,7 +249,7 @@ class Review(StoryStep):
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
-        plan = review.next_round(counted, target.hash, review.declined(subject.records), target.head)
+        plan = review.next_round(counted, target.hash, review.excused(subject.records, subject.prefix), target.head)
         if isinstance(plan, review.Stop):
             raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
         if plan.carry and parsed.get("findings"):

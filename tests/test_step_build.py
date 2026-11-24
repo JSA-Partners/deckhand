@@ -157,14 +157,16 @@ def test_proceed_does_not_cover_a_later_plan_revision(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = labeled(tmp_path, repo)
-    to_cap(store, tmp_path, repo)
+    step = to_cap(store, tmp_path, repo)
     answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
     submit(store, tmp_path, repo, PLAN + "- [ ] revised after the cap\n")
     shell = Shell()
     with pytest.raises(Refusal, match="has not stopped clean"):
         push(store, shell, repo)
     assert shell.ran("git", "push") == []
-    answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
+    with pytest.raises(Refusal, match="not reached its cap"):
+        Decide(store).context(["review-cap", "ACME-1", *TEAM])
+    record_round(step, tmp_path)
     push(store, Shell(), repo)
 
 

@@ -107,7 +107,7 @@ class Signoff(StoryStep):
         }
         missing = signoff.gaps(at.records, sid, head)
         standing = signoff.standing(at.records, sid, head, at.policy.second_signoff)
-        missing += [standing] if standing else []
+        missing += [standing] if standing and standing not in missing else []
         lines = [f"sign-off for {at.story['identifier']} at {head}"]
         lines += [f"{n} {name}: {status[name]}" for n, name in enumerate(SCREENS, start=1)]
         lines += ["missing:", *(f"- {m}" for m in missing)] if missing else ["signed off at this head"]

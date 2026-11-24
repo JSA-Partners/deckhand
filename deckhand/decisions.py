@@ -61,7 +61,10 @@ _SIGN_OFF = {
 _DESCRIPTIONS = {
     "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
     "finding": ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"],
-    review.CAP_DECISION: ["carry on past the cap", "the hand reworks it and the rounds count again"],
+    review.CAP_DECISION: [
+        "carry on with those P1s open; every later change is still reviewed",
+        "the hand reworks it and the rounds count again",
+    ],
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
     signoff.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
@@ -78,7 +81,7 @@ _ASKS = {
     "tier": "Which is the highest that applies to",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
-    review.CAP_DECISION: "Three plan review rounds ran, none clean. Proceed to the build or rework the plan for",
+    review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
     quiz.KIND: "Quiz on",
     signoff.KIND: "Sign off",
     signoff.SECOND: "Second sign-off on",
@@ -87,7 +90,7 @@ _ASKS = {
     asks.EDIT: "Make this change to Claude Code's own config for",
     queue.STALLED: "",
 }
-_BRANCH_CAP = "Three branch review rounds ran, none clean. Proceed to sign-off or rework the branch for"
+_BRANCH_CAP = "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for"
 _RECORDED = (
     "tier",
     "decision-item",

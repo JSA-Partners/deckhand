@@ -7,11 +7,9 @@ from pathlib import Path
 from deckhand import (
     answers,
     asks,
-    checks,
     features,
     fleet,
     gaps,
-    implplan,
     order,
     quiz,
     review,
@@ -129,19 +127,12 @@ def _findings(story: dict, records: list[Record]) -> list[Item]:
 
 
 def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
-    held, _ = review.counted(records, f"{story['id']}:{stage}")
+    prefix = f"{story['id']}:{stage}"
+    held, _ = review.counted(records, prefix)
     latest = review.last(held)
-    plan = versions.held(records, implplan.PURPOSE, story["id"])
-    if latest is None or (stage == "plan" and plan is None):
+    if latest is None or not review.at_cap(held, review.excused(records, prefix)):
         return []
-    checked = versions.held(records, checks.KIND, story["id"])
-    if stage == "plan" and plan:
-        at = plan.version
-    else:
-        at = checked.version if checked is not None else review.reviewed(latest)
-    if not review.at_cap(held, review.declined(records)) or review.cleared(records, story["id"], stage, at):
-        return []
-    lines = [f"the {stage} review reached its cap of {review.CAP} rounds"]
+    lines = [f"three {stage} review rounds left a P1 open"]
     next = [f"decide context review-cap {story['identifier']} --stage {stage}"]
     return [_story_item(review.DECISION, 1, story, latest.at, lines, next)]
 

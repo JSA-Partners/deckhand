@@ -233,8 +233,8 @@ class Build(StoryStep):
         plan = versions.held(records, implplan.PURPOSE, story["id"])
         if plan is None or not review.cleared(records, story["id"], "plan", plan.version):
             raise Refusal(
-                f"the plan review of {story['identifier']} has not stopped clean; finish it,"
-                " or at the cap let the person decide: decide context review-cap"
+                f"the plan review of {story['identifier']} has not stopped clean at the current plan;"
+                " run a plan round, or at the cap ask the person to proceed or rework"
             )
         undecided = review.delivery_gaps(records, story["id"], "plan", story["identifier"])
         if undecided:

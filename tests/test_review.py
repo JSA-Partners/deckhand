@@ -62,12 +62,12 @@ def test_revision_after_a_clean_round_is_scoped():
     assert review.next_round(rounds, "h2", set()) == RoundPlan(2, scoped=True, base_hash="h1")
 
 
-def test_revision_after_a_clean_third_round_passes_at_the_cap():
+def test_a_commit_after_a_clean_third_round_gets_a_scoped_round():
     rounds = [done(1, "h1", raw(severity="P1")), done(2, "h2", raw(severity="P1")), done(3, "h3")]
     assert review.next_round(rounds, "h3", set()) == Stop("clean")
-    assert review.next_round(rounds, "h4", set()) == Stop("cap-clear")
-    assert not review.at_cap(rounds, set()) and not review.at_cap(rounds, set())
-    assert review.cleared(rounds, "s1", "plan", "h4")
+    assert review.next_round(rounds, "h4", set()) == RoundPlan(4, scoped=True, base_hash="h3")
+    assert review.cleared(rounds, "s1", "plan", "h3")
+    assert not review.cleared(rounds, "s1", "plan", "h4")
 
 
 def test_declined_p1_is_not_accepted():
@@ -79,20 +79,61 @@ def test_declined_p1_is_not_accepted():
     assert review.next_round(rounds, "h2", declined) == RoundPlan(2, scoped=True, base_hash="h1")
 
 
-def test_cap_with_only_p2_and_p3_passes_on_its_own_while_the_target_moves():
-    rounds = [done(n, f"h{n}", raw(severity="P2", summary=f"Gap {n}."), raw(severity="P3")) for n in (1, 2, 3)]
-    assert review.next_round(rounds, "h4", set()) == Stop("cap-clear")
-    assert not review.at_cap(rounds, set())
-    assert review.cleared(rounds, "s1", "plan", "h4")
+def test_rounds_without_a_p1_never_count_to_the_cap():
+    rounds = [done(n, f"h{n}", raw(severity="P2", summary=f"Gap {n}.")) for n in (1, 2, 3, 4)]
+    assert review.p1_rounds(rounds, set()) == 0
+    assert review.next_round(rounds, "h5", set()) == RoundPlan(5, scoped=True, base_hash="h4")
 
 
-def test_cap_with_an_open_p1_waits_for_the_person():
+def test_three_p1_rounds_stop_at_the_cap_whatever_the_target():
     p1 = raw(severity="P1")
     rounds = [done(n, f"h{n}", p1) for n in (1, 2, 3)]
     assert review.next_round(rounds, "h4", set()) == Stop("cap")
     assert review.at_cap(rounds, set())
-    assert not review.cleared(rounds, "s1", "plan", "h4")
-    assert review.next_round(rounds, "h4", {id_of(p1)}) == Stop("cap-clear")
+    assert not review.cleared(rounds, "s1", "plan", "h3")
+
+
+def proceed_at(round: Record) -> Record:
+    return Record(review.CAP_DECISION, "s1", review.cap_version(round), "person:pat", {"answer": review.PROCEED})
+
+
+def test_proceed_waives_the_open_p1_and_the_next_commit_is_still_reviewed():
+    p1 = raw(severity="P1")
+    rounds = [done(n, f"h{n}", p1) for n in (1, 2, 3)]
+    records = [*rounds, proceed_at(rounds[-1])]
+    assert review.waived(records, "s1:plan") == {id_of(p1)}
+    excused = review.excused(records, "s1:plan")
+    assert review.cleared(records, "s1", "plan", "h3")
+    assert review.next_round(rounds, "h4", excused) == RoundPlan(4, scoped=True, base_hash="h3")
+    assert not review.cleared(records, "s1", "plan", "h4")
+
+
+def test_a_new_p1_after_proceed_blocks_until_fixed_and_starts_a_fresh_count():
+    p1, other = raw(severity="P1"), raw(severity="P1", summary="A new hole.")
+    rounds = [done(n, f"h{n}", p1) for n in (1, 2, 3)]
+    fourth = done(4, "h4", other)
+    records = [*rounds, proceed_at(rounds[-1]), fourth]
+    excused = review.excused(records, "s1:plan")
+    assert not review.cleared(records, "s1", "plan", "h4")
+    assert review.p1_rounds([*rounds, fourth], excused) == 1
+    assert review.next_round([*rounds, fourth], "h5", excused) == RoundPlan(5, scoped=True, base_hash="h4")
+
+
+def test_a_waived_p1_is_never_carried_into_the_next_round():
+    p1 = raw(severity="P1")
+    rounds = [done(n, f"h{n}", p1) for n in (1, 2, 3)]
+    assert [f["id"] for f in review.carried(rounds, "s1:plan")] == [id_of(p1)]
+    assert review.carried([*rounds, proceed_at(rounds[-1])], "s1:plan") == []
+
+
+def test_an_accepted_finding_at_the_old_cap_count_is_carried_then_dropped_as_fixed():
+    p2 = raw(severity="P2")
+    rounds = [done(1, "h1", p2), done(2, "h2", p2), done(3, "h3", p2)]
+    records = [*rounds, person(id_of(p2), version="h3")]
+    assert review.next_round(rounds, "h4", set()) == RoundPlan(4, scoped=True, base_hash="h3")
+    assert [f["id"] for f in review.carried(records, "s1:plan")] == [id_of(p2)]
+    fourth = done(4, "h4", carried=(id_of(p2),))
+    assert review.unfixed([*records, fourth]) == []
 
 
 def test_cap_after_three():
@@ -213,16 +254,15 @@ def test_a_delivery_finding_without_a_person_decision_is_undecided():
     assert review.undecided_delivery([*records, person], "s1", "plan") == []
 
 
-def test_feature_gaps_need_the_current_target_while_a_round_is_left():
+def test_feature_gaps_need_the_current_target_at_any_count():
     def feature(n: int, target: str) -> Record:
         return review.round_record("p1", "feature", RoundPlan(n, n > 1, ""), target, [])
 
     assert review.feature_gaps("p1", [feature(1, "h1")], "h1") == []
-    assert review.feature_gaps("p1", [feature(1, "h1")], "h2") == [
+    capped = [feature(n, f"h{n}") for n in (1, 2, 3)]
+    assert review.feature_gaps("p1", capped, "h4") == [
         "the feature review has not reviewed the current contract and stories; run a feature round"
     ]
-    capped = [feature(n, f"h{n}") for n in (1, 2, 3)]
-    assert review.feature_gaps("p1", capped, "h4") == []
 
 
 def person(finding: str, answer: str = review.ACCEPT, version: str = "h1") -> Record:

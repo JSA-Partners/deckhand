@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, asks, decisions, features, git, pins, queue, quiz, review, signoff, versions
+from deckhand import answers, asks, decisions, features, git, pins, queue, quiz, signoff, versions
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
@@ -76,8 +76,7 @@ class Decide(StoryStep):
             feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
-        wants_head = kind == signoff.KIND or (kind == review.CAP_DECISION and parsed.get("stage") == "branch")
-        head = self._head(subject, team_key(parsed)) if wants_head else ""
+        head = self._head(subject, team_key(parsed)) if kind == signoff.KIND else ""
         pin = pins.pin(
             store,
             feature,

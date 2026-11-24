@@ -9,7 +9,7 @@ def test_long_titles_end_in_an_ellipsis_and_every_row_fits():
         lines = shown(cols=cols)
         assert all(frame.cells(line.text) <= cols for line in lines)
     row = section(shown(cols=70), "working")[0]
-    assert "Add a farewell banner to the g... branch review 2/3" in row
+    assert "Add a farewell banner to the g... branch review 2" in row
 
 
 def test_wide_characters_count_two_cells():

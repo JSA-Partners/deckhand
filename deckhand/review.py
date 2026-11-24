@@ -174,7 +174,7 @@ def unfixed(records: list[Record]) -> list[dict]:
 
 def carried(records: list[Record], prefix: str) -> list[dict]:
     held = last(counted(records, prefix)[0])
-    p1 = open_p1(held, declined(records)) if held else []
+    p1 = open_p1(held, excused(records, prefix)) if held else []
     ids = {f["id"] for f in p1}
     return p1 + [f for f in _unfixed(records, prefix) if f["id"] not in ids]
 
@@ -244,16 +244,20 @@ def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "RE
     ]
 
 
-def next_round(rounds: list[Record], target_hash: str, declined: set[str], head: str = "") -> RoundPlan | Stop:
+def p1_rounds(rounds: list[Record], excused: set[str]) -> int:
+    return sum(not r.data.get("carry") and bool(open_p1(r, excused)) for r in rounds)
+
+
+def next_round(rounds: list[Record], target_hash: str, excused: set[str], head: str = "") -> RoundPlan | Stop:
     latest = last(rounds)
     if latest is None:
         return RoundPlan(1, scoped=False, base_hash="")
     if latest.data["target_hash"] == target_hash:
         if head and latest.data.get("head") and latest.data["head"] != head:
             return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
-        return Stop("unchanged") if open_p1(latest, declined) else Stop("clean")
-    if reviewed_count(rounds) >= CAP:
-        return Stop("cap") if open_p1(latest, declined) else Stop("cap-clear")
+        return Stop("unchanged") if open_p1(latest, excused) else Stop("clean")
+    if at_cap(rounds, excused):
+        return Stop("cap")
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
 
 
@@ -261,8 +265,8 @@ def reviewed(record: Record) -> str:
     return record.data.get("head") or record.data["target_hash"]
 
 
-def cap_version(round: Record, at: str) -> str:
-    return f"{round.subject}:{at}"
+def cap_version(round: Record) -> str:
+    return f"{round.subject}:{reviewed(round)}"
 
 
 def _cap_cut(record: Record) -> int:
@@ -296,20 +300,26 @@ def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     return [r for r in rounds if _n(r) > cut], cut
 
 
-def at_cap(rounds: list[Record], declined: set[str]) -> bool:
+def waived(records: list[Record], prefix: str) -> set[str]:
+    story, _, stage = prefix.rpartition(":")
+    pinned = {r.version for r in _cap_answers(records, cap_subject(story, stage), PROCEED)}
+    rounds = [r for r in counted(records, prefix)[0] if cap_version(r) in pinned]
+    return {f["id"] for r in rounds for f in open_p1(r, declined(records))}
+
+
+def excused(records: list[Record], prefix: str) -> set[str]:
+    return declined(records) | waived(records, prefix)
+
+
+def at_cap(rounds: list[Record], excused: set[str]) -> bool:
     latest = last(rounds)
-    return latest is not None and reviewed_count(rounds) >= CAP and bool(open_p1(latest, declined))
+    return latest is not None and bool(open_p1(latest, excused)) and p1_rounds(rounds, excused) >= CAP
 
 
 def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
-    held, _ = counted(records, f"{story}:{stage}")
-    latest = last(held)
-    if latest is None:
-        return False
-    if not open_p1(latest, declined(records)) and (reviewed(latest) == at or reviewed_count(held) >= CAP):
-        return True
-    pinned = cap_version(latest, at)
-    return any(r.version == pinned for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
+    prefix = f"{story}:{stage}"
+    latest = last(counted(records, prefix)[0])
+    return latest is not None and reviewed(latest) == at and not open_p1(latest, excused(records, prefix))
 
 
 def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
@@ -317,7 +327,7 @@ def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
     latest = last(rounds)
     if latest is None:
         return ["the feature review has not run"]
-    if reviewed(latest) != at and reviewed_count(rounds) < CAP:
+    if reviewed(latest) != at:
         return ["the feature review has not reviewed the current contract and stories; run a feature round"]
     found = open_p1(latest, declined(records))
     return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]

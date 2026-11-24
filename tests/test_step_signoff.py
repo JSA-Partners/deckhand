@@ -310,7 +310,7 @@ def test_branch_cap_proceed_clears_the_branch_review(
     step = Decide(store, runner=Shell(), repo=repo)
     assert re.search("branch review has not stopped clean", gap_text(store))
     question = answer(state, step, capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed")
-    assert question["question"].startswith("Three branch review rounds ran")
+    assert question["question"].startswith("Three review rounds left a P1 open. Proceed to sign-off")
     assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch"]
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
@@ -336,7 +336,7 @@ def test_cap_question_skips_carry_rounds(tmp_path: Path, repo: Path, state: Path
     question = answer(
         state, Decide(store, Shell(), repo), capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed"
     )
-    assert "3 rounds, 1 P1 open" in question["question"]
+    assert "3 rounds left a P1 open, 1 P1 open at c2" in question["question"]
 
 
 def test_findings_screen_folds_doubtful_and_shows_declines(

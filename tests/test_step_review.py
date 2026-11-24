@@ -427,20 +427,29 @@ def test_branch_review_without_a_worktree_refuses(tmp_path: Path, repo: Path):
         Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo).context(["s1", "--stage", "branch", *TEAM])
 
 
-def test_proceed_at_the_cap_ends_the_review(
+def test_proceed_at_the_cap_stops_proceeded_and_a_revision_still_gets_a_round(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = planned(tmp_path, repo)
     step = Review(store, Git(BASE), repo)
     for n in (1, 2, 3):
+        if n > 1:
+            submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
         record_round(step, tmp_path, raw(severity="P1", summary=f"Gap {n}."))
-        submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
+    submit(store, tmp_path, repo, PLAN + "\nRevision 4.\n")
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap"
+    submit(store, tmp_path, repo, PLAN + "\nRevision 3.\n")
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "unchanged"
     answer(state, Decide(store), capsys, ["review-cap", "ACME-1", "--stage", "plan"], "Proceed")
     assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "proceeded"
+    submit(store, tmp_path, repo, PLAN + "\nRevision 4.\n")
+    facts = shown(step, capsys, "s1", "--stage", "plan")
+    assert (facts["stop"], facts["round"], facts["scoped"], facts["carried"]) == (None, 4, True, [])
+    record_round(step, tmp_path, raw(severity="P1", summary="A new hole."))
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "unchanged"
 
 
-def test_the_cap_without_an_open_p1_ends_the_review_on_its_own(
+def test_rounds_past_three_without_a_p1_keep_reviewing_and_never_print_cap_clear(
     tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = planned(tmp_path, repo)
@@ -448,7 +457,12 @@ def test_the_cap_without_an_open_p1_ends_the_review_on_its_own(
     for n in (1, 2, 3):
         record_round(step, tmp_path, raw(severity="P2", summary=f"Gap {n}."))
         submit(store, tmp_path, repo, PLAN + f"\nRevision {n}.\n")
-    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "cap-clear"
+    capsys.readouterr()
+    step.context(["s1", "--stage", "plan", *TEAM])
+    out = capsys.readouterr().out
+    assert "round 4, scoped to the revision" in out and "cap-clear" not in out
+    record_round(step, tmp_path)
+    assert shown(step, capsys, "s1", "--stage", "plan")["stop"] == "clean"
 
 
 def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path):

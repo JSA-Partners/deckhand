@@ -18,8 +18,7 @@ class Stage:
 
 
 def as_data(stage: Stage) -> dict:
-    cap = review.CAP if stage.round is not None else None
-    return {"name": stage.name, "round": stage.round, "cap": cap, "since": stage.since}
+    return {"name": stage.name, "round": stage.round, "since": stage.since}
 
 
 def _newest(records: list[Record]) -> str | None:

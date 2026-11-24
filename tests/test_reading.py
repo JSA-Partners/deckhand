@@ -36,7 +36,7 @@ def read(
 
 
 def story(ref: str, title: str, since: str) -> dict:
-    stage = {"name": "planning", "round": None, "cap": None, "since": since}
+    stage = {"name": "planning", "round": None, "since": since}
     found = {"ref": ref, "title": title, "state": "Backlog", "owner": None, "mine": True, "blocked_by": []}
     return found | {"stage": stage, "completed_at": None}
 

@@ -74,8 +74,8 @@ def _stage(story: dict) -> tuple[str, str]:
     name = _clean(stage, "name")
     if not name:
         return "", ""
-    round, cap = _number(stage, "round"), _number(stage, "cap")
-    return (f"{name} {round}/{cap}" if round and cap else name), standing.text(stage, "since")
+    round = _number(stage, "round")
+    return (f"{name} {round}" if round else name), standing.text(stage, "since")
 
 
 def _hand_detail(hand: Hand | None) -> tuple[Detail, ...]:

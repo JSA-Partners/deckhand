@@ -435,34 +435,33 @@ def rounds(store: FakeStore, stage: str, *items: dict, count: int = 3) -> Record
     return review.last(review.rounds_of(store.records("s1"), f"s1:{stage}"))
 
 
-def proceed(store: FakeStore, stage: str, latest: Record, at: str) -> None:
-    version = review.cap_version(latest, at)
+def proceed(store: FakeStore, stage: str, latest: Record) -> None:
+    version = review.cap_version(latest)
     data = {"answer": review.PROCEED}
     store.put_record(
         "s1", Record(review.CAP_DECISION, review.cap_subject("s1", stage), version, review.PERSON + "s", data)
     )
 
 
-def test_branch_cap_waits_for_the_person_at_the_checked_head():
+def test_branch_cap_waits_for_the_person_until_proceed_whatever_the_checked_head():
     store = alpha()
     latest = rounds(store, "branch", raw(severity="P1"))
     store.put_record("s1", Record("checks", "s1", "h4", "agent:checks", {"head": "h4", "passed": True}))
     [item] = waiting(store)
     assert (item.kind, item.rank, item.at) == ("finding", 1, latest.at)
+    assert item.lines[1:] == ["three branch review rounds left a P1 open"]
     assert item.next == ["decide context review-cap ACME-1 --stage branch"]
-    proceed(store, "branch", latest, "h3")
-    assert kinds(waiting(store)) == [("finding", 1, "ACME-1")]
-    proceed(store, "branch", latest, "h4")
+    proceed(store, "branch", latest)
     assert waiting(store) == []
 
 
-def test_plan_cap_waits_for_the_person_at_the_plan_version():
+def test_plan_cap_waits_for_the_person_until_proceed():
     store = alpha()
     latest = rounds(store, "plan", raw(severity="P1"))
     store.put_record("s1", Record(implplan.PURPOSE, "s1", "plan-v4", "agent:implplan", manifest()))
     [item] = waiting(store)
     assert (item.kind, item.next) == ("finding", ["decide context review-cap ACME-1 --stage plan"])
-    proceed(store, "plan", latest, "plan-v4")
+    proceed(store, "plan", latest)
     assert waiting(store) == []
 
 

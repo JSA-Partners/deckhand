@@ -30,14 +30,14 @@ Review the plan in rounds from `deckhand review context REF --stage plan`: one d
 listed lens at once, each given its stage, lens path, target path and carried findings, then
 deckhand:confidence on the joined list and target. Save with
 `deckhand review apply REF round --stage plan --findings FILE --target HASH`. Record a fix with
-`deckhand review apply REF resolve --stage plan --accept ID`, or propose a decline with `--propose-decline ID --reason TEXT`; declining, a scope change, a cap and any open finding are the person's; no docs decision excuses one. After fixing, rerun the context: clean, cap-clear or proceeded carries on.
+`deckhand review apply REF resolve --stage plan --accept ID`, or propose a decline with `--propose-decline ID --reason TEXT`; declining, a scope change, a cap and any open finding are the person's; no docs decision excuses one. After fixing, rerun the context: clean or proceeded carries on.
 
 Build with superpowers:test-driven-development, and impeccable:impeccable when a person sees
 it. Commit with `deckhand build apply REF commit --message FILE`. Sync main with
 `deckhand build apply REF sync`, resolve conflicts, commit. Then `deckhand checks apply REF` and `deckhand build apply REF push`.
 
 Review the branch likewise with `--stage branch`, then deckhand:document; commit its
-edits. Repeat checks, push and branch review until clean, cap-clear or
+edits. Repeat checks, push and branch review until clean or
 proceeded at the pushed head.
 
 `deckhand quiz context REF` gives quiz size and shapes. Write the change summary by intent
