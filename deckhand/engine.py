@@ -128,6 +128,8 @@ class Engine:
         self._budget = budget.kept(self._state)
         hands = self._state.hands()
         self._shown.limit(self._limit(now))
+        # Any link landing after a wake counts, a budget-gated one included; read first so it matches the link taken.
+        answered = self._linear.began()
         linked = self._take_link(now)
         self._poke_on_turn_end(hands, now)
         busy = self._collect(now)
@@ -142,7 +144,7 @@ class Engine:
         now_facts = self._facts(now, read, hands, busy)
         # Reconcile before the snapshot, so a stop decided this tick already holds its story's stalled item.
         began = self._fleets.began()
-        linked_since = self._slept is None or (self._newest is not None and self._newest.at > self._slept)
+        linked_since = self._slept is None or (answered is not None and answered > self._slept)
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
             self._reconcile(good, now_facts)

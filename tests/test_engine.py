@@ -118,7 +118,7 @@ class Rig:
     def link(self) -> Linked:
         stores = Stores(app=CachedStore(self.down), person=self.store)
         found = linker.link("ACME", self.fleets.latest, self.clock, lambda: stores, lambda: DAY)
-        self.linear.value = found
+        self.linear.value, self.linear.at = found, self.clock()
         return found
 
     def sessions(self, *rows: dict) -> None:
@@ -307,6 +307,25 @@ def test_no_reconcile_until_a_fleet_read_and_a_link_land_after_a_wake(rig: Rig):
     rig.link()
     rig.step()
     assert [a.name for a in rig.worker.submitted] == [NAME]
+
+
+def test_a_wake_while_linear_is_limited_still_delivers_mail(clone: Path):
+    configure(clone, 1)
+    rig = Rig(building(), row("ACME-1", "stopped"), row("ACME-2", "working", "busy"))
+    held_hand(rig)
+    started(rig.store, "s1")
+    rig.ready()
+    rig.step(31)
+    kept_budget(rig, until=rig.clock() + 3600)
+    rig.state.post("wake:s1:n1", NAME, asks.ANSWER, "Redis")
+    rig.step()
+    rig.sessions(row("ACME-1", "stopped"))
+    rig.step()
+    assert rig.worker.submitted == []
+    rig.linear.at = rig.clock()
+    rig.step()
+    [resume] = rig.worker.submitted
+    assert isinstance(resume, Resume) and resume.name == NAME and "Redis" in resume.text
 
 
 def test_linear_down_marks_the_snapshot_stale_and_still_delivers_mail(clone: Path):
