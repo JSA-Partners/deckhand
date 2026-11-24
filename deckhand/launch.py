@@ -16,8 +16,9 @@ from deckhand.step import Refusal
 HAND_EXEMPT = ["deckhand *", "gh pr view *", "gh pr diff *", "gh pr checks *"]
 CAPTAIN_EXEMPT = ["deckhand *"]
 NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "PushNotification", "mcp__*"]
-CAPTAIN_ALLOW = ["Bash(deckhand *)", "Read", "Grep", "Glob", "Agent", "AskUserQuestion", "Skill(deckhand:*)"]
-CAPTAIN_DENY = ["SendMessage", "PushNotification", "Write", "Edit", "NotebookEdit"]
+CAPTAIN_ALLOW = ["Bash(deckhand *)", "Read", "Grep", "Glob", "Agent", "AskUserQuestion"]
+CAPTAIN_ALLOW += ["Skill(deckhand:*)", "Skill(superpowers:*)", "Skill(impeccable:*)"]
+CAPTAIN_DENY = ["SendMessage", "PushNotification", "NotebookEdit"]
 GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
 CLAUDE_CONFIG = (
     ".claude/settings.json",
@@ -61,6 +62,10 @@ def _forms(*paths: Path) -> list[Path]:
 # A sandboxed shell's $TMPDIR points here, so a hand writes its input files under it.
 def sandbox_tmp() -> list[Path]:
     return _forms(Path(f"/tmp/claude-{os.getuid()}"))
+
+
+def input_roots() -> list[Path]:
+    return _forms(Path(tempfile.gettempdir()), *sandbox_tmp())
 
 
 def protected(config: Path, state: Path) -> Protected:
@@ -160,7 +165,7 @@ def hand_settings(
             "allow": ["Bash(deckhand *)"],
             "deny": guarded["deny"],
             "blockWritesOutsideWorkingDirectories": True,
-            "additionalDirectories": [str(path) for path in _forms(Path(tempfile.gettempdir()), *sandbox_tmp())],
+            "additionalDirectories": [str(path) for path in input_roots()],
         },
         "crossSessionInbound": "refuse",
         "disableClaudeAiConnectors": True,
@@ -168,8 +173,9 @@ def hand_settings(
     }
 
 
+# Planning saves its answers through --file, so the captain writes only where deckhand reads input files.
 def captain_settings(protected: Protected) -> dict[str, Any]:
-    guarded = _guarded(protected, [], [])
+    guarded, roots = _guarded(protected, [], []), input_roots()
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",
@@ -177,8 +183,9 @@ def captain_settings(protected: Protected) -> dict[str, Any]:
         "crossSessionInbound": "refuse",
         "permissions": {
             "defaultMode": "dontAsk",
-            "allow": list(CAPTAIN_ALLOW),
+            "allow": [*CAPTAIN_ALLOW, *(_rule(tool, root, "/**") for root in roots for tool in ("Write", "Edit"))],
             "deny": [*CAPTAIN_DENY, *guarded["deny"]],
+            "additionalDirectories": [str(root) for root in roots],
         },
         "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"], auto_allow=False),
     }

@@ -173,9 +173,10 @@ def test_deckhand_policy_and_lenses_stay_editable(layout: dict) -> None:
             assert not [p for p in patterns if covers(p, str(target))], target
 
 
-def test_the_captain_can_ask_and_read_but_not_write_send_or_notify(layout: dict) -> None:
+def test_the_captain_can_ask_read_and_plan_but_not_send_or_notify(layout: dict) -> None:
     permissions = layout["captain"]["permissions"]
-    assert permissions["allow"] == [
+    tools = [rule for rule in permissions["allow"] if not rule.startswith(("Write(", "Edit("))]
+    assert tools == [
         "Bash(deckhand *)",
         "Read",
         "Grep",
@@ -183,12 +184,27 @@ def test_the_captain_can_ask_and_read_but_not_write_send_or_notify(layout: dict)
         "Agent",
         "AskUserQuestion",
         "Skill(deckhand:*)",
+        "Skill(superpowers:*)",
+        "Skill(impeccable:*)",
     ]
     assert permissions["defaultMode"] == "dontAsk"
-    assert {"SendMessage", "PushNotification", "Write", "Edit", "NotebookEdit"} <= set(permissions["deny"])
+    assert {"SendMessage", "PushNotification", "NotebookEdit"} <= set(permissions["deny"])
     assert "AskUserQuestion" not in permissions["deny"]
     assert layout["captain"]["sandbox"]["autoAllowBashIfSandboxed"] is False
     assert layout["captain"]["env"] == {"DECKHAND_ROLE": "captain"}
+
+
+def test_the_captain_writes_only_in_the_input_folders(layout: dict) -> None:
+    permissions = layout["captain"]["permissions"]
+    roots = launch.input_roots()
+    writes = [rule for rule in permissions["allow"] if rule.startswith(("Write(", "Edit("))]
+    assert writes == [rule(tool, root, "/**") for root in roots for tool in ("Write", "Edit")]
+    assert not {"Write", "Edit"} & set(permissions["allow"])
+    assert permissions["additionalDirectories"] == [str(root) for root in roots]
+    assert str(Path(tempfile.gettempdir()).resolve()) in permissions["additionalDirectories"]
+    assert f"/tmp/claude-{os.getuid()}" in permissions["additionalDirectories"]
+    for path in layout["secrets"]:
+        assert rule("Edit", path, "/**") in permissions["deny"]
 
 
 def test_the_captain_rings_the_terminal_bell_and_refuses_peer_messages(layout: dict) -> None:

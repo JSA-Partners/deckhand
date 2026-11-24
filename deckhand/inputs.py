@@ -3,7 +3,6 @@ from __future__ import annotations
 import fcntl
 import os
 import stat
-import tempfile
 from pathlib import Path
 
 from deckhand import answers, config, git, launch
@@ -50,7 +49,7 @@ def _allowed(path: Path) -> bool:
     denied = (config.config_dir(), answers.state_dir())
     if any(path.is_relative_to(Path(root).resolve()) for root in denied):
         return False
-    roots = [Path(tempfile.gettempdir()).resolve(), *(path.resolve() for path in launch.sandbox_tmp())]
+    roots = [path.resolve() for path in launch.input_roots()]
     try:
         roots.append(git.working_directory().resolve())
     except Refusal:
