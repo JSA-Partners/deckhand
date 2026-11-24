@@ -95,7 +95,7 @@ class Down:
         method = getattr(self.inner, name)
 
         def called(*args: Any, **kwargs: Any) -> Any:
-            if name not in ("records", "put_record"):
+            if name not in ("records", "put_record", "recorded"):
                 self.calls += 1
                 if self.down:
                     raise LinearError("network", "Linear is unreachable")

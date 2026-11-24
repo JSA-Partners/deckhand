@@ -398,6 +398,8 @@ PROJECT_NODE = {
     "startDate": "2026-11-01",
     "targetDate": None,
     "labels": {"nodes": [{"name": "deckhand"}], "pageInfo": {"hasNextPage": False}},
+    "anyIssue": {"nodes": [{"id": "s1"}]},
+    "unfinished": {"nodes": [{"id": "s1"}]},
 }
 PROJECT = {
     "id": "proj-1",
@@ -406,7 +408,9 @@ PROJECT = {
     "start_date": "2026-11-01",
     "target_date": None,
     "labels": ["deckhand"],
+    "finished": False,
 }
+FINISHED_NAMES = ["Done", "Canceled", "Duplicate"]
 
 
 def test_create_project_resolves_the_team_and_sends_teamids(records: LocalRecords) -> None:
@@ -481,7 +485,7 @@ def test_create_project_repeat_id_raises_duplicate(records: LocalRecords) -> Non
 def test_project_maps_the_node(records: LocalRecords) -> None:
     client = FakeClient(Project={"project": PROJECT_NODE})
     assert LinearStore(client, records).project("proj-1") == PROJECT
-    assert client.calls == [("Project", {"id": "proj-1"})]
+    assert client.calls == [("Project", {"id": "proj-1", "finished": FINISHED_NAMES})]
 
 
 def test_project_not_found_is_none(records: LocalRecords) -> None:
@@ -501,7 +505,7 @@ def test_team_projects_queries_the_team_and_maps_nodes(records: LocalRecords) ->
         TeamProjects={"team": {"projects": {"nodes": [PROJECT_NODE], "pageInfo": DONE}}},
     )
     assert LinearStore(client, records).team_projects("ACME") == [PROJECT]
-    assert client.calls[1] == ("TeamProjects", {"id": TEAM_ID, "after": None})
+    assert client.calls[1] == ("TeamProjects", {"id": TEAM_ID, "finished": FINISHED_NAMES, "after": None})
 
 
 def test_team_projects_read_across_pages(records: LocalRecords) -> None:
@@ -511,7 +515,7 @@ def test_team_projects_read_across_pages(records: LocalRecords) -> None:
         TeamProjects=[{"team": {"projects": page([PROJECT_NODE], "p1")}}, {"team": {"projects": page([later])}}],
     )
     assert [p["id"] for p in LinearStore(client, records).team_projects("ACME")] == ["proj-1", "proj-2"]
-    assert client.calls[2] == ("TeamProjects", {"id": TEAM_ID, "after": "p1"})
+    assert client.calls[2] == ("TeamProjects", {"id": TEAM_ID, "finished": FINISHED_NAMES, "after": "p1"})
 
 
 def test_set_project_dates_sends_both_dates_and_null_clears(records: LocalRecords) -> None:
@@ -744,3 +748,23 @@ def test_a_store_given_known_team_ids_asks_for_none(records: LocalRecords) -> No
     assert client.calls == [
         ("IssueCreate", {"input": {"id": UUID, "teamId": TEAM_ID, "title": "One", "description": ""}})
     ]
+
+
+@pytest.mark.parametrize(
+    ("any_issue", "unfinished", "finished"),
+    [([], [], False), ([{"id": "s1"}], [{"id": "s1"}], False), ([{"id": "s1"}], [], True)],
+)
+def test_a_project_is_finished_when_it_has_stories_and_none_unfinished(
+    any_issue: list, unfinished: list, finished: bool, records: LocalRecords
+) -> None:
+    node = {**PROJECT_NODE, "anyIssue": {"nodes": any_issue}, "unfinished": {"nodes": unfinished}}
+    client = FakeClient(Project={"project": node})
+    assert LinearStore(client, records).project("proj-1")["finished"] is finished
+    assert client.calls == [("Project", {"id": "proj-1", "finished": FINISHED_NAMES})]
+
+
+def test_recorded_reads_the_local_records(records: LocalRecords) -> None:
+    records.put_record(UUID, record())
+    client = FakeClient()
+    assert LinearStore(client, records).recorded("approval") == [UUID]
+    assert client.calls == []

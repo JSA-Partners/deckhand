@@ -113,6 +113,11 @@ class LocalRecords:
             ).fetchall()
         return [replace(Record.from_json(body), at=written) for body, written in rows]
 
+    def recorded(self, kind: str) -> list[str]:
+        with self._connection() as db:
+            rows = db.execute("SELECT DISTINCT issue FROM records WHERE kind = ? ORDER BY issue", (kind,)).fetchall()
+        return [issue for (issue,) in rows]
+
 
 def connect(path: Path) -> sqlite3.Connection:
     try:

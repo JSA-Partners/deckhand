@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,9 @@ from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.after import After
 from deckhand.steps.decide import Decide
+from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
+from tests.conftest import CountingStore
 from tests.test_feature_approval import TEAM, approve_everything, setup
 from tests.test_implplan import manifest, repo
 from tests.test_step_build import BRANCH, Shell, labeled
@@ -176,3 +179,24 @@ def test_after_merge_sync_refuses_before_the_merge_and_on_a_dirty_worktree(tmp_p
     with pytest.raises(Refusal, match="ACME-1 has no worktree"):
         After(store, shell, repo).apply(["ACME-1", "sync", *TEAM])
     assert shell.ran("git", "fetch") == [] and shell.ran("git", "merge") == []
+
+
+def test_the_after_merge_queue_loads_a_released_feature_only_for_an_item_left_in_the_records(
+    counting_store: Callable[[FakeStore], CountingStore],
+):
+    store = chored()
+    me = store.viewer()["id"]
+    store.assign("s1", me)
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    beta = create_id("ACME:Beta", "feature")
+    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
+    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
+    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
+    counting = counting_store(store)
+    assert signoff.after_merge_queue(CachedStore(counting), "ACME", me) == []
+    assert [call[1] for call in counting.log if call[0] == "project_issues"] == [(beta,)]
+    After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
+    counting.log.clear()
+    assert len(signoff.after_merge_queue(CachedStore(counting), "ACME", me)) == 1
+    assert len([call for call in counting.log if call[0] == "project_issues"]) == 2

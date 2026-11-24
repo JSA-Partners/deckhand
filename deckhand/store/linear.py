@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from deckhand.features import FINISHED
 from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearClient, LinearError
 from deckhand.linear.workspace import GROUP
@@ -32,6 +33,7 @@ def _project(node: dict[str, Any]) -> dict[str, Any]:
         "labels": sorted(
             n["name"] for n in _nodes(node["labels"], node["id"], "project labels", queries.PROJECT_LABEL_LIMIT)
         ),
+        "finished": bool(node["anyIssue"]["nodes"]) and not node["unfinished"]["nodes"],
     }
 
 
@@ -205,6 +207,9 @@ class LinearStore(Store):
     def records(self, issue: str) -> list[Record]:
         return self._records.records(issue)
 
+    def recorded(self, kind: str) -> list[str]:
+        return self._records.recorded(kind)
+
     def relate(self, blocker: str, blocked: str) -> None:
         relation = {"issueId": self._uuid(blocker), "relatedIssueId": self._uuid(blocked), "type": "blocks"}
         self._client.query(queries.RELATION_CREATE, {"input": relation})
@@ -245,7 +250,7 @@ class LinearStore(Store):
 
     def project(self, id: str) -> dict | None:
         try:
-            node = self._client.query(queries.PROJECT, {"id": id})["project"]
+            node = self._client.query(queries.PROJECT, {"id": id, "finished": list(FINISHED)})["project"]
         except LinearError as error:
             if _missing(error):
                 return None
@@ -253,7 +258,8 @@ class LinearStore(Store):
         return _project(node)
 
     def team_projects(self, team: str) -> list[dict]:
-        found = self._paged(queries.TEAM_PROJECTS, {"id": self._team_id(team)}, ("team", "projects"))
+        variables = {"id": self._team_id(team), "finished": list(FINISHED)}
+        found = self._paged(queries.TEAM_PROJECTS, variables, ("team", "projects"))
         return [_project(n) for n in found]
 
     def set_project_dates(self, project: str, start: str | None, target: str | None) -> None:

@@ -177,6 +177,7 @@ def test_project_round_trip() -> None:
         "start_date": None,
         "target_date": None,
         "labels": [],
+        "finished": False,
     }
     assert store.project("p1") == expected
     store.set_project_dates("p1", "2026-11-01", "2026-12-01")
@@ -322,3 +323,25 @@ def test_records_are_refused_by_identifier() -> None:
         store.put_record("ACME-5", Record("tier", "s", "v1", "person", {"level": 1}))
     with pytest.raises(Refusal):
         store.records("ACME-5")
+
+
+def test_a_project_is_finished_once_it_has_stories_and_all_are_finished() -> None:
+    store = FakeStore()
+    store.create_project("p1", "ACME", "First", "")
+    assert [p["finished"] for p in store.team_projects("ACME")] == [False]
+    store.create_issue("s1", "ACME", "One", "", "p1", [])
+    store.create_issue("s2", "ACME", "Two", "", "p1", [])
+    store.set_issue_state("s1", "Done")
+    assert store.project("p1")["finished"] is False
+    store.set_issue_state("s2", "Canceled")
+    assert store.project("p1")["finished"] is True
+    assert [p["finished"] for p in store.team_projects("ACME")] == [True]
+
+
+def test_recorded_lists_the_issues_holding_a_kind() -> None:
+    store = FakeStore()
+    store.put_record("s2", Record("tier", "s2", "v1", "person", {}))
+    store.put_record("s1", Record("tier", "s1", "v1", "person", {}))
+    store.put_record("s1", Record("quiz", "s1", "v1", "person", {}))
+    assert store.recorded("tier") == ["s1", "s2"]
+    assert store.recorded("sign-off") == []

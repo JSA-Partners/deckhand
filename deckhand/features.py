@@ -196,8 +196,13 @@ def team_features(store: Store, team: str) -> list[dict]:
     return [p for p in store.team_projects(team) if is_feature(p)]
 
 
-def started(store: Store, team: str) -> list[Feature]:
-    return [load(store, p) for p in team_features(store, team) if p["start_date"]]
+def _started(store: Store, team: str, finished: bool) -> list[Feature]:
+    held = [p for p in team_features(store, team) if p["start_date"] and p["finished"] is finished]
+    return [load(store, p) for p in held]
+
+
+def released(store: Store, team: str) -> list[Feature]:
+    return _started(store, team, finished=True)
 
 
 def _one_open(found: list[Feature]) -> Feature | None:
@@ -208,20 +213,18 @@ def _one_open(found: list[Feature]) -> Feature | None:
 
 
 def open_features(store: Store, team: str) -> list[Feature]:
-    return [f for f in started(store, team) if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
+    return [f for f in _started(store, team, finished=False) if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
 
 
 def open_feature(store: Store, team: str) -> Feature | None:
-    return _one_open(started(store, team))
+    return _one_open(open_features(store, team))
 
 
 def current(store: Store, team: str) -> Feature | None:
-    held = started(store, team)
-    found = _one_open(held)
+    found = open_feature(store, team)
     if found is not None:
         return found
-    released = [f for f in held if phase(f) is Phase.RELEASED]
-    return max(released, key=_released_at, default=None)
+    return max(released(store, team), key=_released_at, default=None)
 
 
 def _released_at(feature: Feature) -> tuple[str, str, str]:

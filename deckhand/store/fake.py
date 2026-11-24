@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from deckhand.features import FINISHED
 from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
 from deckhand.records import Clock, Record
 from deckhand.ref import Ref
@@ -172,6 +173,9 @@ class FakeStore(Store):
             found.append(replace(Record.from_json(meta["record"]), at=meta.get("written", held[url]["updatedAt"])))
         return found
 
+    def recorded(self, kind: str) -> list[str]:
+        return sorted(issue for issue in self._attachments if any(r.kind == kind for r in self.records(issue)))
+
     def assign(self, issue: str, user: str) -> None:
         self._issues[issue]["assignee"] = user
         self._issues[issue]["assignee_name"] = user
@@ -206,9 +210,10 @@ class FakeStore(Store):
         self._projects[project]["labels"] = sorted(labels)
         self._wrote("set_project_labels", project, sorted(labels))
 
-    @staticmethod
-    def _project(project: dict[str, Any]) -> dict[str, Any]:
-        return {key: copy.deepcopy(value) for key, value in project.items() if key != "team"}
+    def _project(self, project: dict[str, Any]) -> dict[str, Any]:
+        states = [i["state"] for i in self._issues.values() if i["project"] == project["id"]]
+        finished = bool(states) and all(state in FINISHED for state in states)
+        return {key: copy.deepcopy(value) for key, value in project.items() if key != "team"} | {"finished": finished}
 
     def project(self, id: str) -> dict | None:
         found = self._projects.get(id)

@@ -14,6 +14,11 @@ TEAM_LABEL_PAGE = 100
 PROJECT_LABEL_LIMIT = 10
 PROJECT_LABEL_PAGE = f"(first: {PROJECT_LABEL_LIMIT})"
 PROJECT_LABELS_FIELD = f"labels{PROJECT_LABEL_PAGE} {{ nodes {{ name }} {MORE} }}"
+PROJECT_FIELDS = (
+    f"id name description startDate targetDate {PROJECT_LABELS_FIELD} "
+    "anyIssue: issues(first: 1) { nodes { id } } "
+    "unfinished: issues(first: 1, filter: { state: { name: { nin: $finished } } }) { nodes { id } }"
+)
 
 TEAM_ID = """
 query TeamId($key: String!) {
@@ -53,10 +58,10 @@ query IssueLabels($id: String!, $after: String) {{
 """
 
 TEAM_PROJECTS = f"""
-query TeamProjects($id: String!, $after: String) {{
+query TeamProjects($id: String!, $after: String, $finished: [String!]!) {{
   team(id: $id) {{
     projects(first: {TEAM_PROJECT_PAGE}, after: $after) {{
-      nodes {{ id name description startDate targetDate {PROJECT_LABELS_FIELD} }}
+      nodes {{ {PROJECT_FIELDS} }}
       {CURSOR}
     }}
   }}
@@ -64,8 +69,8 @@ query TeamProjects($id: String!, $after: String) {{
 """
 
 PROJECT = f"""
-query Project($id: String!) {{
-  project(id: $id) {{ id name description startDate targetDate {PROJECT_LABELS_FIELD} }}
+query Project($id: String!, $finished: [String!]!) {{
+  project(id: $id) {{ {PROJECT_FIELDS} }}
 }}
 """
 

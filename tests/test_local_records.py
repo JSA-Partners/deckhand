@@ -213,3 +213,14 @@ def test_an_existing_file_open_to_others_becomes_owner_only(tmp_path: Path) -> N
     path.chmod(0o644)
     LocalRecords(path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_recorded_lists_each_issue_holding_a_record_of_a_kind_once(tmp_path: Path) -> None:
+    store = LocalRecords(tmp_path / "deckhand.db")
+    store.put_record(OTHER, tier("a"))
+    store.put_record(OTHER, tier("b"))
+    store.put_record(ID, tier())
+    store.put_record(ID, Record("quiz", "s", "v1", "person", {}))
+    assert store.recorded("tier") == sorted([ID, OTHER])
+    assert store.recorded("quiz") == [ID]
+    assert store.recorded("sign-off") == []
