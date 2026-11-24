@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, asks, ops, quiz, review, signoff, tiers
+from deckhand import answers, asks, ops, queue, quiz, review, signoff, tiers
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -29,6 +29,7 @@ KINDS = (
     signoff.AFTER,
     asks.ANSWER,
     asks.EDIT,
+    queue.STALLED,
 )
 
 _PIN_OPTIONS = (quiz.KIND, asks.ANSWER, signoff.KIND)
@@ -48,6 +49,7 @@ _OPTIONS = {
     signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
     signoff.AFTER: [signoff.DONE, signoff.NOT_YET],
     asks.EDIT: asks.EDIT_OPTIONS,
+    queue.STALLED: [queue.RESTART, queue.LEAVE],
 }
 
 _SIGN_OFF = {
@@ -63,6 +65,7 @@ _DESCRIPTIONS = {
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
     signoff.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
+    queue.STALLED: ["the hand starts again", "the hand stays stopped"],
 }
 
 _ASKS = {
@@ -82,6 +85,7 @@ _ASKS = {
     signoff.AFTER: "Is this after-merge item done for",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
+    queue.STALLED: "",
 }
 _BRANCH_CAP = "Three branch review rounds ran, none clean. Proceed to sign-off or rework the branch for"
 _RECORDED = (
@@ -94,8 +98,18 @@ _RECORDED = (
     signoff.SECOND,
     asks.ANSWER,
     asks.EDIT,
+    queue.STALLED,
 )
-_CHOSEN = ("finding", review.CAP_DECISION, quiz.KIND, signoff.KIND, signoff.SECOND, signoff.AFTER, asks.EDIT)
+_CHOSEN = (
+    "finding",
+    review.CAP_DECISION,
+    quiz.KIND,
+    signoff.KIND,
+    signoff.SECOND,
+    signoff.AFTER,
+    asks.EDIT,
+    queue.STALLED,
+)
 
 _POSITIVE = {
     "contract": "Approve",

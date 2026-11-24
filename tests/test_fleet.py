@@ -156,3 +156,11 @@ def test_live_and_busy():
     assert not fleet.live(session("hand-A", "done", None))
     assert fleet.busy(session("hand-A", "working", "busy"))
     assert not fleet.busy(session("hand-A", "blocked", "waiting"))
+
+
+def test_alive_is_any_status_and_live_needs_a_working_state():
+    assert fleet.alive(session("hand-A", "idle", "idle", "input needed"))
+    assert fleet.alive(session("hand-A", "blocked", "waiting"))
+    assert not fleet.alive(session("hand-A", "failed", None))
+    assert not fleet.live(session("hand-A", "idle", "idle", "input needed"))
+    assert fleet.live(session("hand-A", "blocked", "waiting"))

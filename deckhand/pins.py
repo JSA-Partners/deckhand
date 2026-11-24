@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import asks, features, implplan, planning, quiz, review, signoff, versions
+from deckhand import asks, features, implplan, planning, queue, quiz, review, signoff, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -139,6 +139,19 @@ def _edit_pin(store: Store, feature: features.Feature, ref: str, item: str) -> P
     return Pin(item, held.version, [story["id"]], detail, label, [label])
 
 
+def _stalled_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    launch = startable.launch_of(startable.kind(feature, story))
+    start = queue.last_start(records, launch)
+    if start is None:
+        raise Refusal(f"{story['identifier']} has no hand started")
+    if queue.stall_answer(records, launch) is not None:
+        raise Refusal(f"the stop of {story['identifier']}'s hand since it last started is already settled")
+    detail = "its hand stopped and has written nothing since it last started. Restart it"
+    return Pin(story["id"], start.at, [story["id"]], detail, story["identifier"], [story["identifier"]])
+
+
 def pin(
     store: Store,
     feature: features.Feature,
@@ -180,6 +193,8 @@ def pin(
         return _quiz_pin(store, feature, subject, _number(item or ""))
     if kind == asks.EDIT:
         return _edit_pin(store, feature, subject, item or "")
+    if kind == queue.STALLED:
+        return _stalled_pin(store, feature, subject)
     if kind == asks.ANSWER:
         if len(stories) != 1:
             raise Refusal("question needs exactly one --story")

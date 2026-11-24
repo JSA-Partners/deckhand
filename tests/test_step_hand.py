@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, config, git, implplan, launch, queue, signoff, spikes
+from deckhand import answers, asks, config, features, fleet, git, implplan, launch, queue, signoff, spikes
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
+from deckhand.steps.decide import Decide
 from deckhand.steps.hand import Hand
 from deckhand.store.fake import FakeStore
 from tests.test_feature_approval import P1, approve_everything, setup
@@ -205,6 +206,51 @@ def test_fill_restarts_stalled_once_per_record(clone: Path):
     assert start.at > checked.at
     hand(store, shell).apply(["fill", *TEAM])
     assert shell.launched() == ["hand-ACME-1", "hand-ACME-1"]
+
+
+def answer_the_stop(store: FakeStore, state: Path, answer: str, capsys: pytest.CaptureFixture[str]) -> None:
+    capsys.readouterr()
+    Decide(store).context(["stalled", "ACME-1", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    asked = shown["tool_input"]["questions"][0]
+    answers.record(
+        {"session_id": "sess", "tool_response": {"questions": [asked], "answers": {asked["question"]: answer}}}, state
+    )
+    Decide(store).apply([shown["nonce"], *TEAM])
+
+
+def stalled_items(store: FakeStore, shell: Shell) -> list[queue.Item]:
+    feature = features.open_feature(store, "ACME")
+    found = queue.items(store, "ACME", feature, ME, fleet.sessions(shell), lambda story: Policy("widgets"))
+    return [i for i in found if i.kind == queue.STALLED]
+
+
+def test_restart_makes_the_story_due_and_clears_the_item(clone: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    shell.rows = [row("ACME-1", "failed")]
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1"]
+    assert [i.ref for i in stalled_items(store, shell)] == ["ACME-1"]
+    answer_the_stop(store, state, "Restart", capsys)
+    assert stalled_items(store, shell) == []
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1", "hand-ACME-1"]
+    assert [i.ref for i in stalled_items(store, shell)] == ["ACME-1"]
+
+
+def test_leave_it_stopped_clears_the_item_and_starts_nothing(
+    clone: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    shell.rows = [row("ACME-1", "failed")]
+    answer_the_stop(store, state, "Leave it stopped", capsys)
+    assert stalled_items(store, shell) == []
+    hand(store, shell).apply(["fill", *TEAM])
+    assert shell.launched() == ["hand-ACME-1"]
 
 
 def test_each_start_records_a_fresh_time(clone: Path):

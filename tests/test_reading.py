@@ -24,9 +24,15 @@ def building() -> FakeStore:
     return store
 
 
-def read(store: FakeStore, person=None, sessions: tuple = (), quiet: frozenset[str] = frozenset()) -> reading.Reading:
+def read(
+    store: FakeStore,
+    person=None,
+    sessions: tuple = (),
+    quiet: frozenset[str] = frozenset(),
+    restarts: dict[str, int] | None = None,
+) -> reading.Reading:
     person = person or (lambda: store)
-    return reading.read(store, person, "ACME", Fleet(list(sessions)), LOCAL, DAY, quiet)
+    return reading.read(store, person, "ACME", Fleet(list(sessions)), LOCAL, DAY, quiet, restarts=restarts)
 
 
 def story(ref: str, title: str, since: str) -> dict:
@@ -81,6 +87,16 @@ def test_a_quiet_story_gets_no_stalled_item():
     gone = (hand("ACME-1", "failed", None),)
     assert [(i.kind, i.ref) for i in read(store, sessions=gone).waiting] == [("stalled", "ACME-1")]
     assert read(store, sessions=gone, quiet=frozenset({"ACME-1"})).waiting == []
+
+
+def test_read_passes_the_restart_counts_to_the_queue():
+    store = alpha()
+    started(store, "s1")
+    gone = (hand("ACME-1", "failed", None),)
+    assert [(i.kind, i.ref) for i in read(store, sessions=gone, restarts={"ACME-1": 1}).waiting] == [
+        ("stalled", "ACME-1")
+    ]
+    assert read(store, sessions=gone, restarts={"ACME-1": 0}).waiting == []
 
 
 def test_missing_clone_degrades_to_a_note():

@@ -108,6 +108,10 @@ def captain(sessions: list[Session]) -> Session | None:
     return max(held, key=lambda s: s.started_at, default=None)
 
 
+def alive(session: Session) -> bool:
+    return session.status is not None
+
+
 def live(session: Session) -> bool:
     return session.status is not None and session.state in LIVE
 

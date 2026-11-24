@@ -86,7 +86,7 @@ def launch_of(kind: str) -> str:
     return queue.DRAFT_HAND if kind == DRAFT else queue.STORY_HAND
 
 
-def due(work: Work, feature: Feature, hands: dict[str, fleet.Session]) -> bool:
+def due(work: Work, feature: Feature, hands: dict[str, fleet.Session], restarts: int | None = None) -> bool:
     story = work.story
     session = hands.get(story["identifier"])
     if session is not None and fleet.live(session):
@@ -97,7 +97,9 @@ def due(work: Work, feature: Feature, hands: dict[str, fleet.Session]) -> bool:
         return True
     policy = Policy.load(work.clone)
     second = queue.second_due(story, records, lambda _: policy) is not None
-    return queue.restart_due(story, records, session, launch, second)
+    if not queue.stalled(story, records, session, launch, second):
+        return False
+    return queue.auto_restart(records, launch, restarts) or queue.stall_answer(records, launch) == queue.RESTART
 
 
 def wake_due(feature: Feature, story: dict) -> Record | None:

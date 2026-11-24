@@ -193,3 +193,28 @@ def test_a_hand_never_opens_a_decision(state: Path, monkeypatch: pytest.MonkeyPa
     with pytest.raises(Refusal, match="a hand never decides"):
         Decide(store).context(["contract", P1, *TEAM])
     assert not (state / decisions.PENDING).exists()
+
+
+def test_a_stalled_item_asks_through_decide(state: Path, capsys: pytest.CaptureFixture[str]):
+    from deckhand import asks, queue
+    from tests.test_queue import alpha, started
+
+    store = alpha()
+    started(store, "s1")
+    [start] = [r for r in store.records("s1") if r.kind == asks.HAND_START]
+    capsys.readouterr()
+    Decide(store).context(["stalled", "ACME-1", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    asked = shown["tool_input"]["questions"][0]
+    text = "ACME-1: its hand stopped and has written nothing since it last started. Restart it?"
+    assert asked["question"].startswith(text + " [")
+    assert [o["label"] for o in asked["options"]] == ["Restart", "Leave it stopped"]
+    record_answer(state, asked, "Leave it stopped")
+    Decide(store).apply([shown["nonce"], *TEAM])
+    [record] = [r for r in store.records("s1") if r.kind == queue.STALLED]
+    assert (record.subject, record.version, record.author) == ("s1", start.at, "person:sess")
+    assert record.data["answer"] == "Leave it stopped"
+    with pytest.raises(Refusal, match="already settled"):
+        Decide(store).context(["stalled", "ACME-1", *TEAM, "--json"])
+    with pytest.raises(Refusal, match="ACME-2 has no hand started"):
+        Decide(store).context(["stalled", "ACME-2", *TEAM, "--json"])
