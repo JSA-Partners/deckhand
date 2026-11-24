@@ -22,4 +22,6 @@ is `[]`.
 Add `"changes_delivery": true` to a finding whose fix would change what the story delivers: an
 acceptance criterion, the Contract, or behavior a person would notice. The person decides those.
 When a spec is given, judge the target against it; a finding that contradicts it, or delivers beyond
-or short of it, also gets `changes_delivery` and a `touches` field quoting the spec line.
+or short of it, also gets `changes_delivery` and a `touches` field quoting the spec line. On a branch
+target scoped to a revision, judge short of the spec on the whole branch by opening the worktree
+files; a revision alone is never short of it.

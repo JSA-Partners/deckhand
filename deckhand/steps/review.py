@@ -17,7 +17,7 @@ USAGE = (
     "review takes REF, --stage plan|branch and [--team-key KEY], feature-review [--team-key KEY] alone; context takes"
     " --json; apply takes round --findings FINDINGS.json --target HASH (the target_hash context printed),"
     " round --target HASH alone when context stops at carry, or resolve with --accept ID, --propose-accept ID or"
-    " --propose-decline ID, one --reason TEXT for the proposals (repeat each)"
+    " --propose-decline ID (repeat each), and one --reason TEXT that covers every proposal in the call"
 )
 PROPOSING = {"--propose-accept": review.ACCEPT, "--propose-decline": review.DECLINE}
 FEATURE = "feature"
@@ -39,6 +39,10 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
+        elif arg == "--reason" and "reason" in found:
+            raise Refusal(
+                "one --reason covers every proposal in the call; put proposals with different reasons in separate calls"
+            )
         elif arg in ("--team-key", "--stage", "--findings", "--target", "--reason"):
             found[arg[2:].replace("-", "_")] = next(rest, "")
         elif arg in ("--accept", "--decline"):

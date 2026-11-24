@@ -170,6 +170,18 @@ def test_one_resolve_takes_accepts_and_proposals_together(tmp_path: Path, repo: 
     assert "accepted 2 and proposed 1 findings" in capsys.readouterr().out
 
 
+def test_a_second_reason_refuses_and_writes_nothing(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    step = Review(store, Git(BASE), repo)
+    one, two = raw(summary="One.", changes_delivery=True), raw(summary="Two.", changes_delivery=True)
+    record_round(step, tmp_path, one, two)
+    before = list(store.writes)
+    resolve = ["s1", "resolve", "--stage", "plan", *TEAM, "--propose-decline", finding_id(one), "--reason", "out"]
+    with pytest.raises(Refusal, match="one --reason covers every proposal in the call.*separate calls"):
+        step.apply([*resolve, "--propose-accept", finding_id(two), "--reason", "in"])
+    assert store.writes == before
+
+
 def test_a_delivery_finding_of_an_earlier_round_can_still_be_proposed(tmp_path: Path, repo: Path):
     store = planned(tmp_path, repo)
     step = Review(store, Git(BASE), repo)

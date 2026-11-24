@@ -27,13 +27,13 @@ Plan with superpowers:writing-plans and a manifest shaped as
 `deckhand implplan context REF` prints; save both with `deckhand implplan apply REF --plan PLAN.md --manifest MANIFEST.json`.
 
 Review the plan in rounds from `deckhand review context REF --stage plan`: one deckhand:reviewer per
-listed lens at once, each given its stage, lens, target and spec paths, and carried findings, then
+lens at once, each given its stage, scope, lens, target and spec paths, and carried findings, then
 deckhand:confidence on the joined list, target and spec. Save with
 `deckhand review apply REF round --stage plan --findings FILE --target HASH`. Resolve a round in one
 `deckhand review apply REF resolve --stage plan --accept ID --propose-accept ID --propose-decline ID --reason TEXT`,
-repeating flags; a delivery-changing finding takes a proposal, never `--accept`. Declines,
-scope changes, caps and open findings are the person's; no docs decision excuses one. Fix, then rerun
-the context.
+repeating ID flags under one `--reason`; a delivery-changing finding takes a proposal, never
+`--accept`. Declines, scope changes, caps and open findings are the person's; no docs decision
+excuses one. Fix, then rerun context.
 
 Build with superpowers:test-driven-development, and impeccable:impeccable when a person sees it;
 commit with `deckhand build apply REF commit --message FILE`, then deckhand:document, committing its
