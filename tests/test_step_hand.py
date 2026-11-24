@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, config, features, fleet, git, implplan, launch, queue, signoff, spikes
+from deckhand import answers, asks, config, features, fleet, git, implplan, launch, queue, signoff, spikes, startable
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
@@ -251,6 +251,19 @@ def test_leave_it_stopped_clears_the_item_and_starts_nothing(
     assert stalled_items(store, shell) == []
     hand(store, shell).apply(["fill", *TEAM])
     assert shell.launched() == ["hand-ACME-1"]
+
+
+def test_an_idle_hand_on_its_own_prompt_is_never_due(clone: Path):
+    store, shell = building(), Shell()
+    store.assign("s2", "someone-else")
+    hand(store, shell).apply(["start", "ACME-1", *TEAM])
+    shell.rows = [row("ACME-1", "idle", "idle") | {"waitingFor": "input needed"}]
+    feature = features.open_feature(store, "ACME")
+    hands = fleet.hands(fleet.sessions(shell).sessions)
+    [work] = [w for w in startable.startable(store, feature, ME) if w.story["identifier"] == "ACME-1"]
+    assert not startable.due(work, feature, hands, 0)
+    shell.rows = [row("ACME-1", "failed")]
+    assert startable.due(work, feature, fleet.hands(fleet.sessions(shell).sessions), 0)
 
 
 def test_each_start_records_a_fresh_time(clone: Path):

@@ -5,15 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, features, planning, versions
+from deckhand import answers, asks, decisions, features, planning, queue, versions
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
-from deckhand.records import content_hash
+from deckhand.records import HAND, Record, content_hash
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.store import open as store_open
 from deckhand.store.fake import FakeStore
+from tests.test_queue import alpha, started
 
 P1 = create_id("ACME:Alpha", "feature")
 
@@ -176,8 +177,6 @@ def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_a_question_from_a_released_story_is_decided(state: Path, capsys: pytest.CaptureFixture[str]):
-    from deckhand import asks
-
     store = released(feature_store())
     found = asks.parse_question(json.dumps({"question": "Drop it?", "options": ["Yes", "No"], "why": "Done."}))
     store.put_record("s1", asks.question_record("s1", found))
@@ -196,9 +195,6 @@ def test_a_hand_never_opens_a_decision(state: Path, monkeypatch: pytest.MonkeyPa
 
 
 def test_a_stalled_item_asks_through_decide(state: Path, capsys: pytest.CaptureFixture[str]):
-    from deckhand import asks, queue
-    from tests.test_queue import alpha, started
-
     store = alpha()
     started(store, "s1")
     [start] = [r for r in store.records("s1") if r.kind == asks.HAND_START]
@@ -222,9 +218,6 @@ def test_a_stalled_item_asks_through_decide(state: Path, capsys: pytest.CaptureF
 
 @pytest.mark.parametrize("kind", ["stalled", "config-edit"])
 def test_a_released_story_is_decided_for_its_stalled_hand_and_its_config_edit(state: Path, capsys, kind: str):
-    from deckhand import asks
-    from deckhand.records import HAND, Record
-
     store = released(feature_store())
     store.put_record("s1", Record(asks.HAND_START, "s1", "v1", HAND, {"kind": "story", "session": "hand"}))
     edit = asks.parse_edit(json.dumps({"path": ".claude/settings.json", "change": "allow npm", "why": "tests"}))

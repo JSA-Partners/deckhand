@@ -89,7 +89,7 @@ def launch_of(kind: str) -> str:
 def due(work: Work, feature: Feature, hands: dict[str, fleet.Session], restarts: int | None = None) -> bool:
     story = work.story
     session = hands.get(story["identifier"])
-    if session is not None and fleet.live(session):
+    if session is not None and fleet.alive(session):
         return False
     records = feature.records.get(story["id"], [])
     launch = launch_of(work.kind)

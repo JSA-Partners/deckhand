@@ -205,7 +205,7 @@ def stalled(
     story: dict, records: list[Record], session: fleet.Session | None, launch: str, second: bool = False
 ) -> bool:
     start = last_start(records, launch)
-    if start is None or (session is not None and fleet.live(session)):
+    if start is None or (session is not None and fleet.alive(session)):
         return False
     return not _waiting(story, records, second) and not finished(story, records, start)
 
@@ -291,7 +291,7 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
             found.append(Item("prompt", 4, key, session.name, session.started_at, 0, lines, next))
         elif fleet.failed(session) and key not in answered:
             lines = [f"{session.name} is {session.state} with no answer document"]
-            found.append(Item("stalled", 4, key, session.name, session.started_at, 0, lines, next))
+            found.append(Item(STALLED, 4, key, session.name, session.started_at, 0, lines, next))
     return found
 
 

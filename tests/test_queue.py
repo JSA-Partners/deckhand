@@ -226,6 +226,14 @@ def test_input_needed_on_a_spike_is_an_item_too(state: Path):
     ]
 
 
+def test_an_idle_hand_on_its_own_prompt_is_a_prompt_and_never_stalled():
+    store = alpha()
+    started(store, "s1")
+    idle = hand("ACME-1", "idle", "idle", "input needed", iso(1795000000500))
+    assert kinds(waiting(store, sessions=(idle,))) == [("prompt", 2, "ACME-1")]
+    assert not queue.stalled(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), idle, "story")
+
+
 def test_a_first_stop_restarts_automatically_and_asks_nothing():
     store = alpha()
     started(store, "s1")
