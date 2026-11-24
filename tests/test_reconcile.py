@@ -550,6 +550,9 @@ def test_a_hand_stopped_as_unheard_keeps_its_slot_until_its_resume(clone: Path):
     found = reconcile(facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 125, unheard=heard), store)
     assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([sync]), (1,))]
     assert stalled_items(store, stopped, 1) == [(queue.STALLED, "ACME-1")]
+    failed = {"hand-ACME-1": (1, T + 125)}
+    waits = facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 130, unheard=heard, failed=failed)
+    assert reconcile(waits, store) == []
     feature = features.current(store, "ACME")
     read = fleet.sessions(Shell(stopped))
     quiet = frozenset({"ACME-1"})
