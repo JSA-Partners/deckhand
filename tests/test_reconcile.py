@@ -536,3 +536,30 @@ def test_without_a_personal_key_only_copies_and_adoptions_happen(clone: Path):
     found = facts(store, *sessions, hands=hands, cap=3)
     unread = Facts(found.now, found.woke, found.read, found.hands, [mail()], None, 3)
     assert reconcile(unread, store) == expected
+
+
+def test_a_hand_stopped_as_unheard_keeps_its_slot_until_its_resume(clone: Path):
+    store = building()
+    store.assign("s1", ME)
+    started(store)
+    sync = Message(1, "sync:s3:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-3 merged.", at(T), None, None)
+    hand, heard = held(restarts=1), frozenset({1})
+    idle, stopped = row("ACME-1", "idle", "idle"), row("ACME-1", "stopped")
+    found = reconcile(facts(store, idle, hands=(hand,), pending=(sync,), now=T + 121), store)
+    assert found == [Stop("hand-ACME-1", "id-ACME-1", "unheard", (1,))]
+    found = reconcile(facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 125, unheard=heard), store)
+    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([sync]), (1,))]
+    assert stalled_items(store, stopped, 1) == [(queue.STALLED, "ACME-1")]
+    feature = features.current(store, "ACME")
+    read = fleet.sessions(Shell(stopped))
+    quiet = frozenset({"ACME-1"})
+    waiting = queue.items(store, "ACME", feature, ME, read, policy, quiet=quiet, restarts={"ACME-1": 1})
+    assert waiting == []
+
+
+def test_an_unheard_stop_waits_for_a_slot_to_resume_into(clone: Path):
+    store = alone()
+    started(store)
+    sync = Message(1, "sync:s3:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-3 merged.", at(T), None, None)
+    sessions = (row("ACME-1", "idle", "idle"), row("ACME-9", "working", "busy"))
+    assert reconcile(facts(store, *sessions, hands=(held(),), pending=(sync,), now=T + 121), store) == []

@@ -97,9 +97,13 @@ class _Tick:
     me: str
     used: int
     acted: set[str] = field(default_factory=set)
+    reserved: set[str] = field(default_factory=set)
 
     def free(self) -> bool:
         return self.used < self.facts.cap
+
+    def room(self, name: str) -> bool:
+        return name in self.reserved or self.free()
 
     def alive(self, name: str) -> fleet.Session | None:
         return max((s for s in self.sessions if s.name == name and fleet.alive(s)), key=_started, default=None)
@@ -122,7 +126,10 @@ class _Tick:
 
     def take(self, action: Launch | Resume | Stop, slot: bool) -> Action:
         self.acted.add(action.name)
-        self.used += slot
+        if action.name in self.reserved:
+            self.reserved.discard(action.name)
+        else:
+            self.used += slot
         return action
 
 
@@ -137,7 +144,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
     found: list[Action] = [*removed, *_adopt(facts, sessions)]
     reading = facts.reading
     if reading is not None and reading.me is not None:
-        tick = _Tick(facts, sessions, reading.me, _used(facts), set(facts.busy))
+        tick = _Tick(facts, sessions, reading.me, _used(facts), set(facts.busy), _reserved(facts))
         feature = reading.feature
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature)
@@ -148,9 +155,18 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
     return [action for action in found if action.name not in facts.busy]
 
 
+def _holding(facts: Facts) -> set[str]:
+    return {s.name for s in facts.read.sessions if fleet.holds_slot(s)}
+
+
+# A hand stopped as unheard keeps its slot until the Resume that carries its mail.
+def _reserved(facts: Facts) -> set[str]:
+    stopped = {m.hand for m in facts.pending if m.delivered is None and m.seq in facts.unheard}
+    return stopped - _holding(facts) - facts.busy
+
+
 def _used(facts: Facts) -> int:
-    holding = {s.name for s in facts.read.sessions if fleet.holds_slot(s)}
-    return fleet.slots_used(facts.read.sessions) + len(facts.busy - holding)
+    return fleet.slots_used(facts.read.sessions) + len(facts.busy - _holding(facts)) + len(_reserved(facts))
 
 
 def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:
@@ -296,8 +312,9 @@ def _deliver(tick: _Tick, feature: Feature | None) -> list[Action]:
             if resume is not None:
                 found.append(tick.take(resume, slot=True))
         elif unheard and session.state != WORKING and not session.waiting_for and _deaf(tick, name, unheard):
-            stop = Stop(name, session.id, "unheard", tuple(m.seq for m in unheard))
-            found.append(tick.take(stop, slot=False))
+            if tick.free():
+                stop = Stop(name, session.id, "unheard", tuple(m.seq for m in unheard))
+                found.append(tick.take(stop, slot=not fleet.holds_slot(session)))
     return found
 
 
@@ -308,7 +325,7 @@ def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Mess
         session, cwd = row.session, row.cwd
     else:
         session, cwd = (last.session_id, last.cwd) if last is not None else (None, "")
-    if session is None or not tick.listed(session) or not tick.free() or tick.backing_off(name):
+    if session is None or not tick.listed(session) or not tick.room(name) or tick.backing_off(name):
         return None
     story = _story_of(feature, name)
     records = _records(feature, story) if feature is not None and story is not None else []
