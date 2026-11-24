@@ -15,7 +15,6 @@ from deckhand.step import Refusal
 
 HAND_EXEMPT = ["deckhand *", "gh pr view *", "gh pr diff *", "gh pr checks *"]
 CAPTAIN_EXEMPT = ["deckhand *"]
-SECRET_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "LINEAR_API_KEY")
 NO_DIALOG = ["AskUserQuestion", "SendMessage", "ListAgents", "mcp__*"]
 GIT_CREDENTIALS = (".ssh", ".git-credentials", ".netrc", ".config/git/credentials", ".gnupg")
 CLAUDE_CONFIG = (
@@ -79,7 +78,7 @@ def _guarded(protected: Protected, deny: list[str], deny_write: list[str]) -> di
         "filesystem": {"denyWrite": secrets + state + deny_write, "denyRead": secrets},
         "credentials": {
             "files": [{"path": path, "mode": "deny"} for path in secrets],
-            "envVars": [{"name": name, "mode": "deny"} for name in SECRET_ENV],
+            "envVars": [{"name": name, "mode": "deny"} for name in git.SECRET_ENV],
         },
     }
 

@@ -23,6 +23,7 @@ UNNESTED = "--ignore-submodules=all"
 GITLINK = "160000"
 NESTED = "a commit takes no nested repository: {}; remove it or list it in .gitignore"
 
+SECRET_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "LINEAR_API_KEY")
 Runner = Callable[[list[str], Path | None, str | None], subprocess.CompletedProcess[str]]
 
 
@@ -66,6 +67,12 @@ def _program(name: str, search: str) -> str:
     return found
 
 
+# A hand inherits the engine's environment, so no token reaches a claude process.
+def _environment(program: str, search: str) -> dict[str, str]:
+    held = {**os.environ, "PATH": search}
+    return {k: v for k, v in held.items() if k not in SECRET_ENV} if program == "claude" else held
+
+
 def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     command = " ".join(argv[:2])
     search = trusted_path()
@@ -74,7 +81,7 @@ def run(argv: list[str], cwd: Path | None = None, stdin: str | None = None) -> s
     try:
         return subprocess.run(
             full,
-            env={**os.environ, "PATH": search},
+            env=_environment(argv[0], search),
             # Without a directory, gh and claude would run git in a repository a hand may have planted.
             cwd=cwd or Path.home(),
             input=stdin,

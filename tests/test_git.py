@@ -364,3 +364,20 @@ def test_fetch_prunes_origin_and_raises_on_failure() -> None:
     with pytest.raises(git.GitError) as raised:
         git.fetch(Path("/clone"), fake)
     assert raised.value.stderr_tail == "fatal: unable to access origin"
+
+
+def test_a_claude_call_carries_no_token_and_a_git_call_keeps_them(monkeypatch: pytest.MonkeyPatch):
+    for name in git.SECRET_ENV:
+        monkeypatch.setenv(name, "secret")
+    seen = {}
+
+    def run(full, env=None, **kwargs):
+        seen[Path(full[0]).name] = env
+        return subprocess.CompletedProcess(full, 0, "", "")
+
+    monkeypatch.setattr(git.subprocess, "run", run)
+    monkeypatch.setattr(git, "_program", lambda name, search: f"/usr/bin/{name}")
+    git.run(["claude", "agents", "--json", "--all"])
+    git.run(["git", "fetch", "origin"])
+    assert not set(git.SECRET_ENV) & set(seen["claude"])
+    assert set(git.SECRET_ENV) <= set(seen["git"])
