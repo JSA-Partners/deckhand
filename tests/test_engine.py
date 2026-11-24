@@ -443,9 +443,22 @@ def test_stop_all_stops_every_alive_hand_and_spike(rig: Rig):
     assert order[0] == "worker"
 
 
+def test_stop_all_runs_through_the_engines_runner_by_default(rig: Rig):
+    shell = Shell(row("ACME-1", "idle", "idle"))
+    Engine("ACME", rig.state, rig.fleets, rig.linear, rig.worker, rig.clock, lambda: DAY, 42, shell).stop_all()
+    assert [argv[:2] for argv, _ in shell.calls] == [["claude", "agents"], ["claude", "stop"]]
+
+
 def test_stop_all_says_when_the_fleet_read_failed(rig: Rig):
-    rig.engine.stop_all(Shell(row("ACME-1", "working", "busy"), fleet_fails=True))
+    said = rig.engine.stop_all(Shell(row("ACME-1", "working", "busy"), fleet_fails=True))
     assert rig.engine.note().startswith("cannot stop the hands: the fleet read failed")
+    assert len(said) == 1 and said[0].startswith("cannot stop the hands: the fleet read failed")
+
+
+def test_stop_all_returns_every_hand_it_could_not_stop(rig: Rig):
+    shell = Shell(row("ACME-1", "idle", "idle"), row("ACME-2", "idle", "idle"), fail=(("claude", "stop"),))
+    said = rig.engine.stop_all(shell)
+    assert [line.split(":")[0] for line in said] == ["ACME-1", "ACME-2"]
 
 
 def test_a_second_lock_on_one_folder_is_refused_and_a_released_one_is_free(tmp_path: Path):

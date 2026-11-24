@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import functools
 import json
 import os
 import shutil
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -26,14 +24,13 @@ from deckhand import (
 from deckhand.linear.client import LinearError
 from deckhand.records import iso
 from deckhand.step import Refusal, register, team_key
-from deckhand.steps.engine import invocation
+from deckhand.steps.engine import command, invocation
 from deckhand.store import Store
 from deckhand.store.local import default_path
 from deckhand.store.open import Stores
 from deckhand.store.state import LocalState
 
-REFRESH_LIMIT = 120.0
-NOT_RUN = 127
+INSIDE = "the board now runs inside the engine"
 USAGE = (
     "captain takes [--team-key KEY]; context [--brief] [--json] [--line [--color]] [--board [--watch] [--no-color]], "
     "or apply hold|release"
@@ -147,20 +144,15 @@ class Captain:
             return
 
     def _board(self, watch: bool, color: bool) -> None:
-        state, g = answers.state_dir(), brief.glyphs(_encoding())
-        terminal = sys.stdout.isatty()
-        if watch and terminal and sys.stdin.isatty() and os.environ.get("TERM") != "dumb":
-            from deckhand import tui
-
-            fleet_read = functools.partial(fleet.sessions, _quiet(self._runner))
-            tui.watch(lambda: status.read(state), fleet_read, self._clock, color, g, _full_read)
+        if watch:
+            print(INSIDE)
+            print(command())
             return
+        state, g, terminal = answers.state_dir(), brief.glyphs(_encoding()), sys.stdout.isatty()
         read, now = fleet.sessions(self._runner), self._clock()
         found = board.build(status.read(state), read, now, board.midnight(now), g)
         cols = min(shutil.get_terminal_size((frame.WIDTH, 24)).columns, frame.WIDTH) if terminal else frame.WIDTH
         print(frame.text(frame.render(found, g, cols), color and terminal))
-        if watch:
-            print("deckhand: --watch needs a terminal; printed the board once", file=sys.stderr)
 
     def apply(self, args: list[str]) -> None:
         words = _parse(args)["words"]
@@ -182,29 +174,6 @@ def _save(state: Path, found: dict, notes: list[str]) -> None:
         status.write(state, found)
     except Refusal as error:
         notes.append(f"cannot write the snapshot: {error}")
-
-
-# The board's r runs the captain's full read, which leaves the notified list to the captain's brief.
-def _full_read(clock: Callable[[], float] = time.monotonic) -> Callable[[], int | None]:
-    argv, quiet = [str(Path(sys.argv[0]).resolve()), "captain", "context"], subprocess.DEVNULL
-    try:
-        started = subprocess.Popen(argv, stdin=quiet, stdout=quiet, stderr=quiet, start_new_session=True)
-    except OSError:
-        return lambda: NOT_RUN
-    deadline = clock() + REFRESH_LIMIT
-
-    def done() -> int | None:
-        code = started.poll()
-        if code is None and clock() >= deadline:
-            started.kill()
-            return started.wait()
-        return code
-
-    return done
-
-
-def _quiet(runner: git.Runner) -> git.Runner:
-    return lambda argv, cwd, stdin: runner(argv, cwd, "" if stdin is None else stdin)
 
 
 def _encoding() -> str | None:

@@ -124,7 +124,7 @@ def test_needs_you_lists_the_oldest_first_with_kind_and_wait():
     rows = section(shown(), "needs you")
     assert rows[0].split() == ["!", "ACME-14", "Print", "every", "greeting", "sign-off", "14m"]
     assert rows[1].split() == ["!", "ACME-16", "Rotate", "the", "access", "log", "question", "3m"]
-    assert rows[2] == "   type next in the captain to take them in turn"
+    assert rows[2] == "   the captain asks these one at a time"
 
 
 def test_working_rows_show_the_stage_and_the_hands_own_status():
@@ -179,9 +179,14 @@ def test_a_failed_fleet_read_is_marked_in_the_header():
     assert section(shown(failed=True), "working")[0].split()[1] == "ACME-15"
 
 
+def test_a_needs_row_says_the_captain_will_ask():
+    lines = shown(selected="item:k16", expanded="item:k16")
+    assert section(lines, "needs you")[2].strip() == "has a question for you; the captain will ask"
+
+
 def test_details_say_the_action_in_words_and_paint_only_typed_commands():
     lines = shown(selected="item:k14", expanded="item:k14")
-    assert section(lines, "needs you")[1].strip() == "needs your sign-off; type next in the captain"
+    assert section(lines, "needs you")[1].strip() == "needs your sign-off; the captain will ask"
     assert not any("signoff context" in text for text in texts(lines))
     lines = shown(selected="story:ACME-15", expanded="story:ACME-15")
     assert section(lines, "working")[1].split() == ["hand:", "claude", "attach", "a1b2"]
@@ -193,22 +198,18 @@ def test_details_say_the_action_in_words_and_paint_only_typed_commands():
     assert [line.selected for line in lines if "ACME-15" in line.text] == [True]
 
 
-def test_an_old_file_gets_a_stale_banner():
+def test_an_unreachable_linear_is_the_only_stale_banner():
     assert not texts(shown())[1].strip()
-    banner = texts(shown(sample(written_at=at(45))))[1]
-    assert banner == " - stale: the captain last read Linear 45m ago; run /deckhand:captain to refresh"
-
-
-def test_an_unreachable_linear_gets_a_stale_banner():
+    assert not texts(shown(sample(written_at=at(45))))[1].strip()
     banner = texts(shown(sample(written_at=at(5), stale_since=at(1))))[1]
-    assert banner == " - stale: Linear was unreachable, this is the state from 5m ago; run /deckhand:captain to retry"
+    assert banner == " - stale: Linear is unreachable, this is the state from 5m ago"
 
 
-def test_no_status_file_teaches_how_to_start():
+def test_no_snapshot_says_linear_is_being_read():
     found = board.build(None, fleet.Fleet(LIVE), NOW, TODAY, G)
     lines = texts(frame.render(found, G, 100))
     assert lines[0] == " Captain"
-    assert "   no captain has run yet; start one with /deckhand:captain" in lines
+    assert "   reading Linear for the first time" in lines
 
 
 def test_nothing_waiting_says_so_with_the_working_count():

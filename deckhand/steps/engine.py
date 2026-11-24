@@ -8,10 +8,12 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import config, git, hosts
-from deckhand.step import Refusal, register
+from deckhand import answers, brief, config, engine, fleet, git, hosts, status
+from deckhand.poller import Poller
+from deckhand.step import Refusal, register, team_key
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState, alive
+from deckhand.worker import Worker, opened_acts, problem
 
 USAGE = "engine takes [--team-key KEY]; context, apply run, or apply copy"
 ACTIONS = ("run", "copy")
@@ -52,6 +54,25 @@ def _running(now: float) -> int | None:
     return beat[0] if beat is not None and alive(beat[1], now) else None
 
 
+def _quiet(runner: git.Runner) -> git.Runner:
+    return lambda argv, cwd, stdin: runner(argv, cwd, "" if stdin is None else stdin)
+
+
+def _holder(state_dir: Path) -> str:
+    try:
+        with LocalState(default_path()) as rows:
+            beat = rows.heartbeat()
+    except Refusal:
+        beat = None
+    if beat is not None:
+        return f" (pid {beat[0]})"
+    try:
+        found = (state_dir / engine.LOCK).read_text().strip()
+    except OSError:
+        return ""
+    return f" (pid {found})" if found.isdigit() else ""
+
+
 @register("engine")
 class Engine:
     def __init__(self, runner: git.Runner = git.run, clock: Callable[[], float] = time.time) -> None:
@@ -68,10 +89,44 @@ class Engine:
         if len(words) != 1 or words[0] not in ACTIONS:
             raise Refusal(f"engine apply takes run or copy; {USAGE}")
         if words == ["run"]:
-            raise Refusal("the engine's screen is not built yet")
+            self._run(_parse(args))
+            return
         shown = command()
         if shutil.which("pbcopy") is None:
             print(f"copy this: {shown}")
             return
         git.call(["pbcopy"], None, self._runner, shown)
         print(f"copied: {shown}")
+
+    def _run(self, parsed: dict) -> None:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise Refusal("the engine needs its own terminal tab")
+        team, state_dir = team_key(parsed), answers.state_dir()
+        held = engine.lock(state_dir)
+        if held is None:
+            raise Refusal(f"the engine already runs in another tab{_holder(state_dir)}")
+        from deckhand import tui
+
+        runner, clock, link = _quiet(self._runner), self._clock, engine.link
+        fleets = Poller(lambda: fleet.sessions(runner), engine.FLEET_EVERY, tui.fleet_failed, "deckhand-fleet", clock)
+        linear = Poller(
+            lambda: link(team, fleets.latest, clock),
+            engine.LINEAR_EVERY,
+            lambda error: engine.Linked(None, None, clock(), problem(error)),
+            "deckhand-linear",
+            clock,
+        )
+        worker = Worker(lambda: opened_acts(runner))
+        running = engine.Engine(team, LocalState(default_path()), fleets, linear, worker, clock, runner=runner)
+        try:
+            fleets.start()
+            worker.start()
+            fleets.wait(engine.FLEET_EVERY)
+            linear.start()
+            g = brief.glyphs(getattr(sys.stdout, "encoding", None))
+            said = tui.watch(lambda: status.read(state_dir), fleets, clock, brief.colored(os.environ), g, running)
+        finally:
+            running.close()
+            held.close()
+        for line in said:
+            print(line)

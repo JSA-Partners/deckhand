@@ -13,7 +13,8 @@
   planning work (`spike`, `draft`), its questions (`ask`) and its messages (`mail`), and the
   person's fleet (`hand` starts, fills and wakes hands, `captain` prints the brief, the queue, the
   status line segment and the board, `engine` says whether the engine runs and how to start it,
-  `watch` rings a session's doorbell); `commit` and `document` only report
+  and runs it with its screen, `watch` rings a session's doorbell); `commit` and `document` only
+  report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the

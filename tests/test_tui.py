@@ -5,7 +5,7 @@ import re
 import threading
 
 from deckhand import brief, fleet, frame, tui
-from tests.test_board import LIVE, NOW, at, sample
+from tests.test_board import LIVE, NOW, sample
 
 ENTER, ESC, DOWN, UP = "\r", "\x1b", "\x1b[B", "\x1b[A"
 SGR = re.compile(r"\x1b\[[0-9;]*m")
@@ -26,7 +26,7 @@ class Term:
         self.lines: list[str] = []
         self.frames: list[list[str]] = []
         self.marked: list[list[str]] = []
-        self.shows = 0
+        self.shows = self.bells = 0
 
     def size(self) -> tuple[int, int]:
         return self.rows_cols
@@ -36,12 +36,16 @@ class Term:
         assert len(lines) <= rows and all(frame.cells(SGR.sub("", line)) <= cols for line in lines)
         self.lines, self.shows = lines, self.shows + 1
 
+    def bell(self) -> None:
+        self.bells += 1
+
     def key(self, timeout: float) -> str | None:
         self.clock.now += timeout
         text = [SGR.sub("", line).rstrip() for line in self.lines]
         self.frames.append(text + [""] * (self.rows_cols[0] - len(text)))
         self.marked.append([SGR.sub("", line).strip() for line in self.lines if REVERSE.search(line)])
-        key = self.keys.pop(0) if self.keys else "q"
+        self.keys = self.keys or ["q", "l"]
+        key = self.keys.pop(0)
         if isinstance(key, tuple):
             self.rows_cols = key
             return None
@@ -72,12 +76,35 @@ class Reader:
         return self.found[min(self.calls, len(self.found)) - 1]
 
 
+class Engine:
+    def __init__(self, said: str = "", failures: list[str] | None = None) -> None:
+        self.said, self.failures = said, failures or []
+        self.ticks: list[int] = []
+        self.refreshes = 0
+        self.stopped = False
+        self.term: Term | None = None
+
+    def tick(self) -> None:
+        self.ticks.append(self.term.shows if self.term else 0)
+
+    def refresh(self) -> None:
+        self.refreshes += 1
+
+    def note(self) -> str:
+        return self.said
+
+    def stop_all(self) -> list[str]:
+        self.stopped = True
+        return self.failures
+
+
 def run(
-    keys: list, reader: Reader | None = None, poller: Poller | None = None, refresh=None, **kw
+    keys: list, reader: Reader | None = None, poller: Poller | None = None, engine: Engine | None = None, **kw
 ) -> tuple[Term, Reader, Poller]:
     clock, reader, poller = Clock(), reader or Reader(), poller or Poller(fleet.Fleet(LIVE))
-    term = Term(keys, clock, **kw)
-    tui.Watch(term, reader, poller, clock, brief.ASCII, True, refresh).run()
+    term, engine = Term(keys, clock, **kw), engine or Engine()
+    engine.term = term
+    tui.Watch(term, reader, poller, clock, brief.ASCII, True, engine).run()
     return term, reader, poller
 
 
@@ -85,12 +112,69 @@ def selected(term: Term, frame: int = -1) -> list[str]:
     return term.marked[frame]
 
 
-def test_q_and_esc_quit_after_one_frame():
+def test_q_asks_and_l_leaves_without_stopping_a_hand():
     for key in ("q", ESC):
-        term, _, _ = run([key])
-        assert len(term.frames) == 1
+        engine = Engine()
+        term, _, _ = run([key, None, None, "l"], engine=engine)
+        assert len(term.frames) == 4
         assert term.frames[0][0].startswith(" ! 2 need you | question ACME-16 3m")
         assert term.frames[0][-1].startswith(" q quit  r refresh  j/k move  enter details")
+        assert [lines[-1] for lines in term.frames[1:]] == [f" {frame.ASK}"] * 3
+        assert engine.stopped is False
+
+
+def test_q_then_s_stops_all_hands_then_leaves():
+    engine = Engine()
+    term, _, _ = run(["q", "s", "j"], engine=engine)
+    assert len(term.frames) == 2 and engine.stopped is True
+
+
+def test_q_then_any_other_key_returns_to_the_board():
+    engine = Engine()
+    term, _, _ = run(["q", "j", None], engine=engine)
+    assert term.frames[2][-1].startswith(" q quit  r refresh")
+    assert selected(term, 2)[0].split()[1] == "ACME-14"
+    assert engine.stopped is False
+
+
+def test_the_lines_a_stop_all_left_come_back_from_the_run():
+    clock, engine = Clock(), Engine(failures=["ACME-1: boom"])
+    term = Term(["q", "s"], clock)
+    assert tui.Watch(term, Reader(), Poller(fleet.Fleet(LIVE)), clock, brief.ASCII, True, engine).run() == [
+        "ACME-1: boom"
+    ]
+    assert tui.Watch(Term(["q", "l"], clock), Reader(), Poller(), clock, brief.ASCII, True, Engine()).run() == []
+
+
+def test_each_loop_ticks_the_engine_before_it_draws():
+    engine = Engine()
+    term, _, _ = run(["j", "k"], engine=engine)
+    assert engine.ticks[0] == 0 and len(engine.ticks) == len(term.frames)
+
+
+def test_the_engine_note_shows_in_the_header():
+    term, _, _ = run([], engine=Engine("cannot read Linear: network: down"))
+    assert " | cannot read Linear: network: down" in term.frames[0][0]
+    assert "updated" not in term.frames[0][0]
+    term, _, _ = run([], Reader(None), engine=Engine("cannot read Linear: network: down"))
+    assert "cannot read Linear: network: down" in term.frames[0][0]
+
+
+def test_a_note_with_control_characters_draws_on_one_line():
+    term, _, _ = run([], engine=Engine("ACME-1: error: one\nfatal: \x1b[2Jtwo"))
+    assert "ACME-1: error: one fatal: [2Jtwo" in term.frames[0][0]
+    assert all("\n" not in line and "\x1b[2J" not in line for line in term.lines)
+
+
+def test_the_bell_rings_when_the_needs_you_count_rises():
+    one, two = sample(), sample()
+    one["items"] = one["items"][:1]
+    none = sample(items=[])
+    ticks = int(tui.STATUS_EVERY / tui.TICK)
+    term, _, _ = run([None] * ticks * 4, Reader(none, one, None, two, one))
+    assert term.bells == 2
+    term, _, _ = run([None] * ticks, Reader(two))
+    assert term.bells == 1
 
 
 def test_the_first_frame_waits_for_the_first_fleet_read():
@@ -108,7 +192,7 @@ def test_a_first_read_that_never_lands_still_draws_from_the_file():
 def test_the_first_row_starts_selected_and_j_k_and_arrows_move():
     term, _, _ = run(["j", DOWN, "k", UP, UP])
     tops = [selected(term, n)[0].split()[1] for n in range(len(term.frames))]
-    assert tops == ["ACME-14", "ACME-16", "ACME-15", "ACME-16", "ACME-14", "ACME-14"]
+    assert tops == ["ACME-14", "ACME-16", "ACME-15", "ACME-16", "ACME-14", "ACME-14", "ACME-14"]
 
 
 def test_enter_opens_and_closes_the_detail_line():
@@ -132,9 +216,10 @@ def test_the_file_is_reread_every_two_seconds():
     assert reader.calls == 3
 
 
-def test_r_rereads_now_and_pokes_the_fleet():
-    _, reader, poller = run(["r"])
-    assert (reader.calls, poller.pokes) == (2, 1)
+def test_r_rereads_now_and_refreshes_the_engine():
+    engine = Engine()
+    _, reader, _ = run(["r"], engine=engine)
+    assert (reader.calls, engine.refreshes) == (2, 1)
 
 
 def test_without_a_live_read_the_file_hands_show():
@@ -153,12 +238,12 @@ def test_resize_redraws_at_the_new_size():
 
 def test_drawing_into_the_last_cell_never_raises():
     term, _, _ = run([(10, 40)])
-    assert term.frames[-1][-1].startswith(" q quit")
+    assert term.frames[1][-1].startswith(" q quit")
 
 
-def test_no_status_file_teaches_and_still_quits():
+def test_no_snapshot_says_linear_is_being_read_and_still_quits():
     term, _, _ = run([], Reader(None))
-    assert "   no captain has run yet; start one with /deckhand:captain" in term.frames[0]
+    assert "   reading Linear for the first time" in term.frames[0]
 
 
 def test_a_malformed_status_file_never_kills_the_watch():
@@ -167,7 +252,7 @@ def test_a_malformed_status_file_never_kills_the_watch():
     broken["items"][0]["since"] = 7
     broken["slots"] = "full"
     term, _, _ = run(["j", "j", ENTER, "j"], Reader(broken))
-    assert len(term.frames) == 5
+    assert len(term.frames) == 6
 
 
 def test_a_time_out_of_range_never_kills_the_watch():
@@ -176,34 +261,14 @@ def test_a_time_out_of_range_never_kills_the_watch():
         broken["stories"][1]["completed_at"] = edge
         broken["items"][0]["since"] = edge
         term, _, _ = run(["j"] * 8 + [ENTER], Reader(broken))
-        assert len(term.frames) == 10
+        assert len(term.frames) == 11
         term, _, _ = run([ENTER], Reader(sample(written_at=edge)))
-        assert len(term.frames) == 2
-
-
-def test_r_runs_a_full_read_shows_refreshing_and_rereads_when_it_ends():
-    started, left = [], [3]
-
-    def refresh():
-        started.append(1)
-
-        def running() -> int | None:
-            left[0] -= 1
-            return None if left[0] > 0 else 0
-
-        return running
-
-    old, new = sample(), sample(written_at=at(0.05))
-    term, reader, _ = run(["r", "r", None, None, None], Reader(old, old, old, new), refresh=refresh)
-    assert started == [1]
-    assert "refreshing" in term.frames[1][0] and "updated" not in term.frames[1][0]
-    assert "refreshing" not in term.frames[-1][0] and "updated" in term.frames[-1][0]
-    assert reader.calls == 4
+        assert len(term.frames) == 3
 
 
 def test_an_unchanged_frame_is_not_written_again():
     term, _, _ = run([None, None, None])
-    assert term.shows == 1
+    assert term.shows == 2
 
 
 def test_application_cursor_keys_move_too():
@@ -217,6 +282,18 @@ def test_each_row_is_cleared_before_it_is_written_and_leftover_rows_are_cleared(
     screen.size = lambda: (4, 20)
     screen.show(["\x1b[2m--\x1b[0m one", "two"])
     assert out.getvalue() == "\x1b[1;1H\x1b[2K\x1b[2m--\x1b[0m one\x1b[2;1H\x1b[2Ktwo\x1b[3;1H\x1b[2K\x1b[4;1H\x1b[2K"
+
+
+def test_the_bell_writes_bel_and_flushes():
+    class Out(io.StringIO):
+        flushed = 0
+
+        def flush(self) -> None:
+            Out.flushed += 1
+
+    out = Out()
+    tui.Screen(0, out).bell()
+    assert (out.getvalue(), Out.flushed) == ("\a", 1)
 
 
 def test_keys_read_together_come_out_one_at_a_time():
@@ -250,32 +327,10 @@ def test_an_arrow_split_across_reads_is_not_a_quit():
 
 def test_a_resize_that_keeps_the_lines_still_redraws():
     term, _, _ = run([(30, 140), (40, 140)], size=(30, 120))
-    assert term.shows == 3
+    assert term.shows == 4
 
 
 def test_the_board_fills_a_wide_terminal():
     term, _, _ = run([], size=(30, 160))
     rule = next(line for line in term.frames[0] if line.startswith("-- needs you"))
     assert len(rule) == 160
-
-
-def test_an_old_read_refreshes_itself_every_five_minutes():
-    started = []
-
-    def refresh():
-        started.append(1)
-        return lambda: 0
-
-    old = Reader(sample(written_at=at(45)))
-    ticks = int(tui.AUTO_REFRESH / tui.TICK)
-    run([None] * (ticks + 2), old, refresh=refresh)
-    assert started == [1, 1]
-    run([None] * (ticks // 2), refresh=refresh)
-    assert started == [1, 1]
-
-
-def test_a_refresh_that_writes_nothing_says_so_until_one_does():
-    old, new = sample(), sample(written_at=at(0.05))
-    term, _, _ = run(["r", None, "r", None], Reader(old, old, old, old, new), refresh=lambda: lambda: 0)
-    assert "refresh failed" in term.frames[1][0]
-    assert "refresh failed" not in term.frames[-1][0]

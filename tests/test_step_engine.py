@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import sys
@@ -7,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, config
+from deckhand import answers, config, engine, tui
+from deckhand.engine import Linked
 from deckhand.step import Refusal
 from deckhand.steps.engine import Engine, command, invocation
 from deckhand.store.local import default_path
@@ -62,9 +64,95 @@ def test_copy_without_pbcopy_prints_the_command(capsys, monkeypatch: pytest.Monk
     assert shell.calls == [] and capsys.readouterr().out == f"copy this: {command()}\n"
 
 
-def test_run_waits_for_the_screen():
-    with pytest.raises(Refusal, match="the engine's screen is not built yet"):
-        Engine(Shell()).apply(["run"])
+def tty(monkeypatch: pytest.MonkeyPatch, terminal: bool = True) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: terminal)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: terminal)
+
+
+def run(monkeypatch: pytest.MonkeyPatch, watch, shell: Shell | None = None) -> Shell:
+    shell = shell or Shell()
+    tty(monkeypatch)
+    monkeypatch.setattr(engine, "link", lambda team, *rest: Linked(None, None, NOW, "network: down"))
+    monkeypatch.setattr(tui, "watch", watch)
+    Engine(shell, clock=lambda: NOW).apply(["run", "--team-key", "ACME"])
+    return shell
+
+
+def test_run_refuses_without_a_terminal(monkeypatch: pytest.MonkeyPatch):
+    tty(monkeypatch, terminal=False)
+    with pytest.raises(Refusal, match="^the engine needs its own terminal tab$"):
+        Engine(Shell()).apply(["run", "--team-key", "ACME"])
+    assert not (answers.state_dir() / engine.LOCK).exists()
+
+
+def test_run_refuses_a_second_engine_naming_the_pid(monkeypatch: pytest.MonkeyPatch):
+    tty(monkeypatch)
+    held = engine.lock(answers.state_dir())
+    with LocalState(default_path()) as rows:
+        rows.beat(4242, NOW - 100)
+    try:
+        with pytest.raises(Refusal, match=r"^the engine already runs in another tab \(pid 4242\)$"):
+            Engine(Shell(), clock=lambda: NOW).apply(["run", "--team-key", "ACME"])
+        with LocalState(default_path()) as rows:
+            assert rows.heartbeat() == (4242, NOW - 100)
+    finally:
+        assert held is not None
+        held.close()
+
+
+def test_a_second_engine_without_a_heartbeat_names_the_pid_in_the_lock(monkeypatch: pytest.MonkeyPatch):
+    tty(monkeypatch)
+    held = engine.lock(answers.state_dir())
+    try:
+        with pytest.raises(Refusal, match=rf"\(pid {os.getpid()}\)$"):
+            Engine(Shell(), clock=lambda: NOW).apply(["run", "--team-key", "ACME"])
+    finally:
+        assert held is not None
+        held.close()
+
+
+def test_run_holds_the_lock_while_the_screen_runs_and_drops_the_heartbeat_after(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    seen = {}
+
+    def watch(read_status, poller, clock, color, g, running):
+        seen["locked"] = engine.lock(answers.state_dir()) is None
+        running.tick()
+        with LocalState(default_path()) as rows:
+            seen["beat"] = rows.heartbeat()
+        raise RuntimeError("screen")
+
+    with pytest.raises(RuntimeError):
+        run(monkeypatch, watch)
+    assert seen["locked"] and seen["beat"] == (os.getpid(), NOW)
+    with LocalState(default_path()) as rows:
+        assert rows.heartbeat() is None
+    assert capsys.readouterr().out == ""
+
+
+def test_run_prints_what_stopping_the_hands_left_after_the_screen(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    run(monkeypatch, lambda *args: ["ACME-1: boom"])
+    assert capsys.readouterr().out == "ACME-1: boom\n"
+
+
+def test_the_fleet_is_read_with_no_terminal_input(monkeypatch: pytest.MonkeyPatch):
+    seen = []
+
+    def watch(read_status, poller, clock, color, g, running):
+        poller.wait(5)
+        return []
+
+    shell = Shell()
+
+    def runner(argv, cwd=None, stdin=None):
+        seen.append((argv[:2], stdin))
+        return shell(argv, cwd, stdin)
+
+    run(monkeypatch, watch, runner)
+    assert (["claude", "agents"], "") in seen
 
 
 @pytest.mark.parametrize("args", [[], ["start"], ["run", "copy"], ["--json"]])

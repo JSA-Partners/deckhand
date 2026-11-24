@@ -7,7 +7,6 @@ from deckhand import brief, fleet, standing
 from deckhand.brief import Glyphs
 from deckhand.standing import Entry, Hand
 
-START = "/deckhand:captain"
 FLEET_FAILED = "hands from the file, fleet read failed"
 NO_CAPTAIN = "no captain running"
 CAPTAIN_STATES = {"busy": "working", "idle": "idle", "waiting": "waiting on you"}
@@ -89,7 +88,7 @@ def _hand_detail(hand: Hand | None) -> tuple[Detail, ...]:
 def _needs(entry: Entry, now: float) -> Row:
     item, ref = entry.item or {}, brief.clean(entry.ref)
     kind = _clean(item, "kind")
-    action = f"{brief.ACTIONS.get(kind, 'needs you')}; type next in the captain"
+    action = f"{brief.ACTIONS.get(kind, 'needs you')}; the captain will ask"
     key = f"item:{_clean(item, 'key') or ref + kind}"
     title = _clean(item, "title") or _clean(entry.story, "title")
     detail = (("", action, ""), *_hand_detail(entry.hand))
@@ -157,12 +156,10 @@ def _facts(status: dict) -> tuple[str, ...]:
 
 
 def _stale(status: dict, since: float | None) -> str:
+    if not status.get("stale_since"):
+        return ""
     age = brief.age(since) if since is not None else "an unknown time"
-    if status.get("stale_since"):
-        return f"stale: Linear was unreachable, this is the state from {age} ago; run {START} to retry"
-    if since is None or since > brief.LINE_STALE_SECONDS:
-        return f"stale: the captain last read Linear {age} ago; run {START} to refresh"
-    return ""
+    return f"stale: Linear is unreachable, this is the state from {age} ago"
 
 
 def _captain(read: fleet.Fleet | None) -> str:
@@ -194,10 +191,11 @@ def build(status: dict | None, read: fleet.Fleet | None, now: float, today: floa
     stamp = standing.timestamp(standing.text(status, "written_at"))
     since = now - stamp if stamp is not None else None
     stale = _stale(status, since)
+    old = bool(stale) or since is None or since > brief.LINE_STALE_SECONDS
     lead = brief.segment(status, since, now, g, entries)
     working = len(rows[standing.WORKING])
-    updated = "" if stale else _updated(since)
+    updated = "" if old else _updated(since)
     failed = read is not None and bool(read.note)
-    quiet = brief.UNKNOWN if brief.unknown(status) else brief.nothing(since, bool(stale))
+    quiet = brief.UNKNOWN if brief.unknown(status) else brief.nothing(since, old)
     slots = (str(used), str(cap))
     return Board(True, lead, _facts(status), slots, updated, stale, sections, working, failed, quiet, _captain(read))

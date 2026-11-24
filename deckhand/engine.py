@@ -129,9 +129,11 @@ class Engine:
         clock: Callable[[], float] = time.time,
         today: Callable[[], date] = date.today,
         pid: int | None = None,
+        runner: git.Runner = git.run,
     ) -> None:
         self._team, self._state, self._fleets, self._linear, self._worker = team, state, fleets, linear, worker
         self._clock, self._today, self._pid = clock, today, pid if pid is not None else os.getpid()
+        self._runner = runner
         self._woke = clock()
         self._slept: float | None = None
         self._ticked: float | None = None
@@ -337,18 +339,26 @@ class Engine:
         good = self._good
         return "; ".join(good.problems) if good is not None else ""
 
-    def stop_all(self, runner: git.Runner = git.run) -> None:
+    def stop_all(self, runner: git.Runner | None = None) -> list[str]:
         self._worker.stop()
+        runner = runner or self._runner
         read = fleet.sessions(runner)
         if read.note:
-            self._lines.say("stop", f"cannot stop the hands: {read.note}")
-            return
-        for session in read.sessions:
-            if fleet.alive(session) and session.name.startswith((fleet.HAND, fleet.SPIKE)):
-                try:
-                    git.call(["claude", "stop", session.id], None, runner)
-                except git.GitError as error:
-                    self._lines.say("stop", f"{fleet.ref_of(session.name)}: {error.stderr_tail}")
+            said = [f"cannot stop the hands: {read.note}"]
+        else:
+            said = [line for session in read.sessions if (line := self._stop(session, runner))]
+        for line in said:
+            self._lines.say("stop", line)
+        return said
+
+    def _stop(self, session: fleet.Session, runner: git.Runner) -> str:
+        if not fleet.alive(session) or not session.name.startswith((fleet.HAND, fleet.SPIKE)):
+            return ""
+        try:
+            git.call(["claude", "stop", session.id], None, runner)
+        except git.GitError as error:
+            return f"{fleet.ref_of(session.name)}: {error.stderr_tail}"
+        return ""
 
     def close(self) -> None:
         try:
