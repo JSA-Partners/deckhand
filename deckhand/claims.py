@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from deckhand.step import Refusal
 from deckhand.store import Store
-from deckhand.store.open import open_store
-
-
-def person_store() -> Store:
-    return open_store("person")
 
 
 def me(person: Store) -> str:

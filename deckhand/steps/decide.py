@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from deckhand import answers, asks, claims, decisions, features, git, pins, quiz, review, signoff, versions
+from deckhand import answers, asks, decisions, features, git, pins, quiz, review, signoff, versions
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import WORKTREE, StoryStep
@@ -46,6 +46,8 @@ def read_text(path: Path) -> str:
 
 @register("decide")
 class Decide(StoryStep):
+    role = "person"
+
     def __init__(
         self,
         store: Store | None = None,
@@ -57,13 +59,6 @@ class Decide(StoryStep):
     ) -> None:
         super().__init__(store, runner, repo, me=me)
         self._reader = reader
-
-    def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        if self._opened is None:
-            self._opened = claims.person_store()
-        return self._opened
 
     def context(self, args: list[str]) -> None:
         if hand_role():

@@ -8,15 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import claims
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
-from deckhand.steps import build, captain, hand
 from deckhand.steps.build import Build
 from deckhand.steps.captain import Captain
 from deckhand.steps.decide import Decide
 from deckhand.steps.hand import Hand
 from deckhand.steps.review import Review
+from deckhand.store import open as store_open
 from deckhand.store.cached import READS, CachedStore
 from deckhand.store.fake import FakeStore
 from tests.conftest import CountingStore
@@ -52,8 +51,12 @@ def opened(
     team: FakeStore, monkeypatch: pytest.MonkeyPatch, counting_store: Callable[[FakeStore], CountingStore]
 ) -> dict[str, CountingStore]:
     found = {"app": counting_store(team), "person": counting_store(team)}
-    for module in (captain, build, hand, claims):
-        monkeypatch.setattr(module, "open_store", lambda role: CachedStore(found[role]))
+
+    def open_store(role: str) -> CachedStore:
+        found[role].opens += 1
+        return CachedStore(found[role])
+
+    monkeypatch.setattr(store_open, "open_store", open_store)
     return found
 
 
@@ -111,3 +114,12 @@ def test_hand_context_reads_each_object_at_most_once(
     assert json.loads(capsys.readouterr().out)["feature"] == "Alpha"
     assert repeated(opened["app"]) == []
     assert reads(opened["person"]) == [("viewer", (), ())]
+
+
+def test_hand_start_opens_each_store_once(
+    clone: Path, opened: dict[str, CountingStore], capsys: pytest.CaptureFixture[str]
+):
+    shell = Shell()
+    Hand(None, shell).apply(["start", "ACME-1", *TEAM])
+    assert shell.launched() == ["hand-ACME-1"]
+    assert {role: counting.opens for role, counting in opened.items()} == {"app": 1, "person": 1}

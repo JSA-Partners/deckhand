@@ -7,7 +7,7 @@ from deckhand.linear.client import LinearError
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
-from deckhand.store.open import open_store
+from deckhand.store.open import Stores
 
 USAGE = "stories takes [--team-key KEY] on both verbs, --json on context only, and --file MAP.json on apply"
 MISSED_BY = ("rule", "example", "invariant", "spike", "external")
@@ -148,13 +148,11 @@ def _discovery(entry: dict) -> dict:
 @register("stories")
 class Stories:
     def __init__(self, store: Store | None = None, runner: git.Runner = git.run) -> None:
-        self._store = store
+        self._stores = Stores(app=store)
         self._runner = runner
 
     def _store_for_run(self) -> Store:
-        if self._store is not None:
-            return self._store
-        return open_store("app")
+        return self._stores("app")
 
     def _refuse_running_spike(self, feature: features.Feature) -> None:
         asked = spikes.keys(answers.state_dir(), feature.project["id"])

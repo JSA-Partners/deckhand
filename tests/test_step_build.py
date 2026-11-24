@@ -77,7 +77,7 @@ def labeled(tmp_path: Path, repo: Path) -> FakeStore:
 
 
 def round_of(step: Review, tmp_path: Path, n: int, *items: dict) -> None:
-    submit(step._store, tmp_path, step._repo, PLAN + f"- [ ] step {n}\n")
+    submit(step._store_for_run(), tmp_path, step._repo, PLAN + f"- [ ] step {n}\n")
     record_round(step, tmp_path, *items)
 
 

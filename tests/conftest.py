@@ -45,6 +45,7 @@ class CountingStore:
         self._inner = inner
         self.calls: dict[str, int] = {}
         self.log: list[tuple[str, tuple, tuple]] = []
+        self.opens = 0
 
     def __getattr__(self, name: str) -> Any:
         method = getattr(self._inner, name)
