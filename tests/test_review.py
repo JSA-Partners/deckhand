@@ -225,14 +225,37 @@ def test_feature_gaps_need_the_current_target_while_a_round_is_left():
     assert review.feature_gaps("p1", capped, "h4") == []
 
 
-def person(finding: str, answer: str = review.ACCEPT) -> Record:
-    return Record(review.DECISION, finding, "h1", "person:pat", {"answer": answer})
+def person(finding: str, answer: str = review.ACCEPT, version: str = "h1") -> Record:
+    return Record(review.DECISION, finding, version, "person:pat", {"answer": answer})
 
 
-def test_unfixed_lists_person_accepted_findings_without_a_hand_fix():
-    first, second, third, fourth = (raw(summary=s) for s in ("first", "second", "third", "fourth"))
-    records = [done(1, "h1", first, second), done(2, "h2", second, third, fourth)]
-    records += [person(id_of(third)), person(id_of(first)), person(id_of(second)), person(id_of(fourth), "Decline")]
-    records.append(review.accept_record(id_of(second), "h2"))
-    assert [f["summary"] for f in review.unfixed(records)] == ["first", "third"]
-    assert review.unfixed([done(1, "h1", first), review.accept_record(id_of(first), "h1")]) == []
+FIRST, SECOND = raw(summary="first"), raw(summary="second")
+
+
+def summaries(records: list[Record]) -> list[str]:
+    return [f["summary"] for f in review.unfixed(records)]
+
+
+def test_an_accepted_finding_with_no_later_round_is_unfixed():
+    records = [done(1, "h1", FIRST, SECOND), person(id_of(SECOND)), person(id_of(FIRST))]
+    assert summaries(records) == ["first", "second"]
+
+
+def test_an_accepted_finding_a_later_round_no_longer_raises_is_fixed():
+    records = [done(1, "h1", FIRST, SECOND), done(2, "h2", SECOND), person(id_of(FIRST)), person(id_of(SECOND))]
+    assert summaries(records) == ["second"]
+
+
+def test_an_accepted_finding_a_later_round_still_raises_is_unfixed():
+    records = [done(1, "h1", FIRST), done(2, "h2", FIRST), person(id_of(FIRST))]
+    assert summaries(records) == ["first"]
+
+
+def test_a_finding_decided_at_the_latest_round_waits_for_the_next_one():
+    records = [done(1, "h1"), done(2, "h2", FIRST), person(id_of(FIRST), version="h2")]
+    assert summaries(records) == ["first"]
+
+
+def test_a_declined_or_undecided_finding_is_never_unfixed():
+    records = [done(1, "h1", FIRST, SECOND), person(id_of(FIRST), review.DECLINE)]
+    assert review.unfixed(records) == []

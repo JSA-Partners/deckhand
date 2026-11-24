@@ -97,3 +97,12 @@ def test_a_spike_hand_reads_and_acks_its_own_mail(capsys, db: Path, monkeypatch)
     Mail().apply(["a1b2c3d4e5f6", "ack", "1"])
     assert capsys.readouterr().out == "done: acknowledged 1\n"
     assert pending(db) == [(2, "hand-a1b2c3d4e5f6")]
+
+
+def test_a_hand_reading_another_hands_mail_gets_one_line_and_nothing_else(capsys, db: Path, monkeypatch):
+    posted(db)
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    for args in (["ACME-2"], ["ACME-2", "--json"]):
+        Mail().context(args)
+        assert capsys.readouterr().out == "ACME-2 is not this hand's REF; mail context takes its own\n"

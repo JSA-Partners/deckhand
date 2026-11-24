@@ -8,7 +8,7 @@ import sys
 
 from deckhand import answers, decisions, features, fleet, gaps, launch, ops, spec
 from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
-from deckhand.step import Refusal, hand_role, register, team_key
+from deckhand.step import Refusal, hand_role, own_ref, register, team_key
 from deckhand.steps.build import StoryStep
 from deckhand.steps.captain import Captain
 from deckhand.store import Store
@@ -89,7 +89,7 @@ class Hook(StoryStep):
         print(buffer.getvalue(), end="")
 
     def _stop(self) -> None:
-        ref = fleet.own_ref()
+        ref = own_ref()
         if hand_role() and ref:
             with LocalState(default_path()) as rows:
                 rows.turn_ended(fleet.session_of(ref))

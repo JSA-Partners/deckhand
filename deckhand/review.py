@@ -142,16 +142,24 @@ def accepted(records: list[Record]) -> set[str]:
     return by_person | {r.subject for r in records if r.kind == HAND_ACCEPT}
 
 
+def _fixed(rounds: list[Record], id: str, version: str) -> bool:
+    raised = [n for n, round in enumerate(rounds) if any(f["id"] == id for f in round.data["findings"])]
+    at = next((n for n in reversed(raised) if rounds[n].version == version), raised[-1])
+    return at < len(rounds) - 1 and raised[-1] != len(rounds) - 1
+
+
 def unfixed(records: list[Record]) -> list[dict]:
-    by_person = {id for id, answer in decided(records).items() if answer == ACCEPT}
-    fixed = {r.subject for r in records if r.kind == HAND_ACCEPT}
+    answers = decided(records)
+    versions = {r.subject: r.version for r in records if r.kind == DECISION and r.author.startswith(PERSON)}
     prefixes = list(dict.fromkeys(r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND))
     found: dict[str, dict] = {}
     for prefix in prefixes:
-        for round in rounds_of(records, prefix):
+        rounds = rounds_of(records, prefix)
+        for round in rounds:
             for item in round.data["findings"]:
-                if item["id"] in by_person and item["id"] not in fixed:
-                    found.setdefault(item["id"], item)
+                id = item["id"]
+                if answers.get(id) == ACCEPT and id not in found and not _fixed(rounds, id, versions[id]):
+                    found[id] = item
     return list(found.values())
 
 

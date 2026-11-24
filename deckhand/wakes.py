@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from deckhand import queue, review
+from deckhand import fleet, queue, review
 from deckhand.records import Record
 from deckhand.store.state import Message
 
 NUDGE, SYNC = "nudge", "sync"
-ACK = "Then acknowledge with deckhand mail apply."
+ACK = "Then acknowledge with: deckhand mail apply {ref} ack {seq}"
 
 
 def to_fix(records: list[Record]) -> list[str]:
@@ -28,6 +28,8 @@ def body(story: dict, decision: Record, records: list[Record]) -> str:
     left = to_fix(records)
     if left:
         lines += ["Accepted findings still to fix:", *(f"- {line}" for line in left)]
+    if len(lines) == 1:
+        lines.append(nudge_body())
     return "\n".join(lines)
 
 
@@ -40,5 +42,7 @@ def sync_body(merged: dict) -> str:
 
 
 def prompt(messages: list[Message]) -> str:
-    bodies = [m.body for m in sorted(messages, key=lambda m: m.seq)]
-    return "\n\n".join([*bodies, ACK])
+    ordered = sorted(messages, key=lambda m: m.seq)
+    last = ordered[-1]
+    ack = ACK.format(ref=fleet.ref_of(last.hand), seq=last.seq)
+    return "\n\n".join([*(m.body for m in ordered), ack])

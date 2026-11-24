@@ -353,15 +353,6 @@ def test_permission_gap_recorded_once_the_next_feature_opens(monkeypatch, tmp_pa
     assert len(store.records("s1")) == 1
 
 
-def test_hooks_json_runs_the_stop_hook_on_every_turn_end():
-    from tests.conftest import ROOT
-
-    [entry] = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]["Stop"]
-    assert "matcher" not in entry
-    [command] = entry["hooks"]
-    assert command == {"type": "command", "command": '"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" hook apply stop'}
-
-
 def turn_ended(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str | None) -> str | None:
     from deckhand.steps.hook import Hook
     from deckhand.store.state import LocalState

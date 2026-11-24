@@ -15,9 +15,8 @@ def not_yet(**extra: str) -> Record:
 
 
 def accepted_two_fixed_one() -> list[Record]:
-    records = [done(1, "h1", OPEN, FIXED, stage="branch")]
-    records += [person(id_of(OPEN, "branch")), person(id_of(FIXED, "branch"))]
-    return [*records, review.accept_record(id_of(FIXED, "branch"), "h1")]
+    records = [done(1, "h1", OPEN, FIXED, stage="branch"), done(2, "h2", OPEN, stage="branch")]
+    return [*records, person(id_of(OPEN, "branch")), person(id_of(FIXED, "branch"))]
 
 
 def test_a_not_yet_body_carries_each_accepted_finding_with_its_fix():
@@ -25,6 +24,13 @@ def test_a_not_yet_body_carries_each_accepted_finding_with_its_fix():
         "The person decided sign-off: Not yet",
         "Accepted findings still to fix:",
         "- P2 correctness cart.py:12 The total skips tax. Fix: Add the tax line.",
+    ]
+
+
+def test_a_bare_not_yet_body_still_says_what_to_do():
+    assert wakes.body(STORY, not_yet(), []).splitlines() == [
+        "The person decided sign-off: Not yet",
+        "Carry on from the first step the contexts show undone.",
     ]
 
 
@@ -50,10 +56,15 @@ def test_nudge_and_sync_bodies():
     assert wakes.sync_body({"identifier": "ACME-2"}) == "ACME-2 merged. Bring main in before your next commit."
 
 
-def message(seq: int, body: str) -> Message:
-    return Message(seq, f"k{seq}", "hand-ACME-1", wakes.NUDGE, body, "2026-11-23T10:00:00.000Z", None, None)
+def message(seq: int, body: str, hand: str = "hand-ACME-1") -> Message:
+    return Message(seq, f"k{seq}", hand, wakes.NUDGE, body, "2026-11-23T10:00:00.000Z", None, None)
 
 
-def test_prompt_orders_bodies_by_seq_and_ends_with_the_ack_line():
+def test_prompt_orders_bodies_by_seq_and_ends_with_the_ack_command():
     text = wakes.prompt([message(5, "second"), message(2, "first")])
-    assert text == "first\n\nsecond\n\nThen acknowledge with deckhand mail apply."
+    assert text == "first\n\nsecond\n\nThen acknowledge with: deckhand mail apply ACME-1 ack 5"
+
+
+def test_a_spike_prompt_acks_by_the_spike_key():
+    text = wakes.prompt([message(3, "answered", "spike-a1b2c3d4e5f6")])
+    assert text.splitlines()[-1] == "Then acknowledge with: deckhand mail apply a1b2c3d4e5f6 ack 3"

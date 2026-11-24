@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from deckhand import fleet
-from deckhand.step import Refusal, register
+from deckhand.step import Refusal, hand_role, own_ref, register
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 
@@ -29,7 +29,11 @@ def _parse(args: list[str]) -> dict:
 class Mail:
     def context(self, args: list[str]) -> None:
         parsed = _parse(args)
-        hand = fleet.session_of(parsed["words"][0])
+        ref = parsed["words"][0]
+        if hand_role() and ref != own_ref():
+            print(f"{ref} is not this hand's REF; mail context takes its own")
+            return
+        hand = fleet.session_of(ref)
         with LocalState(default_path()) as rows:
             waiting = rows.pending(hand)
         if parsed["json"]:

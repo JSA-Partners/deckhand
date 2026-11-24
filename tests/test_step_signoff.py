@@ -820,6 +820,7 @@ def with_unfixed(tmp_path: Path, repo: Path, state: Path, capsys: pytest.Capture
     for each in (raw(), OPEN):
         found = review.finding_id(review.parse_findings(json.dumps([each]))[0], "branch")
         store.put_record("s1", Record(review.DECISION, found, "hash2", "person:pat", {"answer": review.ACCEPT}))
+    branch_round(store, OPEN, n=3)
     return store
 
 

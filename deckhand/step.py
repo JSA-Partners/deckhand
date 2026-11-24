@@ -72,17 +72,18 @@ def hand_role() -> bool:
     return os.environ.get("DECKHAND_ROLE") == "hand"
 
 
+def own_ref() -> str:
+    return os.environ.get("DECKHAND_SPIKE") or os.environ.get("DECKHAND_STORY", "")
+
+
 def hand_may_apply(command: str, args: list[str]) -> bool:
     allowed = HAND_APPLIES.get(command)
     if allowed is None:
         return False
     if command in UNREFERENCED:
         return allowed(args)
-    from deckhand import fleet
-
-    own = (
-        fleet.own_ref()
-        if command == "mail"
-        else os.environ.get("DECKHAND_SPIKE" if command == "spike" else "DECKHAND_STORY", "")
-    )
+    if command == "mail":
+        own = own_ref()
+    else:
+        own = os.environ.get("DECKHAND_SPIKE" if command == "spike" else "DECKHAND_STORY", "")
     return bool(own) and args[:1] == [own] and allowed(args[1:])
