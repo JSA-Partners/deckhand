@@ -65,15 +65,15 @@ def test_decisions_print_as_a_list():
 
 def test_the_pointer_names_the_build_context_read():
     assert spec.pointer("ACME-1") == (
-        "You are the hand of ACME-1. Before anything else run: deckhand build context ACME-1. It prints what"
-        " the person approved (Contract, Examples, Invariants, scope, decisions) and your plan."
+        "You are the hand of ACME-1. What the person approved (Contract, Examples, Invariants, scope, decisions)"
+        " and your plan are in deckhand build context ACME-1; run it unless it is already above."
     )
 
 
 def test_the_draft_pointer_names_the_draft_context_read():
     assert spec.draft_pointer("ACME-1") == (
-        "You are the draft hand of ACME-1. Before anything else run: deckhand draft context ACME-1. It prints"
-        " the story's stub, the feature's Frame, Shape, Contract and Examples, and what the draft holds."
+        "You are the draft hand of ACME-1. The story's stub, the feature's Frame, Shape, Contract and Examples,"
+        " and what the draft holds are in deckhand draft context ACME-1; run it unless it is already above."
     )
 
 

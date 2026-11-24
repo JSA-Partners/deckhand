@@ -12,27 +12,27 @@ allowed-tools: Bash Read Write Edit Grep Glob Agent Skill(superpowers:*) Skill(i
 
 !`deckhand build context $story`
 
-Above: the story and its worktree. REF is $story. You are its hand and never ask the person: save a
-decision of theirs with `deckhand ask apply REF --file QUESTION.json`, shaped as
-`deckhand ask context REF` prints, and stop; the answer wakes you. A change to Claude Code's own
-config adds `--edit`. On a rerun, carry on from the first step the contexts show undone;
-`deckhand merge context REF` says whether it is signed off. When a command refuses, fix the rule it
-names. A raw write fails: use the deckhand command for it. A uv cache error or a sandbox refusal
-means the call was chained: run it alone. Keep command input files in a temporary directory outside
-the worktree.
+Above: the story, its worktree, and what the person approved (Contract, Examples, Invariants, scope,
+decisions); build to it, in its wording. REF is $story. Never ask the person: save a decision of
+theirs with `deckhand ask apply REF --file QUESTION.json`, shaped as `deckhand ask context REF`
+prints, and stop; the answer wakes you. A change to Claude Code's own config adds `--edit`. On a
+rerun, resume at the first step the contexts show undone; `deckhand merge context REF` says whether
+it is signed off. When a command refuses, fix the rule it names. A raw write fails; use deckhand. A
+uv cache error or a sandbox refusal means the call was chained: run it alone. Keep input files in a
+temporary directory outside the worktree.
 
 Work in the worktree above. Plan with superpowers:writing-plans and a manifest shaped as
 `deckhand implplan context REF` prints; save both with `deckhand implplan apply REF --plan PLAN.md --manifest MANIFEST.json`.
 
 Review the plan in rounds from `deckhand review context REF --stage plan`: one deckhand:reviewer per
 listed lens at once, each given the stage, lens path, target path and any carried P1s, then
-deckhand:confidence on the joined list and target path. Save its output with
+deckhand:confidence on the joined list and target path. Save it with
 `deckhand review apply REF round --stage plan --findings FILE --target HASH`. Record a fix with
 `deckhand review apply REF resolve --stage plan --accept ID`, or propose a decline with `--propose-decline ID --reason TEXT`; declining, changing what the story delivers, a cap and any finding left open are the person's; never write a docs decision to excuse one. Rerun the context after fixing: clean, cap-clear or proceeded carries on.
 
 Build with superpowers:test-driven-development, and impeccable:impeccable when a person sees the
 change. Commit with `deckhand build apply REF commit --message FILE`. Bring main in with
-`deckhand build apply REF sync`, resolve any conflict it names, and commit. Then run `deckhand checks apply REF` and `deckhand build apply REF push`.
+`deckhand build apply REF sync`, resolve any conflict, and commit. Then run `deckhand checks apply REF` and `deckhand build apply REF push`.
 
 Review the branch the same way with `--stage branch`, then run deckhand:document and commit its
 edits. Repeat checks, push and branch review until the context stops clean, cap-clear or

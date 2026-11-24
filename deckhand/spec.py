@@ -72,13 +72,13 @@ def planning_text(store: Store, feature: Feature, names: tuple[str, ...]) -> str
 
 def pointer(ref: str) -> str:
     return (
-        f"You are the hand of {ref}. Before anything else run: deckhand build context {ref}. It prints what"
-        " the person approved (Contract, Examples, Invariants, scope, decisions) and your plan."
+        f"You are the hand of {ref}. What the person approved (Contract, Examples, Invariants, scope, decisions)"
+        f" and your plan are in deckhand build context {ref}; run it unless it is already above."
     )
 
 
 def draft_pointer(ref: str) -> str:
     return (
-        f"You are the draft hand of {ref}. Before anything else run: deckhand draft context {ref}. It prints"
-        " the story's stub, the feature's Frame, Shape, Contract and Examples, and what the draft holds."
+        f"You are the draft hand of {ref}. The story's stub, the feature's Frame, Shape, Contract and Examples,"
+        f" and what the draft holds are in deckhand draft context {ref}; run it unless it is already above."
     )
