@@ -4,16 +4,20 @@ from typing import Literal
 
 from deckhand.credentials import Credentials
 from deckhand.linear.client import LinearClient, Transport, default_transport
+from deckhand.linear.meter import Meter
 from deckhand.linear.oauth import fetch_app_token
 
 
 def connect(
-    credentials: Credentials, role: Literal["app", "person"], transport: Transport = default_transport
+    credentials: Credentials,
+    role: Literal["app", "person"],
+    transport: Transport = default_transport,
+    meter: Meter | None = None,
 ) -> LinearClient:
     if role == "person":
-        return LinearClient(credentials.personal_key, lambda: None, transport, str(credentials.key_path))
+        return LinearClient(credentials.personal_key, lambda: None, transport, str(credentials.key_path), meter)
 
     def bearer() -> str:
         return "Bearer " + credentials.app_token(lambda id, secret: fetch_app_token(id, secret, transport))
 
-    return LinearClient(bearer, credentials.invalidate_app_token, transport, str(credentials.app_path))
+    return LinearClient(bearer, credentials.invalidate_app_token, transport, str(credentials.app_path), meter)

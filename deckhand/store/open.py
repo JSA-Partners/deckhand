@@ -1,17 +1,36 @@
 from __future__ import annotations
 
-from deckhand import config
+from deckhand import budget, config
 from deckhand.credentials import Credentials
 from deckhand.linear.connect import connect
+from deckhand.linear.meter import Meter
+from deckhand.step import Refusal
 from deckhand.store import Store
 from deckhand.store.cached import CachedStore
 from deckhand.store.linear import LinearStore
 from deckhand.store.local import LocalRecords, default_path
+from deckhand.store.state import LocalState
+
+METERS = {"app": Meter(), "person": Meter()}
 
 
 def open_store(role: str) -> Store:
-    client = connect(Credentials.load(config.config_dir()), role)
+    client = connect(Credentials.load(config.config_dir()), role, meter=METERS[role])
     return CachedStore(LinearStore(client, LocalRecords(default_path())))
+
+
+# A meter that cannot be kept never changes what the command printed or how it exited.
+def flush() -> None:
+    taken = {role: meter.taken() for role, meter in METERS.items()}
+    if not any(taken.values()):
+        return
+    try:
+        with LocalState(default_path()) as rows:
+            for role, found in taken.items():
+                if found is not None:
+                    budget.keep(rows, role, found)
+    except Refusal:
+        pass
 
 
 class Stores:

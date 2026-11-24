@@ -40,8 +40,9 @@
   escape codes; `statusline.py` installs and removes the captain's segment in the person's status
   line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`
   what each status line tool needs, and the launcher scripts
-- `linear/` every Linear call: the GraphQL client and its errors, the app token, every query, what
-  setup reads and plans for a team, and a client for the app or the person
+- `linear/` every Linear call: the GraphQL client and its errors, the meter that reads its budget
+  headers, the app token, every query, what setup reads and plans for a team, and a client for the
+  app or the person; `budget.py` the Linear budget each role's meter keeps in the local state
 - `store/` the issue store: the `Store` protocol with Linear UUIDs for ids, the in-memory fake the
   tests use, and the store backed by Linear; `local.py` the records in deckhand's local SQLite
   file, `state.py` its message, hand and engine rows; `ops.py` the idempotent ensure operations over

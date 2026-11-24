@@ -13,6 +13,7 @@ import pytest
 from deckhand import __version__
 from deckhand.credentials import APP_FILE
 from deckhand.linear.client import DuplicateId, KeepAliveTransport, LinearClient, LinearError
+from deckhand.linear.meter import Meter
 from deckhand.linear.oauth import fetch_app_token
 from deckhand.step import Refusal
 
@@ -446,3 +447,38 @@ def test_no_proxy_for_linear_connects_directly(proxied: list[Proxied], monkeypat
     monkeypatch.setenv("NO_PROXY", "api.linear.app")
     client(KeepAliveTransport()).query("q", {})
     assert [(made.address[0], made.tunnel) for made in proxied] == [("api.linear.app", None)]
+
+
+def limited_error(headers: dict[str, str]) -> urllib.error.HTTPError:
+    body = {"errors": [{"message": "Rate limit exceeded.", "extensions": {"code": "RATELIMITED"}}]}
+    message = http.client.HTTPMessage()
+    for name, value in headers.items():
+        message[name] = value
+    return urllib.error.HTTPError(
+        "https://api.linear.app/graphql", 400, "x", message, io.BytesIO(json.dumps(body).encode())
+    )
+
+
+def test_the_meter_hears_the_headers_of_a_reply_through_keep_alive() -> None:
+    response = Response(200, ok({"x": 1}))
+    response.headers["X-Complexity"] = "37"
+    meter = Meter(lambda: 5.0)
+    linear = LinearClient(lambda: BEARER, Unauthorized(), KeepAliveTransport(Connections([response])), meter=meter)
+    linear.query("query Issue($id: String!) { issue(id: $id) { id } }", {"id": "a"})
+    assert meter.taken()["costs"] == {"Issue": 37}
+
+
+def test_the_meter_hears_a_rate_limit_from_the_error_headers() -> None:
+    meter = Meter(lambda: 5.0)
+    transport = Transport(limited_error({"Retry-After": "60"}))
+    linear = LinearClient(lambda: BEARER, Unauthorized(), transport, meter=meter)
+    with pytest.raises(LinearError) as raised:
+        linear.query("query Viewer { viewer { id } }", {})
+    assert raised.value.code == "RATELIMITED"
+    assert meter.taken()["budget"]["until"] == 65.0
+
+
+def test_a_plain_transport_is_metered_without_headers() -> None:
+    meter = Meter(lambda: 5.0)
+    LinearClient(lambda: BEARER, Unauthorized(), Transport(ok({})), meter=meter).query("query Viewer { v }", {})
+    assert meter.taken() == {"budget": {"at": 5.0, "until": None}, "costs": {}}

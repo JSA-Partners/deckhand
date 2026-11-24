@@ -494,3 +494,25 @@ def test_text_the_stdout_cannot_encode_is_replaced(registry, monkeypatch):
     assert main(["probe", "context"]) == 0
     sys.stdout.flush()
     assert raw.getvalue() == b"Caf? ?\n"
+
+
+def test_what_a_command_heard_from_linear_is_kept_even_when_it_refuses(registry, tmp_path, monkeypatch):
+    from deckhand import budget
+    from deckhand.store import open as store_open
+    from deckhand.store.state import LocalState
+
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(store_open, "METERS", {"app": store_open.Meter(), "person": store_open.Meter()})
+
+    @register("probe")
+    class Probe:
+        def context(self, args):
+            return None
+
+        def apply(self, args):
+            store_open.METERS["app"].heard("Issue", {"X-RateLimit-Complexity-Remaining": "3"}, False)
+            raise Refusal("no plan")
+
+    assert main(["probe", "apply"]) == 1
+    with LocalState(tmp_path / "deckhand.db") as rows:
+        assert budget.kept(rows).remaining == 3

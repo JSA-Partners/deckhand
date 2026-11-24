@@ -160,7 +160,7 @@ class Connected(Exception):
 def roles_connected(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     roles: list[str] = []
 
-    def connect(credentials: object, role: str) -> None:
+    def connect(credentials: object, role: str, meter: object) -> None:
         roles.append(role)
         raise Connected
 
