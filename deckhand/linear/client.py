@@ -4,15 +4,18 @@ import http.client
 import io
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
+from deckhand import __version__
 from deckhand.step import Refusal
 
 HOST = "api.linear.app"
 URL = f"https://{HOST}/graphql"
 TIMEOUT_SECONDS = 30
 CONFLICT_PREFIX = "conflict on insert of"
+USER_AGENT = f"deckhand/{__version__}"
 
 Transport = Callable[[urllib.request.Request], bytes]
 
@@ -34,15 +37,39 @@ DROPPED = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError
 
 
 def _connect() -> http.client.HTTPSConnection:
-    return http.client.HTTPSConnection(HOST, timeout=TIMEOUT_SECONDS)
+    proxy = urllib.request.getproxies().get("https")
+    if not proxy or urllib.request.proxy_bypass(HOST):
+        return http.client.HTTPSConnection(HOST, timeout=TIMEOUT_SECONDS)
+    address = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+    connection = http.client.HTTPSConnection(address.hostname, address.port, timeout=TIMEOUT_SECONDS)
+    connection.set_tunnel(HOST)
+    return connection
 
 
 class KeepAliveTransport:
     def __init__(self, connect: Callable[[], http.client.HTTPSConnection] = _connect) -> None:
         self._connect = connect
         self._connection: http.client.HTTPSConnection | None = None
+        self._down: OSError | http.client.HTTPException | None = None
+
+    def reset(self) -> None:
+        if self._connection is not None:
+            self._connection.close()
+        self._connection = None
+        self._down = None
 
     def __call__(self, request: urllib.request.Request) -> bytes:
+        if self._down is not None:
+            raise self._down
+        try:
+            return self._send(request)
+        except urllib.error.HTTPError:
+            raise
+        except (OSError, http.client.HTTPException) as error:
+            self._down = error
+            raise
+
+    def _send(self, request: urllib.request.Request) -> bytes:
         reused = self._connection is not None
         try:
             return self._exchange(request)
@@ -108,18 +135,17 @@ class LinearClient:
         self._on_unauthorized = on_unauthorized
         self._transport = transport
         self._source = source
-        self._down: LinearError | None = None
 
     def query(self, document: str, variables: dict) -> dict:
-        if self._down is not None:
-            raise self._down
         payload = json.dumps({"query": document, "variables": variables}).encode()
         try:
-            raw = self._post(payload)
-        except LinearError as error:
-            if error.code == "network":
-                self._down = error
-            raise
+            raw = self._send(payload)
+        except _Unauthorized:
+            self._on_unauthorized()
+            try:
+                raw = self._send(payload)
+            except _Unauthorized:
+                raise Refusal(f"unauthorized: check {self._source}") from None
         body = _parse(raw)
         errors = body.get("errors")
         if errors:
@@ -129,21 +155,11 @@ class LinearClient:
             raise LinearError("bad_response", "the response held no data")
         return data
 
-    def _post(self, payload: bytes) -> bytes:
-        try:
-            return self._send(payload)
-        except _Unauthorized:
-            self._on_unauthorized()
-            try:
-                return self._send(payload)
-            except _Unauthorized:
-                raise Refusal(f"unauthorized: check {self._source}") from None
-
     def _send(self, payload: bytes) -> bytes:
         request = urllib.request.Request(
             URL,
             data=payload,
-            headers={"Content-Type": "application/json", "Authorization": self._token()},
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, "Authorization": self._token()},
         )
         try:
             return self._transport(request)

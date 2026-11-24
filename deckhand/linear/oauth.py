@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 
 from deckhand.credentials import APP_FILE
-from deckhand.linear.client import LinearError, Transport, default_transport
+from deckhand.linear.client import USER_AGENT, LinearError, Transport, default_transport
 from deckhand.step import Refusal
 
 TOKEN_URL = "https://api.linear.app/oauth/token"
@@ -26,7 +26,7 @@ def fetch_app_token(client_id: str, client_secret: str, transport: Transport = d
     request = urllib.request.Request(
         TOKEN_URL,
         data=form,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT},
     )
     try:
         body = json.loads(transport(request))

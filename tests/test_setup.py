@@ -330,12 +330,16 @@ def through_main(tmp_path, monkeypatch: pytest.MonkeyPatch):
         def getresponse(self) -> Revoked:
             return Revoked()
 
+        def set_tunnel(self, host: str) -> None:
+            pass
+
         def close(self) -> None:
             pass
 
     monkeypatch.setattr(http.client, "HTTPSConnection", Connection)
-    monkeypatch.setattr(client.default_transport, "_connection", None)
-    return config, requests
+    client.default_transport.reset()
+    yield config, requests
+    client.default_transport.reset()
 
 
 def test_revoked_key_refuses_through_main_naming_the_key_file(through_main, capsys: pytest.CaptureFixture[str]):

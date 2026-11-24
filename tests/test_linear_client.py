@@ -9,6 +9,7 @@ import urllib.request
 
 import pytest
 
+from deckhand import __version__
 from deckhand.credentials import APP_FILE
 from deckhand.linear.client import DuplicateId, KeepAliveTransport, LinearClient, LinearError
 from deckhand.linear.oauth import fetch_app_token
@@ -210,26 +211,6 @@ def test_token_unfit_for_a_header_is_linear_error_without_the_token() -> None:
     assert raised.value.__context__ is None or raised.value.__suppress_context__
 
 
-def test_after_a_network_failure_later_queries_fail_without_sending() -> None:
-    transport = Transport(urllib.error.URLError("down"), ok({"x": 1}))
-    linear = client(transport)
-    with pytest.raises(LinearError) as first:
-        linear.query("q", {})
-    with pytest.raises(LinearError) as second:
-        linear.query("q", {})
-    assert second.value is first.value
-    assert second.value.code == "network"
-    assert len(transport.requests) == 1
-
-
-def test_an_http_error_does_not_latch() -> None:
-    linear = client(Transport(http_error(500), ok({"x": 1})))
-    with pytest.raises(LinearError) as raised:
-        linear.query("q", {})
-    assert raised.value.code == "http"
-    assert linear.query("q", {}) == {"x": 1}
-
-
 class Response:
     def __init__(self, status: int, body: bytes) -> None:
         self.status = status
@@ -260,13 +241,23 @@ class Connection:
         self.closed = True
 
 
+class Validating(Connection):
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+        connection = http.client.HTTPConnection("localhost")
+        connection.putrequest(method, url)
+        for name, value in (headers or {}).items():
+            connection.putheader(name, value)
+        super().request(method, url, body, headers)
+
+
 class Connections:
-    def __init__(self, *scripts: list[Response | Exception]) -> None:
+    def __init__(self, *scripts: list[Response | Exception], kind: type[Connection] = Connection) -> None:
         self.scripts = list(scripts)
+        self.kind = kind
         self.made: list[Connection] = []
 
     def __call__(self) -> Connection:
-        connection = Connection(self.scripts.pop(0))
+        connection = self.kind(self.scripts.pop(0))
         self.made.append(connection)
         return connection
 
@@ -323,19 +314,113 @@ def test_keep_alive_keeps_the_status_handling() -> None:
     assert len(connections.made) == 1
 
 
-def test_a_network_failure_fetching_the_token_latches() -> None:
-    calls = []
-
-    def token() -> str:
-        calls.append(1)
-        raise LinearError("network", "could not reach Linear")
-
-    transport = Transport(ok({}))
-    linear = LinearClient(token, Unauthorized(), transport)
-    with pytest.raises(LinearError) as first:
+def test_an_http_error_does_not_latch() -> None:
+    connections = Connections([Response(500, b""), Response(200, ok({"x": 1}))])
+    linear = client(KeepAliveTransport(connections))
+    with pytest.raises(LinearError) as raised:
         linear.query("q", {})
-    with pytest.raises(LinearError) as second:
-        linear.query("q", {})
-    assert second.value is first.value
-    assert len(calls) == 1
-    assert transport.requests == []
+    assert raised.value.code == "http"
+    assert linear.query("q", {}) == {"x": 1}
+
+
+def test_after_a_network_failure_the_transport_fails_without_sending() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({}))])
+    transport = KeepAliveTransport(connections)
+    linear = client(transport)
+    for _ in range(2):
+        with pytest.raises(LinearError) as raised:
+            linear.query("q", {})
+        assert raised.value.code == "network"
+    assert len(connections.made) == 1
+    assert len(connections.made[0].requests) == 1
+
+
+def test_a_second_client_on_a_down_transport_fails_without_sending() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({}))])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    with pytest.raises(LinearError) as raised:
+        LinearClient(lambda: "lin_api_person", Unauthorized(), transport).query("q", {})
+    assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_a_down_transport_also_stops_the_token_request() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, b"{}")])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    with pytest.raises(LinearError) as raised:
+        fetch_app_token("id1", "sec1", transport)
+    assert raised.value.code == "network"
+    assert len(connections.made) == 1
+
+
+def test_reset_brings_a_down_transport_back() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({"x": 1}))])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    transport.reset()
+    assert client(transport).query("q", {}) == {"x": 1}
+
+
+def test_requests_name_deckhand_as_the_user_agent() -> None:
+    transport = Transport(ok({}), json.dumps({"access_token": "tok", "expires_in": 1}).encode())
+    client(transport).query("q", {})
+    fetch_app_token("id1", "sec1", transport)
+    assert [r.get_header("User-agent") for r in transport.requests] == [f"deckhand/{__version__}"] * 2
+
+
+def test_a_token_unfit_for_a_header_through_keep_alive_is_a_credentials_error() -> None:
+    connections = Connections([Response(200, ok({}))], kind=Validating)
+    leaky = LinearClient(lambda: "lin_api_first\nlin_api_second", Unauthorized(), KeepAliveTransport(connections))
+    with pytest.raises(LinearError) as raised:
+        leaky.query("q", {})
+    assert raised.value.code == "credentials"
+    assert "lin_api" not in str(raised.value)
+    assert "lin_api" not in raised.value.message
+
+
+class Proxied:
+    made: list[Proxied] = []
+
+    def __init__(self, host: str, port: int | None = None, timeout: float | None = None) -> None:
+        self.address = (host, port)
+        self.tunnel: str | None = None
+        Proxied.made.append(self)
+
+    def set_tunnel(self, host: str) -> None:
+        self.tunnel = host
+
+    def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+        pass
+
+    def getresponse(self) -> Response:
+        return Response(200, ok({}))
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def proxied(monkeypatch: pytest.MonkeyPatch) -> list[Proxied]:
+    for name in ("https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(http.client, "HTTPSConnection", Proxied)
+    monkeypatch.setattr(Proxied, "made", [])
+    return Proxied.made
+
+
+def test_an_https_proxy_tunnels_to_linear(proxied: list[Proxied], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    client(KeepAliveTransport()).query("q", {})
+    assert [(made.address, made.tunnel) for made in proxied] == [(("proxy.example", 3128), "api.linear.app")]
+
+
+def test_no_proxy_for_linear_connects_directly(proxied: list[Proxied], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("NO_PROXY", "api.linear.app")
+    client(KeepAliveTransport()).query("q", {})
+    assert [(made.address[0], made.tunnel) for made in proxied] == [("api.linear.app", None)]
