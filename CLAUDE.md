@@ -21,9 +21,10 @@
   who owns a story, `asks.py` a hand's questions and wakes, `gaps.py` permission gaps, `spikes.py`
   spike questions and answers, `order.py` the build order, `answers.py` the dialog answers the hook
   stores, `inputs.py` the files a hand may hand in; `stage.py` where each story is in the build and
-  its review round, `status.py` the captain's status file, `standing.py` how the status file and the
-  fleet sort into needs you, working, stopped, queued, team and done today, `brief.py` the brief, the
-  notify text and the status line segment, `board.py` the board's sections and rows
+  its review round, `reading.py` the full read the captain shares, `status.py` the snapshot kept in
+  deckhand's local SQLite file, `standing.py` how the snapshot and the fleet sort into needs you,
+  working, stopped, queued, team and done today, `brief.py` the brief, the notify text and the
+  status line segment, `board.py` the board's sections and rows
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
   escape codes; `statusline.py` installs and removes the captain's segment in the person's status
   line, with a backup, and writes the `deckhand` launcher in deckhand's config directory; `hosts.py`
@@ -109,8 +110,8 @@ install reaches them when the next fix or feature does.
   hold no credential; every write it causes goes through `deckhand`, and a raw write fails
 - The captain holds no state: its view, the queue and the wakes are printed from records, and a
   hand stopping only reprints the brief; a waiting hand frees its slot, a planning hand holds one
-- The status file is written for the brief, the status line and the board, and never decided from;
-  its notified list only keeps a notification from repeating
+- The snapshot in deckhand's local SQLite file is written for the brief, the status line and the
+  board, and never decided from; its notified list only keeps a notification from repeating
 - A hand does the after-merge chores it can; only the rest reach the person's queue
 - `.claude/` is Claude Code's: a hand may edit `.claude/deckhand.toml` and
   `.claude/deckhand/lenses/`, and any other change becomes a queue item through `ask apply --edit`
