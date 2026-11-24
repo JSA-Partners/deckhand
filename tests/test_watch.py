@@ -118,3 +118,10 @@ def test_an_item_held_while_the_engine_comes_back_rings_on_release():
     seen, _ = watch.captain(Seen("k1", False, 0, T), "k1", True, T + 1, T + 1)
     _, lines = watch.captain(seen, "k1", False, T + 2, T + 2)
     assert lines == [QUEUE]
+
+
+def test_an_unreadable_snapshot_neither_rings_nor_clears_the_top():
+    seen, lines = watch.captain(Seen("k1", True, 0, T), None, False, T + 1, T + 1)
+    assert (seen.top, lines) == ("k1", [])
+    _, lines = watch.captain(seen, "k1", False, T + 2, T + 2)
+    assert lines == []

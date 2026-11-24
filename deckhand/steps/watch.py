@@ -12,10 +12,13 @@ USAGE = "watch apply captain|hand blocks and prints one line per event"
 POLL = 1.0
 
 
-def _captain_facts(rows: LocalState) -> tuple[str, bool, float | None]:
-    items = (status.read(answers.state_dir()) or {}).get("items") or []
+def _captain_facts(rows: LocalState) -> tuple[str | None, bool, float | None]:
+    read, top = status.read(answers.state_dir()), None
+    if read is not None:
+        items = read.get("items") or []
+        top = items[0]["key"] if items else ""
     beat = rows.heartbeat()
-    return items[0]["key"] if items else "", rows.get(watch.HOLD) is not None, beat[1] if beat else None
+    return top, rows.get(watch.HOLD) is not None, beat[1] if beat else None
 
 
 def _newest(rows: LocalState, hand: str) -> int:
@@ -57,7 +60,7 @@ class Watch:
         with LocalState(default_path()) as rows:
             rows.changed()
             top, held, beat = _captain_facts(rows)
-            seen = watch.Seen(top, None, 0, self._clock())
+            seen = watch.Seen(top or "", None, 0, self._clock())
             beaten = _beat(rows, self._clock())
             while True:
                 self._sleep(POLL)

@@ -26,15 +26,16 @@ class Seen:
 
 
 # The captain withholds every item while the engine is down, so an item still on top rings when it returns.
-def captain(seen: Seen, top: str, held: bool, beat: float | None, now: float) -> tuple[Seen, list[str]]:
+# A top of None is a snapshot that could not be read: it neither rings nor clears what was shown.
+def captain(seen: Seen, top: str | None, held: bool, beat: float | None, now: float) -> tuple[Seen, list[str]]:
     if now - seen.at > state.SLEEP_GAP:
         return replace(seen, at=now), []
     lines = []
     engine = state.alive(beat, now)
     shown = "" if seen.engine is False and engine else seen.top
-    if not top:
+    if top == "":
         shown = ""
-    elif top != shown and not held:
+    elif top is not None and top != shown and not held:
         lines.append(QUEUE)
         shown = top
     if seen.engine is not None and engine != seen.engine:

@@ -65,6 +65,53 @@ def test_the_captain_watcher_rings_for_a_new_top_item(db: Path, capsys):
     assert capsys.readouterr().out == watch.QUEUE + "\n"
 
 
+def test_the_captain_watcher_keeps_its_top_across_a_failed_snapshot_read(db: Path, capsys):
+    status.write(db.parent, snapshot([question("q1")]))
+
+    def broken() -> None:
+        with LocalState(db) as rows:
+            rows.put(status.SNAPSHOT, {"items": "unreadable"})
+
+    def again() -> None:
+        status.write(db.parent, snapshot([question("q1")]))
+
+    def newer() -> None:
+        status.write(db.parent, snapshot([question("q2")]))
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: broken, 3: again, 5: newer}, 6)).apply(["captain"])
+    assert capsys.readouterr().out == watch.QUEUE + "\n"
+
+
+def test_an_engine_that_restarts_rings_once_its_snapshot_is_back(db: Path, capsys):
+    now = [1795000000.0]
+    status.write(db.parent, snapshot([question("q1")]))
+    with LocalState(db) as rows:
+        rows.beat(1, now[0])
+
+    def later(then: Callable[[], None] = lambda: None) -> Callable[[], None]:
+        def step() -> None:
+            now[0] += 20
+            then()
+
+        return step
+
+    def restarted() -> None:
+        with LocalState(db) as rows:
+            rows.drop(status.SNAPSHOT)
+            rows.beat(2, now[0])
+
+    def written() -> None:
+        status.write(db.parent, snapshot([question("q1")]))
+        with LocalState(db) as rows:
+            rows.beat(2, now[0])
+
+    steps = {1: later(), 2: later(), 3: later(restarted), 4: later(), 5: later(written)}
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes(steps, 6), clock=lambda: now[0]).apply(["captain"])
+    assert capsys.readouterr().out.splitlines() == [watch.STOPPED, watch.RUNNING, watch.QUEUE]
+
+
 def test_the_captain_watcher_beats_its_own_row(db: Path):
     now = [1795000000.0]
 
