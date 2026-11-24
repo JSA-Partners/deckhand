@@ -359,6 +359,29 @@ def test_branch_revision_after_a_sync_leaves_out_the_merged_base(
     assert ["git", "merge-tree", "--write-tree", "c1", "base1"] in git.argvs
 
 
+def test_a_sync_alone_carries_the_last_round_at_the_new_head(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = planned(tmp_path, repo)
+    worktree(store, repo)
+    checked(store, "c1")
+    record_round(
+        Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo), tmp_path, raw(severity="P1"), stage="branch"
+    )
+    checked(store, "c2")
+    git = BranchGit("c2", {"base1...HEAD": " sibling\n+one\n", "tree1 HEAD": ""}, ancestor=False)
+    step = Review(store, git, repo)
+    found = shown(step, capsys, "s1", "--stage", "branch")
+    assert (found["stop"], found["round"], found["lenses"]) == ("carry", 2, [])
+    with pytest.raises(Refusal, match="carries the last round forward"):
+        record_round(step, tmp_path, raw(), stage="branch", target=found["target_hash"])
+    step.apply(["s1", "round", "--stage", "branch", *TEAM, "--target", found["target_hash"]])
+    held = rounds(store)[-1]
+    assert (held.subject, held.data["carry"], held.data["head"]) == ("s1:branch:2", True, "c2")
+    assert held.data["target_hash"] == found["target_hash"]
+    assert shown(step, capsys, "s1", "--stage", "branch")["stop"] == "unchanged"
+
+
 def test_branch_context_without_passing_checks_stops(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
     store = planned(tmp_path, repo)
     worktree(store, repo)

@@ -28,8 +28,8 @@ STOPS = {
     "cap": "three rounds left a P1 open; the person decides whether to proceed or rework",
     "proceeded": "the person chose Proceed at the cap and no other P1 is open; the review is done",
     "checks": "checks have not passed at this commit; run them first",
-    "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
-    " carries the last round forward without reviewers",
+    "carry": "the story's own change is unchanged at a new head; record apply round --target HASH with no"
+    " --findings, which carries the last round forward without reviewers",
 }
 
 
@@ -165,6 +165,19 @@ class Review(StoryStep):
             return None, "the previously reviewed text is not on this machine; review the whole text"
         return review.text_diff(old, target.text), ""
 
+    def _due(
+        self, subject: Subject, target: Target, repo: Path
+    ) -> tuple[review.RoundPlan | review.Stop, str | None, str]:
+        records, prefix = subject.records, subject.prefix
+        counted, _ = review.counted(records, prefix)
+        excused, since = review.excused(records, prefix), review.proceeded(records, prefix)
+        plan = review.next_round(counted, target.hash, excused, target.head, since)
+        last = review.last(review.rounds_of(records, prefix))
+        if isinstance(plan, review.Stop) or plan.carry or not plan.scoped or last is None:
+            return plan, None, ""
+        diff, note = self._scoped_diff(subject, target, last, repo)
+        return review.carry_when_empty(plan, diff if subject.stage == "branch" else None), diff, note
+
     def _clone_of(self, subject: Subject) -> Path:
         if subject.located is not None:
             return subject.located.clone
@@ -191,17 +204,13 @@ class Review(StoryStep):
         subject = self._subject(parsed)
         store, clone = self._store_for_run(), self._clone_of(subject)
         repo = self._worktree(subject, clone)
-        rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
-        excused, since = (
-            review.excused(subject.records, subject.prefix),
-            review.proceeded(subject.records, subject.prefix),
-        )
-        last = review.last(rounds)
+        excused = review.excused(subject.records, subject.prefix)
+        last = review.last(review.rounds_of(subject.records, subject.prefix))
         target = self._target(store, subject, repo)
-        plan = review.next_round(counted, target.hash, excused, target.head, since)
-        plan = review.Stop("checks") if self._unchecked(subject, repo) else plan
+        checked = not self._unchecked(subject, repo)
+        plan, diff, note = self._due(subject, target, repo) if checked else (review.Stop("checks"), None, "")
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
         facts |= {"note": target.note, "spec": None}
@@ -217,13 +226,11 @@ class Review(StoryStep):
             names = self._lenses(subject, clone)
             facts["lenses"] = [{"name": n, "path": str(lenses.path_of(n, clone))} for n in names]
             key, text = target.hash, target.text
-            if plan.scoped and last is not None:
-                diff, note = self._scoped_diff(subject, target, last, repo)
-                facts["note"] = note or facts["note"]
-                if subject.stage != "branch":
-                    facts["diff"] = diff
-                elif diff is not None:
-                    key, text = content_hash(diff), diff
+            facts["note"] = note or facts["note"]
+            if subject.stage != "branch":
+                facts["diff"] = diff
+            elif diff is not None:
+                key, text = content_hash(diff), diff
             owner = subject.prefix.split(":")[0]
             if text is not None:
                 facts["target"] = str(review.save_text(answers.state_dir(), owner, key, text))
@@ -266,22 +273,18 @@ class Review(StoryStep):
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
-        excused, since = (
-            review.excused(subject.records, subject.prefix),
-            review.proceeded(subject.records, subject.prefix),
-        )
-        plan = review.next_round(counted, target.hash, excused, target.head, since)
+        plan, _, _ = self._due(subject, target, repo)
         if isinstance(plan, review.Stop):
             raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
         if plan.carry and parsed.get("findings"):
             raise Refusal(
-                f"the diff is unchanged at {target.head}, so this round carries the last round forward;"
+                f"the story's own change is unchanged at {target.head}, so this round carries the last round forward;"
                 " run apply round --target HASH without --findings"
             )
         found = [] if plan.carry else review.parse_findings(_read(parsed.get("findings", "")))
         plan, owner = replace(plan, n=plan.n + cut), subject.prefix.split(":")[0]
         if plan.carry:
-            record = review.carry_record(owner, subject.stage, plan, review.last(counted), target.head)
+            record = review.carry_record(owner, subject.stage, plan, review.last(counted), target.head, target.hash)
         else:
             carried = [f["id"] for f in review.carried(subject.records, subject.prefix)] if plan.scoped else []
             ordered = review.ordered(found)

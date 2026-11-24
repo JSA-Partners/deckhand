@@ -3,7 +3,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from deckhand.records import Record, content_hash
@@ -205,11 +205,17 @@ def open_p1(record: Record, declined: set[str]) -> list[dict]:
     return [f for f in open_findings(record, declined) if f["severity"] == "P1"]
 
 
-def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: str) -> Record:
-    target = last.data["target_hash"]
-    data = {"target_hash": target, "findings": last.data["findings"], "scoped": True, "base_hash": target}
+def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: str, target_hash: str = "") -> Record:
+    target = target_hash or last.data["target_hash"]
+    base = last.data["target_hash"]
+    data = {"target_hash": target, "findings": last.data["findings"], "scoped": True, "base_hash": base}
     data |= {"head": head, "carry": True}
     return Record(KIND, f"{story}:{stage}:{plan.n}", target, "agent:review", data)
+
+
+# A sync alone changes the whole diff and leaves the story's own change empty.
+def carry_when_empty(plan: RoundPlan, scoped_diff: str | None) -> RoundPlan:
+    return replace(plan, carry=True) if plan.scoped and scoped_diff == "" else plan
 
 
 def reviewed_count(rounds: list[Record]) -> int:

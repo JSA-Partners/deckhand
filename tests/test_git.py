@@ -142,6 +142,29 @@ def test_changed_since_without_a_new_base_is_the_plain_diff(tmp_path: Path, monk
     )
 
 
+def test_changed_since_a_sync_of_another_hunk_of_the_same_file_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = repo_with_story(tmp_path, monkeypatch)
+    story = git.worktree_add(clone, "story", "main")
+
+    def commit(where: Path, text: str) -> None:
+        (where / "b.txt").write_text(text)
+        subprocess.run(["git", "add", "b.txt"], cwd=where, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "b"], cwd=where, check=True)
+
+    lines = [f"line {n}\n" for n in range(1, 7)]
+    commit(clone, "".join(lines))
+    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=story, check=True)
+    commit(story, "".join(["story\n", *lines[1:]]))
+    reviewed, before = git.head(story), git.diff(story, "main")
+    commit(clone, "".join([*lines[:2], "sibling\n", *lines[3:]]))
+    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=story, check=True)
+    assert git.head(story) != reviewed
+    assert git.diff(story, "main") != before
+    assert git.changed_since(story, reviewed, "main") == ""
+
+
 def test_changed_since_a_conflicting_base_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _, story, reviewed = reviewed_story(tmp_path, monkeypatch, sibling="b.txt")
     with pytest.raises(git.GitError, match="merge-tree"):
