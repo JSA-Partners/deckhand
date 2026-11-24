@@ -83,6 +83,20 @@ def test_ack_through_a_seq_clears_only_that_hand(tmp_path: Path) -> None:
     assert [m.key for m in rows.pending()] == ["k3"]
 
 
+def test_an_ack_stamps_delivered_when_the_row_was_never_delivered(tmp_path: Path) -> None:
+    rows = state(tmp_path, now=ticking())
+    rows.post("k1", "hand-ACME-1", "answer", "one")
+    rows.post("k2", "hand-ACME-1", "answer", "two")
+    rows.delivered([rows.pending()[0].seq])
+    rows.ack("hand-ACME-1", 2)
+    with closing(sqlite3.connect(tmp_path / "deckhand.db")) as db:
+        found = db.execute("SELECT key, delivered, acked FROM messages ORDER BY seq").fetchall()
+    assert found == [
+        ("k1", "2026-11-19T10:00:02.000Z", "2026-11-19T10:00:03.000Z"),
+        ("k2", "2026-11-19T10:00:03.000Z", "2026-11-19T10:00:03.000Z"),
+    ]
+
+
 def test_delivered_stamps_the_named_rows(tmp_path: Path) -> None:
     rows = state(tmp_path, now=lambda: "2026-11-19T10:00:00.000Z")
     rows.post("k1", "hand-ACME-1", "answer", "one")

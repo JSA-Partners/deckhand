@@ -108,10 +108,12 @@ class LocalState:
             )
 
     def ack(self, hand: str, through: int) -> int:
+        at = self._now()
         with self._write() as db:
             cursor = db.execute(
-                "UPDATE messages SET acked = ? WHERE acked IS NULL AND hand = ? AND seq <= ?",
-                (self._now(), hand, through),
+                "UPDATE messages SET acked = ?, delivered = COALESCE(delivered, ?) "
+                "WHERE acked IS NULL AND hand = ? AND seq <= ?",
+                (at, at, hand, through),
             )
             return cursor.rowcount
 
