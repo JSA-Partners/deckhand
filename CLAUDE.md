@@ -25,7 +25,8 @@
   hand is sent, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the
   build order, `answers.py` the dialog answers the hook stores, `inputs.py` the files a hand may
   hand in; `stage.py` where each story is in the build and its review round, `reading.py` the full
-  read the engine makes, `status.py` the snapshot kept in deckhand's local SQLite file,
+  read the engine makes, `spec.py` what the person approved for a story and how a hand's context
+  fits its injection, `status.py` the snapshot kept in deckhand's local SQLite file,
   `standing.py` how the snapshot and the fleet sort into needs you, working, stopped, queued, team
   and done today, `brief.py` the brief and the status line segment, `board.py` the board's sections
   and rows; `watch.py` when a session's watcher rings and when the captain's has gone silent
@@ -33,8 +34,9 @@
   actions of `actions.py` and writes nothing, `idle.py` which live hands sit idle past their turn,
   `acts.py` carries one action out and builds every hand's launch, `worker.py` runs them in order on
   one thread, `poller.py` reads the fleet and Linear on their own threads, `linker.py` the Linear
-  read the engine takes from that thread, `lines.py` the failures the engine shows, and `engine.py`
-  is the loop, its lock, its heartbeat and the snapshot it writes
+  read the engine takes from that thread, `lines.py` the failures the engine shows, `shown.py` the
+  snapshot the engine writes and the stories, slots and resuming hands it holds, and `engine.py` is
+  the loop, its lock and its heartbeat
 - `monitors/monitors.json` registers `watch.sh`, the watcher every session runs; in a session that
   is neither captain nor hand it parks rather than exits, since an exit costs a model turn
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
