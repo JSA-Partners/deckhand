@@ -293,7 +293,7 @@ class Engine:
         self._reading, self._fleet, self._quiet = found, read, quiet
         self._lines.clear("read")
         previous = status.get(self._state)
-        waiting = [*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting]
+        waiting = queue.ranked([*queue.policy_items(found.feature, good.local.clones, good.broken), *found.waiting])
         shown = status.snapshot(self._iso(good.at), self._team, found.facts, waiting, read.sessions, found.me is None)
         if self._newest is not None and self._newest.error:
             shown["stale_since"] = (previous or {}).get("stale_since") or self._iso(now)

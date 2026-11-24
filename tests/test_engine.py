@@ -306,13 +306,14 @@ def test_a_missing_personal_key_is_a_note_not_a_failed_link(rig: Rig):
 def test_a_broken_repository_policy_is_one_item_per_clone_and_a_note_in_words(rig: Rig, clone: Path):
     rig.store.assign("s1", "viewer-1")
     rig.store.assign("s2", "viewer-1")
+    asked(rig.store, "s1")
     (clone / ".claude" / "deckhand.toml").write_text('repository_label = ""\n')
     rig.ready()
     assert rig.worker.submitted == []
     note = "repository_label must be a non-empty string in .claude/deckhand.toml of clone widgets"
     assert rig.engine.note() == f"{note}; its stories do not start"
     [item] = [i for i in rig.shown()["items"] if i["kind"] == queue.POLICY]
-    assert rig.shown()["items"][0] == item
+    assert rig.kinds() == ["question", queue.POLICY]
     assert (item["ref"], item["lines"], item["next"]) == ("widgets", [note, queue.POLICY_LINE], [])
     (clone / ".claude" / "deckhand.toml").write_text('repository_label = "widgets"\n')
     rig.link()

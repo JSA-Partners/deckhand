@@ -33,6 +33,8 @@ STAGES = ("plan", "branch")
 STALLED = "stalled"
 RESTART, LEAVE = "Restart", "Leave it stopped"
 POLICY = "policy"
+# Below every story's item, so a policy the person puts off never holds back work already in flight.
+POLICY_RANK = 5
 POLICY_LINE = "its stories do not start until it is fixed"
 
 
@@ -53,7 +55,7 @@ def policy_items(feature: Feature | None, clones: Mapping[str, Path], broken: Ma
     stories = feature.live if feature is not None else []
     held = {clones[label] for s in stories for label in s["labels"] if label in clones}
     named = sorted(held & set(broken), key=lambda clone: clone.name)
-    return [Item(POLICY, 0, c.name, f"clone {c.name}", "", 0, [broken[c], POLICY_LINE], []) for c in named]
+    return [Item(POLICY, POLICY_RANK, c.name, f"clone {c.name}", "", 0, [broken[c], POLICY_LINE], []) for c in named]
 
 
 def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], next: list[str], head: str = "") -> Item:
@@ -319,6 +321,10 @@ def items(
     found = _after_merge(store, team, me)
     if feature is not None:
         found += _feature_items(store, feature, me, read, policy_for, quiet, restarts or {})
+    return ranked(found)
+
+
+def ranked(found: list[Item]) -> list[Item]:
     return sorted(found, key=lambda i: (i.rank, -i.unblocks, i.at, i.ref))
 
 

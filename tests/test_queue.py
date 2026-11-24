@@ -521,3 +521,14 @@ def test_a_broken_clone_is_one_item_for_the_clones_its_stories_use(tmp_path: Pat
         (queue.POLICY, "widgets", ["widgets is broken", queue.POLICY_LINE], []),
     ]
     assert queue.policy_items(None, clones, broken) == []
+
+
+def test_a_broken_clone_ranks_below_every_item_of_a_story_in_flight(tmp_path: Path):
+    store = alpha(planning=True)
+    sessions = every_kind(store)
+    feature = features.open_feature(store, "ACME")
+    clones = {"widgets": tmp_path / "widgets"}
+    blocked = queue.policy_items(feature, clones, {tmp_path / "widgets": "widgets is broken"})
+    found = queue.ranked([*blocked, *waiting(store, sessions=sessions)])
+    assert kinds(found)[-1] == (queue.POLICY, queue.POLICY_RANK, "widgets")
+    assert [i.kind for i in found].count(queue.POLICY) == 1
