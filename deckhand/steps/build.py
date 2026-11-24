@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, tiers, versions
+from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, spec, tiers, versions
 from deckhand.features import Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -172,6 +172,7 @@ class Build(StoryStep):
         plan = store.document(ops.create_id(story["id"], implplan.PURPOSE))
         sitting = store.document(ops.create_id(story["id"], "sitting"))
         branch = branch_of(records, story) or story["branch_name"]
+        approved = spec.gather(store, at.feature, story)
         facts = {
             "story": story["identifier"],
             "title": story["title"],
@@ -181,13 +182,17 @@ class Build(StoryStep):
             "checks": policy.checks,
             "worktree": str(git.worktree_path(clone, branch)),
             "branch": branch,
+            "contract": approved.contract,
+            "examples": approved.examples,
+            "invariants": approved.invariants,
+            "decisions": approved.decisions,
             "plan": plan["body"] if plan else None,
             "sitting": sitting["body"] if sitting else None,
         }
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
-        _print(facts)
+        _print(facts, spec.text(approved))
 
     def apply(self, args: list[str]) -> None:
         parsed = parse(args, USAGE)
@@ -284,10 +289,8 @@ def _worktree_of(at: Located) -> Path:
     return at.path
 
 
-def _print(facts: dict) -> None:
+def _print(facts: dict, approved: str) -> None:
     print(f"story: {facts['story']} {facts['title']}")
-    if facts["description"]:
-        print(facts["description"])
     print(f"worktree: {facts['worktree']} (branch {facts['branch']})")
     print(f"tier: {facts['tier'] if facts['tier'] is not None else 'not decided'}")
     print("tools:")
@@ -296,6 +299,7 @@ def _print(facts: dict) -> None:
     print("checks:")
     for check in facts["checks"]:
         print(f"- {check}")
+    print(approved)
     for name in ("plan", "sitting"):
         print(f"{name}:")
         print(facts[name] if facts[name] else "none saved")

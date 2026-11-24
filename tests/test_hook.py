@@ -199,6 +199,36 @@ def test_session_hook_prints_captain_context_only_for_captain(monkeypatch, capsy
     assert capsys.readouterr().out == ""
 
 
+class Raising:
+    def __getattr__(self, name: str):
+        raise AssertionError(f"the store was called: {name}")
+
+
+def test_a_hand_session_start_prints_the_pointer_and_reads_no_linear(capsys, monkeypatch):
+    from deckhand import spec
+
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == (spec.pointer("ACME-1") + "\n", "")
+
+
+def test_a_spike_session_start_prints_nothing(capsys, monkeypatch):
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_SPIKE", "ACME-1")
+    monkeypatch.delenv("DECKHAND_STORY", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    from deckhand.steps.hook import Hook
+
+    Hook(Raising()).apply(["session"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("", "")
+
+
 def test_permission_gap_recorded_for_hand(monkeypatch, capsys, tmp_path: Path):
     from deckhand import gaps
     from tests.test_step_decide import feature_store

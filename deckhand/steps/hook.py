@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from deckhand import answers, decisions, features, gaps, ops
+from deckhand import answers, decisions, features, gaps, ops, spec
 from deckhand.questions import HEADER_PREFIX, RECOMMENDED, valid_nonce
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
@@ -72,6 +72,10 @@ class Hook(StoryStep):
         self._captain = captain
 
     def _session(self) -> None:
+        ref = os.environ.get("DECKHAND_STORY", "")
+        if hand_role() and ref:
+            print(spec.pointer(ref))
+            return
         if os.environ.get("DECKHAND_ROLE") != "captain":
             return
         buffer = io.StringIO()

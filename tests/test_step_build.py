@@ -231,6 +231,22 @@ def test_context_prints_the_briefing(tmp_path: Path, repo: Path, capsys: pytest.
     assert facts["plan"] == PLAN
 
 
+def test_build_context_prints_the_spec_before_the_plan(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
+    store = labeled(tmp_path, repo)
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    out = capsys.readouterr().out
+    contract = "# Contract\n\nWritten by the person.\n\nThe Contract of Alpha."
+    assert contract in out
+    assert out.index(contract) < out.index("# Decisions") < out.index("plan:\n" + PLAN)
+    Build(store, Shell(), repo).context(["s1", *TEAM, "--json"])
+    facts = json.loads(capsys.readouterr().out)
+    assert facts["contract"] == "Written by the person.\n\nThe Contract of Alpha."
+    assert facts["examples"] == "Written by the person.\n\nThe Examples of Alpha."
+    assert facts["invariants"] == "Written by the person.\n\nThe Invariants of Alpha."
+    assert facts["decisions"] == []
+
+
 def test_a_renamed_story_keeps_its_worktree(tmp_path: Path, repo: Path):
     store = planned(tmp_path, repo)
     store.set_labels("s1", ["widgets"])
