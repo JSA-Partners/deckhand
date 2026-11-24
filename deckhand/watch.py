@@ -37,8 +37,7 @@ def captain(
     lines = []
     engine = state.alive(beat, now)
     shown = "" if seen.engine is False and engine else seen.top
-    # A Linear error ends the captain's turn unasked, so the same item rings again once Linear reads clean,
-    # once per top item so a flapping read does not ring on every recovery.
+    # A Linear error ends the captain's turn unasked, so its top rings once more when Linear reads clean.
     recovered = seen.recovered
     if top is not None and seen.stale and not stale and top != recovered:
         shown, recovered = "", top
