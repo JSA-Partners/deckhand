@@ -608,3 +608,19 @@ def test_an_idle_hand_waiting_on_the_person_is_not_stalled():
     started(store, "s1")
     asked(store, "s1")
     assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1}) == []
+
+
+def test_one_feature_finding_makes_one_queue_item_across_stories():
+    store = alpha(planning=True)
+    feature = features.open_feature(store, "ACME")
+    store.create_issue("s3", "ACME", "Refunds", "Outcome: a refund is paid.", feature.project["id"], ["widgets"])
+    store.assign("s3", ME)
+    project = feature.project["id"]
+    found = review.parse_findings(json.dumps([raw(changes_delivery=True)]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), "fh1", found)
+    [finding] = round.data["findings"]
+    for story in ("s1", "s2", "s3"):
+        store.put_record(story, round)
+        store.put_record(story, asks.proposal_record(finding["id"], round.version, "out of scope"))
+    [item] = [i for i in waiting(store) if i.kind == review.DECISION]
+    assert (item.ref, item.next) == ("Alpha", [f"decide context finding {project} --finding {finding['id']}"])

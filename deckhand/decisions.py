@@ -90,7 +90,10 @@ _ASKS = {
     asks.EDIT: "Make this change to Claude Code's own config for",
     queue.STALLED: "",
 }
-_BRANCH_CAP = "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for"
+_STAGE_CAP = {
+    "branch": "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for",
+    "feature": "Three review rounds left a P1 open. Proceed to approval or rework the feature",
+}
 _RECORDED = (
     "tier",
     "decision-item",
@@ -169,11 +172,8 @@ def make_question(kind: str, pin: Pin) -> Question:
 def question_text(kind: str, pin: Pin) -> str:
     fields = {"kind": kind, **asdict(pin)}
     check = content_hash(json.dumps(fields, sort_keys=True))[:12]
-    ask = (
-        _BRANCH_CAP
-        if kind == review.CAP_DECISION and review.cap_prefix(pin.subject).endswith(":branch")
-        else _ASKS[kind]
-    )
+    stage = review.cap_prefix(pin.subject).rpartition(":")[2] if kind == review.CAP_DECISION else ""
+    ask = _STAGE_CAP.get(stage, _ASKS[kind])
     shown = " ".join(part for part in (ask, pin.label) if part)
     if pin.detail:
         shown += f": {pin.detail}"

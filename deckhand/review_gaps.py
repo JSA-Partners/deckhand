@@ -3,7 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from deckhand.records import Record
-from deckhand.review import PROPOSAL, accepted, counted, decided, declined, last, open_p1, reviewed, rounds_of, waived
+from deckhand.review import (
+    PROPOSAL,
+    accepted,
+    at_cap,
+    counted,
+    decided,
+    excused,
+    last,
+    open_p1,
+    proceeded,
+    reviewed,
+    rounds_of,
+    waived,
+)
 
 
 @dataclass(frozen=True)
@@ -78,13 +91,52 @@ def left_open_gaps(records: list[Record], story: str, stage: str, ref: str) -> l
     return found
 
 
+def _feature_delivery(records: list[Record], project: str, ref: str) -> list[Gap]:
+    proposed = {r.subject for r in records if r.kind == PROPOSAL}
+    found = []
+    for id in (f["id"] for f in undecided_delivery(records, project, "feature")):
+        if id in proposed:
+            hand = f"{id} waits for the person: decide context finding {ref} --finding {id}"
+            person = f"finding {id} changes what the feature delivers; decide it"
+        else:
+            hand = (
+                f"{id} changes what the feature delivers; propose an answer with feature-review apply resolve"
+                f" --propose-accept {id} or --propose-decline {id} --reason TEXT"
+            )
+            person = f"finding {id} changes what the feature delivers; it waits for a proposal"
+        found.append(Gap(id, hand, person))
+    return found
+
+
+def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) -> list[Gap]:
+    held, excusing = counted(records, prefix)[0], excused(records, prefix)
+    capped = at_cap(held, excusing, proceeded(records, prefix))
+    proposed = {r.subject for r in records if r.kind == PROPOSAL} - set(decided(records))
+    found = []
+    for f in open_p1(latest, excusing):
+        id = f["id"]
+        person = f"the feature review holds an open P1 {id}: {f['summary']}"
+        if id in proposed:
+            hand = f"{person}; it waits for the person: decide context finding {ref} --finding {id}"
+        elif capped:
+            hand = f"{person}; three rounds left a P1 open: decide context review-cap {ref} --stage feature"
+        else:
+            hand = (
+                f"{person}; fix it and review again, or propose declining it with feature-review apply resolve"
+                f" --propose-decline {id} --reason TEXT"
+            )
+        found.append(Gap(id, hand, person))
+    return found
+
+
 def feature_gaps(project: str, records: list[Record], at: str, ref: str) -> list[Gap]:
-    rounds = rounds_of(records, f"{project}:feature")
-    latest = last(rounds)
+    prefix = f"{project}:feature"
+    latest = last(rounds_of(records, prefix))
     if latest is None:
         return [both("feature-review", "the feature review has not run")]
     if reviewed(latest) != at:
         text = "the feature review has not reviewed the current contract and stories; run a feature round"
         return [both("feature-review", text)]
-    found = open_p1(latest, declined(records))
-    return [both(f["id"], f"the feature review holds an open P1 {f['id']}: {f['summary']}") for f in found]
+    p1 = _feature_p1(records, prefix, latest, ref)
+    held = {gap.id for gap in p1}
+    return p1 + [gap for gap in _feature_delivery(records, project, ref) if gap.id not in held]

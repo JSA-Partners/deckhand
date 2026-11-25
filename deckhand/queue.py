@@ -115,14 +115,33 @@ def finding_lines(records: list[Record], finding: str) -> list[str]:
     return lines + ([asks.proposal_line(proposal)] if proposal else [])
 
 
+def _of_feature(records: list[Record], finding: str) -> bool:
+    found = review.locate(records, finding)
+    return found is not None and review.cap_prefix(found[0].subject).endswith(":feature")
+
+
 def _findings(story: dict, records: list[Record]) -> list[Item]:
     ref, found = story["identifier"], []
     for proposal in asks.open_proposals(records):
+        if _of_feature(records, proposal.subject):
+            continue
         lines = finding_lines(records, proposal.subject)
         next = [f"decide context finding {ref} --finding {proposal.subject}"]
         found.append(_story_item(review.DECISION, 1, story, proposal.at, lines, next))
     for stage in STAGES:
         found += _cap(story, records, stage)
+    return found
+
+
+def _feature_findings(feature: Feature) -> list[Item]:
+    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+    project, name = feature.project["id"], feature.project["name"]
+    found = []
+    for proposal in asks.open_proposals(records):
+        if _of_feature(records, proposal.subject):
+            lines = [name, *finding_lines(records, proposal.subject)]
+            next = [f"decide context finding {project} --finding {proposal.subject}"]
+            found.append(Item(review.DECISION, 1, name, name, proposal.at, 0, lines, next))
     return found
 
 
@@ -204,7 +223,8 @@ def merged_at(story: dict) -> str:
 
 
 def _waiting(story: dict, records: list[Record], second: bool) -> bool:
-    if second or _for_person(story, records, 2) or signoff.after_merge_for_person(records, story["id"]):
+    asked = _for_person(story, records, 2) or asks.open_proposals(records)
+    if second or asked or signoff.after_merge_for_person(records, story["id"]):
         return True
     return asks.wake_due(records, story["id"], merged_at(story)) is not None
 
@@ -362,7 +382,7 @@ def _feature_items(
                     found += _stalled(story, records, session, rank, launch, second, restarts.get(ref), ref in idle)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
-    found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found]
+    found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
     if not building:
         found += _planning(store, feature) + _spikes(store, feature, read)
     return found

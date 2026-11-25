@@ -65,7 +65,7 @@ class Feature:
                     "phase": current.value,
                     "stories": len(feature.stories),
                     "next_planning_step": planning.next_section(store, feature),
-                    "gaps": features.approval_gaps(store, feature) if current is Phase.PLANNING else [],
+                    "gaps": features.approval_gaps(store, feature, captain=True) if current is Phase.PLANNING else [],
                     "approval_void": current is Phase.PLANNING and any(feature.approved(s) for s in feature.live),
                     "story_hint": None
                     if budget is None

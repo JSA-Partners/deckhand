@@ -31,9 +31,9 @@ decisions naming its expected items. Save it with `deckhand stories apply --file
 names each REF.
 
 For every decision, run `deckhand decide context KIND SUBJECT`, pass its JSON unchanged to the
-question dialog, then `deckhand decide apply NONCE` once answered. Contract, invariants and
-feature-approval take the project id; tier, state-chart and sitting take the story; finding takes a
-story and `--finding ID`.
+question dialog, then `deckhand decide apply NONCE` once answered. Contract, invariants,
+feature-approval, finding and review-cap take the project id; tier, state-chart and sitting take the
+story.
 
 Decide the contract and invariants first; the contract gates the drafts and the sittings. Then take
 each story in turn: when its hand left a Draft document, offer `deckhand draft apply REF take`;
@@ -42,8 +42,10 @@ tier 2 or 3, record answers with `deckhand sitting apply REF --file ANSWERS.md`,
 sitting. Ask each expected item with `deckhand decide context decision-item ITEM --story REF`, ITEM
 its map text.
 
-Then decide each gap `deckhand feature context` names. For the feature review, pass the lens and
-target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence scores
-the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`, HASH
-the target_hash line. A P1 is a gap: fix the Contract or story and review again, or the person
-declines it. Decide the feature-approval once no gap is left.
+Settle each gap `deckhand feature context` names as it says. For the feature review, pass the
+lens and target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence
+scores the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`,
+HASH the target_hash line. Decide a proposed finding with
+`deckhand decide context finding PROJECT --finding ID`, the cap with
+`deckhand decide context review-cap PROJECT --stage feature`. Decide feature-approval once no gap
+remains.

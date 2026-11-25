@@ -12,10 +12,11 @@ from deckhand.store import Store
 
 USAGE = (
     "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
-    " the SUBJECT a feature id, a story or a decision item's text, finding takes a story and --finding ID,"
+    " the SUBJECT a feature id, a story or a decision item's text,"
+    " finding takes a story or, for a feature finding, the feature id, and --finding ID,"
     " quiz and after-merge take a story and --item N, question takes its id and one --story,"
     " config-edit takes a story and --item ID, stalled takes a story,"
-    " review-cap takes a story and --stage plan|branch,"
+    " review-cap takes a story and --stage plan|branch, or the feature id and --stage feature,"
     " sign-off and second-sign-off take a story;"
     " apply NONCE"
 )

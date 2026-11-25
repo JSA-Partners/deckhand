@@ -20,34 +20,56 @@ def _label(story: dict) -> str:
     return f"{story['identifier']} {story['title']}"
 
 
+def _feature_records(feature: features.Feature) -> list[Record]:
+    return [r for s in feature.live for r in feature.records.get(s["id"], [])]
+
+
+def _feature_pin(feature: features.Feature, subject: str, version: str, detail: str) -> Pin:
+    labels = [_label(s) for s in feature.live]
+    return Pin(subject, version, [s["id"] for s in feature.live], detail, feature.project["name"], labels)
+
+
 def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str) -> Pin:
+    project = feature.project["id"]
+    if ref == project:
+        records = _feature_records(feature)
+        found = review.locate(records, finding)
+        if found is None or not found[0].subject.startswith(f"{project}:feature:"):
+            raise Refusal(f"{finding} is not a finding of the feature review of {features.describe(feature.project)}")
+        return _feature_pin(feature, finding, found[0].version, "; ".join(queue.finding_lines(records, finding)))
     story = features.story(store, feature, ref)
     found = review.locate(feature.records.get(story["id"], []), finding)
     if found is None:
         raise Refusal(f"{finding} is not a finding of any review round on {story['identifier']}")
     round, _ = found
     detail = "; ".join(queue.finding_lines(feature.records.get(story["id"], []), finding))
-    if round.subject.startswith(f"{feature.project['id']}:feature:"):
-        live = feature.live
-        labels = [_label(s) for s in live]
-        return Pin(finding, round.version, [s["id"] for s in live], detail, feature.project["name"], labels)
+    if round.subject.startswith(f"{project}:feature:"):
+        return _feature_pin(feature, finding, round.version, detail)
     return Pin(finding, round.version, [story["id"]], detail, _label(story), [_label(story)])
 
 
-def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> Pin:
-    story = features.story(store, feature, ref)
-    records = feature.records.get(story["id"], [])
-    prefix = f"{story['id']}:{stage}"
+def _capped(records: list[Record], prefix: str, what: str) -> tuple[str, str, str]:
     held, _ = review.counted(records, prefix)
     excused = review.excused(records, prefix)
     latest = review.last(held)
     since = review.proceeded(records, prefix)
     if latest is None or not review.at_cap(held, excused, since):
-        raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
+        raise Refusal(f"the {what} has not reached its cap with a P1 open")
     open_count = len(review.open_p1(latest, excused))
     at = review.reviewed(latest)[:12]
     detail = f"{review.p1_rounds(held, excused, since)} rounds left a P1 open, {open_count} P1 open at {at}"
-    subject, version = review.cap_subject(latest), review.cap_version(latest)
+    return review.cap_subject(latest), review.cap_version(latest), detail
+
+
+def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> Pin:
+    if stage == "feature":
+        if ref != feature.project["id"]:
+            raise Refusal(f"{ref} is not the open feature; the open feature is {features.describe(feature.project)}")
+        what = f"feature review of {feature.project['name']}"
+        return _feature_pin(feature, *_capped(_feature_records(feature), f"{ref}:feature", what))
+    story = features.story(store, feature, ref)
+    records = feature.records.get(story["id"], [])
+    subject, version, detail = _capped(records, f"{story['id']}:{stage}", f"{stage} review of {story['identifier']}")
     return Pin(subject, version, [story["id"]], detail, _label(story), [_label(story)])
 
 
@@ -178,8 +200,8 @@ def pin(
     if stage and kind != review.CAP_DECISION:
         raise Refusal("--stage applies only to review-cap")
     if kind == review.CAP_DECISION:
-        if stage not in ("", "plan", "branch"):
-            raise Refusal("--stage takes plan or branch")
+        if stage not in ("", "plan", "branch", "feature"):
+            raise Refusal("--stage takes plan, branch or feature")
         return _cap_pin(store, feature, subject, stage or "plan")
     if kind == signoff.KIND:
         if not head:

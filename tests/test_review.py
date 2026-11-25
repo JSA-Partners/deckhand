@@ -332,3 +332,21 @@ def test_touches_is_optional_and_kept():
     assert findings(raw(changes_delivery=True))[0].touches == ""
     with pytest.raises(Refusal, match="touches"):
         findings(raw(touches=3))
+
+
+def test_a_feature_rework_restarts_the_count():
+    def feature(n: int, target: str) -> Record:
+        plan = RoundPlan(n, scoped=n > 1, base_hash="")
+        return review.round_record("p1", "feature", plan, target, findings(raw(severity="P1")))
+
+    rounds = [feature(n, f"h{n}") for n in (1, 2, 3)]
+    latest, data = rounds[-1], {"answer": review.REWORK}
+    rework = Record(review.CAP_DECISION, review.cap_subject(latest), review.cap_version(latest), "person:pat", data)
+    prefix = "p1:feature"
+    held, cut = review.counted([*rounds, rework], prefix)
+    assert (held, cut) == ([], 3)
+    due = review.next_round(held, "h4", review.excused([*rounds, rework], prefix))
+    assert isinstance(due, RoundPlan) and due.n + cut == 4
+    records = [*rounds, rework, feature(4, "h4")]
+    held, _ = review.counted(records, prefix)
+    assert review.p1_rounds(held, review.excused(records, prefix)) == 1

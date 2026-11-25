@@ -245,3 +245,25 @@ def test_a_branch_cap_question_needs_no_worktree_head(state: Path, capsys: pytes
     Decide(store).context(["review-cap", "ACME-1", "--stage", "branch", *TEAM, "--json"])
     nonce = json.loads(capsys.readouterr().out)["nonce"]
     assert decisions.load_pending(nonce, answers.state_dir()).version == review.cap_version(latest)
+
+
+def test_review_cap_context_takes_the_feature_stage(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = feature_store()
+    p1 = {"lens": "correctness", "severity": "P1", "path": "Contract", "line": 1, "summary": "A hole."}
+    found = review.parse_findings(json.dumps([p1 | {"fix": "Fill it.", "evidence": "Contract", "confidence": 0.9}]))
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, scoped=n > 1, base_hash="")
+        for story in ("s1", "s2"):
+            store.put_record(story, review.round_record(P1, "feature", plan, f"hash{n}", found))
+    Decide(store).context(["review-cap", P1, "--stage", "feature", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    asked = shown["tool_input"]["questions"][0]
+    assert asked["question"].startswith("Three review rounds left a P1 open. Proceed to approval or rework the feature")
+    assert "Alpha: 3 rounds left a P1 open" in asked["question"]
+    assert [o["label"] for o in asked["options"]] == [review.PROCEED, review.REWORK]
+    record_answer(state, asked, review.REWORK)
+    Decide(store).apply([shown["nonce"], *TEAM])
+    for story in ("s1", "s2"):
+        [record] = [r for r in store.records(story) if r.kind == review.CAP_DECISION]
+        assert record.data["answer"] == review.REWORK
+    assert review.counted(store.records("s1"), f"{P1}:feature") == ([], 3)

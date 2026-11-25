@@ -226,6 +226,23 @@ def test_feature_context_names_the_gaps(capsys: pytest.CaptureFixture[str]):
     assert "gap: the Invariants changed after they were approved" in capsys.readouterr().out
 
 
+def test_feature_context_tells_the_captain_how_to_propose_a_delivery_finding(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+    target = content_hash(features.review_text(store, load(store)))
+    item = {"lens": "scope", "severity": "P2", "path": "Contract", "line": 1, "summary": "Ships late."}
+    item |= {"fix": "Say when.", "evidence": "Contract", "confidence": 0.9, "changes_delivery": True}
+    found = review.parse_findings(json.dumps([item]))
+    round = review.round_record(P1, "feature", review.RoundPlan(1, scoped=False, base_hash=""), target, found)
+    for story in load(store).live:
+        ops.ensure_record(store, story["id"], round)
+    [finding] = round.data["findings"]
+    Feature(store).context([*TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)["open"][0]["gaps"]
+    assert any(gap.startswith(f"{finding['id']} changes what the feature delivers; propose") for gap in shown)
+    person = f"finding {finding['id']} changes what the feature delivers; it waits for a proposal"
+    assert person in features.approval_gaps(store, load(store))
+
+
 def test_feature_context_says_a_frame_change_voided_the_approval(capsys: pytest.CaptureFixture[str]):
     store = setup()
     approve_everything(store)

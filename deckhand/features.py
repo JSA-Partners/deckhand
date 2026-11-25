@@ -85,7 +85,7 @@ def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
     return found
 
 
-def approval_gaps(store: Store, feature: Feature) -> list[str]:
+def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list[str]:
     gaps = [
         f"the {name} section is not saved"
         for name in planning.SECTIONS
@@ -131,7 +131,7 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
     held = [record for story in live for record in feature.records.get(story["id"], [])]
     text = review_text(store, feature)
     found = review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "", project)
-    return gaps + [gap.person for gap in found]
+    return gaps + [gap.hand if captain else gap.person for gap in found]
 
 
 def review_text(store: Store, feature: Feature) -> str | None:

@@ -274,9 +274,6 @@ def _cap_answers(records: list[Record], prefix: str, answer: str) -> list[Record
 
 def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     rounds = rounds_of(records, prefix)
-    stage = prefix.rpartition(":")[2]
-    if stage not in ("plan", "branch"):
-        return rounds, 0
     cut = max(map(_cap_cut, _cap_answers(records, prefix, REWORK)), default=0)
     return [r for r in rounds if round_number(r) > cut], cut
 
