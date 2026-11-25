@@ -197,8 +197,11 @@ class Stories:
     def _store_for_run(self) -> Store:
         return self._stores("app")
 
-    def _refuse_running_spike(self, feature: features.Feature) -> None:
-        asked = spikes.keys(answers.state_dir(), feature.project["id"])
+    def _refuse_running_spike(self, store: Store, feature: features.Feature) -> None:
+        project = feature.project["id"]
+        asked = spikes.keys(answers.state_dir(), project)
+        if asked:
+            asked -= {spikes.key_of(project, document) for document in spikes.answered(store, feature)}
         if not asked:
             return
         read = fleet.sessions(self._runner)
@@ -244,7 +247,7 @@ class Stories:
         feature = features.open_feature(store, team)
         if feature is None:
             raise Refusal("no feature is open")
-        self._refuse_running_spike(feature)
+        self._refuse_running_spike(store, feature)
         known = store.repository_labels(team)
         for entry in entries:
             if entry["repository"] not in known:

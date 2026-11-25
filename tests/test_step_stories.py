@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, features, planning, spikes, tiers, versions
+from deckhand import answers, decisions, features, ops, planning, spikes, tiers, versions
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
@@ -356,6 +356,25 @@ def test_stories_refuse_while_spike_live(tmp_path: Path, monkeypatch: pytest.Mon
     assert store.writes == written
     Stories(store, fleet_of(spike_row(key, "done", None))).apply([*TEAM, "--file", str(path)])
     assert store.writes != written
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_an_answered_spike_never_blocks_the_map_while_its_session_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readable: bool
+):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store, question = setup(), "Does the queue keep order?"
+    key = asked_spike(question)
+    ops.ensure_document(store, P1, "spike:" + key, P1, spikes.TITLE + question, "Yes, in order.")
+    path = tmp_path / "map.json"
+    path.write_text(json.dumps([entry("a")]))
+
+    def broken(argv, cwd=None, stdin=None):
+        return subprocess.CompletedProcess(argv, 1, "", "no")
+
+    runner = fleet_of(spike_row(key, "working", "busy")) if readable else broken
+    Stories(store, runner).apply([*TEAM, "--file", str(path)])
+    assert store.issue(story_id("a")) is not None
 
 
 def test_stories_refuse_when_the_fleet_cannot_be_read_with_spikes_asked(
