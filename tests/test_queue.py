@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, planning, policy, queue, review, signoff, spikes
+from deckhand import asks, chores, features, fleet, gaps, implplan, planning, policy, queue, review, signoff, spikes
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
@@ -73,7 +73,7 @@ def started(store: FakeStore, story: str, launch: str = "story") -> None:
 
 def chore(store: FakeStore, story: str) -> None:
     store.put_record(story, Record(implplan.PURPOSE, story, "p1", "agent:implplan", manifest(after_merge=["rotate"])))
-    store.put_record(story, signoff.after_record(signoff.AFTER_PERSON, story, 1, "rotate", {"why": "the vault"}))
+    store.put_record(story, chores.after_record(chores.AFTER_PERSON, story, 1, "rotate", {"why": "the vault"}))
     store.set_issue_state(story, "Done")
 
 

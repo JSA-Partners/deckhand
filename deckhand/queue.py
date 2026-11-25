@@ -7,6 +7,7 @@ from pathlib import Path
 from deckhand import (
     answers,
     asks,
+    chores,
     features,
     fleet,
     gaps,
@@ -206,23 +207,13 @@ def last_start(records: list[Record], launch: str | None = None) -> Record | Non
     return start if start is None or launch is None or start.data.get("kind") == launch else None
 
 
-def finished(story: dict, records: list[Record], start: Record) -> bool:
-    if start.data.get("kind") == DRAFT_HAND and any(r.kind == DRAFT and r.at >= start.at for r in records):
-        return True
-    if story["state"] != order.DONE:
-        return False
-    chores = signoff.after_items(records, story["id"])
-    statuses = [signoff.after_status(records, story["id"], n, text)[0] for n, text in enumerate(chores, start=1)]
-    return signoff.OPEN not in statuses
-
-
 def merged_at(story: dict) -> str:
     return (story.get("completed_at") or "") if story["state"] == order.DONE else ""
 
 
 def _waiting(story: dict, records: list[Record], second: bool) -> bool:
     asked = _for_person(story, records, 2) or asks.open_proposals(records)
-    if second or asked or signoff.after_merge_for_person(records, story["id"]):
+    if second or asked or chores.after_merge_for_person(records, story["id"]):
         return True
     return asks.wake_due(records, story["id"], merged_at(story)) is not None
 
@@ -238,7 +229,7 @@ def stalled(
     start = last_start(records, launch)
     if start is None or (session is not None and fleet.alive(session) and not idle):
         return False
-    return not _waiting(story, records, second) and not finished(story, records, start)
+    return not _waiting(story, records, second) and not chores.finished(story, records, start)
 
 
 def _new_since_start(records: list[Record], launch: str) -> bool:
@@ -282,10 +273,10 @@ def _stalled(
 
 def _after_merge(store: Store, team: str, me: str) -> list[Item]:
     found = []
-    for story, n, text, why, at in signoff.after_merge_queue(store, team, me):
+    for story, n, text, why, at in chores.after_merge_queue(store, team, me):
         lines = [f"item {n}: {text}", f"left for the person: {why}"]
         next = [f"decide context after-merge {story['identifier']} --item {n}"]
-        found.append(_story_item(signoff.AFTER, 2, story, at, lines, next))
+        found.append(_story_item(chores.AFTER, 2, story, at, lines, next))
     return found
 
 

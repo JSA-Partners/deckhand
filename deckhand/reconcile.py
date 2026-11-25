@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckhand import asks, fleet, order, queue, startable, wakes
+from deckhand import asks, chores, fleet, order, queue, startable, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
@@ -128,7 +128,7 @@ def _resumable(facts: Facts, name: str) -> bool:
         return True
     records = _records(feature, story)
     start = queue.last_start(records)
-    return start is None or not queue.finished(story, records, start)
+    return start is None or not chores.finished(story, records, start)
 
 
 def used(facts: Facts) -> int:
@@ -195,7 +195,7 @@ def _finished(tick: _Tick, feature: Feature) -> list[Action]:
             continue
         if session.state == WORKING and start.data.get("kind") != queue.DRAFT_HAND:
             continue
-        if queue.finished(story, records, start):
+        if chores.finished(story, records, start):
             found.append(tick.take(Stop(name, session.id, "finished"), slot=False))
     return found
 
@@ -333,7 +333,7 @@ def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Mess
     story = _story_of(feature, name)
     records = _records(feature, story) if feature is not None and story is not None else []
     start = queue.last_start(records)
-    if story is not None and start is not None and queue.finished(story, records, start):
+    if story is not None and start is not None and chores.finished(story, records, start):
         return None
     text, seqs = wakes.prompt(messages), tuple(m.seq for m in messages)
     if any(m.seq in tick.facts.unheard and m.delivered is None for m in messages):

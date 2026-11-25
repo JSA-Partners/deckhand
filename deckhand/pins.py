@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from deckhand import asks, features, queue, review, signoff, startable, versions
+from deckhand import asks, chores, features, queue, review, signoff, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
-ITEM_KINDS = {signoff.AFTER: "N", asks.EDIT: "ID"}
+ITEM_KINDS = {chores.AFTER: "N", asks.EDIT: "ID"}
 STORY_ARGUMENT = ("decision-item", asks.ANSWER)
 
 
@@ -104,11 +104,11 @@ def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
 def _after_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
-    items = signoff.after_items(records, story["id"])
+    items = chores.after_items(records, story["id"])
     if n > len(items):
         raise Refusal(f"{story['identifier']} has no after-merge item {n}; it has {len(items)}")
-    status, held = signoff.after_status(records, story["id"], n, items[n - 1])
-    if status != signoff.FOR_PERSON or held is None:
+    status, held = chores.after_status(records, story["id"], n, items[n - 1])
+    if status != chores.FOR_PERSON or held is None:
         raise Refusal(f"item {n} of {story['identifier']} is not left for the person; it is {status}")
     label = _label(story)
     detail = f"item {n}, {items[n - 1]} ({held.data.get('why')})"
@@ -191,7 +191,7 @@ def pin(
         return _signoff_pin(store, feature, subject, head)
     if kind == signoff.SECOND:
         return _second_pin(store, feature, subject)
-    if kind == signoff.AFTER:
+    if kind == chores.AFTER:
         return _after_pin(store, feature, subject, _number(item or ""))
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)

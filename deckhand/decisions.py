@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from deckhand import answers, asks, ops, queue, review, signoff
+from deckhand import answers, asks, chores, ops, queue, review, signoff
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -22,7 +22,7 @@ KINDS = (
     review.CAP_DECISION,
     signoff.KIND,
     signoff.SECOND,
-    signoff.AFTER,
+    chores.AFTER,
     asks.ANSWER,
     asks.EDIT,
     queue.STALLED,
@@ -38,7 +38,7 @@ _OPTIONS = {
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
     signoff.KIND: [signoff.SIGN, signoff.NOT_YET],
     signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
-    signoff.AFTER: [signoff.DONE, signoff.NOT_YET],
+    chores.AFTER: [signoff.DONE, signoff.NOT_YET],
     asks.EDIT: asks.EDIT_OPTIONS,
     queue.STALLED: [queue.RESTART, queue.LEAVE],
 }
@@ -58,7 +58,7 @@ _DESCRIPTIONS = {
         "the hand reworks it and the rounds count again",
     ],
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
-    signoff.AFTER: ["the item is done", "the item stays in your queue"],
+    chores.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
     queue.STALLED: ["the hand starts again", "the hand stays stopped"],
 }
@@ -77,7 +77,7 @@ _ASKS = {
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
     signoff.KIND: "Sign off",
     signoff.SECOND: "Second sign-off on",
-    signoff.AFTER: "Is this after-merge item done for",
+    chores.AFTER: "Is this after-merge item done for",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
     queue.STALLED: "",
@@ -100,7 +100,7 @@ _CHOSEN = (
     review.CAP_DECISION,
     signoff.KIND,
     signoff.SECOND,
-    signoff.AFTER,
+    chores.AFTER,
     asks.EDIT,
     queue.STALLED,
 )
@@ -111,7 +111,7 @@ _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 _POSITIVE = {
     "feature-approval": "Approve",
     "lean": "Prove it in Lean",
-    signoff.AFTER: signoff.DONE,
+    chores.AFTER: signoff.DONE,
 }
 
 PENDING = "pending"

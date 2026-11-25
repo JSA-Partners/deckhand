@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import asks, config, features, fleet, order, planning, queue, signoff
+from deckhand import asks, chores, config, features, fleet, order, planning, queue
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -22,11 +22,6 @@ class Work:
 
 def clone_of(story: dict, clones: Mapping[str, Path]) -> Path | None:
     return next((clones[label] for label in story["labels"] if label in clones), None)
-
-
-def _open_chores(story: dict, records: list[Record]) -> bool:
-    chores = enumerate(signoff.after_items(records, story["id"]), start=1)
-    return any(signoff.after_status(records, story["id"], n, text)[0] == signoff.OPEN for n, text in chores)
 
 
 def _blocked_by(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict]) -> list[str]:
@@ -61,7 +56,7 @@ def why_not(
     if story["state"] == order.DONE:
         if story["assignee"] != me:
             return f"{ref} is Done and not yours"
-        if not _open_chores(story, feature.records.get(story["id"], [])):
+        if not chores.open_chores(story, feature.records.get(story["id"], [])):
             return f"{ref} is Done with no open after-merge item"
     elif features.phase(feature) is Phase.PLANNING:
         drafted = why_not_drafted(store, feature, story)

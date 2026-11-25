@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from deckhand import claims, features, git, ops, signoff
+from deckhand import chores, claims, features, git, ops
 from deckhand.order import DONE
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
@@ -13,7 +13,7 @@ USAGE = (
     " apply done N --note TEXT, apply person N --why TEXT, or apply sync"
 )
 WAITS = "waits for the merge"
-ITEMS = {"done": ("--note", "note", signoff.AFTER_DONE), "person": ("--why", "why", signoff.AFTER_PERSON)}
+ITEMS = {"done": ("--note", "note", chores.AFTER_DONE), "person": ("--why", "why", chores.AFTER_PERSON)}
 SYNC = "sync"
 ACTIONS = (*ITEMS, SYNC)
 
@@ -52,8 +52,8 @@ class After(StoryStep):
         story, records = self._find(parsed)
         sid, done = story["id"], story["state"] == DONE
         items = []
-        for n, text in enumerate(signoff.after_items(records, sid), start=1):
-            status, held = signoff.after_status(records, sid, n, text)
+        for n, text in enumerate(chores.after_items(records, sid), start=1):
+            status, held = chores.after_status(records, sid, n, text)
             noted = {key: held.data[key] for key in ("note", "why") if held is not None and key in held.data}
             items.append({"n": n, "text": text, "status": status if done else WAITS} | noted)
         if parsed["json"]:
@@ -78,17 +78,17 @@ class After(StoryStep):
         flag, key, kind = ITEMS[words[1]]
         story, records = self._merged(parsed)
         ref, sid = story["identifier"], story["id"]
-        items = signoff.after_items(records, sid)
+        items = chores.after_items(records, sid)
         n = _item(story, items, words[2])
-        status, _ = signoff.after_status(records, sid, n, items[n - 1])
-        if status != signoff.OPEN:
+        status, _ = chores.after_status(records, sid, n, items[n - 1])
+        if status != chores.OPEN:
             raise Refusal(f"item {n} of {ref} is {status}")
         text = parsed[key].strip()
         if not text:
             raise Refusal(f"{flag} TEXT is required; {USAGE}")
-        record = signoff.after_record(kind, sid, n, items[n - 1], {key: text})
+        record = chores.after_record(kind, sid, n, items[n - 1], {key: text})
         ops.ensure_record(self._store_for_run(), sid, record)
-        print(f"done: item {n} of {ref} is {signoff.after_status([*records, record], sid, n, items[n - 1])[0]}")
+        print(f"done: item {n} of {ref} is {chores.after_status([*records, record], sid, n, items[n - 1])[0]}")
 
     def _merged(self, parsed: dict) -> tuple[dict, list[Record]]:
         story, records = self._find(parsed)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from deckhand import answers, asks, decisions, features, pins, queue, signoff, watch
+from deckhand import answers, asks, chores, decisions, features, pins, queue, signoff, watch
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
@@ -52,7 +52,7 @@ class Decide(StoryStep):
             raise Refusal(f"context takes KIND and SUBJECT; {USAGE}")
         kind, subject = parsed["words"]
         store = self._store_for_run()
-        if kind in (signoff.AFTER, asks.EDIT, queue.STALLED):
+        if kind in (chores.AFTER, asks.EDIT, queue.STALLED):
             feature = features.owning(store, team_key(parsed), subject)
         elif kind == asks.ANSWER and len(parsed["stories"]) == 1:
             feature = features.owning(store, team_key(parsed), parsed["stories"][0])
