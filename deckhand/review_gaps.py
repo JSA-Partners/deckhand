@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from deckhand.records import Record
 from deckhand.review import PROPOSAL, accepted, counted, decided, declined, last, open_p1, reviewed, rounds_of, waived
+
+
+@dataclass(frozen=True)
+class Gap:
+    id: str
+    hand: str
+    person: str
 
 
 def undecided_delivery(records: list[Record], story: str, stage: str) -> list[dict]:
@@ -15,15 +24,19 @@ def delivery_line(item: dict) -> str:
     return f"touches: {item['touches']}" if item.get("touches") else "it changes what the story delivers"
 
 
-def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
+def delivery_gaps(records: list[Record], story: str, stage: str, ref: str) -> list[Gap]:
     proposed = {r.subject for r in records if r.kind == PROPOSAL}
-    return [
-        f"{id} waits for the person's decision"
-        if id in proposed
-        else f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve --stage {stage}"
-        f" --propose-accept {id} or --propose-decline {id} --reason TEXT"
-        for id in (f["id"] for f in undecided_delivery(records, story, stage))
-    ]
+    found = []
+    for id in (f["id"] for f in undecided_delivery(records, story, stage)):
+        if id in proposed:
+            hand = f"{id} waits for the person's decision"
+        else:
+            hand = (
+                f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve"
+                f" --stage {stage} --propose-accept {id} or --propose-decline {id} --reason TEXT"
+            )
+        found.append(Gap(id, hand, f"finding {id} changes what the story delivers; decide it"))
+    return found
 
 
 def left_open(records: list[Record], story: str, stage: str) -> list[dict]:
@@ -35,20 +48,29 @@ def left_open(records: list[Record], story: str, stage: str) -> list[dict]:
     ]
 
 
-def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
-    return [
-        f"{f['id']} is a {f['severity']} the hand left open and the person has not decided it:"
-        f" decide context finding {ref} --finding {f['id']}"
-        for f in left_open(records, story, stage)
-    ]
+def left_open_gaps(records: list[Record], story: str, stage: str, ref: str) -> list[Gap]:
+    proposed = {r.subject for r in records if r.kind == PROPOSAL}
+    found = []
+    for f in left_open(records, story, stage):
+        id = f["id"]
+        if id in proposed:
+            hand = f"{id} waits for the person's decision"
+        else:
+            hand = (
+                f"{id} is a {f['severity']} left open; resolve it with review apply {ref} resolve --stage {stage}"
+                f" --accept {id}, or --propose-decline {id} --reason TEXT"
+            )
+        found.append(Gap(id, hand, f"finding {id} was left open by the hand; decide it"))
+    return found
 
 
-def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
+def feature_gaps(project: str, records: list[Record], at: str, ref: str) -> list[Gap]:
     rounds = rounds_of(records, f"{project}:feature")
     latest = last(rounds)
     if latest is None:
-        return ["the feature review has not run"]
+        return [Gap("feature-review", *["the feature review has not run"] * 2)]
     if reviewed(latest) != at:
-        return ["the feature review has not reviewed the current contract and stories; run a feature round"]
+        text = "the feature review has not reviewed the current contract and stories; run a feature round"
+        return [Gap("feature-review", text, text)]
     found = open_p1(latest, declined(records))
-    return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]
+    return [Gap(f["id"], *[f"the feature review holds an open P1 {f['id']}: {f['summary']}"] * 2) for f in found]

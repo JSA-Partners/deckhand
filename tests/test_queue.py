@@ -93,13 +93,22 @@ def test_rank_order_across_all_kinds():
     store = alpha(planning=True)
     sessions = every_kind(store)
     assert kinds(waiting(store, sessions=sessions)) == [
-        ("sign-off", 0, "ACME-1"),
         ("finding", 1, "ACME-1"),
         ("after-merge", 2, "ACME-2"),
         ("planning", 3, "Alpha"),
         ("config-edit", 4, "ACME-1"),
         ("question", 4, "ACME-1"),
     ]
+
+
+def test_a_story_with_an_open_finding_item_shows_no_signoff_item():
+    store = alpha()
+    summarized(store, "s1", "c2")
+    assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
+    store.put_record("s1", asks.proposal_record("f1", "v1", "out of scope"))
+    assert kinds(waiting(store)) == [("finding", 1, "ACME-1")]
+    store.put_record("s1", Record(review.DECISION, "f1", "v1", "person:pat", {"answer": review.ACCEPT}))
+    assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
 
 
 def test_question_and_stalled_rank_with_blocked_hands_in_build():

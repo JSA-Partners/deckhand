@@ -130,7 +130,8 @@ def approval_gaps(store: Store, feature: Feature) -> list[str]:
     gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
     held = [record for story in live for record in feature.records.get(story["id"], [])]
     text = review_text(store, feature)
-    return gaps + review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "")
+    found = review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "", project)
+    return gaps + [gap.person for gap in found]
 
 
 def review_text(store: Store, feature: Feature) -> str | None:

@@ -191,7 +191,7 @@ def test_a_sign_off_past_the_last_reviewed_head_never_merges(
     for n in (1, 2, 3):
         branch_round(store, n=n, head="c1")
     gap = "the branch review has not reviewed the signed head c2; run a branch round"
-    assert signoff.gaps(store.records("s1"), "s1", "c2") == [gap]
+    assert [g.hand for g in signoff.gaps(store.records("s1"), "s1", "c2", "ACME-1")] == [gap]
     held = signoff.version(store.records("s1"), "s1", "c2")
     data = {"answer": signoff.SIGN, "nonce": "n1", "by": "viewer-1"}
     store.put_record("s1", Record(signoff.KIND, "s1", held, "person:pat", data))

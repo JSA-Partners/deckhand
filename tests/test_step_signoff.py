@@ -125,7 +125,7 @@ def sign(store: FakeStore, repo: Path, state: Path, capsys: pytest.CaptureFixtur
 
 
 def gap_text(store: FakeStore, head: str = "c2") -> str:
-    return "; ".join(signoff.gaps(store.records("s1"), "s1", head))
+    return "; ".join(g.hand for g in signoff.gaps(store.records("s1"), "s1", head, "ACME-1"))
 
 
 def not_ready_options(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str]) -> list[str]:
@@ -432,9 +432,9 @@ def test_sign_off_waits_for_the_person_on_a_delivery_finding(
     store = ready(tmp_path, repo, state, capsys)
     delivery = raw(changes_delivery=True)
     branch_round(store, delivery, n=2)
-    [line] = [g for g in signoff.gaps(store.records("s1"), "s1", "c2") if g.startswith(_id(delivery))]
-    assert line.startswith(f"{_id(delivery)} changes what the story delivers; propose an answer")
-    assert "decide" not in line
+    [gap] = [g for g in signoff.gaps(store.records("s1"), "s1", "c2", "ACME-1") if g.id == _id(delivery)]
+    assert gap.hand.startswith(f"{_id(delivery)} changes what the story delivers; propose an answer")
+    assert "decide" not in gap.hand
     store.put_record("s1", asks.proposal_record(_id(delivery), "v", "out of scope"))
     assert f"{_id(delivery)} waits for the person's decision" in gaps_at_head(store, repo)
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", _id(delivery)], "Decline")
@@ -748,13 +748,7 @@ def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
     plan_left = review.finding_id(plan_round(store, plan.version, raw(summary="Plan left."))[0], "plan")
     missing = overview(store, repo, capsys)["missing"]
     assert missing == [
-        f"{plan_left} is a P2 the hand left open and the person has not decided it:"
-        f" decide context finding REF --finding {plan_left}",
-        *(
-            f"{id} is a {severity} the hand left open and the person has not decided it:"
-            f" decide context finding REF --finding {id}"
-            for id, severity in ((ids[1], "P3"), (ids[2], "P2"))
-        ),
+        *(f"finding {id} was left open by the hand; decide it" for id in (plan_left, ids[1], ids[2])),
         "the person has not signed off",
     ]
     assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
@@ -841,8 +835,8 @@ def test_a_finding_left_open_in_an_earlier_round_stays_the_persons(
     plan_left = review.finding_id(plan_round(store, "older", raw(summary="Plan left."))[0], "plan")
     store.put_record("s1", review.round_record("s1", "plan", review.RoundPlan(3, True, ""), plan.version, []))
     missing = "\n".join(overview(store, repo, capsys)["missing"])
-    assert f"{_id(left)} is a P3 the hand left open" in missing
-    assert f"{plan_left} is a P2 the hand left open" in missing
+    assert f"finding {_id(left)} was left open by the hand; decide it" in missing
+    assert f"finding {plan_left} was left open by the hand; decide it" in missing
     assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
 
 
@@ -882,3 +876,35 @@ def test_signoff_and_merge_contexts_list_unfixed_findings_for_a_hand(
     Merge(store, Shell(), repo).context(["s1", *TEAM])
     lines = capsys.readouterr().out.splitlines()
     assert lines == ["ACME-1: the person has not signed off", UNFIXED]
+
+
+def test_signoff_gaps_name_the_story_ref(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    branch_round(store, raw(changes_delivery=True), raw(severity="P3", summary="Left."), n=2)
+    found = signoff.gaps(store.records("s1"), "s1", "c2", "ACME-1")
+    assert found
+    assert not any("REF" in text for gap in found for text in (gap.hand, gap.person))
+    assert any("ACME-1" in gap.hand for gap in found)
+
+
+def test_the_overview_prints_hand_text_to_a_hand_and_person_text_to_the_person(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    store = ready(tmp_path, repo, state, capsys)
+    branch_round(store, raw(severity="P3", summary="Left."), n=2)
+    capsys.readouterr()
+    Signoff(store, Shell(), repo).context(["s1", *TEAM])
+    person = capsys.readouterr().out.splitlines()
+    config_dir = tmp_path / "hand-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
+    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    Signoff(store, Shell(), repo).context(["s1", *TEAM])
+    hand = capsys.readouterr().out.splitlines()
+    assert person != hand
+    assert any("decide it" in line for line in person)
+    assert any("review apply ACME-1 resolve --stage branch --accept" in line for line in hand)
+    for lines in (person, hand):
+        assert lines[0] == "missing:"
+        assert lines.index("missing:") < next(i for i, line in enumerate(lines) if line.startswith("sign-off for"))

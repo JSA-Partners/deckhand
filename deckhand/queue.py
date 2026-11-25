@@ -179,7 +179,8 @@ def _prompt(story: dict, records: list[Record], session: fleet.Session | None, r
 
 
 def _for_person(story: dict, records: list[Record], rank: int) -> list[Item]:
-    found = _signoff(story, records) + _findings(story, records)
+    findings = _findings(story, records)
+    found = ([] if findings else _signoff(story, records)) + findings
     return found + _questions(story, records, rank) + _edits(story, records, rank)
 
 

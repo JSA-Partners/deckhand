@@ -194,9 +194,8 @@ def test_a_delivery_finding_of_an_earlier_round_can_still_be_proposed(tmp_path: 
     step.apply([*resolve, "--propose-decline", finding_id(delivery), "--reason", "out of scope"])
     [proposal] = [r for r in store.records("s1") if r.kind == asks.PROPOSAL]
     assert (proposal.subject, proposal.version) == (finding_id(delivery), first.version)
-    assert review_gaps.delivery_gaps(store.records("s1"), "s1", "plan") == [
-        f"{finding_id(delivery)} waits for the person's decision"
-    ]
+    [gap] = review_gaps.delivery_gaps(store.records("s1"), "s1", "plan", "ACME-1")
+    assert gap.hand == f"{finding_id(delivery)} waits for the person's decision"
 
 
 def test_a_re_proposal_after_a_change_of_mind_is_the_newest(tmp_path: Path, repo: Path, capsys):

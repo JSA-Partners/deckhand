@@ -253,7 +253,7 @@ class Build(StoryStep):
             )
         undecided = review_gaps.delivery_gaps(records, story["id"], "plan", story["identifier"])
         if undecided:
-            raise Refusal("; ".join(undecided))
+            raise Refusal("; ".join(gap.hand for gap in undecided))
         branch = branch_of(records, story)
         path = git.worktree_path(clone, branch) if branch else None
         if branch is None or path is None or not path.is_dir():

@@ -54,7 +54,7 @@ def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> P
 def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
-    missing = signoff.gaps(records, story["id"], head)
+    missing = [gap.person for gap in signoff.gaps(records, story["id"], head, story["identifier"])]
     version = signoff.version(records, story["id"], head)
     label = _label(story)
     if missing and version is None:

@@ -6,6 +6,7 @@ from dataclasses import asdict
 from deckhand import features, implplan, quiz, review, review_gaps, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
+from deckhand.review_gaps import Gap
 from deckhand.step import Refusal
 from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
@@ -37,51 +38,77 @@ def held_summary(records: list[Record], story: str, head: str) -> ChangeSummary 
         return None
 
 
-def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSummary | None) -> list[str]:
+def _both(id: str, text: str) -> Gap:
+    return Gap(id, text, text)
+
+
+def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSummary | None) -> list[Gap]:
     held = quiz.held_set(records, story)
     if held is None or held.data.get("head") != head:
-        return [f"no quiz is saved at {head}; a story with nothing to ask still saves an empty quiz"]
+        text = f"no quiz is saved at {head}"
+        return [Gap("quiz", f"{text}; a story with nothing to ask still saves an empty quiz", text)]
     found = []
     if summary is not None and held.data.get("summary") != digest(summary):
-        found.append("the change summary differs from the one the quiz was written from; save the quiz again")
+        found.append(
+            Gap(
+                "quiz-summary",
+                "the change summary differs from the one the quiz was written from; save the quiz again",
+                "the change summary differs from the one the quiz was written from",
+            )
+        )
     if not quiz.passed(records, story, head):
-        found.append("quiz items still open: " + ", ".join(str(n) for n in quiz.open_items(records, story)))
+        open_items = ", ".join(str(n) for n in quiz.open_items(records, story))
+        found.append(_both("quiz-open", f"quiz items still open: {open_items}"))
     return found
 
 
-def _branch_gap(records: list[Record], story: str, head: str) -> list[str]:
+def _branch_gap(records: list[Record], story: str, head: str) -> list[Gap]:
     if review.cleared(records, story, "branch", head):
         return []
     latest = review.last(review.counted(records, f"{story}:branch")[0])
     if latest is None or review.reviewed(latest) != head:
-        return [f"the branch review has not reviewed the signed head {head}; run a branch round"]
-    return ["the branch review has not stopped clean, a P1 is open; fix it; at the cap the person decides"]
+        return [
+            Gap(
+                "branch-review",
+                f"the branch review has not reviewed the signed head {head}; run a branch round",
+                f"the branch review has not reviewed the signed head {head}",
+            )
+        ]
+    return [
+        Gap(
+            "branch-review",
+            "the branch review has not stopped clean, a P1 is open; fix it; at the cap the person decides",
+            "the branch review has not stopped clean, a P1 is open",
+        )
+    ]
 
 
-def _plan_gap(records: list[Record], story: str) -> list[str]:
+def _plan_gap(records: list[Record], story: str) -> list[Gap]:
     plan = versions.held(records, implplan.PURPOSE, story)
     if plan is None or not review.cleared(records, story, "plan", plan.version):
-        return ["the plan review has not stopped clean at the current plan version"]
+        return [_both("plan-review", "the plan review has not stopped clean at the current plan version")]
     return []
 
 
-def _tuicr_gap(records: list[Record], story: str, head: str) -> list[str]:
+def _tuicr_gap(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     held = versions.held(records, TUICR, story)
     if held is None or held.data.get("head") != head:
-        return [f"no tuicr review is built at {head}; run signoff apply REF review"]
+        text = f"no tuicr review is built at {head}"
+        return [Gap("tuicr", f"{text}; run signoff apply {ref} review", text)]
     return []
 
 
-def gaps(records: list[Record], story: str, head: str) -> list[str]:
+def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     summary = held_summary(records, story, head)
-    found = [] if summary else [f"no change summary is saved at {head}"]
+    found = [] if summary else [_both("summary", f"no change summary is saved at {head}")]
     found += _quiz_gap(records, story, head, summary)
     for stage in ("plan", "branch"):
         found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
-        found += review_gaps.delivery_gaps(records, story, stage) + review_gaps.left_open_gaps(records, story, stage)
-    found += _tuicr_gap(records, story, head)
+        found += review_gaps.delivery_gaps(records, story, stage, ref)
+        found += review_gaps.left_open_gaps(records, story, stage, ref)
+    found += _tuicr_gap(records, story, head, ref)
     if not passing(records, story, head):
-        found.append(f"checks are not passing at {head}")
+        found.append(_both("checks", f"checks are not passing at {head}"))
     return found
 
 
@@ -117,7 +144,7 @@ def _first(records: list[Record], story: str, head: str) -> bool:
         held is not None
         and held.data.get("answer") == SIGN
         and held.version == version(records, story, head)
-        and not gaps(records, story, head)
+        and not gaps(records, story, head, story)
         and voided(records, story, held) is None
     )
 

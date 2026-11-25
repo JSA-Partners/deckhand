@@ -105,12 +105,14 @@ class Signoff(StoryStep):
             "tuicr": self._pr_diff(at) if at.path is None else _tuicr_status(built, comments),
             "quiz": "passed" if quiz.passed(at.records, sid, head) else "not passed",
         }
-        missing = signoff.gaps(at.records, sid, head)
+        found_gaps = signoff.gaps(at.records, sid, head, at.story["identifier"])
+        missing = [gap.hand if hand_role() else gap.person for gap in found_gaps]
         standing = signoff.standing(at.records, sid, head, at.policy.second_signoff)
         missing += [standing] if standing and standing not in missing else []
-        lines = [f"sign-off for {at.story['identifier']} at {head}"]
+        lines = ["missing:", *(f"- {m}" for m in missing)] if missing else []
+        lines += [f"sign-off for {at.story['identifier']} at {head}"]
         lines += [f"{n} {name}: {status[name]}" for n, name in enumerate(SCREENS, start=1)]
-        lines += ["missing:", *(f"- {m}" for m in missing)] if missing else ["signed off at this head"]
+        lines += [] if missing else ["signed off at this head"]
         found = {"story": at.story["identifier"], "head": head, "screens": status, "missing": missing}
         if hand_role():
             found["unfixed"] = review.unfixed(at.records)
