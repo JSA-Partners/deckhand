@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, launch, queue, stalls
-from deckhand.actions import Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand import asks, config, features, fleet, launch, mirror, queue, stalls
+from deckhand.actions import Adopt, Attach, Launch, Post, PutDocument, Remove, Resume, Stop
 from deckhand.acts import Acts, unheard
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
@@ -19,6 +19,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import LocalRecords
 from deckhand.store.state import LocalState
 from tests.shell import Shell, World, row
+from tests.test_mirror import named
 from tests.test_reconcile import story
 from tests.test_step_hand import ME, building, clone, state
 
@@ -391,3 +392,45 @@ def test_an_engine_launch_carries_the_hands_settings(
         assert f"Edit(//{str(form / '.git').lstrip('/')})" in deny
         assert f"Edit(//{str(form / '.claude/settings.json').lstrip('/')})" in deny
     assert str(worktree / ".git") in settings["sandbox"]["filesystem"]["denyWrite"]
+
+
+class Refusing(FakeStore):
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        raise LinearError("network", "Linear is unreachable")
+
+
+def mirrors(store: FakeStore) -> list[Attach | PutDocument]:
+    feature = features.current(named(store), "ACME")
+    assert feature is not None
+    return mirror.wanted(store, feature)
+
+
+def test_an_attach_writes_through_the_app_store_then_its_digest(rows: LocalState, db: Path):
+    store = building()
+    first = mirrors(store)[0]
+    app = FakeStore()
+    runs = Acts(rows, LocalRecords(db), lambda: store, Shell(), app=lambda: app)
+    assert runs.run(first) is None
+    assert app.writes == [("attach", "s1", first.url)]
+    assert rows.keyed(mirror.PREFIX) == {first.key: {"digest": first.digest}}
+
+
+def test_a_put_document_writes_the_story_map_then_its_digest(rows: LocalState, db: Path):
+    app = FakeStore()
+    document = PutDocument("mirror:p1", "mirror:p1:story-map", "d1", "doc-1", "p1", "Story map", "## ACME-1\n")
+    runs = Acts(rows, LocalRecords(db), lambda: app, Shell(), app=lambda: app)
+    assert runs.run(document) is None
+    assert app.document("doc-1") == {"id": "doc-1", "parent": "p1", "title": "Story map", "body": "## ACME-1\n"}
+    assert rows.keyed(mirror.PREFIX) == {"mirror:p1:story-map": {"digest": "d1"}}
+
+
+def test_a_failed_attach_leaves_no_digest_and_is_due_next_read(rows: LocalState, db: Path):
+    store = building()
+    first = mirrors(store)[0]
+    runs = Acts(rows, LocalRecords(db), lambda: store, Shell(), app=Refusing)
+    assert runs.run(first) == "mirror:s1: network: Linear is unreachable"
+    assert rows.keyed(mirror.PREFIX) == {}
+    feature = features.current(store, "ACME")
+    assert feature is not None
+    done = {key: body["digest"] for key, body in rows.keyed(mirror.PREFIX).items()}
+    assert first in mirror.due(store, feature, done)

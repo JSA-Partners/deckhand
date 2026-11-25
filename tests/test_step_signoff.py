@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, implplan, review, signoff, versions, wakes
+from deckhand import asks, features, implplan, mirror, review, signoff, versions, wakes
+from deckhand.actions import Attach
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.checks import Checks
@@ -1007,3 +1008,33 @@ def test_a_hand_is_told_the_tuicr_review_waits_for_the_person(
     [gap] = [g for g in signoff.gaps(store.records("s1"), "s1", "c2", "ACME-1") if g.id == "tuicr"]
     assert gap.hand == "no tuicr review is built at c2; it waits for the person's tuicr review"
     assert "signoff apply" not in gap.hand
+
+
+def test_a_sign_off_record_carries_the_repository_and_the_signers_name(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    store.writes.clear()
+    sign(store, repo, state, capsys)
+    assert store.writes == [("put_record", "s1", signoff.KIND, "s1")]
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert (held.data["repo"], held.data["name"], held.data["by"]) == ("acme/widgets", "viewer-1", "viewer-1")
+
+
+class NoRepo(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:3] == ["gh", "repo", "view"]:
+            return subprocess.CompletedProcess(argv, 1, "", "error connecting to api.github.com\n")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_a_sign_off_gh_cannot_name_still_records_and_is_not_mirrored(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    answer(state, Decide(store, runner=NoRepo(), repo=repo), capsys, ["sign-off", "ACME-1"], signoff.SIGN)
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert held.data["answer"] == signoff.SIGN and "repo" not in held.data
+    feature = features.current(store, "ACME")
+    assert feature is not None
+    assert not [a for a in mirror.wanted(store, feature) if isinstance(a, Attach) and "github.com" in a.url]

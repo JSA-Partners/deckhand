@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckhand import asks, chores, delivery, fleet, order, queue, stalls, startable, wakes
+from deckhand import asks, chores, delivery, fleet, mirror, order, queue, stalls, startable, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
@@ -36,6 +36,7 @@ class Facts:
     idle: frozenset[str] = frozenset()
     readable: bool = True
     posted: frozenset[str] = frozenset()
+    mirrored: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,6 +98,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature)
             found += _sync(tick, feature) + delivery.deliver(tick, feature) + _start(tick, store, feature)
+            found += mirror.due(store, feature, facts.mirrored) if facts.readable else []
         else:
             found += delivery.deliver(tick, None)
         found += _spikes(tick)
@@ -132,7 +134,8 @@ def _resumable(facts: Facts, name: str) -> bool:
 
 
 def used(facts: Facts) -> int:
-    return fleet.slots_used(facts.read.sessions) + len(facts.busy - _holding(facts)) + len(reserved(facts))
+    hands = {name for name in facts.busy if name.startswith((fleet.HAND, fleet.SPIKE))}
+    return fleet.slots_used(facts.read.sessions) + len(hands - _holding(facts)) + len(reserved(facts))
 
 
 def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:

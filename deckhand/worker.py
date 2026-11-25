@@ -31,7 +31,7 @@ def opened_acts(runner: git.Runner = git.run) -> Iterator[Runs]:
     path = default_path()
     with LocalState(path) as state:
         stores = Stores()
-        yield Acts(state, LocalRecords(path), lambda: stores("person"), runner)
+        yield Acts(state, LocalRecords(path), lambda: stores("person"), runner, lambda: stores("app"))
 
 
 class Worker:

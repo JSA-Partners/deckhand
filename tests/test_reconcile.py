@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, queue, stalls, wakes
+from deckhand import asks, config, features, fleet, mirror, queue, stalls, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
@@ -16,6 +16,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
 from tests.test_feature_approval import P1, approve_everything, reapprove, setup
+from tests.test_mirror import named
 from tests.test_queue import asked
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
 from tests.test_step_stories import setup as empty_feature
@@ -607,3 +608,20 @@ def test_an_idle_hand_waiting_on_the_person_is_left_alone(clone: Path):
     started(store)
     asked(store, "s1")
     assert reconcile(idle_facts(store, held(turn_ended=ENDED)), store) == []
+
+
+def test_a_mirror_in_flight_leaves_the_slot_free(clone: Path):
+    store = building()
+    assert reconcile(facts(store, busy=frozenset({"mirror:s1"})), store) == [launch(store, clone)]
+
+
+def test_reconcile_wants_each_mirror_not_yet_written_and_none_when_unreadable(clone: Path):
+    store = named(building())
+    feature = features.current(store, "ACME")
+    assert feature is not None
+    wanted = mirror.wanted(store, feature)
+    assert reconcile(facts(store, cap=0), store) == wanted
+    written = {a.key: a.digest for a in wanted}
+    assert reconcile(facts(store, cap=0, mirrored=written), store) == []
+    assert reconcile(facts(store, cap=0, readable=False), store) == []
+    assert reconcile(facts(store, cap=0, busy=frozenset({"mirror:s1"})), store) == wanted[1:]

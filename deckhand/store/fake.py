@@ -184,6 +184,7 @@ class FakeStore(Store):
         return sorted(issue for issue, found in self._records.items() if any(r.kind == kind for r in found))
 
     def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        require_id(issue)
         require_flat(metadata)
         entry = {"url": url, "title": title, "subtitle": subtitle, "metadata": dict(metadata)}
         self._attachments.setdefault(issue, {})[url] = entry

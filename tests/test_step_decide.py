@@ -373,3 +373,16 @@ def test_review_cap_context_takes_the_feature_stage(state: Path, capsys: pytest.
         [record] = [r for r in store.records(story) if r.kind == review.CAP_DECISION]
         assert record.data["answer"] == review.REWORK
     assert review.counted(store.records("s1"), f"{P1}:feature") == ([], 3)
+
+
+def test_decide_apply_makes_no_linear_write_for_a_mirror(state: Path, capsys):
+    store = approved_ready()
+    Decide(store).context(["feature-approval", P1, *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    record_answer(state, shown["tool_input"]["questions"][0], "Approve")
+    store.writes.clear()
+    Decide(store).apply([shown["nonce"], *TEAM])
+    assert store.writes == [("put_record", s, "feature-approval", P1) for s in ("s1", "s2")]
+    for story in ("s1", "s2"):
+        [record] = [r for r in store.records(story) if r.kind == "feature-approval"]
+        assert (record.data["by"], record.data["name"]) == ("viewer-1", "viewer-1")

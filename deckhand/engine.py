@@ -9,8 +9,8 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, budget, config, features, fleet, git, idle, reading, shown, status, watch
-from deckhand.actions import Action, Adopt, Launch, Post, Resume, Stop
+from deckhand import acts, budget, config, features, fleet, git, idle, mirror, reading, shown, status, watch
+from deckhand.actions import Action, Adopt, Attach, Launch, Post, PutDocument, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
@@ -194,7 +194,7 @@ class Engine:
             if isinstance(action, HOLDS):
                 self._holding.discard(action.name)
             self._lines.heard(action, line, now)
-            if not isinstance(action, Post | Adopt):
+            if not isinstance(action, Post | Adopt | Attach | PutDocument):
                 self._settling[action.name] = (now, isinstance(action, HOLDS))
                 self._fleets.poke()
         began = self._fleets.began()
@@ -221,6 +221,7 @@ class Engine:
             idle=self._idle,
             readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
             posted=self._state.posted(),
+            mirrored={key: str(body.get("digest")) for key, body in self._state.keyed(mirror.PREFIX).items()},
         )
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:

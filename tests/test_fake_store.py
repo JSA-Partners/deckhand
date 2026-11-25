@@ -396,3 +396,10 @@ def test_issues_reads_each_known_id_with_its_state_in_the_order_asked() -> None:
         ("i1", "Backlog", False),
     ]
     assert {k: v for k, v in found[1].items() if k not in ("state", "completed_at")} == store.issue("i1")
+
+
+def test_attach_refuses_an_identifier() -> None:
+    store = FakeStore()
+    with pytest.raises(Refusal, match="keyed by the issue id"):
+        store.attach("ACME-1", "https://linear.app/x", "T", "S", {})
+    assert store.writes == []

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, stalls, status, watch
-from deckhand.actions import Action, Launch, Post, Remove, Resume, Stop
+from deckhand.actions import Action, Attach, Launch, Post, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
 from deckhand.linker import Linked
@@ -25,6 +25,7 @@ from deckhand.store.open import Stores
 from deckhand.store.state import LocalState
 from deckhand.worker import Worker
 from tests.shell import Shell, row
+from tests.test_mirror import named
 from tests.test_queue import asked, started
 from tests.test_step_hand import building, clone, configure, state
 
@@ -914,3 +915,38 @@ def test_a_sibling_merge_posts_its_sync_once_and_keeps_the_snapshot_still(clone:
         slots.append(rig.shown()["slots"])
     assert slots == [slots[0]] * 4
     assert [a.key for a in rig.worker.submitted if isinstance(a, Post)] == ["sync:s1:hand-ACME-2"]
+
+
+def test_a_mirror_result_pokes_no_fleet_read_and_a_failing_one_backs_off(clone: Path):
+    configure(clone, 1)
+    rig = Rig(named(building()))
+    rig.ready()
+    attaches = [a for a in rig.worker.submitted if isinstance(a, Attach)]
+    assert [a.name for a in attaches] == ["mirror:s1", "mirror:s2"]
+    pokes = rig.fleets.pokes
+    for action in attaches:
+        rig.worker.finish(action, f"{action.name}: network: Linear is unreachable")
+    rig.step()
+    assert rig.fleets.pokes == pokes
+    notes = fail_every_submitted(rig, 300, "mirror: network: Linear is unreachable", "mirror:s1")
+    tries = [a for a in rig.worker.submitted if a.name == "mirror:s1"]
+    assert 2 <= len(tries) <= 4
+    assert notes[-1].endswith("network: Linear is unreachable")
+
+
+def test_a_released_feature_mirrors_with_no_linear_read_between_links(clone: Path):
+    configure(clone, 1)
+    store = named(building())
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    rig = Rig(store)
+    rig.link()
+    calls = rig.down.calls
+    rig.clock.t += 0.5
+    rig.landed()
+    rig.engine.tick()
+    for _ in range(5):
+        rig.landed()
+        rig.step()
+    assert rig.down.calls == calls
+    assert [a.name for a in rig.worker.submitted if isinstance(a, Attach)] == ["mirror:s1", "mirror:s2"]

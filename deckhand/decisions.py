@@ -106,6 +106,7 @@ _CHOSEN = (
 )
 
 _OWN_WORDS = (signoff.KIND, signoff.SECOND)
+_MIRRORED = ("feature-approval", signoff.KIND)
 _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 
 _POSITIVE = {
@@ -132,6 +133,7 @@ class Pending:
     story_labels: list[str] = field(default_factory=list)
     draft: str = ""
     stage: str = ""
+    repo: str = ""
 
 
 @dataclass(frozen=True)
@@ -174,7 +176,7 @@ def question_text(kind: str, pin: Pin) -> str:
     return f"{shown.rstrip('?')}? [{check}]"
 
 
-def save_pending(question: Question, pin: Pin, state: Path) -> None:
+def save_pending(question: Question, pin: Pin, state: Path, repo: str = "") -> None:
     descriptions = [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
     pending = Pending(
         question.nonce,
@@ -190,6 +192,7 @@ def save_pending(question: Question, pin: Pin, state: Path) -> None:
         pin.story_labels,
         pin.draft,
         pin.stage,
+        repo,
     )
     folder = state / PENDING
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -286,7 +289,7 @@ def _another_signs(store: Store, pending: Pending, by: str) -> None:
         )
 
 
-def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
+def decide(store: Store, pending: Pending, state: Path, by: str, name: str = "") -> bool:
     found = check(pending, state)
     note = found.answer if in_own_words(pending, found.answer) else None
     answer = signoff.NOT_YET if note is not None else found.answer
@@ -305,7 +308,9 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         f"person:{found.session_id}",
         {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"note": note} if note is not None else {})
-        | ({"item": pending.detail} if pending.kind == ITEM else {}),
+        | ({"item": pending.detail} if pending.kind == ITEM else {})
+        | ({"name": name} if name and pending.kind in _MIRRORED else {})
+        | ({"repo": pending.repo} if pending.repo and pending.kind == signoff.KIND else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

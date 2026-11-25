@@ -957,3 +957,9 @@ def test_a_looked_up_team_id_that_is_missing_raises(records: LocalRecords) -> No
     with pytest.raises(LinearError, match="Entity not found: Team"):
         LinearStore(client, records).team_projects("ACME")
     assert client.names == ["TeamId", "TeamProjects"]
+
+
+def test_linear_attach_resolves_an_identifier_to_its_uuid(records: LocalRecords) -> None:
+    client = FakeClient(Issue={"issue": ISSUE_NODE}, AttachmentCreate={"attachmentCreate": {"success": True}})
+    LinearStore(client, records).attach("ACME-5", "https://linear.app/acme/document/contract-1", "T", "S", {})
+    assert client.calls[-1][1]["input"]["issueId"] == UUID

@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from deckhand import fleet
-from deckhand.actions import Action, Launch, Remove, Resume, Stop
+from deckhand.actions import Action, Attach, Launch, PutDocument, Remove, Resume, Stop
 from deckhand.reconcile import RETRY_AFTER, RETRY_CAP
 
 START, STOP, REMOVE, FINISHED_STOP = "start", "Stop", "Remove", "Stop:finished"
 LAUNCH = f"{START}:Launch"
+# Only a write that lands clears a failed mirror.
+MIRRORS = (Attach.__name__, PutDocument.__name__)
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,7 @@ class Lines:
         return found
 
     def backing_off(self, action: Action, now: float) -> bool:
-        if not isinstance(action, Stop | Remove):
+        if not isinstance(action, Stop | Remove | Attach | PutDocument):
             return False
         tries, last = self._tries.get(_key(action), (0, now))
         return bool(tries) and now - last < min(RETRY_AFTER * 2 ** (tries - 1), RETRY_CAP)
@@ -97,6 +99,6 @@ def _settled(kind: str, name: str, stories: Stories) -> bool:
         return name in stories.finished
     if kind == FINISHED_STOP:
         return name not in stories.finished
-    if kind.startswith(STOP) or kind == REMOVE:
+    if kind.startswith(STOP) or kind in (REMOVE, *MIRRORS):
         return False
     return name in stories.finished or name not in stories.wanted

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from deckhand import answers, asks, chores, decisions, features, pins, signoff, stalls, watch
+from deckhand import answers, asks, chores, decisions, features, gh, pins, signoff, stalls, watch
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
@@ -60,7 +60,7 @@ class Decide(StoryStep):
             feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
-        head = self._head(subject, team_key(parsed)) if kind == signoff.KIND else ""
+        head, repo = self._head(subject, team_key(parsed)) if kind == signoff.KIND else ("", "")
         pin = pins.pin(
             store,
             feature,
@@ -73,7 +73,7 @@ class Decide(StoryStep):
             head,
         )
         question = decisions.make_question(kind, pin)
-        decisions.save_pending(question, pin, answers.state_dir())
+        decisions.save_pending(question, pin, answers.state_dir(), repo)
         tool_input = as_tool_input(question)
         if parsed["json"]:
             print(json.dumps({"nonce": question.nonce, "tool_input": tool_input}, indent=2))
@@ -81,11 +81,20 @@ class Decide(StoryStep):
         print(f"nonce: {question.nonce}")
         print(json.dumps(tool_input, indent=2))
 
-    def _head(self, ref: str, team_key: str) -> str:
+    # A repository gh cannot name leaves the sign-off unmirrored rather than unsigned.
+    def _head(self, ref: str, team_key: str) -> tuple[str, str]:
         at = self.locate(ref, team_key)
         if at.head is None:
             raise Refusal(f"{at.story['identifier']} has no worktree on this machine to sign off")
-        return at.head
+        try:
+            repo = gh.repo_name(at.clone, self._runner)
+        except (gh.GhError, ValueError, KeyError):
+            repo = ""
+        return at.head, repo
+
+    def _viewer(self) -> tuple[str, str]:
+        found = self._stores("person").viewer()
+        return (self._me() if self._me is not None else found["id"]), found["name"]
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
@@ -95,7 +104,7 @@ class Decide(StoryStep):
         state = answers.state_dir()
         pending = decisions.load_pending(nonce, state)
         store = self._store_for_run()
-        if decisions.decide(store, pending, state, self.viewer()):
+        if decisions.decide(store, pending, state, *self._viewer()):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == features.APPROVAL:
                 with LocalState(default_path()) as rows:

@@ -240,7 +240,13 @@ class LinearStore(Store):
 
     def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
         require_flat(metadata)
-        attachment = {"issueId": issue, "url": url, "title": title, "subtitle": subtitle, "metadata": metadata}
+        attachment = {
+            "issueId": self._uuid(issue),
+            "url": url,
+            "title": title,
+            "subtitle": subtitle,
+            "metadata": metadata,
+        }
         self._client.query(queries.ATTACHMENT_CREATE, {"input": attachment})
 
     def relate(self, blocker: str, blocked: str) -> None:

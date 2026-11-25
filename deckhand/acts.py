@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from deckhand import answers, asks, claims, config, fleet, git, launch, ops, queue
-from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand.actions import Action, Adopt, Attach, Launch, Post, PutDocument, Remove, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
 from deckhand.step import Refusal
@@ -41,12 +41,18 @@ def _heard_not(state: LocalState, seqs: Sequence[int]) -> None:
 
 class Acts:
     def __init__(
-        self, state: LocalState, records: LocalRecords, person: Callable[[], Store], runner: git.Runner = git.run
+        self,
+        state: LocalState,
+        records: LocalRecords,
+        person: Callable[[], Store],
+        runner: git.Runner = git.run,
+        app: Callable[[], Store] | None = None,
     ) -> None:
         self._state = state
         self._records = records
         self._person = person
         self._runner = runner
+        self._app = app or person
 
     def run(self, action: Action) -> str | None:
         try:
@@ -80,6 +86,12 @@ class Acts:
             self._claude("rm", action.short)
         elif isinstance(action, Adopt):
             self._state.adopt(action.name, action.short, action.session)
+        elif isinstance(action, Attach):
+            self._app().attach(action.issue, action.url, action.title, action.subtitle, dict(action.metadata))
+            self._state.put(action.key, {"digest": action.digest})
+        elif isinstance(action, PutDocument):
+            self._app().put_document(action.id, action.parent, action.title, action.body)
+            self._state.put(action.key, {"digest": action.digest})
 
     def _claude(self, verb: str, short: str) -> str:
         return git.call(["claude", verb, short], None, self._runner)
