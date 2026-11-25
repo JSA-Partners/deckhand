@@ -122,8 +122,6 @@ def parse_summary(text: str) -> ChangeSummary:
     if diagram is not None:
         diagram = _text(diagram, "summary field state_diagram")
     to_check = [_checked(entry, index) for index, entry in enumerate(_entries(document, "to_check", ("where", "why")))]
-    if not to_check:
-        raise Refusal("summary field to_check must hold at least one entry, the riskiest line of the diff")
     return ChangeSummary(intents, new_here, screenshots, diagram, to_check)
 
 

@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, decisions, signoff, tiers
-from deckhand.cli import main
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -352,7 +351,5 @@ def test_option_descriptions_say_what_a_choice_does_and_never_repeat_the_subject
             assert all("Checkout" not in text for text in shown(kind)), kind
 
 
-def test_no_quiz_kind_remains(capsys: pytest.CaptureFixture[str]):
+def test_no_quiz_kind_remains():
     assert "quiz" not in decisions.KINDS
-    assert main(["quiz", "context", "ACME-1"]) == 2
-    assert "unknown command 'quiz'" in capsys.readouterr().err

@@ -14,7 +14,7 @@ from deckhand.records import Record
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep, branch_of
 from deckhand.store import Store
-from deckhand.summary import SHAPE, ChangeSummary, around, location, parse_summary
+from deckhand.summary import SHAPE, ChangeSummary, around, digest, location, parse_summary
 
 USAGE = (
     "signoff takes REF and [--team-key KEY] on both verbs; context [--screen 1-5] [--json],"
@@ -137,7 +137,7 @@ class Signoff(StoryStep):
         summary = signoff.held_summary(at.records, at.story["id"], at.head)
         if summary is None or at.head is None:
             return ["no change summary is saved at this head"]
-        lines = []
+        lines = [] if summary.to_check else ["nothing in the diff shows a new line to check"]
         for entry in summary.to_check:
             path, line = location(entry.where)
             try:
@@ -189,15 +189,8 @@ class Signoff(StoryStep):
         summary = parse_summary(_read(parsed.get("summary", "")))
         if git.dirty(at.path, self._runner):
             raise Refusal(f"{at.path} has uncommitted changes; commit them first so the summary is pinned")
-        hunks = tuicr.parse_hunks(
-            git.diff(at.path, git.merge_base(at.path, "HEAD", DEFAULT_BASE, self._runner), runner=self._runner)
-        )
-        for index, entry in enumerate(summary.to_check):
-            if not tuicr.holds(hunks, entry.where):
-                shown = tuicr.describe_ranges(tuicr.shown_ranges(hunks)) or "no line"
-                raise Refusal(
-                    f"to_check entry {index} names {entry.where}, which the diff does not show; it shows {shown}"
-                )
+        base = git.merge_base(at.path, "HEAD", DEFAULT_BASE, self._runner)
+        signoff.check_to_check(summary, tuicr.parse_hunks(git.diff(at.path, base, runner=self._runner)))
         record = signoff.summary_record(at.story["id"], at.head, summary)
         ops.ensure_record(self._store_for_run(), at.story["id"], record)
         print(f"done: saved the change summary for {at.story['identifier']} at {at.head}")
@@ -210,10 +203,10 @@ class Signoff(StoryStep):
             raise Refusal(f"{at.story['identifier']} needs its plan and a change summary at {head} first")
         base, hunks = review_hunks(at, at.path, summary, plan.data, self._runner)
         held = versions.held(at.records, signoff.TUICR, sid)
-        if held is None or held.data.get("head") != head:
+        if held is None or (held.data.get("head"), held.data.get("summary")) != (head, digest(summary)):
             sha = tuicr.review_commit(at.path, base, hunks, self._runner) if hunks else None
             selected = [{"path": h.path, "reason": h.reason} for h in hunks]
-            data = {"head": head, "base": base, "sha": sha, "hunks": selected}
+            data = {"head": head, "base": base, "sha": sha, "hunks": selected, "summary": digest(summary)}
             held = Record(signoff.TUICR, sid, head, "agent:signoff", data)
             ops.ensure_record(self._store_for_run(), sid, held)
         sha = held.data.get("sha")

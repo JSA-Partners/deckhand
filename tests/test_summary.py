@@ -36,8 +36,11 @@ def test_parses_a_change_summary() -> None:
     assert parsed.to_check == [summary.ToCheck("src/queue.py:12", "a retry must reuse the key")]
 
 
+def test_an_empty_to_check_parses_and_waits_for_the_diff() -> None:
+    assert parse(to_check=[]).to_check == []
+
+
 def test_a_summary_without_to_check_is_refused() -> None:
-    assert "to_check must hold at least one entry" in refusal(to_check=[])
     assert "to_check entry 0 field why" in refusal(to_check=[{"where": "src/queue.py:12"}])
     assert "where must be path:line" in refusal(to_check=[{"where": "src/queue.py", "why": "w"}])
     with pytest.raises(Refusal, match="to_check is missing"):

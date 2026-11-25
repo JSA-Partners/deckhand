@@ -168,6 +168,35 @@ def test_a_to_check_entry_outside_the_diff_is_refused(tmp_path: Path, repo: Path
     assert store.writes == written
 
 
+DELETION = "diff --git a/src/old.py b/src/old.py\ndeleted file mode 100644\n--- a/src/old.py\n+++ /dev/null\n"
+DELETION += "@@ -1,2 +0,0 @@\n-a\n-b\n"
+
+
+def summarize(store: FakeStore, tmp_path: Path, repo: Path, made: dict, diff: str) -> None:
+    path = tmp_path / "change.json"
+    path.write_text(json.dumps(made))
+    Signoff(store, Diffing(diff=diff), repo).apply(["s1", "summary", "--summary", str(path), *TEAM])
+
+
+def test_a_diff_with_no_new_line_takes_an_empty_to_check(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signable(tmp_path, repo)
+    summarize(store, tmp_path, repo, summary() | {"to_check": []}, DELETION)
+    assert signoff.held_summary(store.records("s1"), "s1", "c2") is not None
+    capsys.readouterr()
+    Signoff(store, Shell(), repo).context(["s1", *TEAM, "--screen", "4"])
+    assert capsys.readouterr().out.splitlines()[1:] == ["nothing in the diff shows a new line to check"]
+
+
+def test_a_diff_with_new_lines_refuses_an_empty_to_check(tmp_path: Path, repo: Path):
+    store = signable(tmp_path, repo)
+    written = list(store.writes)
+    with pytest.raises(Refusal, match="to_check must hold at least one entry"):
+        summarize(store, tmp_path, repo, summary() | {"to_check": []}, QUEUE_HUNK)
+    assert store.writes == written
+
+
 def test_screen_four_shows_each_line_to_check_with_its_code(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -382,6 +411,19 @@ def test_review_commit_is_built_once_per_head(
     Signoff(store, Shell(), repo).context(["s1", *TEAM, "--screen", "5"])
     out = capsys.readouterr().out
     assert "tuicr -r c1..c2" in out and "src/a.py: contract site" in out
+
+
+def test_a_revised_summary_at_the_same_head_rebuilds_the_review_commit(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing()
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    summarize(store, tmp_path, repo, summary(where="src/a.py:1"), ONE_HUNK)
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    assert len(shell.ran("git", "commit")) == 2
+    [hunk] = versions.held(store.records("s1"), signoff.TUICR, "s1").data["hunks"]
+    assert hunk["reason"] == "contract site; to check: a retry reuses the key"
 
 
 SLUG = "acme/widgets@acme-1-orders/commits/c2..c2"

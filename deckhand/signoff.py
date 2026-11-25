@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import features, implplan, review, review_gaps, versions
+from deckhand import features, implplan, review, review_gaps, tuicr, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
 from deckhand.review_gaps import Gap, both
@@ -26,6 +26,17 @@ OPEN, BY_HAND, FOR_PERSON, BY_PERSON = "open", "done by the hand", "left for the
 def summary_record(story: str, head: str, summary: ChangeSummary) -> Record:
     found = digest(summary)
     return Record(SUMMARY, story, found, "agent:signoff", {"summary": asdict(summary), "digest": found, "head": head})
+
+
+# A diff that only deletes, renames or changes modes shows no new line, so it has nothing to check.
+def check_to_check(summary: ChangeSummary, hunks: list[tuicr.Hunk]) -> None:
+    shown = tuicr.describe_ranges(tuicr.shown_ranges(hunks))
+    if shown and not summary.to_check:
+        raise Refusal("summary field to_check must hold at least one entry, the riskiest line of the diff")
+    for index, entry in enumerate(summary.to_check):
+        if not tuicr.holds(hunks, entry.where):
+            where = f"to_check entry {index} names {entry.where}"
+            raise Refusal(f"{where}, which the diff does not show; it shows {shown or 'no new line'}")
 
 
 def held_summary(records: list[Record], story: str, head: str) -> ChangeSummary | None:
