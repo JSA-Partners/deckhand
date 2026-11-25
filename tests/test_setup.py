@@ -38,6 +38,8 @@ class FakeLinear:
         self.writes: list[tuple[str, dict]] = []
         self.fail_after: int | None = None
         self.more = False
+        self.attachments: list[dict] = []
+        self.listed = 0
         self.reads = {
             "TeamStates": ("states", "states"),
             "TeamLabels": ("labels", "labels"),
@@ -57,6 +59,13 @@ class FakeLinear:
             return {"teams": {"nodes": [{k: found[k] for k in keep}]}}
         if name == "WorkspaceProjectLabels":
             return {"projectLabels": {"nodes": self.project_labels, "pageInfo": {"hasNextPage": self.more}}}
+        if name == "LegacyAttachments":
+            self.listed += 1
+            start = int(variables["after"] or 0)
+            rows = self.attachments[start : start + 250]
+            end = start + len(rows)
+            info = {"hasNextPage": end < len(self.attachments), "endCursor": str(end)}
+            return {"attachments": {"nodes": rows, "pageInfo": info}}
         if name in self.reads:
             field, source = self.reads[name]
             rows = self._team(variables["id"])[source]
@@ -92,6 +101,8 @@ class FakeLinear:
                 for row in team["automation"]:
                     if row["id"] == variables["id"]:
                         row["state"] = {"name": next(x for x in team["states"] if x["id"] == data["stateId"])["name"]}
+        elif name == "AttachmentDelete":
+            self.attachments = [x for x in self.attachments if x["id"] != variables["id"]]
         elif name == "TeamUpdate":
             team = self._team(variables["id"])
             team["autoArchivePeriod"] = data["autoArchivePeriod"]
@@ -561,3 +572,53 @@ def test_team_labels_past_one_page_are_read_in_full():
     assert len(found["labels"]["nodes"]) == 101
     assert asked == [None, "c1"]
     assert team["id"] == found["id"]
+
+
+def attachment(id: str, url: str) -> dict:
+    return {"id": id, "url": url}
+
+
+def deletes(linear: FakeLinear) -> list[str]:
+    return [variables["id"] for name, variables in linear.writes if name == "AttachmentDelete"]
+
+
+def test_setup_context_counts_legacy_attachments(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME")
+    linear.attachments = [
+        attachment("a1", "https://deckhand.invalid/record/one"),
+        attachment("a2", "https://deckhand.invalid/record/two"),
+    ]
+    make(linear).context(ARGS)
+    assert "delete 2 deckhand.invalid attachments" in capsys.readouterr().out
+    assert deletes(linear) == []
+
+
+def test_setup_apply_deletes_only_that_host(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME")
+    linear.attachments = [
+        attachment("a1", "https://deckhand.invalid/record/one"),
+        attachment("keep1", "https://deckhand.invalid.example.com/x"),
+        attachment("keep2", "https://github.com/acme/widgets/commit/abc"),
+        attachment("keep3", "https://notdeckhand.invalid/y"),
+        attachment("a2", "https://deckhand.invalid/record/two"),
+    ]
+    make(linear).apply(ARGS)
+    assert deletes(linear) == ["a1", "a2"]
+    assert "delete 2 deckhand.invalid attachments" in capsys.readouterr().out
+    assert [x["id"] for x in linear.attachments] == ["keep1", "keep2", "keep3"]
+
+
+def test_setup_with_no_legacy_attachment_plans_no_change(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME")
+    linear.attachments = [attachment("keep", "https://github.com/acme/widgets/commit/abc")]
+    make(linear).context(ARGS)
+    assert linear.listed == 1
+    assert "deckhand.invalid" not in capsys.readouterr().out
+
+
+def test_setup_sweeps_legacy_attachments_past_one_page():
+    linear = FakeLinear("ACME")
+    linear.attachments = [attachment(f"a{n}", f"https://deckhand.invalid/record/{n}") for n in range(600)]
+    make(linear).apply(ARGS)
+    assert len(deletes(linear)) == 600
+    assert linear.attachments == []

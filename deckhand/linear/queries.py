@@ -205,6 +205,20 @@ mutation AttachmentCreate($input: AttachmentCreateInput!) {
 }
 """
 
+LEGACY_ATTACHMENTS = f"""
+query LegacyAttachments($after: String) {{
+  attachments(first: {PAGE_SIZE}, after: $after, filter: {{ url: {{ startsWith: "https://deckhand.invalid/" }} }}) {{
+    nodes {{ id url }} {CURSOR}
+  }}
+}}
+"""
+
+ATTACHMENT_DELETE = """
+mutation AttachmentDelete($id: String!) {
+  attachmentDelete(id: $id) { success }
+}
+"""
+
 RELATION_CREATE = """
 mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
   issueRelationCreate(input: $input) { success }

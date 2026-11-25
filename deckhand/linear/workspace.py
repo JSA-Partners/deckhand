@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear import queries
@@ -29,6 +30,7 @@ STATES = {
 }
 AUTOMATION = {"draft": "In Progress", "start": "In Review", "merge": "Done"}
 ARCHIVE_MONTHS = 1
+LEGACY_HOST = "deckhand.invalid"
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,7 @@ class Workspace:
                     lambda ids: self._client.query(queries.TEAM_UPDATE, {"id": team_id, "input": settings}),
                 )
             )
+        changes += self._legacy(team)
         return changes
 
     def state_ids(self, team: dict[str, Any]) -> dict[str, str]:
@@ -168,6 +171,24 @@ class Workspace:
                 pass
 
         return [Change(f"create project label {FEATURE_LABEL}", run)]
+
+    def _legacy(self, team: dict[str, Any]) -> list[Change]:
+        ids: list[str] = []
+        after = None
+        while True:
+            page = self._client.query(queries.LEGACY_ATTACHMENTS, {"after": after})["attachments"]
+            ids += [node["id"] for node in page["nodes"] if urlsplit(node["url"]).hostname == LEGACY_HOST]
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            after = page["pageInfo"]["endCursor"]
+        if not ids:
+            return []
+
+        def run(held: dict[str, str]) -> None:
+            for id in ids:
+                self._client.query(queries.ATTACHMENT_DELETE, {"id": id})
+
+        return [Change(f"delete {len(ids)} {LEGACY_HOST} attachments", run)]
 
     def _create_label(self, fields: dict[str, Any]) -> None:
         try:
