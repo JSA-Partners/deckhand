@@ -64,14 +64,27 @@ def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
     return found
 
 
+def _draft_gaps(records: list[Record], ref: str) -> list[str]:
+    from deckhand import queue
+
+    kinds = {r.kind for r in records}
+    if queue.TAKEN in kinds:
+        return []
+    if queue.DRAFT in kinds:
+        return [f"{ref}: its draft is not taken"]
+    return [f"{ref}: its draft is being written"] if queue.last_start(records, queue.DRAFT_HAND) else []
+
+
 def _map_gaps(feature: Feature, story: dict) -> list[str]:
     records, ref = feature.records.get(story["id"], []), story["identifier"]
     level = versions.tier(records, story["id"])
     if level is None:
-        return [f"{ref}: the story map gives no tier; save the map again"]
-    if level.level in STATE_CHART_TIERS and not versions.chart(records, story["id"]).strip():
-        return [f"{ref}: tier {level.level} needs a state chart in the story map"]
-    return []
+        found = [f"{ref}: the story map gives no tier; save the map again"]
+    elif level.level in STATE_CHART_TIERS and not versions.chart(records, story["id"]).strip():
+        found = [f"{ref}: tier {level.level} needs a state chart in the story map"]
+    else:
+        found = []
+    return found + _draft_gaps(records, ref)
 
 
 def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list[str]:

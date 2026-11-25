@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, ops, planning, review, versions
+from deckhand import answers, asks, features, ops, planning, queue, review, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
@@ -346,3 +346,24 @@ def test_a_new_repository_voids_the_approval():
     approve_everything(store)
     store.set_labels("s1", ["gadgets"])
     assert features.phase(load(store)) is Phase.PLANNING
+
+
+def test_an_untaken_draft_holds_the_approval():
+    store = setup()
+    reviewed(store)
+    mapped(store, "s1")
+    mapped(store, "s2")
+    store.put_record("s1", Record(queue.DRAFT, "s1", "d1", "agent:draft", {}))
+    assert features.approval_gaps(store, load(store)) == ["ACME-1: its draft is not taken"]
+    store.put_record("s1", Record(queue.TAKEN, "s1", "d1", "agent:captain", {}))
+    assert features.approval_gaps(store, load(store)) == []
+
+
+def test_a_draft_being_written_holds_the_approval():
+    store = setup()
+    reviewed(store)
+    mapped(store, "s1")
+    mapped(store, "s2")
+    story = features.story(store, load(store), "ACME-2")
+    store.put_record("s2", asks.hand_start(story, store.records("s2"), queue.DRAFT_HAND))
+    assert features.approval_gaps(store, load(store)) == ["ACME-2: its draft is being written"]
