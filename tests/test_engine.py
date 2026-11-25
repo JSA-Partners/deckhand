@@ -11,12 +11,12 @@ from typing import Any
 import pytest
 
 from deckhand import acts, answers, asks, budget, chores, engine, fleet, linker, queue, spikes, stalls, status, watch
-from deckhand.actions import Action, Attach, Launch, Leave, Post, Remove, Resume, Stop
+from deckhand.actions import Action, Attach, Launch, Leave, Post, PutDocument, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
 from deckhand.linker import Linked
 from deckhand.reconcile import RETRY_AFTER
-from deckhand.records import iso
+from deckhand.records import Record, iso
 from deckhand.step import Refusal
 from deckhand.steps.after import After
 from deckhand.store.cached import CachedStore
@@ -28,7 +28,7 @@ from deckhand.worker import Worker
 from tests.shell import Shell, row
 from tests.test_chores import opened_next, released
 from tests.test_feature_approval import P1, TEAM
-from tests.test_mirror import named
+from tests.test_mirror import mapped_stub, named
 from tests.test_queue import asked, started
 from tests.test_step_after import CHORES
 from tests.test_step_hand import building, clone, configure, state
@@ -1038,3 +1038,33 @@ def test_reconcile_hears_only_the_spikes_asked_in_this_feature(clone: Path, monk
     rig.ready()
     rig.step()
     assert seen and seen[-1] == frozenset({here})
+
+
+def test_the_answer_that_settles_an_older_features_last_chore_reaches_its_story_map(clone: Path):
+    configure(clone, 1)
+    store = released()
+    for story in ("s1", "s2"):
+        mapped_stub(store, story, [], [])
+    store.put_record("s1", chores.after_record(chores.AFTER_DONE, "s1", 1, CHORES[0], {"note": "ran"}))
+    left = chores.after_record(chores.AFTER_PERSON, "s1", 2, CHORES[1], {"why": "its hand stopped"})
+    store.put_record("s1", left)
+    opened_next(store)
+    rig = Rig(store)
+    rig.ready()
+    [shown] = [a for a in rig.worker.submitted if isinstance(a, PutDocument)]
+    assert f"{CHORES[1]} (left for the person)" in shown.body
+    rig.state.put(shown.key, {"digest": shown.digest})
+    rig.worker.finish(shown)
+    answer = {"answer": chores.MAKE_STORY, "by": "me"}
+    store.put_record("s1", Record(chores.AFTER, "s1:2", left.version, "person:sess", answer))
+    assert not rig.link().reading.chores
+    rig.wait(30)
+    [*_, settled] = [a for a in rig.worker.submitted if isinstance(a, PutDocument)]
+    assert f"{CHORES[1]} (made into a story)" in settled.body
+    rig.state.put(settled.key, {"digest": settled.digest})
+    rig.worker.finish(settled)
+    rig.link()
+    rig.wait(30)
+    store.put_record("s1", Record(chores.AFTER, "s1:2", left.version, "person:sess", {"answer": chores.DROP}))
+    rig.wait(30)
+    assert [a for a in rig.worker.submitted if isinstance(a, PutDocument)][-1] is settled

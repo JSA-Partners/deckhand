@@ -169,7 +169,7 @@ class Engine:
             stale = self._iso(now) if self._newest is not None and self._newest.error else None
             found = self._shown.read(good, read, hands, self._idle, quiet, (slots, resuming), self._limit(now), stale)
             if found is not None:
-                self._reading = found
+                self._reading = self._held(found, good)
 
     def _heartbeat(self, now: float) -> None:
         try:
@@ -186,7 +186,7 @@ class Engine:
             return False
         self._newest = newest
         if not newest.error:
-            self._good, self._reading = newest, newest.reading
+            self._good, self._reading = newest, self._held(newest.reading, newest)
             return True
         self._shown.stale(self._iso(now))
         return False
@@ -242,9 +242,22 @@ class Engine:
             idle=self._idle,
             readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
             posted=self._state.posted(),
-            mirrored={key: str(body.get("digest")) for key, body in self._state.keyed(mirror.PREFIX).items()},
+            mirrored=self._mirrored(),
             asked=_asked(self._reading),
         )
+
+    def _mirrored(self) -> dict[str, str]:
+        return {key: str(body.get("digest")) for key, body in self._state.keyed(mirror.PREFIX).items()}
+
+    def _held(self, found: Reading | None, good: Linked) -> Reading | None:
+        before = self._reading
+        if found is None or before is None or good.stores is None:
+            return found
+        try:
+            kept = mirror.leaving(before.held, found.held, good.stores("app").records, self._mirrored())
+        except Refusal:
+            return found
+        return replace(found, chores=[*found.chores, *kept]) if kept else found
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
         held = self._reading.held if self._reading is not None else []

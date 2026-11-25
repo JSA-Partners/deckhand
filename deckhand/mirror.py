@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from deckhand import chores, features, ops, signoff, versions
 from deckhand.actions import Attach, Mirror, PutDocument
@@ -104,3 +105,16 @@ def wanted(feature: features.Feature, contract: str) -> list[Mirror]:
 
 def due(feature: features.Feature, contract: str, mirrored: Mapping[str, str]) -> list[Mirror]:
     return [action for action in wanted(feature, contract) if mirrored.get(action.key) != action.digest]
+
+
+# The answer that settles a feature's last chore drops it from the read, so it stays held until that answer is mirrored.
+def leaving(
+    before: list[features.Feature],
+    after: list[features.Feature],
+    records: Callable[[str], list[Record]],
+    mirrored: Mapping[str, str],
+) -> list[features.Feature]:
+    kept = {f.project["id"] for f in after}
+    gone = [f for f in before if f.project["id"] not in kept]
+    fresh = [replace(f, records={s["id"]: records(s["id"]) for s in f.stories}) for f in gone]
+    return [f for f in fresh if due(f, "", mirrored)]
