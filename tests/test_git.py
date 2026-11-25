@@ -555,3 +555,10 @@ def test_a_prompt_with_no_terminal_says_how_to_load_the_key(stderr: str) -> None
         git.push(WT, "b", fake)
     assert caught.value.stderr_tail == git.NO_PROMPT
     assert "Device not configured" not in str(caught.value)
+
+
+def test_commits_between_lists_the_range_newest_first() -> None:
+    fake = Fake((0, "c3 third\nc2 second\n", ""))
+    assert git.commits_between(Path("/w"), "c1", "c3", fake) == ["c3 third", "c2 second"]
+    assert fake.calls[0][0] == ["git", "log", "--oneline", "c1..c3"]
+    assert fake.calls[0][1] == Path("/w")

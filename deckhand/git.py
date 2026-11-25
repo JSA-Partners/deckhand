@@ -232,6 +232,10 @@ def changed_since(worktree: Path, reviewed: str, base: str, runner: Runner = run
     return call(["git", "diff", tree, "HEAD"], worktree, runner)
 
 
+def commits_between(path: Path, base: str, head: str, runner: Runner = run) -> list[str]:
+    return call(["git", "log", "--oneline", f"{base}..{head}"], path, runner).splitlines()
+
+
 def changed_files(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     out = call(["git", "diff", "--name-only", f"{base}...HEAD"], worktree, runner)
     return out.splitlines()

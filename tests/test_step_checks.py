@@ -51,7 +51,20 @@ def test_checks_record_pins_head(tmp_path: Path, repo: Path):
     assert commands.ran == [("make lint", repo / ".worktrees" / BRANCH), ("make types", repo / ".worktrees" / BRANCH)]
     record = held(store)
     assert record.version == "c2"
-    assert record.data == {"head": "c2", "passed": True, "command": None, "tail": None}
+    assert record.data == {
+        "head": "c2",
+        "passed": True,
+        "command": None,
+        "tail": None,
+        "commands": ["make lint", "make types"],
+    }
+
+
+def test_checks_record_the_commands_that_ran(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    configured(repo, "make lint")
+    run(store, repo, Commands())
+    assert held(store).data["commands"] == ["make lint"]
 
 
 def test_failing_check_is_recorded_then_refused_and_stops(tmp_path: Path, repo: Path):

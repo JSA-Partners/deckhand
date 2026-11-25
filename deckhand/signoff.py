@@ -79,7 +79,9 @@ def _plan_gap(records: list[Record], story: str) -> list[Gap]:
 
 def _tuicr_gap(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     held = versions.held(records, TUICR, story)
-    if held is None or held.data.get("head") != head:
+    summary = held_summary(records, story, head)
+    stale = summary is not None and held is not None and held.data.get("summary") != digest(summary)
+    if held is None or held.data.get("head") != head or stale:
         text = f"no tuicr review is built at {head}"
         return [Gap("tuicr", f"{text}; run signoff apply {ref} review", text)]
     return []

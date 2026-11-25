@@ -90,7 +90,13 @@ class Checks(StoryStep):
             if done.returncode != 0:
                 failed, tail = command, git.stderr_tail(f"{done.stdout}\n{done.stderr}", TAIL_LINES)
                 break
-        data = {"head": head, "passed": failed is None, "command": failed, "tail": tail if failed else None}
+        data = {
+            "head": head,
+            "passed": failed is None,
+            "command": failed,
+            "tail": tail if failed else None,
+            "commands": commands,
+        }
         store = self._store_for_run()
         store.put_record(story["id"], Record(KIND, story["id"], head, "agent:checks", data))
         if failed:

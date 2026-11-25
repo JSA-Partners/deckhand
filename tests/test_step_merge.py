@@ -17,6 +17,7 @@ from tests.test_step_signoff import (
     Clock,
     Gh,
     branch_round,
+    built,
     gap_text,
     overview,
     ready,
@@ -155,8 +156,9 @@ def test_not_yet_after_sign_off_is_not_current(
 
 
 def summarized(tmp_path: Path, repo: Path) -> FakeStore:
-    store = signable(tmp_path, repo)
+    store = signable(tmp_path, repo, tuicr=False)
     save_summary(store, tmp_path, repo)
+    built(store)
     checked(store, "c2")
     return store
 
