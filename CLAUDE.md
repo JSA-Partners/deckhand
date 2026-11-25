@@ -20,17 +20,18 @@
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary and its lines
   to check, tuicr and the sign-off; `review_gaps.py` the review's gaps, worded for the hand or the
-  person, and `approval.py` the feature's one approval screen; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
-  and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
-  who owns a story, `asks.py` a hand's questions and wakes, `wakes.py` the text of the messages a
-  hand is sent, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the
-  build order, `answers.py` the dialog answers the hook stores, `inputs.py` the files a hand may
-  hand in; `stage.py` where each story is in the build and its review round, `reading.py` the full
-  read the engine makes, `spec.py` what the person approved for a story and how a hand's context
-  fits its injection, `status.py` the snapshot kept in deckhand's local SQLite file,
-  `standing.py` how the snapshot and the fleet sort into needs you, working, stopped, queued, team
-  and done today, `brief.py` the brief and the status line segment, `board.py` the board's sections
-  and rows; `watch.py` when a session's watcher rings and when the captain's has gone silent
+  person, and `approval.py` the feature's one approval screen; `queue.py` the person's ranked items,
+  `fleet.py` the Claude Code sessions and their slots, `startable.py` which stories a hand may start
+  and when one is due, `claims.py` who owns a story, `asks.py` a hand's questions and wakes,
+  `wakes.py` the text of the messages a hand is sent, `gaps.py` permission gaps, `spikes.py` spike
+  questions and answers, `order.py` the build order, `answers.py` the dialog answers the hook
+  stores, `inputs.py` the files a hand may hand in; `stage.py` where each story is in the build and
+  its review round, `reading.py` the full read the engine makes, `spec.py` what the person approved
+  for a story and how a hand's context fits its injection, `status.py` the snapshot kept in
+  deckhand's local SQLite file, `standing.py` how the snapshot and the fleet sort into needs you,
+  working, stopped, queued, team and done today, `brief.py` the brief and the status line segment,
+  `board.py` the board's sections and rows; `watch.py` when a session's watcher rings and when the
+  captain's has gone silent
 - The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into the
   actions of `actions.py` and writes nothing, `idle.py` which live hands sit idle past their turn,
   `acts.py` carries one action out and builds every hand's launch, `worker.py` runs them in order on
@@ -54,9 +55,10 @@
 - `git.py` every git call and `gh.py` every `gh` call, each behind an injected runner; `policy.py`
   a repository's `.claude/deckhand.toml`; `config.py` and `credentials.py` what stays on one
   person's machine; `launch.py` the sandboxed settings a hand or the captain runs under
-- Skills: `skills/<name>/SKILL.md` with YAML frontmatter: a hand's (story, spike, draft) and
-  the person's (setup, captain, feature, signoff, commit, document); review lenses in `skills/story/lenses/`, a project's own in its
-  `.claude/deckhand/lenses/`; agents `agents/<name>.md`
+- Skills: `skills/<name>/SKILL.md` with YAML frontmatter: a hand's (story, spike, draft) and the
+  person's (setup, captain, feature, signoff, commit, document); review lenses in
+  `skills/story/lenses/`, a project's own in its `.claude/deckhand/lenses/`; agents
+  `agents/<name>.md`
 - `README.md` the process; `skills/document/reference.md` the shape of `docs/claude/` files
 
 ## Purpose
