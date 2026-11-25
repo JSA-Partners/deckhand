@@ -28,6 +28,7 @@ class Facts:
     reading: Reading | None
     cap: int
     busy: frozenset[str] = frozenset()
+    holds: frozenset[str] = frozenset()
     failed: Mapping[str, tuple[int, float]] = field(default_factory=dict)
     clones: Mapping[str, Path] = field(default_factory=dict)
     policies: Mapping[Path, Policy] = field(default_factory=dict)
@@ -139,8 +140,7 @@ def _resumable(facts: Facts, name: str) -> bool:
 
 
 def used(facts: Facts) -> int:
-    hands = {name for name in facts.busy if name.startswith((fleet.HAND, fleet.SPIKE))}
-    return fleet.slots_used(facts.read.sessions) + len(hands - _holding(facts)) + len(reserved(facts))
+    return fleet.slots_used(facts.read.sessions) + len(facts.holds - _holding(facts)) + len(reserved(facts))
 
 
 def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:
@@ -281,6 +281,8 @@ def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[A
         if name in tick.acted or tick.alive(name) is not None or _held_elsewhere(story, records, tick.me):
             continue
         chore = story["state"] == order.DONE
+        if chore and stalls.waiting(story, records, False):
+            continue
         # A chore hand starts fresh once after the merge; once that hand is gone, its items go to the person.
         if chore and _since_merge(story, records):
             tick.acted.add(name)

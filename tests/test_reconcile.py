@@ -186,6 +186,42 @@ def test_an_idle_chore_hand_past_its_nudge_is_stopped(clone: Path):
     assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
 
 
+def test_a_chore_hand_waiting_on_an_answer_is_held_then_woken(clone: Path):
+    stopped = row("ACME-1", "stopped")
+    for since_merge in (False, True):
+        store = released(CHORES[:1])
+        if since_merge:
+            started(store)
+        asked(store, "s1")
+        assert reconcile(facts(store, stopped, hands=(held(),)), store) == []
+    qid = asks.question_id("Which queue?")
+    data = {"answer": "Redis", "nonce": "n1", "by": ME}
+    store.put_record("s1", Record(asks.ANSWER, qid, "v1", "person:session-1", data))
+    found = reconcile(facts(store, stopped, hands=(held(),)), store)
+    assert [(type(a).__name__, a.kind) for a in found if isinstance(a, Post)] == [("Post", asks.ANSWER)]
+    assert len(found) == 1
+    woken = reconcile(facts(store, stopped, hands=(held(),), pending=(mail(),)), store)
+    assert [type(a).__name__ for a in woken if not isinstance(a, Post)] == ["Resume"]
+
+
+def test_a_chore_hand_that_left_one_item_and_idles_past_its_nudge_is_stopped(clone: Path):
+    store = released()
+    left = chores.after_record(chores.AFTER_PERSON, "s1", 1, CHORES[0], {"why": "it needs the vault"})
+    store.put_record("s1", left)
+    started(store)
+    idle = row("ACME-1", "idle", "idle")
+    nudged = held(turn_ended=at(T - 200), restarts=1)
+    found = reconcile(facts(store, idle, hands=(nudged,), idle=frozenset({"hand-ACME-1"})), store)
+    assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
+
+
+def test_a_name_busy_with_no_launch_resume_or_stop_takes_no_slot(clone: Path):
+    store = building()
+    leaving = frozenset({"hand-ACME-9"})
+    assert reconcile(facts(store, busy=leaving), store) == [launch(store, clone)]
+    assert reconcile(facts(store, busy=leaving, holds=leaving), store) == []
+
+
 def test_a_free_slot_launches_the_next_story_in_build_order(clone: Path):
     store = building()
     assert reconcile(facts(store), store) == [launch(store, clone)]
@@ -208,9 +244,10 @@ def test_a_story_in_progress_with_no_local_start_is_held_elsewhere(clone: Path):
 
 def test_a_busy_name_gets_no_action(clone: Path):
     store = building()
-    assert reconcile(facts(store, busy=frozenset({"hand-ACME-1"})), store) == []
+    busy = frozenset({"hand-ACME-1"})
+    assert reconcile(facts(store, busy=busy, holds=busy), store) == []
     copies = (row("ACME-1", "working", "busy", at=1), row("ACME-1", "working", "busy") | {"id": "id-new"})
-    assert reconcile(facts(store, *copies, busy=frozenset({"hand-ACME-1"})), store) == []
+    assert reconcile(facts(store, *copies, busy=busy, holds=busy), store) == []
 
 
 def test_a_wanted_row_with_a_live_session_is_adopted_not_launched(clone: Path):
@@ -399,8 +436,8 @@ def test_a_busy_hand_holds_its_slot_until_the_fleet_shows_it(clone: Path):
     stopped, working = row("ACME-1", "stopped"), row("ACME-1", "working", "busy")
     hand = held(restarts=1)
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == [launch(store, clone, "ACME-2")]
-    assert reconcile(facts(store, stopped, hands=(hand,), busy=busy), store) == []
-    found = reconcile(facts(store, working, hands=(hand,), busy=busy, cap=2), store)
+    assert reconcile(facts(store, stopped, hands=(hand,), busy=busy, holds=busy), store) == []
+    found = reconcile(facts(store, working, hands=(hand,), busy=busy, holds=busy, cap=2), store)
     assert found == [launch(store, clone, "ACME-2")]
 
 

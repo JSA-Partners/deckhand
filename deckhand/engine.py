@@ -164,8 +164,7 @@ class Engine:
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
             self._reconcile(good, now_facts)
-        settled = {name for name, (_, holds) in self._settling.items() if holds}
-        quiet, slots, resuming = shown.held(now_facts, frozenset(self._holding | settled))
+        quiet, slots, resuming = shown.held(now_facts, frozenset(self._holding | self._settled()))
         if changed or linked or fresh is not None or self._shown.moved(read, quiet, self._idle, slots):
             stale = self._iso(now) if self._newest is not None and self._newest.error else None
             found = self._shown.read(good, read, hands, self._idle, quiet, (slots, resuming), self._limit(now), stale)
@@ -217,6 +216,9 @@ class Engine:
         self._settling = {n: kept for n, kept in self._settling.items() if began is None or began <= kept[0]}
         return busy | frozenset(self._settling)
 
+    def _settled(self) -> set[str]:
+        return {name for name, (_, holds) in self._settling.items() if holds}
+
     def _facts(self, now: float, read: fleet.Fleet, hands: dict[str, HandRow], busy: frozenset[str]) -> Facts:
         good = self._good
         local = good.local if good is not None else config.LocalConfig()
@@ -229,6 +231,7 @@ class Engine:
             reading=self._reading,
             cap=local.slot_cap,
             busy=busy,
+            holds=frozenset(self._holding | self._settled()),
             failed=self._lines.failed(),
             clones=local.clones,
             policies=good.policies if good is not None else {},

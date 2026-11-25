@@ -21,7 +21,7 @@ def held(facts: Facts, holding: frozenset[str]) -> tuple[frozenset[str], int, fr
     resuming = reserved(replace(facts, busy=frozenset()))
     nudged = idle.nudged(facts.pending, facts.now, facts.woke)
     quiet = frozenset(fleet.ref_of(name) for name in resuming | nudged | holding)
-    return quiet, used(replace(facts, busy=holding)), resuming
+    return quiet, used(replace(facts, busy=holding, holds=holding)), resuming
 
 
 class Shown:

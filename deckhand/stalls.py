@@ -7,9 +7,9 @@ STALLED = "stalled"
 RESTART, LEAVE = "Restart", "Leave it stopped"
 
 
-def _waiting(story: dict, records: list[Record], second: bool) -> bool:
+def waiting(story: dict, records: list[Record], second: bool) -> bool:
     asked = queue._for_person(story, records, 2) or asks.open_proposals(records)
-    if second or asked or chores.after_merge_for_person(records, story["id"]):
+    if second or asked:
         return True
     return asks.wake_due(records, story["id"], queue.merged_at(story)) is not None
 
@@ -25,7 +25,7 @@ def stalled(
     start = queue.last_start(records, launch)
     if start is None or (session is not None and fleet.alive(session) and not idle):
         return False
-    return not _waiting(story, records, second) and not chores.finished(story, records, start)
+    return not waiting(story, records, second) and not chores.finished(story, records, start)
 
 
 def _new_since_start(records: list[Record], launch: str) -> bool:
