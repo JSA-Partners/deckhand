@@ -972,19 +972,32 @@ def test_a_hand_without_a_change_summary_is_shown_its_shape(
     assert shape not in overview(store, repo, capsys)["lines"]
 
 
-def test_a_p1_left_at_the_signed_head_is_named_in_words(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-):
+OPEN_P1 = "the branch review has not stopped clean, a P1 is open"
+
+
+def signed_then_p1(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> FakeStore:
     store = ready(tmp_path, repo, state, capsys)
     sign(store, repo, state, capsys)
     branch_round(store, raw(severity="P1"), n=2)
-    open_p1 = "the branch review has not stopped clean, a P1 is open"
+    return store
+
+
+def test_a_p1_left_at_the_signed_head_is_named_in_words(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    store = signed_then_p1(tmp_path, repo, state, capsys)
     with pytest.raises(Refusal) as refused:
         Merge(store, Gh(), repo, Clock().sleep, Clock()).apply(["s1", *TEAM])
-    assert refused.value.rule.startswith(f"ACME-1 has no current sign-off: {open_p1}")
-    assert open_p1 in overview(store, repo, capsys)["missing"]
+    assert refused.value.rule.startswith(f"ACME-1 has no current sign-off: {OPEN_P1}")
     as_hand(tmp_path, repo, monkeypatch)
-    assert signoff.standing(store.records("s1"), "s1", "c2").startswith(f"{open_p1}; fix it")
+    assert signoff.standing(store.records("s1"), "s1", "c2").startswith(f"{OPEN_P1}; fix it")
+
+
+def test_the_json_overview_names_a_p1_left_at_the_signed_head(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = signed_then_p1(tmp_path, repo, state, capsys)
+    assert OPEN_P1 in overview(store, repo, capsys)["missing"]
 
 
 def test_a_hand_is_told_the_tuicr_review_waits_for_the_person(
