@@ -31,7 +31,7 @@ def test_elapsed_from_a_record_time():
 
 
 NOW = 1795000000.0
-STAGE = {"name": "plan review", "round": 2, "cap": 3, "since": "2026-11-20T09:00:00.000Z"}
+STAGE = {"name": "plan review", "round": 2, "since": "2026-11-20T09:00:00.000Z"}
 
 
 def at(minutes_ago: float) -> str:
@@ -80,14 +80,14 @@ def test_one_waiting_with_a_head():
 
 def test_one_waiting_shows_the_story_stage():
     found = brief.text(held([item("ACME-1", "question", 3)]), NOW, brief.UNICODE)
-    assert lines(found)[1] == "**question** at plan review 2/3 · waiting 3m"
+    assert lines(found)[1] == "**question** at plan review 2 · waiting 3m"
 
 
 def test_two_waiting_name_the_count_and_the_oldest():
     waiting = [item("ACME-1", "question", 3), item("ACME-2", "sign-off", 14, head="c2f00d1234567890")]
     found = lines(brief.text(held(waiting), NOW, brief.UNICODE))
     assert found[0] == "## ● 2 need you · oldest ACME-2 sign-off 14m"
-    assert found[1] == "**question** ACME-1 at plan review 2/3 · waiting 3m"
+    assert found[1] == "**question** ACME-1 at plan review 2 · waiting 3m"
     assert found[2] == "◐ 0 working · ○ 1 queued · slots 1/2 · Alpha day 4 of 7"
 
 

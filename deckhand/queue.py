@@ -7,11 +7,9 @@ from pathlib import Path
 from deckhand import (
     answers,
     asks,
-    checks,
     features,
     fleet,
     gaps,
-    implplan,
     order,
     quiz,
     review,
@@ -31,6 +29,7 @@ FEATURE_SKILL = "/deckhand:feature"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
 STALLED = "stalled"
+SPIKE = "spike"
 RESTART, LEAVE = "Restart", "Leave it stopped"
 POLICY = "policy"
 # Below every story's item, so a policy the person puts off never holds back work already in flight.
@@ -107,41 +106,34 @@ def finding_line(records: list[Record], finding: str) -> tuple[str, str]:
     return round.at, f"{item['severity']} {item['lens']} {item['path']}:{item['line']} {item['summary']}"
 
 
+def finding_lines(records: list[Record], finding: str) -> list[str]:
+    _, line = finding_line(records, finding)
+    found = review.locate(records, finding)
+    lines = [line] + ([review.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
+    proposal = asks.proposed(records, finding)
+    return lines + ([asks.proposal_line(proposal)] if proposal else [])
+
+
 def _findings(story: dict, records: list[Record]) -> list[Item]:
     ref, found = story["identifier"], []
-    proposed = set()
     for proposal in asks.open_proposals(records):
-        proposed.add(proposal.subject)
-        _, line = finding_line(records, proposal.subject)
-        lines = [line, f"the hand proposes to decline it: {proposal.data.get('reason', '')}"]
+        lines = finding_lines(records, proposal.subject)
         next = [f"decide context finding {ref} --finding {proposal.subject}"]
         found.append(_story_item(review.DECISION, 1, story, proposal.at, lines, next))
     for stage in STAGES:
-        for finding in review.undecided_delivery(records, story["id"], stage):
-            if finding["id"] in proposed:
-                continue
-            at, line = finding_line(records, finding["id"])
-            lines = [line, "it changes what the story delivers"]
-            next = [f"decide context finding {ref} --finding {finding['id']}"]
-            found.append(_story_item(review.DECISION, 1, story, at, lines, next))
         found += _cap(story, records, stage)
     return found
 
 
 def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
-    held, _ = review.counted(records, f"{story['id']}:{stage}")
+    prefix = f"{story['id']}:{stage}"
+    held, _ = review.counted(records, prefix)
     latest = review.last(held)
-    plan = versions.held(records, implplan.PURPOSE, story["id"])
-    if latest is None or (stage == "plan" and plan is None):
+    excused = review.excused(records, prefix)
+    since = review.proceeded(records, prefix)
+    if latest is None or not review.at_cap(held, excused, since):
         return []
-    checked = versions.held(records, checks.KIND, story["id"])
-    if stage == "plan" and plan:
-        at = plan.version
-    else:
-        at = checked.version if checked is not None else review.reviewed(latest)
-    if not review.at_cap(held, review.declined(records)) or review.cleared(records, story["id"], stage, at):
-        return []
-    lines = [f"the {stage} review reached its cap of {review.CAP} rounds"]
+    lines = [f"three {stage} review rounds left a P1 open"]
     next = [f"decide context review-cap {story['identifier']} --stage {stage}"]
     return [_story_item(review.DECISION, 1, story, latest.at, lines, next)]
 
@@ -298,7 +290,7 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
         key = spikes.key_of(project, document) or ""
         answered.add(key)
         lines = [f"spike answered, read it: {document['title']}"]
-        found.append(Item("spike", 3, key, document["title"], document["at"], 0, lines, [document["url"]]))
+        found.append(Item(SPIKE, 3, key, document["title"], document["at"], 0, lines, [document["url"]]))
     if read.note:
         return found
     asked = spikes.keys(answers.state_dir(), project)

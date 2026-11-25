@@ -18,8 +18,7 @@ class Stage:
 
 
 def as_data(stage: Stage) -> dict:
-    cap = review.CAP if stage.round is not None else None
-    return {"name": stage.name, "round": stage.round, "cap": cap, "since": stage.since}
+    return {"name": stage.name, "round": stage.round, "since": stage.since}
 
 
 def _newest(records: list[Record]) -> str | None:
@@ -33,7 +32,7 @@ def _rounds(records: list[Record], story: str, stage: str) -> list[Record]:
 
 def _review(name: str, held: list[Record]) -> Stage | None:
     latest = review.last(held)
-    return Stage(name, review.reviewed_count(held), latest.at) if latest is not None else None
+    return Stage(name, review.round_number(latest), latest.at) if latest is not None else None
 
 
 def _signing(records: list[Record], story: str, head: str) -> Stage | None:
@@ -57,8 +56,7 @@ def _building(records: list[Record], story: str) -> Stage | None:
         return None
     held = _rounds(records, story, "plan")
     if review.cleared(records, story, "plan", plan.version):
-        subject = review.cap_subject(story, "plan")
-        answers = [r for r in records if r.kind == review.CAP_DECISION and r.subject == subject]
+        answers = review.cap_answers(records, f"{story}:plan")
         return Stage(BUILDING, None, _newest([*held, *answers]))
     return _review(PLAN_REVIEW, held)
 

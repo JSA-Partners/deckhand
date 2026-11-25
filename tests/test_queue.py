@@ -435,34 +435,31 @@ def rounds(store: FakeStore, stage: str, *items: dict, count: int = 3) -> Record
     return review.last(review.rounds_of(store.records("s1"), f"s1:{stage}"))
 
 
-def proceed(store: FakeStore, stage: str, latest: Record, at: str) -> None:
-    version = review.cap_version(latest, at)
+def proceed(store: FakeStore, stage: str, latest: Record) -> None:
+    version = review.cap_version(latest)
     data = {"answer": review.PROCEED}
-    store.put_record(
-        "s1", Record(review.CAP_DECISION, review.cap_subject("s1", stage), version, review.PERSON + "s", data)
-    )
+    store.put_record("s1", Record(review.CAP_DECISION, review.cap_subject(latest), version, review.PERSON + "s", data))
 
 
-def test_branch_cap_waits_for_the_person_at_the_checked_head():
+def test_branch_cap_waits_for_the_person_until_proceed_whatever_the_checked_head():
     store = alpha()
     latest = rounds(store, "branch", raw(severity="P1"))
     store.put_record("s1", Record("checks", "s1", "h4", "agent:checks", {"head": "h4", "passed": True}))
     [item] = waiting(store)
     assert (item.kind, item.rank, item.at) == ("finding", 1, latest.at)
+    assert item.lines[1:] == ["three branch review rounds left a P1 open"]
     assert item.next == ["decide context review-cap ACME-1 --stage branch"]
-    proceed(store, "branch", latest, "h3")
-    assert kinds(waiting(store)) == [("finding", 1, "ACME-1")]
-    proceed(store, "branch", latest, "h4")
+    proceed(store, "branch", latest)
     assert waiting(store) == []
 
 
-def test_plan_cap_waits_for_the_person_at_the_plan_version():
+def test_plan_cap_waits_for_the_person_until_proceed():
     store = alpha()
     latest = rounds(store, "plan", raw(severity="P1"))
     store.put_record("s1", Record(implplan.PURPOSE, "s1", "plan-v4", "agent:implplan", manifest()))
     [item] = waiting(store)
     assert (item.kind, item.next) == ("finding", ["decide context review-cap ACME-1 --stage plan"])
-    proceed(store, "plan", latest, "plan-v4")
+    proceed(store, "plan", latest)
     assert waiting(store) == []
 
 
@@ -475,16 +472,43 @@ def test_cap_without_an_open_p1_raises_no_item(stage: str):
     assert [i for i in waiting(store) if i.next and "review-cap" in i.next[0]] == []
 
 
-def test_finding_that_changes_delivery_waits_for_the_person():
+def test_finding_that_changes_delivery_waits_for_the_hands_proposal():
+    store = alpha()
+    latest = rounds(store, "branch", raw(changes_delivery=True, touches="Contract: ships the same day"), count=1)
+    [finding] = latest.data["findings"]
+    assert waiting(store) == []
+    store.put_record("s1", asks.proposal_record(finding["id"], latest.version, "the spec allows it", review.ACCEPT))
+    [proposal] = [r for r in store.records("s1") if r.kind == asks.PROPOSAL]
+    [item] = waiting(store)
+    assert (item.kind, item.rank, item.at) == ("finding", 1, proposal.at)
+    assert item.next == [f"decide context finding ACME-1 --finding {finding['id']}"]
+    assert item.lines[1:] == [
+        f"P2 correctness plan.md:3 {finding['summary']}",
+        "touches: Contract: ships the same day",
+        "the hand proposes to accept it: the spec allows it",
+    ]
+
+
+def test_a_delivery_finding_without_touches_says_it_changes_the_delivery():
     store = alpha()
     latest = rounds(store, "branch", raw(changes_delivery=True), count=1)
     [finding] = latest.data["findings"]
-    [item] = waiting(store)
-    assert (item.kind, item.rank, item.at) == ("finding", 1, latest.at)
-    assert item.next == [f"decide context finding ACME-1 --finding {finding['id']}"]
     store.put_record("s1", asks.proposal_record(finding["id"], latest.version, "out of scope"))
+    store.put_record("s1", asks.proposal_record(finding["id"], latest.version, "in scope after all", review.ACCEPT))
     [item] = waiting(store)
-    assert item.lines[-1] == "the hand proposes to decline it: out of scope"
+    assert item.lines[2:] == [
+        "it changes what the story delivers",
+        "the hand proposes to accept it: in scope after all",
+    ]
+
+
+def test_a_decline_proposal_on_a_plain_finding_claims_no_scope_change():
+    store = alpha()
+    latest = rounds(store, "branch", raw(severity="P1"), count=1)
+    [finding] = latest.data["findings"]
+    store.put_record("s1", asks.proposal_record(finding["id"], latest.version, "noise"))
+    [item] = waiting(store)
+    assert item.lines[2:] == ["the hand proposes to decline it: noise"]
 
 
 def test_prompt_shows_the_latest_gap():

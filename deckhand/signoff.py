@@ -53,9 +53,9 @@ def _branch_gap(records: list[Record], story: str, head: str) -> list[str]:
     if review.cleared(records, story, "branch", head):
         return []
     latest = review.last(review.counted(records, f"{story}:branch")[0])
-    if latest is not None and review.reviewed(latest) != head:
+    if latest is None or review.reviewed(latest) != head:
         return [f"the branch review has not reviewed the signed head {head}; run a branch round"]
-    return ["the branch review has not stopped clean, and the person has not decided Proceed at its cap"]
+    return ["the branch review has not stopped clean, a P1 is open; fix it; at the cap the person decides"]
 
 
 def _plan_gap(records: list[Record], story: str) -> list[str]:
@@ -161,6 +161,9 @@ def standing(records: list[Record], story: str, head: str, second: bool = False)
         return f"the sign-off at {at} is void: {void.data.get('reason')}"
     if at != head:
         return f"the head moved to {head}"
+    unreviewed = _plan_gap(records, story) + _branch_gap(records, story, head)
+    if unreviewed and held.version == version(records, story, head):
+        return unreviewed[0]
     return "the sign-off no longer matches the change summary or the quiz"
 
 

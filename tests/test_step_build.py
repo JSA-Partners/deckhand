@@ -39,8 +39,10 @@ BRANCH = "acme-1-orders"
 
 
 class Shell:
-    def __init__(self, head: str = "c2", base: str = "c1", origin: bool = True, dirty: bool = False) -> None:
-        self.head, self.base, self.origin, self.dirty = head, base, origin, dirty
+    def __init__(
+        self, head: str = "c2", base: str = "c1", origin: bool = True, dirty: bool = False, fetch_fails: bool = False
+    ) -> None:
+        self.head, self.base, self.origin, self.dirty, self.fetch_fails = head, base, origin, dirty, fetch_fails
         self.argvs: list[list[str]] = []
         self.created = False
 
@@ -51,6 +53,8 @@ class Shell:
             code = 0 if self.origin else 128
         elif argv[:2] == ["git", "rev-parse"]:
             out = f"{self.head}\n"
+        elif argv[:2] == ["git", "fetch"] and self.fetch_fails:
+            return subprocess.CompletedProcess(argv, 1, "", "fatal: unable to access origin\n")
         elif argv[:2] == ["git", "merge-base"]:
             out = f"{self.base}\n"
         elif argv[:2] == ["git", "status"]:
@@ -157,14 +161,16 @@ def test_proceed_does_not_cover_a_later_plan_revision(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = labeled(tmp_path, repo)
-    to_cap(store, tmp_path, repo)
+    step = to_cap(store, tmp_path, repo)
     answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
     submit(store, tmp_path, repo, PLAN + "- [ ] revised after the cap\n")
     shell = Shell()
     with pytest.raises(Refusal, match="has not stopped clean"):
         push(store, shell, repo)
     assert shell.ran("git", "push") == []
-    answer(state, Decide(store), capsys, ["review-cap", "ACME-1"], "Proceed")
+    with pytest.raises(Refusal, match="not reached its cap"):
+        Decide(store).context(["review-cap", "ACME-1", *TEAM])
+    record_round(step, tmp_path)
     push(store, Shell(), repo)
 
 
@@ -202,6 +208,27 @@ def test_worktree_is_made_from_origin_head_once(tmp_path: Path, repo: Path, caps
     (repo / ".worktrees" / BRANCH).mkdir(parents=True)
     Build(store, shell, repo).apply(["s1", "worktree", *TEAM])
     assert len(shell.ran("git", "worktree", "add")) == 1
+
+
+def test_worktree_fetches_origin_before_adding(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    shell = Shell()
+    Build(store, shell, repo).apply(["s1", "worktree", *TEAM])
+    calls = shell.argvs
+    fetch = ["git", "fetch", "origin", "--prune"]
+    assert calls.count(fetch) == 1
+    assert calls.index(fetch) < next(i for i, argv in enumerate(calls) if argv[:3] == ["git", "worktree", "add"])
+
+
+def test_a_failed_fetch_adds_no_worktree(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    shell = Shell(fetch_fails=True)
+    with pytest.raises(Refusal, match="cannot fetch origin: fatal: unable to access origin"):
+        Build(store, shell, repo).apply(["s1", "worktree", *TEAM])
+    assert shell.ran("git", "worktree", "add") == []
+    assert [r for r in store.records("s1") if r.kind == "worktree"] == []
 
 
 def test_wrong_place_run_refuses(tmp_path: Path, repo: Path):
@@ -316,7 +343,15 @@ def test_push_waits_for_the_person_on_a_delivery_finding(
     delivery = raw(changes_delivery=True)
     record_round(Review(store, Git(BASE), repo), tmp_path, delivery)
     shell = Shell()
-    with pytest.raises(Refusal, match=f"{finding_id(delivery)} changes what the story delivers"):
+    found = finding_id(delivery)
+    with pytest.raises(Refusal, match=f"{found} changes what the story delivers; propose an answer") as refused:
+        push(store, shell, repo)
+    assert "review apply ACME-1 resolve --stage plan --propose-accept" in str(refused.value)
+    assert "decide" not in str(refused.value)
+    Review(store, Git(BASE), repo).apply(
+        ["s1", "resolve", "--stage", "plan", *TEAM, "--propose-decline", found, "--reason", "out of scope"]
+    )
+    with pytest.raises(Refusal, match=f"{found} waits for the person's decision"):
         push(store, shell, repo)
     assert shell.ran("git", "push") == []
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", finding_id(delivery)], "Accept")

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from deckhand import asks, features, pins
+from deckhand import asks, features, pins, review
+from deckhand.records import Record
 from deckhand.step import Refusal
 from tests.test_step_decide import feature_store
 
@@ -22,6 +25,17 @@ def asked():
 _QUESTION = '{"question": "Which queue?", "options": ["Redis", "SQS"], "why": "Both fit."}'
 _EDIT = '{"path": ".claude/settings.json", "change": "allow gh pr list", "why": "the hand lists pull requests"}'
 QID = asks.question_id("Which queue?")
+P1 = {
+    "lens": "correctness",
+    "severity": "P1",
+    "path": "a.py",
+    "line": 1,
+    "summary": "A hole.",
+    "fix": "Fill it.",
+    "evidence": "a.py:1",
+    "confidence": 0.9,
+}
+P2 = P1 | {"severity": "P2"}
 
 
 def test_question_pin_holds_the_records_options_in_order():
@@ -68,3 +82,54 @@ def test_guards_still_hold_for_the_other_kinds():
         pins.pin(store, feature, "quiz", "ACME-1", [])
     with pytest.raises(Refusal, match="--item takes an item number from 1"):
         pins.pin(store, feature, "quiz", "ACME-1", [], item="x")
+
+
+def capped(store, *items: dict) -> Record:
+    found = review.parse_findings(json.dumps(list(items)))
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, scoped=n > 1, base_hash="")
+        store.put_record("s1", review.round_record("s1", "branch", plan, f"hash{n}", found, f"c{n}"))
+    return review.last(review.rounds_of(store.records("s1"), "s1:branch"))
+
+
+def test_cap_pin_is_pinned_to_the_round_whatever_head_is_passed():
+    store, _ = asked()
+    latest = capped(store, P1)
+    feature = features.open_feature(store, "ACME")
+    for head in ("", "c3", "c9"):
+        held = pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="branch", head=head)
+        assert (held.subject, held.version) == (latest.subject, review.cap_version(latest))
+    assert "3 rounds left a P1 open, 1 P1 open at c3" in held.detail
+
+
+def test_cap_pin_refuses_off_the_cap_and_after_proceed():
+    store, _ = asked()
+    capped(store, P2)
+    feature = features.open_feature(store, "ACME")
+    with pytest.raises(Refusal, match="has not reached its cap"):
+        pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="branch")
+    store, _ = asked()
+    latest = capped(store, P1)
+    proceed = Record(
+        review.CAP_DECISION, latest.subject, review.cap_version(latest), "person:pat", {"answer": "Proceed"}
+    )
+    store.put_record("s1", proceed)
+    feature = features.open_feature(store, "ACME")
+    with pytest.raises(Refusal, match="has not reached its cap"):
+        pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="branch")
+
+
+def test_finding_pin_shows_what_the_finding_touches_and_the_proposal():
+    store, _ = asked()
+    delivery = P2 | {"changes_delivery": True, "touches": "Contract: ships the same day"}
+    found = review.parse_findings(json.dumps([delivery]))
+    round = review.round_record("s1", "branch", review.RoundPlan(1, False, ""), "hash1", found, "c1")
+    store.put_record("s1", round)
+    [finding] = round.data["findings"]
+    store.put_record("s1", asks.proposal_record(finding["id"], round.version, "the spec allows it", review.ACCEPT))
+    feature = features.open_feature(store, "ACME")
+    held = pins.pin(store, feature, review.DECISION, "ACME-1", [], finding=finding["id"])
+    assert held.detail == (
+        "P2 correctness a.py:1 A hole.; touches: Contract: ships the same day;"
+        " the hand proposes to accept it: the spec allows it"
+    )

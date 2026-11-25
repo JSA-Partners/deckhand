@@ -20,7 +20,7 @@ def story(ref: str, title: str, state: str = "In Progress", **extra) -> dict:
 
 
 def stage(name: str, minutes: float | None, round: int | None = None) -> dict:
-    return {"name": name, "round": round, "cap": 3 if round else None, "since": at(minutes) if minutes else None}
+    return {"name": name, "round": round, "since": at(minutes) if minutes else None}
 
 
 def item(key: str, kind: str, ref: str, title: str, minutes: float, next: str) -> dict:
@@ -129,15 +129,22 @@ def test_needs_you_lists_the_oldest_first_with_kind_and_wait():
 def test_working_rows_show_the_stage_and_the_hands_own_status():
     rows = section(shown(), "working")
     assert rows[0].split()[:2] == ["*", "ACME-15"]
-    assert rows[0].split()[-4:] == ["branch", "review", "2/3", "6m"]
+    assert rows[0].split()[-4:] == ["branch", "review", "2", "6m"]
     assert rows[1].split()[-3:] == ["building,", "waiting", "1m"]
+
+
+def test_a_round_past_three_reads_its_number_alone():
+    stories = sample()["stories"]
+    stories[3] = stories[3] | {"stage": stage("branch review", 6, 4)}
+    rows = section(shown(sample(stories=stories)), "working")
+    assert rows[0].split()[-4:] == ["branch", "review", "4", "6m"]
 
 
 def test_a_story_whose_hand_is_gone_reads_stopped_at_its_stage():
     sessions = [session("a1b2", "ACME-15", state="failed", status=None), LIVE[3]]
     rows = section(shown(sessions=sessions), "stopped")
     assert [row.split()[:2] for row in rows] == [["x", "ACME-15"], ["x", "ACME-17"], ["x", "ACME-18"]]
-    assert "failed at branch review 2/3" in rows[0]
+    assert "failed at branch review 2" in rows[0]
     assert "stopped at building" in rows[1]
     assert "stopped at drafting" in rows[2]
     assert "ACME-15" not in "\n".join(section(shown(sessions=sessions), "queued"))
@@ -244,7 +251,7 @@ def test_a_wrong_type_anywhere_still_renders(bad):
         hands = [sample()["hands"][0] | {field: bad}]
         frame.text(shown(sample(hands=hands), sessions=None), color=False)
     stage_bad = sample()["stories"]
-    stage_bad[3] = stage_bad[3] | {"stage": {"name": "plan review", "round": bad, "cap": bad, "since": bad}}
+    stage_bad[3] = stage_bad[3] | {"stage": {"name": "plan review", "round": bad, "since": bad}}
     frame.text(shown(sample(stories=stage_bad)), color=False)
 
 
@@ -279,7 +286,7 @@ def test_the_header_counts_the_same_hands_as_the_body():
 def test_a_story_past_its_start_with_no_session_reads_stopped():
     rows = section(shown(sessions=[session("x", "ACME-17")]), "stopped")
     assert [row.split()[1] for row in rows] == ["ACME-15"]
-    assert "stopped at branch review 2/3" in rows[0]
+    assert "stopped at branch review 2" in rows[0]
 
 
 EDGES = ["9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"]

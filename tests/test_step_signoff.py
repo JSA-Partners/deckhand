@@ -310,8 +310,8 @@ def test_branch_cap_proceed_clears_the_branch_review(
     step = Decide(store, runner=Shell(), repo=repo)
     assert re.search("branch review has not stopped clean", gap_text(store))
     question = answer(state, step, capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed")
-    assert question["question"].startswith("Three branch review rounds ran")
-    assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch"]
+    assert question["question"].startswith("Three review rounds left a P1 open. Proceed to sign-off")
+    assert [r.subject for r in store.records("s1") if r.kind == review.CAP_DECISION] == ["s1:branch:3"]
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")
 
@@ -336,7 +336,7 @@ def test_cap_question_skips_carry_rounds(tmp_path: Path, repo: Path, state: Path
     question = answer(
         state, Decide(store, Shell(), repo), capsys, ["review-cap", "ACME-1", "--stage", "branch"], "Proceed"
     )
-    assert "3 rounds, 1 P1 open" in question["question"]
+    assert "3 rounds left a P1 open, 1 P1 open at c2" in question["question"]
 
 
 def test_findings_screen_folds_doubtful_and_shows_declines(
@@ -432,7 +432,11 @@ def test_sign_off_waits_for_the_person_on_a_delivery_finding(
     store = ready(tmp_path, repo, state, capsys)
     delivery = raw(changes_delivery=True)
     branch_round(store, delivery, n=2)
-    assert f"{_id(delivery)} changes what the story delivers" in gaps_at_head(store, repo)
+    [line] = [g for g in signoff.gaps(store.records("s1"), "s1", "c2") if g.startswith(_id(delivery))]
+    assert line.startswith(f"{_id(delivery)} changes what the story delivers; propose an answer")
+    assert "decide" not in line
+    store.put_record("s1", asks.proposal_record(_id(delivery), "v", "out of scope"))
+    assert f"{_id(delivery)} waits for the person's decision" in gaps_at_head(store, repo)
     answer(state, Decide(store), capsys, ["finding", "ACME-1", "--finding", _id(delivery)], "Decline")
     sign(store, repo, state, capsys)
     assert signoff.current(store.records("s1"), "s1", "c2")

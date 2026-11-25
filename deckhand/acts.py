@@ -9,7 +9,7 @@ from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
 from deckhand.step import Refusal
-from deckhand.steps.build import DEFAULT_BASE, make_worktree, require_base, worktree_branch
+from deckhand.steps.build import DEFAULT_BASE, fetch_origin, make_worktree, worktree_branch
 from deckhand.store import Store
 from deckhand.store.local import LocalRecords
 from deckhand.store.state import LocalState
@@ -110,14 +110,10 @@ class Acts:
         if session is not None:
             self._state.adopt(action.name, session.id, session.session_id)
             return
-        try:
-            git.fetch(action.clone, self._runner)
-        except git.GitError as error:
-            raise Refusal(f"cannot fetch origin: {error.stderr_tail}") from None
-        require_base(action.clone, self._runner)
         command = argv(action.name, action.ref, action.clone, worktree, action.kind)
         start = asks.hand_start(story, records, action.kind) if story is not None else None
         if story is None:
+            fetch_origin(action.clone, self._runner)
             git.worktree_detached(action.clone, action.name, DEFAULT_BASE, self._runner)
         else:
             claims.owned(story, action.me)

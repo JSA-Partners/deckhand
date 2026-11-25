@@ -86,14 +86,13 @@ def test_failing_lint_blocks_branch_review(tmp_path: Path, repo: Path, capsys: p
     with pytest.raises(Refusal, match="make lint failed"):
         run(store, repo, Commands(failing="make lint", output="E501"), "c1")
     step = Review(store, BranchGit("c1", {"base1...HEAD": "+one\n"}), repo)
-    for call in (
-        lambda: step.context(["s1", "--stage", "branch", *TEAM]),
-        lambda: record_round(step, tmp_path, raw(), stage="branch", target="x"),
-    ):
-        before = list(store.writes)
-        with pytest.raises(Refusal, match="no passing checks"):
-            call()
-        assert store.writes == before
+    capsys.readouterr()
+    step.context(["s1", "--stage", "branch", *TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["stop"] == "checks"
+    before = list(store.writes)
+    with pytest.raises(Refusal, match="no passing checks"):
+        record_round(step, tmp_path, raw(), stage="branch", target="x")
+    assert store.writes == before
 
 
 def test_new_head_needs_new_checks(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
@@ -103,8 +102,9 @@ def test_new_head_needs_new_checks(tmp_path: Path, repo: Path, capsys: pytest.Ca
     first = BranchGit("c1", {"base1...HEAD": "+one\n"})
     record_round(Review(store, first, repo), tmp_path, raw(severity="P1"), stage="branch")
     moved = Review(store, BranchGit("c2", {"base1...HEAD": "+one\n+two\n", "c1..HEAD": "+two\n"}), repo)
-    with pytest.raises(Refusal, match="no passing checks"):
-        moved.context(["s1", "--stage", "branch", *TEAM])
+    capsys.readouterr()
+    moved.context(["s1", "--stage", "branch", *TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["stop"] == "checks"
     run(store, repo, Commands(), "c2")
     capsys.readouterr()
     moved.context(["s1", "--stage", "branch", *TEAM, "--json"])

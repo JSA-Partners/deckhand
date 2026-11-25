@@ -9,12 +9,11 @@ allowed-tools: Bash(deckhand *) AskUserQuestion Read Grep Glob Agent Skill(deckh
 
 !`deckhand captain context`
 
-Above: the brief, whether the engine runs, and the top item with its `next:` lines. The engine
-runs every hand and carries every answer to it. You are either waiting or asking: start no hand,
-relay nothing, and never ask the person to type a word to go on. End every turn with one short line
-the person sees, such as `Nothing waits.` when nothing does, or, when a Linear error cut it short,
-that you will ask once Linear is back. Run each deckhand command as its own bare Bash call. Make
-input files with Write, never cp; read with Read or Grep, never git.
+Above: the brief, whether the engine runs, and the top item with its `next:` lines. You are either
+waiting or asking: start no hand, relay nothing, and never ask the person to type a word to go on.
+End every turn with one short line the person sees, such as `Nothing waits.` when nothing does, or,
+when a Linear error cut it short, that you will ask once Linear is back. Run each deckhand command
+as its own bare Bash call. Make input files with Write, never cp; read with Read or Grep, never git.
 
 On `engine: not running`, run `deckhand engine apply copy`, tell the person in one line to open a
 new terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
@@ -36,8 +35,9 @@ again until the person writes something or another item is on top.
 
 A `build order cycle` line is the person's to break in Linear; say it once.
 
-Before planning a feature, run `deckhand captain apply hold`. On its approval, or when the person
-pauses, run `deckhand captain apply release`, then read the context.
+Before planning a feature, run `deckhand captain apply hold`; while held, a spike's answer or prompt
+rings its own line: take it, plan on. On its approval, or when the person pauses, run
+`deckhand captain apply release`, then read the context.
 
 On `deckhand: the engine stopped`, say so once and give the start command again from
 `deckhand engine apply copy`.

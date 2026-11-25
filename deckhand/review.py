@@ -3,7 +3,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from deckhand.records import Record, content_hash
@@ -12,6 +12,7 @@ from deckhand.step import Refusal
 KIND = "review-round"
 DECISION = "finding"
 HAND_ACCEPT = "finding-accept"
+PROPOSAL = "decline-proposal"
 CAP_DECISION = "review-cap"
 PROCEED, REWORK = "Proceed", "Rework"
 DECLINE, ACCEPT = "Decline", "Accept"
@@ -35,6 +36,7 @@ class Finding:
     confidence: float
     reason: str = ""
     changes_delivery: bool = False
+    touches: str = ""
 
 
 def finding_id(finding: Finding, stage: str) -> str:
@@ -72,9 +74,10 @@ def _finding(index: int, item: object) -> Finding:
     confidence = item.get("confidence")
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1:
         raise bad("confidence", "must be a number from 0.0 to 1.0")
-    reason = item.get("reason", "")
-    if not isinstance(reason, str):
-        raise bad("reason", "must be a string")
+    reason, touches = item.get("reason", ""), item.get("touches", "")
+    for field, value in (("reason", reason), ("touches", touches)):
+        if not isinstance(value, str):
+            raise bad(field, "must be a string")
     changes_delivery = item.get("changes_delivery", False)
     if not isinstance(changes_delivery, bool):
         raise bad("changes_delivery", "must be true or false")
@@ -85,6 +88,7 @@ def _finding(index: int, item: object) -> Finding:
         confidence=float(confidence),
         reason=reason,
         changes_delivery=changes_delivery,
+        touches=touches,
     )
 
 
@@ -124,17 +128,17 @@ def round_record(
     return Record(KIND, f"{story}:{stage}:{plan.n}", target_hash, "agent:review", data)
 
 
-def _n(record: Record) -> int:
+def round_number(record: Record) -> int:
     return int(record.subject.rsplit(":", 1)[1])
 
 
 def rounds_of(records: list[Record], prefix: str) -> list[Record]:
     found = {r.subject: r for r in records if r.kind == KIND and r.subject.rsplit(":", 1)[0] == prefix}
-    return sorted(found.values(), key=_n)
+    return sorted(found.values(), key=round_number)
 
 
 def last(rounds: list[Record]) -> Record | None:
-    return max(rounds, key=_n) if rounds else None
+    return max(rounds, key=round_number) if rounds else None
 
 
 def decided(records: list[Record]) -> dict[str, str]:
@@ -174,7 +178,7 @@ def unfixed(records: list[Record]) -> list[dict]:
 
 def carried(records: list[Record], prefix: str) -> list[dict]:
     held = last(counted(records, prefix)[0])
-    p1 = open_p1(held, declined(records)) if held else []
+    p1 = open_p1(held, excused(records, prefix)) if held else []
     ids = {f["id"] for f in p1}
     return p1 + [f for f in _unfixed(records, prefix) if f["id"] not in ids]
 
@@ -201,29 +205,38 @@ def open_p1(record: Record, declined: set[str]) -> list[dict]:
     return [f for f in open_findings(record, declined) if f["severity"] == "P1"]
 
 
-def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: str) -> Record:
-    target = last.data["target_hash"]
-    data = {"target_hash": target, "findings": last.data["findings"], "scoped": True, "base_hash": target}
+def carry_record(story: str, stage: str, plan: RoundPlan, last: Record, head: str, target_hash: str = "") -> Record:
+    target = target_hash or last.data["target_hash"]
+    base = last.data["target_hash"]
+    data = {"target_hash": target, "findings": last.data["findings"], "scoped": True, "base_hash": base}
     data |= {"head": head, "carry": True}
     return Record(KIND, f"{story}:{stage}:{plan.n}", target, "agent:review", data)
 
 
-def reviewed_count(rounds: list[Record]) -> int:
-    return sum(not r.data.get("carry") for r in rounds)
+# A sync alone changes the whole diff and leaves the story's own change empty.
+def carry_when_empty(plan: RoundPlan, scoped_diff: str | None) -> RoundPlan:
+    return replace(plan, carry=True) if plan.scoped and scoped_diff == "" else plan
 
 
 def undecided_delivery(records: list[Record], story: str, stage: str) -> list[dict]:
     held, _ = counted(records, f"{story}:{stage}")
-    by_person = decided(records)
+    settled = set(decided(records)) | waived(records, f"{story}:{stage}")
     found = {f["id"]: f for r in held for f in r.data["findings"] if f.get("changes_delivery")}
-    return [f for id, f in found.items() if id not in by_person]
+    return [f for id, f in found.items() if id not in settled]
+
+
+def delivery_line(item: dict) -> str:
+    return f"touches: {item['touches']}" if item.get("touches") else "it changes what the story delivers"
 
 
 def delivery_gaps(records: list[Record], story: str, stage: str, ref: str = "REF") -> list[str]:
+    proposed = {r.subject for r in records if r.kind == PROPOSAL}
     return [
-        f"{f['id']} changes what the story delivers and the person has not decided it:"
-        f" decide context finding {ref} --finding {f['id']}"
-        for f in undecided_delivery(records, story, stage)
+        f"{id} waits for the person's decision"
+        if id in proposed
+        else f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve --stage {stage}"
+        f" --propose-accept {id} or --propose-decline {id} --reason TEXT"
+        for id in (f["id"] for f in undecided_delivery(records, story, stage))
     ]
 
 
@@ -244,16 +257,23 @@ def left_open_gaps(records: list[Record], story: str, stage: str, ref: str = "RE
     ]
 
 
-def next_round(rounds: list[Record], target_hash: str, declined: set[str], head: str = "") -> RoundPlan | Stop:
+def p1_rounds(rounds: list[Record], excused: set[str], since: int = 0) -> int:
+    return sum(round_number(r) > since and not r.data.get("carry") and bool(open_p1(r, excused)) for r in rounds)
+
+
+def next_round(
+    rounds: list[Record], target_hash: str, excused: set[str], head: str = "", since: int = 0
+) -> RoundPlan | Stop:
     latest = last(rounds)
     if latest is None:
         return RoundPlan(1, scoped=False, base_hash="")
+    moved = bool(head and latest.data.get("head") and latest.data["head"] != head)
+    if latest.data["target_hash"] == target_hash and not moved:
+        return Stop("unchanged") if open_p1(latest, excused) else Stop("clean")
+    if at_cap(rounds, excused, since):
+        return Stop("cap")
     if latest.data["target_hash"] == target_hash:
-        if head and latest.data.get("head") and latest.data["head"] != head:
-            return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
-        return Stop("unchanged") if open_p1(latest, declined) else Stop("clean")
-    if reviewed_count(rounds) >= CAP:
-        return Stop("cap") if open_p1(latest, declined) else Stop("cap-clear")
+        return RoundPlan(len(rounds) + 1, scoped=True, base_hash=target_hash, carry=True)
     return RoundPlan(len(rounds) + 1, scoped=True, base_hash=latest.data["target_hash"])
 
 
@@ -261,8 +281,8 @@ def reviewed(record: Record) -> str:
     return record.data.get("head") or record.data["target_hash"]
 
 
-def cap_version(round: Record, at: str) -> str:
-    return f"{round.subject}:{at}"
+def cap_version(round: Record) -> str:
+    return f"{round.subject}:{reviewed(round)}"
 
 
 def _cap_cut(record: Record) -> int:
@@ -272,44 +292,62 @@ def _cap_cut(record: Record) -> int:
         return 0
 
 
-def cap_subject(story: str, stage: str) -> str:
-    return story if stage == "plan" else f"{story}:{stage}"
+# Each cap answer is its own record, named by the round it was given at.
+def cap_subject(round: Record) -> str:
+    return round.subject
 
 
-def _cap_answers(records: list[Record], subject: str, answer: str) -> list[Record]:
+def cap_prefix(subject: str) -> str:
+    return subject.rpartition(":")[0]
+
+
+def cap_answers(records: list[Record], prefix: str) -> list[Record]:
     return [
-        r
-        for r in records
-        if r.kind == CAP_DECISION
-        and r.subject == subject
-        and r.author.startswith(PERSON)
-        and r.data.get("answer") == answer
+        r for r in records if r.kind == CAP_DECISION and cap_prefix(r.subject) == prefix and r.author.startswith(PERSON)
     ]
+
+
+def _cap_answers(records: list[Record], prefix: str, answer: str) -> list[Record]:
+    return [r for r in cap_answers(records, prefix) if r.data.get("answer") == answer]
 
 
 def counted(records: list[Record], prefix: str) -> tuple[list[Record], int]:
     rounds = rounds_of(records, prefix)
-    story, _, stage = prefix.rpartition(":")
+    stage = prefix.rpartition(":")[2]
     if stage not in ("plan", "branch"):
         return rounds, 0
-    cut = max(map(_cap_cut, _cap_answers(records, cap_subject(story, stage), REWORK)), default=0)
-    return [r for r in rounds if _n(r) > cut], cut
+    cut = max(map(_cap_cut, _cap_answers(records, prefix, REWORK)), default=0)
+    return [r for r in rounds if round_number(r) > cut], cut
 
 
-def at_cap(rounds: list[Record], declined: set[str]) -> bool:
+def waived(records: list[Record], prefix: str) -> set[str]:
+    pinned = {r.version for r in _cap_answers(records, prefix, PROCEED)}
+    rounds = [r for r in counted(records, prefix)[0] if cap_version(r) in pinned]
+    return {f["id"] for r in rounds for f in open_p1(r, declined(records))}
+
+
+def waived_anywhere(records: list[Record]) -> set[str]:
+    prefixes = dict.fromkeys(r.subject.rsplit(":", 1)[0] for r in records if r.kind == KIND)
+    return {id for prefix in prefixes for id in waived(records, prefix)}
+
+
+def excused(records: list[Record], prefix: str) -> set[str]:
+    return declined(records) | waived(records, prefix)
+
+
+def proceeded(records: list[Record], prefix: str) -> int:
+    return max(map(_cap_cut, _cap_answers(records, prefix, PROCEED)), default=0)
+
+
+def at_cap(rounds: list[Record], excused: set[str], since: int = 0) -> bool:
     latest = last(rounds)
-    return latest is not None and reviewed_count(rounds) >= CAP and bool(open_p1(latest, declined))
+    return latest is not None and bool(open_p1(latest, excused)) and p1_rounds(rounds, excused, since) >= CAP
 
 
 def cleared(records: list[Record], story: str, stage: str, at: str) -> bool:
-    held, _ = counted(records, f"{story}:{stage}")
-    latest = last(held)
-    if latest is None:
-        return False
-    if not open_p1(latest, declined(records)) and (reviewed(latest) == at or reviewed_count(held) >= CAP):
-        return True
-    pinned = cap_version(latest, at)
-    return any(r.version == pinned for r in _cap_answers(records, cap_subject(story, stage), PROCEED))
+    prefix = f"{story}:{stage}"
+    latest = last(counted(records, prefix)[0])
+    return latest is not None and reviewed(latest) == at and not open_p1(latest, excused(records, prefix))
 
 
 def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
@@ -317,7 +355,7 @@ def feature_gaps(project: str, records: list[Record], at: str) -> list[str]:
     latest = last(rounds)
     if latest is None:
         return ["the feature review has not run"]
-    if reviewed(latest) != at and reviewed_count(rounds) < CAP:
+    if reviewed(latest) != at:
         return ["the feature review has not reviewed the current contract and stories; run a feature round"]
     found = open_p1(latest, declined(records))
     return [f"the feature review holds an open P1 {f['id']}: {f['summary']}" for f in found]

@@ -346,7 +346,7 @@ def test_option_descriptions_say_what_a_choice_does_and_never_repeat_the_subject
 
     assert shown("quiz", ["The key", "A new key"]) == ["", ""]
     assert shown("question", ["Redis", "SQS"]) == ["", ""]
-    assert shown("finding") == ["the finding stays unfixed; the hand's call stands", "the hand fixes the finding"]
+    assert shown("finding") == ["the finding stays unfixed", "the hand fixes the finding"]
     for kind in decisions.KINDS:
         if kind not in ("quiz", "question", "tier"):
             assert all("Checkout" not in text for text in shown(kind)), kind

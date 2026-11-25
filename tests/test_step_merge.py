@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import signoff
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
@@ -154,28 +155,50 @@ def test_not_yet_after_sign_off_is_not_current(
         merge(store, repo, Gh())
 
 
-def test_proceed_does_not_cover_later_commits(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
+def quizzed(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> FakeStore:
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
     submit(store, tmp_path, repo, [item()])
     quizzer = decide(store, repo)
     reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
     checked(store, "c2")
+    return store
+
+
+def test_proceed_does_not_cover_later_commits(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = quizzed(tmp_path, repo, state, capsys)
     for n in (1, 2, 3):
         branch_round(store, raw(severity="P1"), n=n, head="c1")
     cap = ["review-cap", "ACME-1", "--stage", "branch"]
     question = answer(state, Decide(store, runner=Shell(head="c1"), repo=repo), capsys, cap, "Proceed")
     assert "at c1" in question["question"]
-    step = Decide(store, runner=Shell(), repo=repo)
     assert "the branch review has not reviewed the signed head c2" in gap_text(store)
     with pytest.raises(Refusal, match="no current sign-off"):
         merge(store, repo, Gh())
-    question = answer(state, step, capsys, cap, "Proceed")
-    assert "at c2" in question["question"]
+    with pytest.raises(Refusal, match="has not reached its cap"):
+        Decide(store, runner=Shell(), repo=repo).context([*cap, *TEAM])
+    branch_round(store, n=4)
     sign(store, repo, state, capsys)
     merge(store, repo, Gh())
+
+
+def test_a_sign_off_past_the_last_reviewed_head_never_merges(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = quizzed(tmp_path, repo, state, capsys)
+    for n in (1, 2, 3):
+        branch_round(store, n=n, head="c1")
+    gap = "the branch review has not reviewed the signed head c2; run a branch round"
+    assert signoff.gaps(store.records("s1"), "s1", "c2") == [gap]
+    held = signoff.version(store.records("s1"), "s1", "c2")
+    data = {"answer": signoff.SIGN, "nonce": "n1", "by": "viewer-1"}
+    store.put_record("s1", Record(signoff.KIND, "s1", held, "person:pat", data))
+    gh = Gh()
+    with pytest.raises(Refusal, match="has not reviewed the signed head"):
+        merge(store, repo, gh)
+    assert gh.ran("gh", "pr", "merge") == []
 
 
 def test_void_returns_pr_to_draft(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import asks, features, implplan, planning, queue, quiz, review, signoff, startable, versions
+from deckhand import asks, features, planning, queue, quiz, review, signoff, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -25,8 +25,8 @@ def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str
     found = review.locate(feature.records.get(story["id"], []), finding)
     if found is None:
         raise Refusal(f"{finding} is not a finding of any review round on {story['identifier']}")
-    round, item = found
-    detail = f"{item['severity']} {item['lens']} {item['path']}:{item['line']} {item['summary']}"
+    round, _ = found
+    detail = "; ".join(queue.finding_lines(feature.records.get(story["id"], []), finding))
     if round.subject.startswith(f"{feature.project['id']}:feature:"):
         live = feature.live
         labels = [_label(s) for s in live]
@@ -34,18 +34,20 @@ def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str
     return Pin(finding, round.version, [story["id"]], detail, _label(story), [_label(story)])
 
 
-def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str, head: str) -> Pin:
+def _cap_pin(store: Store, feature: features.Feature, ref: str, stage: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
-    held, _ = review.counted(records, f"{story['id']}:{stage}")
-    plan = versions.held(records, implplan.PURPOSE, story["id"])
-    at = head if stage == "branch" else plan.version if plan else ""
-    if not review.at_cap(held, review.declined(records)):
-        raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
+    prefix = f"{story['id']}:{stage}"
+    held, _ = review.counted(records, prefix)
+    excused = review.excused(records, prefix)
     latest = review.last(held)
-    open_count = len(review.open_p1(latest, review.declined(records)))
-    detail = f"{review.reviewed_count(held)} rounds, {open_count} P1 open, at {at[:12]}"
-    subject, version = review.cap_subject(story["id"], stage), review.cap_version(latest, at)
+    since = review.proceeded(records, prefix)
+    if latest is None or not review.at_cap(held, excused, since):
+        raise Refusal(f"the {stage} review of {story['identifier']} has not reached its cap with a P1 open")
+    open_count = len(review.open_p1(latest, excused))
+    at = review.reviewed(latest)[:12]
+    detail = f"{review.p1_rounds(held, excused, since)} rounds left a P1 open, {open_count} P1 open at {at}"
+    subject, version = review.cap_subject(latest), review.cap_version(latest)
     return Pin(subject, version, [story["id"]], detail, _label(story), [_label(story)])
 
 
@@ -178,7 +180,7 @@ def pin(
     if kind == review.CAP_DECISION:
         if stage not in ("", "plan", "branch"):
             raise Refusal("--stage takes plan or branch")
-        return _cap_pin(store, feature, subject, stage or "plan", head)
+        return _cap_pin(store, feature, subject, stage or "plan")
     if kind == signoff.KIND:
         if not head:
             raise Refusal("sign-off needs the head of the story's worktree")

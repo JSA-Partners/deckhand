@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, decisions, features, planning, queue, versions
+from deckhand import answers, asks, decisions, features, planning, queue, review, versions
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
@@ -232,3 +232,16 @@ def test_a_released_story_is_decided_for_its_stalled_hand_and_its_config_edit(st
     Decide(store).apply([shown["nonce"], *TEAM])
     [record] = [r for r in store.records("s1") if r.kind == kind]
     assert record.data["answer"] == answer
+
+
+def test_a_branch_cap_question_needs_no_worktree_head(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = feature_store()
+    p1 = {"lens": "correctness", "severity": "P1", "path": "a.py", "line": 1, "summary": "A hole."}
+    found = review.parse_findings(json.dumps([p1 | {"fix": "Fill it.", "evidence": "a.py:1", "confidence": 0.9}]))
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, scoped=n > 1, base_hash="")
+        store.put_record("s1", review.round_record("s1", "branch", plan, f"hash{n}", found, f"c{n}"))
+    latest = review.last(review.rounds_of(store.records("s1"), "s1:branch"))
+    Decide(store).context(["review-cap", "ACME-1", "--stage", "branch", *TEAM, "--json"])
+    nonce = json.loads(capsys.readouterr().out)["nonce"]
+    assert decisions.load_pending(nonce, answers.state_dir()).version == review.cap_version(latest)

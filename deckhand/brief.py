@@ -75,7 +75,7 @@ def age(seconds: float) -> str:
 def stage_label(stage: dict | None) -> str:
     if not stage:
         return ""
-    return f"{stage['name']} {stage['round']}/{stage['cap']}" if stage.get("round") else stage["name"]
+    return f"{stage['name']} {stage['round']}" if stage.get("round") else stage["name"]
 
 
 def unreachable_line(status: dict | None, now: float) -> str:

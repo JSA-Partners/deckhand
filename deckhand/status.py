@@ -101,9 +101,7 @@ def _item_ok(found: object) -> bool:
 def _stage_ok(found: object) -> bool:
     if found is None:
         return True
-    if not isinstance(found, dict) or not isinstance(found.get("name"), str) or not _maybe(found.get("round"), int):
-        return False
-    return not found.get("round") or _count(found.get("cap"))
+    return isinstance(found, dict) and isinstance(found.get("name"), str) and _maybe(found.get("round"), int)
 
 
 def _story_ok(found: object) -> bool:

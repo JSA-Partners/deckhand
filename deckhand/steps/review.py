@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, tiers, versions
+from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, spec, tiers, versions
 from deckhand.checks import passing
 from deckhand.features import Phase
 from deckhand.policy import STAGES, Policy
@@ -16,20 +16,29 @@ from deckhand.store import Store
 USAGE = (
     "review takes REF, --stage plan|branch and [--team-key KEY], feature-review [--team-key KEY] alone; context takes"
     " --json; apply takes round --findings FINDINGS.json --target HASH (the target_hash context printed),"
-    " round --target HASH alone when context stops at carry, or resolve with --accept ID or --propose-decline ID"
-    " --reason TEXT (repeat for each)"
+    " round --target HASH alone when context stops at carry, or resolve with --accept ID, --propose-accept ID or"
+    " --propose-decline ID (repeat each), and one --reason TEXT that covers every proposal in the call"
 )
+PROPOSING = {"--propose-accept": review.ACCEPT, "--propose-decline": review.DECLINE}
 FEATURE = "feature"
 ACTIONS = ("round", "resolve")
 STOPS = {
     "unchanged": "the target is unchanged since the last round; nothing to review",
     "clean": "the last round holds no accepted P1; the review is done",
-    "cap": "three rounds ran and a P1 is open; the person decides with review-cap",
-    "cap-clear": "three rounds ran and no P1 is open; the review is done",
-    "proceeded": "the person chose Proceed at the cap; the review is done",
-    "carry": "the diff is unchanged at a new head; record apply round --target HASH with no --findings, which"
-    " carries the last round forward without reviewers",
+    "cap": "three rounds left a P1 open; the person decides whether to proceed or rework",
+    "proceeded": "the person chose Proceed at the cap and no other P1 is open; the review is done",
+    "checks": "checks have not passed at this commit; run them first",
+    "carry": "the story's own change is unchanged at a new head; record apply round --target HASH with no"
+    " --findings, which carries the last round forward without reviewers",
 }
+FEATURE_CAP = (
+    "three rounds left a P1 open; propose declining each open P1 with apply resolve --propose-decline ID"
+    " --reason TEXT, and no round runs until none is open"
+)
+
+
+def _stop_text(reason: str, stage: str) -> str:
+    return FEATURE_CAP if (reason, stage) == ("cap", FEATURE) else STOPS[reason]
 
 
 def _parse(args: list[str]) -> dict:
@@ -38,10 +47,16 @@ def _parse(args: list[str]) -> dict:
     for arg in rest:
         if arg == "--json":
             found["json"] = True
+        elif arg == "--reason" and "reason" in found:
+            raise Refusal(
+                "one --reason covers every proposal in the call; put proposals with different reasons in separate calls"
+            )
         elif arg in ("--team-key", "--stage", "--findings", "--target", "--reason"):
             found[arg[2:].replace("-", "_")] = next(rest, "")
-        elif arg in ("--accept", "--decline", "--propose-decline"):
-            found[arg[2:].replace("propose-decline", "propose")].append(next(rest, ""))
+        elif arg in ("--accept", "--decline"):
+            found[arg[2:]].append(next(rest, ""))
+        elif arg in PROPOSING:
+            found["propose"].append((next(rest, ""), PROPOSING[arg]))
         elif arg.startswith("--"):
             raise Refusal(f"unknown argument {arg}; {USAGE}")
         else:
@@ -67,11 +82,14 @@ class Target:
     text: str | None = None
     head: str = ""
     note: str = ""
+    base: str = ""
 
 
-def _status(item: dict, declined: set[str], accepted: set[str]) -> str:
+def _status(item: dict, declined: set[str], waived: set[str], accepted: set[str]) -> str:
     if item["id"] in declined:
         return "declined by the person"
+    if item["id"] in waived:
+        return "waived by the person"
     return "accepted" if item["id"] in accepted else "open"
 
 
@@ -140,7 +158,7 @@ class Review(StoryStep):
         else:
             base = git.merge_base(repo, "HEAD", "origin/HEAD", self._runner)
             diff = git.diff(repo, base, runner=self._runner)
-            found = Target(content_hash(diff), text=diff, head=git.head(repo, self._runner))
+            found = Target(content_hash(diff), text=diff, head=git.head(repo, self._runner), base=base)
             found.note = f"the diff to review is git diff {base}..HEAD in {repo}"
         if subject.stage == "plan" and found.text is None:
             found.note = f"the plan text is not on this machine; read the Implementation plan on {subject.label}"
@@ -149,15 +167,28 @@ class Review(StoryStep):
     def _scoped_diff(self, subject: Subject, target: Target, last: Record, repo: Path) -> tuple[str | None, str]:
         if subject.stage == "branch":
             if not last.data.get("head"):
-                raise Refusal(f"the last branch round of {subject.label} holds no head to scope the diff from")
+                return None, "the last branch round holds no head to scope the diff from; review the whole diff"
             try:
-                return git.diff_since(repo, last.data["head"], self._runner), ""
+                return git.changed_since(repo, last.data["head"], target.base, self._runner), ""
             except git.GitError:
-                return None, "the last reviewed commit is gone; review the whole diff"
+                return None, "the last reviewed commit is gone or does not merge with the base; review the whole diff"
         old = review.saved_text(answers.state_dir(), subject.prefix.split(":")[0], last.data["target_hash"])
         if old is None or target.text is None:
             return None, "the previously reviewed text is not on this machine; review the whole text"
         return review.text_diff(old, target.text), ""
+
+    def _due(
+        self, subject: Subject, target: Target, repo: Path
+    ) -> tuple[review.RoundPlan | review.Stop, str | None, str]:
+        records, prefix = subject.records, subject.prefix
+        counted, _ = review.counted(records, prefix)
+        excused, since = review.excused(records, prefix), review.proceeded(records, prefix)
+        plan = review.next_round(counted, target.hash, excused, target.head, since)
+        last = review.last(review.rounds_of(records, prefix))
+        if isinstance(plan, review.Stop) or plan.carry or not plan.scoped or last is None:
+            return plan, None, ""
+        diff, note = self._scoped_diff(subject, target, last, repo)
+        return review.carry_when_empty(plan, diff if subject.stage == "branch" else None), diff, note
 
     def _clone_of(self, subject: Subject) -> Path:
         if subject.located is not None:
@@ -172,10 +203,12 @@ class Review(StoryStep):
             raise Refusal(f"{subject.label} has no worktree; run build apply {subject.label} worktree")
         return at.path
 
+    def _unchecked(self, subject: Subject, repo: Path) -> bool:
+        head = git.head(repo, self._runner) if subject.stage == "branch" else ""
+        return bool(head) and not passing(subject.records, subject.stories[0], head)
+
     def _checked(self, subject: Subject, repo: Path) -> None:
-        if subject.stage != "branch":
-            return
-        if not passing(subject.records, subject.stories[0], git.head(repo, self._runner)):
+        if self._unchecked(subject, repo):
             raise Refusal(f"{subject.label} has no passing checks at this commit; run checks apply {subject.label}")
 
     def context(self, args: list[str]) -> None:
@@ -183,20 +216,19 @@ class Review(StoryStep):
         subject = self._subject(parsed)
         store, clone = self._store_for_run(), self._clone_of(subject)
         repo = self._worktree(subject, clone)
-        self._checked(subject, repo)
-        rounds = review.rounds_of(subject.records, subject.prefix)
         counted, cut = review.counted(subject.records, subject.prefix)
         declined, accepted = review.declined(subject.records), review.accepted(subject.records)
-        last = review.last(rounds)
+        excused = review.excused(subject.records, subject.prefix)
+        last = review.last(review.rounds_of(subject.records, subject.prefix))
         target = self._target(store, subject, repo)
-        plan = review.next_round(counted, target.hash, declined, target.head)
+        checked = not self._unchecked(subject, repo)
+        plan, diff, note = self._due(subject, target, repo) if checked else (review.Stop("checks"), None, "")
         facts: dict = {"subject": subject.label, "stage": subject.stage, "target_hash": target.hash}
         facts |= {"stop": None, "round": None, "scoped": False, "lenses": [], "target": None, "diff": None}
-        facts["note"] = target.note
+        facts |= {"note": target.note, "spec": None}
         if isinstance(plan, review.Stop):
-            proceeded = plan.reason == "cap" and review.cleared(
-                subject.records, subject.stories[0], subject.stage, target.hash
-            )
+            held = review.last(counted)
+            proceeded = held is not None and bool(review.open_p1(held, declined)) and plan.reason == "clean"
             facts["stop"] = "proceeded" if proceeded else plan.reason
         elif plan.carry:
             facts |= {"stop": "carry", "round": plan.n + cut}
@@ -206,16 +238,18 @@ class Review(StoryStep):
             names = self._lenses(subject, clone)
             facts["lenses"] = [{"name": n, "path": str(lenses.path_of(n, clone))} for n in names]
             key, text = target.hash, target.text
-            if plan.scoped and last is not None:
-                diff, note = self._scoped_diff(subject, target, last, repo)
-                facts["note"] = note or facts["note"]
-                if subject.stage != "branch":
-                    facts["diff"] = diff
-                elif diff is not None:
-                    key, text = content_hash(diff), diff
+            facts["note"] = note or facts["note"]
+            if subject.stage != "branch":
+                facts["diff"] = diff
+            elif diff is not None:
+                key, text = content_hash(diff), diff
+            owner = subject.prefix.split(":")[0]
             if text is not None:
-                owner = subject.prefix.split(":")[0]
                 facts["target"] = str(review.save_text(answers.state_dir(), owner, key, text))
+            if subject.stage != FEATURE:
+                approved = spec.text(spec.gather(store, subject.feature, subject.story))
+                name = "spec-" + content_hash(approved)[:12]
+                facts["spec"] = str(review.save_text(answers.state_dir(), owner, name, approved))
         facts["carried"] = []
         if isinstance(plan, review.RoundPlan) and plan.scoped and not plan.carry:
             facts["carried"] = [
@@ -224,8 +258,9 @@ class Review(StoryStep):
             ]
         facts["last_round"] = None
         if last is not None:
-            items = [item | {"status": _status(item, declined, accepted)} for item in last.data["findings"]]
-            facts["last_round"] = {"n": int(last.subject.rsplit(":", 1)[1]), "findings": items}
+            waived = excused - declined
+            items = [item | {"status": _status(item, declined, waived, accepted)} for item in last.data["findings"]]
+            facts["last_round"] = {"n": review.round_number(last), "findings": items}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
@@ -250,18 +285,18 @@ class Review(StoryStep):
         target = self._target(store, subject, repo)
         if target.hash != parsed["target"]:
             raise Refusal(f"the target changed since context; run context again and review {target.hash}")
-        plan = review.next_round(counted, target.hash, review.declined(subject.records), target.head)
+        plan, _, _ = self._due(subject, target, repo)
         if isinstance(plan, review.Stop):
-            raise Refusal(f"no review round is due: {plan.reason}, {STOPS[plan.reason]}")
+            raise Refusal(f"no review round is due: {plan.reason}, {_stop_text(plan.reason, subject.stage)}")
         if plan.carry and parsed.get("findings"):
             raise Refusal(
-                f"the diff is unchanged at {target.head}, so this round carries the last round forward;"
+                f"the story's own change is unchanged at {target.head}, so this round carries the last round forward;"
                 " run apply round --target HASH without --findings"
             )
         found = [] if plan.carry else review.parse_findings(_read(parsed.get("findings", "")))
         plan, owner = replace(plan, n=plan.n + cut), subject.prefix.split(":")[0]
         if plan.carry:
-            record = review.carry_record(owner, subject.stage, plan, review.last(counted), target.head)
+            record = review.carry_record(owner, subject.stage, plan, review.last(counted), target.head, target.hash)
         else:
             carried = [f["id"] for f in review.carried(subject.records, subject.prefix)] if plan.scoped else []
             ordered = review.ordered(found)
@@ -281,36 +316,21 @@ class Review(StoryStep):
 
     def _resolve(self, parsed: dict) -> None:
         subject = self._writable(parsed)
-        ref = subject.story["identifier"] if subject.story else subject.feature.live[0]["identifier"]
         if parsed["decline"]:
             ids = " ".join(f"--propose-decline {id}" for id in parsed["decline"])
             raise Refusal(f"only the person declines a finding; propose it with {ids} --reason TEXT")
         if not parsed["accept"] and not parsed["propose"]:
-            raise Refusal(f"resolve takes --accept ID or --propose-decline ID; {USAGE}")
+            raise Refusal(f"resolve takes --accept ID, --propose-accept ID or --propose-decline ID; {USAGE}")
         if parsed["propose"] and not parsed.get("reason", "").strip():
-            raise Refusal(f"--propose-decline needs --reason TEXT; {USAGE}")
+            raise Refusal(f"a proposal needs --reason TEXT; {USAGE}")
+        reason, where = parsed.get("reason", "").strip(), f"{subject.label} {subject.stage}"
+        found = asks.resolutions(subject.records, subject.prefix, parsed["accept"], parsed["propose"], reason, where)
         store = self._store_for_run()
-        last = review.last(review.rounds_of(subject.records, subject.prefix))
-        held = {item["id"]: item for item in last.data["findings"]} if last else {}
-        by_person = review.decided(subject.records)
-        for id in parsed["accept"] + parsed["propose"]:
-            if id not in held:
-                raise Refusal(f"{id} is not a finding of the last round of {subject.label} {subject.stage}")
-            if id in by_person:
-                raise Refusal(f"{id} is already decided: the person decided {by_person[id]}")
-            if id in parsed["accept"] and held[id].get("changes_delivery"):
-                raise Refusal(
-                    f"{id} changes what the story delivers; the person decides it: decide context finding"
-                    f" {ref} --finding {id}"
-                )
-        for id in parsed["accept"]:
+        for record in found:
             for story in subject.stories:
-                ops.ensure_record(store, story, review.accept_record(id, last.version))
-        for id in parsed["propose"]:
-            for story in subject.stories:
-                ops.ensure_record(store, story, asks.proposal_record(id, last.version, parsed["reason"].strip()))
+                ops.ensure_record(store, story, record)
         print(
-            f"done: accepted {len(parsed['accept'])} and proposed declining {len(parsed['propose'])} findings"
+            f"done: accepted {len(parsed['accept'])} and proposed {len(parsed['propose'])} findings"
             f" on {subject.label} {subject.stage}"
         )
 
@@ -334,7 +354,7 @@ def _line(item: dict) -> str:
 def _print(facts: dict) -> None:
     head = f"review {facts['subject']} {facts['stage']}"
     if facts["stop"]:
-        print(f"{head}: stop, {facts['stop']}: {STOPS[facts['stop']]}")
+        print(f"{head}: stop, {facts['stop']}: {_stop_text(facts['stop'], facts['stage'])}")
         print(f"target_hash: {facts['target_hash']}")
     else:
         scope = "scoped to the revision" if facts["scoped"] else "the whole target"
@@ -345,6 +365,8 @@ def _print(facts: dict) -> None:
             print(f"- {lens['name']}: {lens['path']}")
         if facts["target"]:
             print(f"target: {facts['target']}")
+        if facts["spec"]:
+            print(f"spec: {facts['spec']}")
     if facts["carried"]:
         print("open P1s and accepted findings not yet fixed; re-report each the diff does not fix, with the same")
         print("lens, path, line and summary so the id is kept:")
