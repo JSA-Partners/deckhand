@@ -201,7 +201,7 @@ def test_an_item_the_engine_handed_over_is_asked_with_three_choices():
     assert question.options == ["Done", "Drop", "Make it a story"]
 
 
-def test_tuicr_pin_holds_the_head_its_review_commit_was_built_at():
+def test_tuicr_pin_holds_the_review_commit_the_person_was_shown():
     store = feature_store()
     feature = features.open_feature(store, "ACME")
     assert feature is not None
@@ -212,6 +212,16 @@ def test_tuicr_pin_holds_the_head_its_review_commit_was_built_at():
     feature = features.open_feature(store, "ACME")
     assert feature is not None
     held = pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")
-    assert (held.subject, held.version, held.stories) == ("s1", "c2", ["s1"])
+    assert (held.subject, held.version, held.stories) == ("s1", "r1", ["s1"])
     with pytest.raises(Refusal, match="no tuicr review is built at c3"):
         pins.pin(store, feature, "tuicr", "ACME-1", [], head="c3")
+
+
+def test_tuicr_pin_with_no_hunk_selected_says_so():
+    store = feature_store()
+    data = {"head": "c2", "base": "c1", "sha": None, "hunks": [], "summary": None}
+    store.put_record("s1", Record("tuicr-review", "s1", "c2", "agent:signoff", data))
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    with pytest.raises(Refusal, match="^no hunk of ACME-1 is selected for review at c2, so tuicr has nothing to show$"):
+        pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")

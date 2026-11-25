@@ -83,9 +83,9 @@ def _tuicr_gap(records: list[Record], story: str, head: str) -> list[Gap]:
     return []
 
 
-def done_in_tuicr(records: list[Record], story: str, head: str | None) -> bool:
+def done_in_tuicr(records: list[Record], story: str, sha: str | None) -> bool:
     held = versions.held(records, IN_TUICR, story)
-    return held is not None and held.version == head and held.author.startswith(review.PERSON)
+    return bool(sha) and held is not None and held.version == sha and held.author.startswith(review.PERSON)
 
 
 def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:

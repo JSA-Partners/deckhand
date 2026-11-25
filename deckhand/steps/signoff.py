@@ -84,7 +84,7 @@ class Signoff(StoryStep):
             "evidence": "checks pass" if passing(at.records, sid, head) else "checks are not passing",
             "findings": f"{len(_last_branch(at.records, at.story['id']).get('findings', []))} in the last branch round",
             "what to check": f"{len(summary.to_check)} lines" if summary else "no change summary at this head",
-            "tuicr": self._pr_diff(at) if at.path is None else _tuicr_status(built, comments),
+            "tuicr": self._pr_diff(at) if at.path is None else _tuicr_status(at, built, comments),
         }
         found_gaps = signoff.gaps(at.records, sid, head, at.story["identifier"])
         missing = [gap.hand if hand_role() else gap.person for gap in found_gaps]
@@ -156,7 +156,7 @@ class Signoff(StoryStep):
         built = _built(at)
         if built is None or not built.get("sha") or at.path is None:
             return []
-        if not signoff.done_in_tuicr(at.records, at.story["id"], at.head):
+        if not signoff.done_in_tuicr(at.records, at.story["id"], built["sha"]):
             return []
         try:
             session = tuicr.session_for(at.path, built["sha"], self._runner)
@@ -279,9 +279,11 @@ def _from_records(at: Located) -> Located:
     return replace(at, head=head) if isinstance(head, str) and head else at
 
 
-def _tuicr_status(built: dict | None, comments: list[dict]) -> str:
+def _tuicr_status(at: Located, built: dict | None, comments: list[dict]) -> str:
     if built is None:
         return "not built at this head"
+    if built.get("sha") and not signoff.done_in_tuicr(at.records, at.story["id"], built["sha"]):
+        return "built, waiting for Done"
     if not comments:
         return "built"
     return f"built, {len(comments)} comment{'' if len(comments) == 1 else 's'} from you"
@@ -309,7 +311,7 @@ def _tuicr(at: Located, comments: list[dict]) -> list[str]:
         return ["no hunk is selected for review"]
     lines = _tuicr_lines(at.path, data)
     lines += ["your comments:", *(f"- {c.get('location')}: {c.get('content')}" for c in comments)] if comments else []
-    done = signoff.done_in_tuicr(at.records, at.story["id"], at.head)
+    done = signoff.done_in_tuicr(at.records, at.story["id"], data["sha"])
     return lines + ([] if done else ["waiting for the person to say Done in tuicr"])
 
 

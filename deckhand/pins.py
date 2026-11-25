@@ -92,10 +92,13 @@ def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -
 def _tuicr_pin(store: Store, feature: features.Feature, ref: str, head: str) -> Pin:
     story = features.story(store, feature, ref)
     held = versions.held(feature.records.get(story["id"], []), signoff.TUICR, story["id"])
-    if held is None or held.data.get("head") != head or not held.data.get("sha"):
+    if held is None or held.data.get("head") != head:
         raise Refusal(f"no tuicr review is built at {head} for {story['identifier']}")
+    if not held.data.get("sha"):
+        ref = story["identifier"]
+        raise Refusal(f"no hunk of {ref} is selected for review at {head}, so tuicr has nothing to show")
     label = _label(story)
-    return Pin(story["id"], head, [story["id"]], f"head {head}", label, [label])
+    return Pin(story["id"], held.data["sha"], [story["id"]], f"head {head}", label, [label])
 
 
 def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
