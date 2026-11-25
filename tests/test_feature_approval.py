@@ -317,3 +317,10 @@ def test_a_tier_two_story_without_a_chart_is_a_gap():
     store.put_record("s1", tier)
     store.put_record("s1", Record("state-chart", "s1", "v1", "person:s", {"answer": "Approve"}))
     assert "ACME-1: tier 2 needs a state chart in the story map" in features.approval_gaps(store, load(store))
+
+
+def test_a_tier_written_by_a_person_is_left_unread():
+    store = setup()
+    data = {"answer": "None of these", "level": 0, "fact": "none"}
+    store.put_record("s1", Record("tier", "s1", "v1", "person:s", data))
+    assert "ACME-1: the story map gives no tier; save the map again" in features.approval_gaps(store, load(store))

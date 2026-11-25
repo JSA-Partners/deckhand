@@ -20,11 +20,11 @@ TIERS: tuple[Tier, ...] = (
 )
 
 FACTS = tuple(tier.fact for tier in TIERS)
-_BY_FACT = {tier.fact: tier for tier in TIERS}
+BY_FACT = {tier.fact: tier for tier in TIERS}
 
 
 def named(fact: object) -> Tier | None:
-    return _BY_FACT.get(fact) if isinstance(fact, str) else None
+    return BY_FACT.get(fact) if isinstance(fact, str) else None
 
 
 def from_record(data: dict) -> Tier | None:

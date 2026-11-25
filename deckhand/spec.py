@@ -24,6 +24,7 @@ class Spec:
     scope: str
     decisions: list[dict]
     after_merge: list[str]
+    state_chart: str
 
 
 _CODE = re.compile(
@@ -72,8 +73,9 @@ def gather(store: Store, feature: Feature, story: dict) -> Spec:
     shown = [planning.section(store, feature, name) for name in ("Contract", "Examples", "Invariants")]
     contract, examples, invariants = [None if body is None else plain(body) for body in shown]
     scope = f"{story['title']}\n\n{description}" if description else story["title"]
-    after_merge = versions.after_merge(feature.records.get(story["id"], []))
-    return Spec(contract, examples, invariants, plain(scope), _answered(feature), after_merge)
+    records = feature.records.get(story["id"], [])
+    chart = versions.chart(records, story["id"])
+    return Spec(contract, examples, invariants, plain(scope), _answered(feature), versions.after_merge(records), chart)
 
 
 def _decision(entry: dict) -> str:
@@ -96,6 +98,7 @@ def text(spec: Spec) -> str:
             ("Examples", spec.examples),
             ("Invariants", spec.invariants),
             ("Scope", spec.scope),
+            ("State chart", spec.state_chart.strip() or "none"),
         ]
     )
 

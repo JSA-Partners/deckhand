@@ -100,13 +100,11 @@ def _check_tier(index: int, entry: dict) -> None:
 
 
 def map_records(id: str, entry: dict) -> list[Record]:
-    tier = tiers.named(entry["tier"])
-    if tier is None:
-        raise Refusal(f"{entry['key']}: the tier must be one of {', '.join(tiers.FACTS)}")
+    tier = tiers.BY_FACT[entry["tier"]]
     chart = entry.get("state_chart", "")
     return [
-        Record("tier", id, content_hash(tier.fact), "agent:stories", {"level": tier.level, "fact": tier.fact}),
-        Record("state-chart", id, versions.chart_version(chart), "agent:stories", {"chart": chart}),
+        Record("tier", id, content_hash(tier.fact), versions.MAP_AUTHOR, {"level": tier.level, "fact": tier.fact}),
+        Record("state-chart", id, versions.chart_version(chart), versions.MAP_AUTHOR, {"chart": chart}),
     ]
 
 
@@ -265,11 +263,11 @@ class Stories:
                 "decisions": entry.get("decisions", []),
                 "after_merge": entry.get("after_merge", []),
             }
-            ops.ensure_record(store, id, Record("stub", entry["key"], "1", "agent:stories", stub))
+            ops.ensure_record(store, id, Record("stub", entry["key"], "1", versions.MAP_AUTHOR, stub))
             for record in map_records(id, entry):
                 ops.ensure_record(store, id, record)
             if "missed_by" in entry:
-                record = Record("discovered", entry["key"], "1", "agent:stories", _discovery(entry))
+                record = Record("discovered", entry["key"], "1", versions.MAP_AUTHOR, _discovery(entry))
                 ops.ensure_record(store, id, record)
         print(f"done: {len(entries)} stories in the map for {feature.project['name']}")
         for entry in entries:

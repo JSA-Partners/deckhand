@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, spec, tiers, versions
+from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, spec, versions
 from deckhand.checks import passing
 from deckhand.features import Phase
 from deckhand.policy import STAGES, Policy
@@ -123,8 +123,7 @@ class Review(StoryStep):
         if subject.stage == FEATURE:
             return ["contract"]
         policy = Policy.load(repo)
-        tier = versions.held(subject.records, "tier", subject.stories[0])
-        level = tiers.from_record(tier.data) if tier else None
+        level = versions.tier(subject.records, subject.stories[0])
         if level is None:
             raise Refusal(f"{subject.label} has no tier in the story map")
         return lenses.lenses_for(subject.stage, level, policy)

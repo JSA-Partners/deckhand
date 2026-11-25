@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from deckhand import planning
+from deckhand import planning, tiers
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 SECTION_OF = {"contract": "Contract", "invariants": "Invariants"}
 STORY_KINDS = ("lean",)
+MAP_AUTHOR = "agent:stories"
 
 
 def _hash(*parts: str) -> str:
@@ -28,14 +29,30 @@ def held(records: list[Record], kind: str, subject: str) -> Record | None:
     return found[-1] if found else None
 
 
+def mapped(records: list[Record], kind: str, story: str) -> Record | None:
+    found = held(records, kind, story)
+    return found if found is not None and found.author == MAP_AUTHOR else None
+
+
+def tier(records: list[Record], story: str) -> tiers.Tier | None:
+    found = mapped(records, "tier", story)
+    return tiers.from_record(found.data) if found else None
+
+
+def chart(records: list[Record], story: str) -> str:
+    found = mapped(records, "state-chart", story)
+    text = found.data.get("chart") if found else None
+    return text if isinstance(text, str) else ""
+
+
 def story_text_version(issue: dict) -> str:
     return _hash(issue["title"], issue["description"] or "")
 
 
 def story_version(issue: dict, records: list[Record]) -> str:
-    tier = held(records, "tier", issue["id"])
-    fact = str(tier.data.get("fact", "")) if tier else ""
-    return _hash(story_text_version(issue), tier.version if tier else "", fact)
+    found = mapped(records, "tier", issue["id"])
+    fact = str(found.data.get("fact", "")) if found else ""
+    return _hash(story_text_version(issue), found.version if found else "", fact)
 
 
 def chart_version(chart: str) -> str:
@@ -60,7 +77,7 @@ def feature_version(store: Store, feature: Feature) -> str:
     parts = [planning.section(store, feature, name) or "" for name in planning.SECTIONS]
     for story in sorted(feature.live, key=lambda s: s["id"]):
         records = feature.records.get(story["id"], [])
-        chart = held(records, "state-chart", story["id"])
+        chart = mapped(records, "state-chart", story["id"])
         items = json.dumps([expected_items(records), after_merge(records)], sort_keys=True)
         parts += [story["id"], story_version(story, records), items, chart.version if chart else ""]
     return _hash(*parts)

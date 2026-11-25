@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from deckhand import ops, planning, review_gaps, tiers, versions
+from deckhand import ops, planning, review_gaps, versions
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
@@ -82,13 +82,10 @@ def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
 
 def _map_gaps(feature: Feature, story: dict) -> list[str]:
     records, ref = feature.records.get(story["id"], []), story["identifier"]
-    tier = versions.held(records, "tier", story["id"])
-    level = tiers.from_record(tier.data) if tier else None
+    level = versions.tier(records, story["id"])
     if level is None:
         return [f"{ref}: the story map gives no tier; save the map again"]
-    chart = versions.held(records, "state-chart", story["id"])
-    text = chart.data.get("chart") if chart else None
-    if level.level in STATE_CHART_TIERS and not (isinstance(text, str) and text.strip()):
+    if level.level in STATE_CHART_TIERS and not versions.chart(records, story["id"]).strip():
         return [f"{ref}: tier {level.level} needs a state chart in the story map"]
     return []
 

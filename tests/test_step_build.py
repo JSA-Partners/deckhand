@@ -17,7 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import approve_everything, decided, setup
+from tests.test_feature_approval import approve_everything, decided, mapped, setup
 from tests.test_implplan import BASE, Git, manifest
 from tests.test_step_review import (
     PLAN,
@@ -259,6 +259,25 @@ def test_context_prints_the_briefing(tmp_path: Path, repo: Path, capsys: pytest.
     assert facts["worktree"] == str(repo / ".worktrees" / BRANCH)
     assert facts["plan"] == PLAN
     assert "sitting" not in facts
+
+
+@pytest.mark.parametrize(
+    "fact,chart,shown", [("concurrency", "queued -> sent", "queued -> sent"), ("data_rule", "", "none")]
+)
+def test_build_context_hands_over_the_state_chart(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str], fact: str, chart: str, shown: str
+):
+    store = setup()
+    mapped(store, "s1", fact, chart)
+    approve_everything(store)
+    submit(store, tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    Build(store, Shell(), repo).apply(["s1", "worktree", *TEAM])
+    capsys.readouterr()
+    Build(store, Shell(), repo).context(["s1", *TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["state_chart"] == chart
+    Build(store, Shell(), repo).context(["s1", *TEAM])
+    assert f"# State chart\n\n{shown}\n" in capsys.readouterr().out
 
 
 def test_build_context_prints_the_spec_before_the_plan(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):

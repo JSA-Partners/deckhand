@@ -182,8 +182,7 @@ class Build(StoryStep):
         store = self._store_for_run()
         at = self.locate(parsed["words"][0], team_key(parsed))
         story, policy, clone, records = at.story, at.policy, at.clone, at.records
-        held = versions.held(records, "tier", story["id"])
-        level = tiers.from_record(held.data) if held else None
+        level = versions.tier(records, story["id"])
         plan = store.document(ops.create_id(story["id"], implplan.PURPOSE))
         branch = branch_of(records, story) or story["branch_name"]
         approved = spec.gather(store, at.feature, story)
@@ -201,6 +200,7 @@ class Build(StoryStep):
             "invariants": approved.invariants,
             "decisions": approved.decisions,
             "after_merge": approved.after_merge,
+            "state_chart": approved.state_chart,
             "plan": plan["body"] if plan else None,
         }
         if parsed["json"]:

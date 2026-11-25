@@ -7,6 +7,7 @@ import pytest
 
 from deckhand import features, launch, planning, spec, versions
 from deckhand.records import Record, content_hash
+from deckhand.steps.stories import map_records
 from deckhand.store.fake import FakeStore
 from tests.test_step_decide import feature_store
 
@@ -59,13 +60,14 @@ def test_a_missing_section_is_none_and_prints_as_not_written():
         "# Decisions\n\nnot written\n\n"
         "# Examples\n\nnot written\n\n"
         "# Invariants\n\nnot written\n\n"
-        "# Scope\n\nOne\n\nOutcome.\n"
+        "# Scope\n\nOne\n\nOutcome.\n\n"
+        "# State chart\n\nnone\n"
     )
 
 
 def test_decisions_print_as_a_list():
     decisions = [{"item": "Ids", "answer": "Keep", "note": None}, {"item": "X", "answer": "Change", "note": "Y"}]
-    found = spec.Spec("C", "E", "I", "One", decisions, [])
+    found = spec.Spec("C", "E", "I", "One", decisions, [], "")
     assert "# Decisions\n\n- Ids: Keep\n- X: Change (Y)\n\n# Examples" in spec.text(found)
 
 
@@ -176,3 +178,21 @@ def test_the_spec_shows_after_merge_items():
     found = spec.gather(store, *loaded(store))
     assert found.after_merge == ["rotate the key", "drop the old queue"]
     assert spec.text(found).startswith("# After merge\n\n- rotate the key\n- drop the old queue\n\n# Contract")
+
+
+@pytest.mark.parametrize(
+    "fact,chart,shown", [("concurrency", "queued -> sent", "queued -> sent"), ("data_rule", "", "none")]
+)
+def test_the_spec_shows_the_state_chart_the_map_holds(fact: str, chart: str, shown: str):
+    store = feature_store()
+    for record in map_records("s1", {"tier": fact, "state_chart": chart}):
+        store.put_record("s1", record)
+    found = spec.gather(store, *loaded(store))
+    assert found.state_chart == chart
+    assert spec.text(found).endswith(f"# State chart\n\n{shown}\n")
+
+
+def test_a_chart_written_by_a_person_is_left_unread():
+    store = feature_store()
+    store.put_record("s1", Record("state-chart", "s1", "v1", "person:s", {"chart": "a -> b"}))
+    assert spec.gather(store, *loaded(store)).state_chart == ""
