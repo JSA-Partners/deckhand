@@ -6,7 +6,7 @@ from dataclasses import asdict
 from deckhand import features, implplan, quiz, review, review_gaps, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
-from deckhand.review_gaps import Gap
+from deckhand.review_gaps import Gap, both
 from deckhand.step import Refusal
 from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
@@ -38,10 +38,6 @@ def held_summary(records: list[Record], story: str, head: str) -> ChangeSummary 
         return None
 
 
-def _both(id: str, text: str) -> Gap:
-    return Gap(id, text, text)
-
-
 def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSummary | None) -> list[Gap]:
     held = quiz.held_set(records, story)
     if held is None or held.data.get("head") != head:
@@ -58,7 +54,7 @@ def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSumma
         )
     if not quiz.passed(records, story, head):
         open_items = ", ".join(str(n) for n in quiz.open_items(records, story))
-        found.append(_both("quiz-open", f"quiz items still open: {open_items}"))
+        found.append(both("quiz-open", f"quiz items still open: {open_items}"))
     return found
 
 
@@ -86,7 +82,7 @@ def _branch_gap(records: list[Record], story: str, head: str) -> list[Gap]:
 def _plan_gap(records: list[Record], story: str) -> list[Gap]:
     plan = versions.held(records, implplan.PURPOSE, story)
     if plan is None or not review.cleared(records, story, "plan", plan.version):
-        return [_both("plan-review", "the plan review has not stopped clean at the current plan version")]
+        return [both("plan-review", "the plan review has not stopped clean at the current plan version")]
     return []
 
 
@@ -100,7 +96,7 @@ def _tuicr_gap(records: list[Record], story: str, head: str, ref: str) -> list[G
 
 def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     summary = held_summary(records, story, head)
-    found = [] if summary else [_both("summary", f"no change summary is saved at {head}")]
+    found = [] if summary else [both("summary", f"no change summary is saved at {head}")]
     found += _quiz_gap(records, story, head, summary)
     for stage in ("plan", "branch"):
         found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
@@ -108,7 +104,7 @@ def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
         found += review_gaps.left_open_gaps(records, story, stage, ref)
     found += _tuicr_gap(records, story, head, ref)
     if not passing(records, story, head):
-        found.append(_both("checks", f"checks are not passing at {head}"))
+        found.append(both("checks", f"checks are not passing at {head}"))
     return found
 
 

@@ -35,7 +35,7 @@ def test_delivery_gaps_split_by_who_acts():
         f"{finding} changes what the story delivers; propose an answer with review apply ACME-1 resolve --stage plan"
         f" --propose-accept {finding} or --propose-decline {finding} --reason TEXT"
     )
-    assert "apply" not in gap.person
+    assert gap.person == f"finding {finding} waits for the hand"
     proposal = Record(review.PROPOSAL, finding, "h1", "agent:review", {"reason": "r", "answer": review.ACCEPT})
     [waiting] = review_gaps.delivery_gaps([*records, proposal], "s1", "plan", "ACME-1")
     assert waiting.hand == f"{finding} waits for the person's decision"
@@ -59,7 +59,7 @@ def test_a_left_open_p3_is_the_hands_to_resolve():
     [gap] = review_gaps.left_open_gaps(records, "s1", "branch", "ACME-1")
     assert "review apply ACME-1 resolve --stage branch --accept" in gap.hand
     assert "--propose-decline" in gap.hand
-    assert "apply" not in gap.person
+    assert gap.person == f"finding {id_of(left, 'branch')} waits for the hand"
 
 
 def test_a_proposed_left_open_finding_waits_for_the_person():

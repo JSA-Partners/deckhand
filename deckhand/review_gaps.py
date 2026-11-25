@@ -13,6 +13,10 @@ class Gap:
     person: str
 
 
+def both(id: str, text: str) -> Gap:
+    return Gap(id, text, text)
+
+
 def undecided_delivery(records: list[Record], story: str, stage: str) -> list[dict]:
     held, _ = counted(records, f"{story}:{stage}")
     settled = set(decided(records)) | waived(records, f"{story}:{stage}")
@@ -35,7 +39,12 @@ def delivery_gaps(records: list[Record], story: str, stage: str, ref: str) -> li
                 f"{id} changes what the story delivers; propose an answer with review apply {ref} resolve"
                 f" --stage {stage} --propose-accept {id} or --propose-decline {id} --reason TEXT"
             )
-        found.append(Gap(id, hand, f"finding {id} changes what the story delivers; decide it"))
+        person = (
+            f"finding {id} changes what the story delivers; decide it"
+            if id in proposed
+            else f"finding {id} waits for the hand"
+        )
+        found.append(Gap(id, hand, person))
     return found
 
 
@@ -60,7 +69,12 @@ def left_open_gaps(records: list[Record], story: str, stage: str, ref: str) -> l
                 f"{id} is a {f['severity']} left open; resolve it with review apply {ref} resolve --stage {stage}"
                 f" --accept {id}, or --propose-decline {id} --reason TEXT"
             )
-        found.append(Gap(id, hand, f"finding {id} was left open by the hand; decide it"))
+        person = (
+            f"finding {id} was left open by the hand; decide it"
+            if id in proposed
+            else f"finding {id} waits for the hand"
+        )
+        found.append(Gap(id, hand, person))
     return found
 
 
@@ -68,9 +82,9 @@ def feature_gaps(project: str, records: list[Record], at: str, ref: str) -> list
     rounds = rounds_of(records, f"{project}:feature")
     latest = last(rounds)
     if latest is None:
-        return [Gap("feature-review", *["the feature review has not run"] * 2)]
+        return [both("feature-review", "the feature review has not run")]
     if reviewed(latest) != at:
         text = "the feature review has not reviewed the current contract and stories; run a feature round"
-        return [Gap("feature-review", text, text)]
+        return [both("feature-review", text)]
     found = open_p1(latest, declined(records))
-    return [Gap(f["id"], *[f"the feature review holds an open P1 {f['id']}: {f['summary']}"] * 2) for f in found]
+    return [both(f["id"], f"the feature review holds an open P1 {f['id']}: {f['summary']}") for f in found]

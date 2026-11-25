@@ -735,7 +735,7 @@ def test_review_names_each_file_s_reason_once(
     assert capsys.readouterr().out.count("- src/a.py: contract site") == 1
 
 
-def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
+def test_every_open_finding_the_hand_left_blocks_sign_off_until_it_is_decided(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = ready(tmp_path, repo, state, capsys)
@@ -748,7 +748,7 @@ def test_every_open_finding_the_hand_left_is_the_persons_before_sign_off(
     plan_left = review.finding_id(plan_round(store, plan.version, raw(summary="Plan left."))[0], "plan")
     missing = overview(store, repo, capsys)["missing"]
     assert missing == [
-        *(f"finding {id} was left open by the hand; decide it" for id in (plan_left, ids[1], ids[2])),
+        *(f"finding {id} waits for the hand" for id in (plan_left, ids[1], ids[2])),
         "the person has not signed off",
     ]
     assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
@@ -835,8 +835,8 @@ def test_a_finding_left_open_in_an_earlier_round_stays_the_persons(
     plan_left = review.finding_id(plan_round(store, "older", raw(summary="Plan left."))[0], "plan")
     store.put_record("s1", review.round_record("s1", "plan", review.RoundPlan(3, True, ""), plan.version, []))
     missing = "\n".join(overview(store, repo, capsys)["missing"])
-    assert f"finding {_id(left)} was left open by the hand; decide it" in missing
-    assert f"finding {plan_left} was left open by the hand; decide it" in missing
+    assert f"finding {_id(left)} waits for the hand" in missing
+    assert f"finding {plan_left} waits for the hand" in missing
     assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
 
 
@@ -895,15 +895,11 @@ def test_the_overview_prints_hand_text_to_a_hand_and_person_text_to_the_person(
     capsys.readouterr()
     Signoff(store, Shell(), repo).context(["s1", *TEAM])
     person = capsys.readouterr().out.splitlines()
-    config_dir = tmp_path / "hand-config"
-    config_dir.mkdir()
-    (config_dir / "config.toml").write_text(f'[clones]\nwidgets = "{repo}"\n', encoding="utf-8")
-    monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(config_dir))
-    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    as_hand(tmp_path, repo, monkeypatch)
     Signoff(store, Shell(), repo).context(["s1", *TEAM])
     hand = capsys.readouterr().out.splitlines()
     assert person != hand
-    assert any("decide it" in line for line in person)
+    assert any("waits for the hand" in line for line in person)
     assert any("review apply ACME-1 resolve --stage branch --accept" in line for line in hand)
     for lines in (person, hand):
         assert lines[0] == "missing:"
