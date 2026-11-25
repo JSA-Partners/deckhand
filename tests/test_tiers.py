@@ -3,32 +3,18 @@ from __future__ import annotations
 import pytest
 
 from deckhand.records import Record
-from deckhand.step import Refusal
-from deckhand.tiers import NONE, OPTIONS, TIERS, chosen, from_record, tools
+from deckhand.tiers import FACTS, TIERS, from_record, named, tools
 
 
-def test_options_ask_from_the_highest_tier_down_and_end_with_none():
-    assert OPTIONS == [
-        "Jobs, retries, webhooks, queues or two writers",
-        "A flow or an entity with several states",
-        "A data rule: ownership, permissions, uniqueness or money",
-        "None of these",
-    ]
+def test_facts_run_from_the_highest_tier_down():
+    assert FACTS == ("concurrency", "multi_step", "data_rule", "none")
     assert [t.level for t in TIERS] == [3, 2, 1, 0]
-    assert OPTIONS[-1] == NONE
 
 
-@pytest.mark.parametrize("answer", ["Jobs, retries, webhooks, queues or two writers", NONE])
-def test_chosen_reads_one_option_even_when_its_label_holds_commas(answer: str):
-    assert chosen(answer).label == answer
-
-
-@pytest.mark.parametrize(
-    "answer", [", ".join(OPTIONS[:2]), "A flow or an entity with several states, free text", "anything"]
-)
-def test_chosen_refuses_anything_but_one_option(answer: str):
-    with pytest.raises(Refusal, match="not one of the offered options"):
-        chosen(answer)
+@pytest.mark.parametrize("fact", ["high", "Concurrency", ["none"], None])
+def test_named_reads_only_a_known_fact(fact: object):
+    assert named(fact) is None
+    assert named("multi_step") == TIERS[1]
 
 
 def test_from_record_reads_the_stored_level_and_fact():

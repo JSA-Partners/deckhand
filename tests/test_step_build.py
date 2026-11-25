@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import git, launch, ops, review, spec, step
+from deckhand import git, implplan, launch, ops, review, spec, step
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.commit import Commit
@@ -258,6 +258,7 @@ def test_context_prints_the_briefing(tmp_path: Path, repo: Path, capsys: pytest.
     assert (facts["story"], facts["tier"], facts["tools"], facts["checks"]) == ("ACME-1", 0, ["ruff"], ["make lint"])
     assert facts["worktree"] == str(repo / ".worktrees" / BRANCH)
     assert facts["plan"] == PLAN
+    assert "sitting" not in facts
 
 
 def test_build_context_prints_the_spec_before_the_plan(tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]):
@@ -281,14 +282,15 @@ def test_a_long_context_prints_the_spec_and_saves_the_whole(
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     store = labeled(tmp_path, repo)
-    store.put_document(ops.create_id("s1", "sitting"), "s1", "Sitting", "An order of two ships the same day.\n" * 600)
+    long = "An order of two ships the same day.\n" * 600
+    store.put_document(ops.create_id("s1", implplan.PURPOSE), "s1", "Implementation plan", long)
     capsys.readouterr()
     Build(store, Shell(), repo).context(["s1", *TEAM])
     out = capsys.readouterr().out
     saved = tmp_path / launch.INPUT / "ACME-1-build.md"
     assert len(out.encode("utf-8")) < spec.LIMIT
     assert "The Contract of Alpha." in out and str(saved) in out and "plan:" not in out
-    assert "The Contract of Alpha." in saved.read_text() and "sitting:\nAn order of two" in saved.read_text()
+    assert "The Contract of Alpha." in saved.read_text() and "plan:\nAn order of two" in saved.read_text()
 
 
 def test_a_long_examples_section_leaves_the_contract_and_decisions_inline(

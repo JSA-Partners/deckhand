@@ -54,6 +54,7 @@ def test_a_missing_section_is_none_and_prints_as_not_written():
     found = spec.gather(store, *loaded(store))
     assert (found.examples, found.invariants, found.decisions) == (None, None, [])
     assert spec.text(found) == (
+        "# After merge\n\nnone\n\n"
         "# Contract\n\nWritten by the person.\n\nPOST /orders.\n\n"
         "# Decisions\n\nnot written\n\n"
         "# Examples\n\nnot written\n\n"
@@ -64,7 +65,7 @@ def test_a_missing_section_is_none_and_prints_as_not_written():
 
 def test_decisions_print_as_a_list():
     decisions = [{"item": "Ids", "answer": "Keep", "note": None}, {"item": "X", "answer": "Change", "note": "Y"}]
-    found = spec.Spec("C", "E", "I", "One", decisions)
+    found = spec.Spec("C", "E", "I", "One", decisions, [])
     assert "# Decisions\n\n- Ids: Keep\n- X: Change (Y)\n\n# Examples" in spec.text(found)
 
 
@@ -166,3 +167,12 @@ def test_gather_returns_plain_fields_and_the_saved_section_stays_raw():
     assert found.examples == f"{planning.WRITTEN}\n\nSee x.io, a_b."
     assert found.decisions[0]["answer"] == "tests/*"
     assert planning.section(store, feature, "Examples") == f"{planning.WRITTEN}\n\n{raw}"
+
+
+def test_the_spec_shows_after_merge_items():
+    store = feature_store()
+    stub = {"unknowns": [], "new_here": [], "decisions": [], "after_merge": ["rotate the key", "drop the old queue"]}
+    store.put_record("s1", Record("stub", "one", "1", "agent:stories", stub))
+    found = spec.gather(store, *loaded(store))
+    assert found.after_merge == ["rotate the key", "drop the old queue"]
+    assert spec.text(found).startswith("# After merge\n\n- rotate the key\n- drop the old queue\n\n# Contract")

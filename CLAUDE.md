@@ -8,7 +8,7 @@
   or a git error on stderr at exit 1, and never prints the text of an unexpected exception;
   `step.py` the registry, `Refusal`, and the shared TOML read
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
-  (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
+  (`feature`, `plan`, `stories`, `decide`, `hook`), and the build (`build`, `implplan`,
   `review` and `feature-review`, `checks`, `signoff`, `merge` and `after`), a hand's
   planning work (`spike`, `draft`), its questions (`ask`) and its messages (`mail`), and the
   person's fleet (`hand` lists the fleet and asks the engine for a spike, `captain` prints the

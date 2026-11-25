@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import answers, git, implplan, inputs, ops, review
+from deckhand import answers, git, implplan, inputs, ops, review, versions
 from deckhand.records import Record
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
@@ -43,6 +43,9 @@ class ImplPlan(StoryStep):
         manifest = implplan.parse_manifest(_read(parsed.get("manifest", ""), "--manifest")[1])
         at = self.locate(parsed["words"][0], team_key(parsed))
         self.owned(at)
+        for item in versions.after_merge(at.records):
+            if item not in manifest.get("after_merge", []):
+                raise Refusal(f"the plan drops the after-merge item {item} the person approved")
         story, store, repo = at.story, self._store_for_run(), at.path or at.clone
         if self._runner(["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"], repo, None).returncode != 0:
             raise Refusal("origin/HEAD is not set in this clone; run git remote set-head origin --auto")

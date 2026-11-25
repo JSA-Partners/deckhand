@@ -96,7 +96,7 @@ def test_build_review_and_decide_contexts_read_each_object_at_most_once(
     runs = {
         "build": lambda: Build(None, BuildShell(), repo).context(["ACME-1", *TEAM, "--json"]),
         "review": lambda: Review(None, Git(BASE), repo).context(["ACME-1", "--stage", "plan", *TEAM, "--json"]),
-        "decide": lambda: Decide(None).context(["tier", "ACME-1", *TEAM, "--json"]),
+        "decide": lambda: Decide(None).context(["lean", "ACME-1", *TEAM, "--json"]),
     }
     found = {}
     for name, run in runs.items():

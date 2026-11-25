@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, asks, ops, queue, review, signoff, tiers
+from deckhand import answers, asks, ops, queue, review, signoff
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -15,10 +15,7 @@ from deckhand.store import Store
 KINDS = (
     "contract",
     "invariants",
-    "state-chart",
     "decision-item",
-    "tier",
-    "sitting",
     "lean",
     "feature-approval",
     "finding",
@@ -36,11 +33,8 @@ _PIN_OPTIONS = (asks.ANSWER, signoff.KIND)
 _OPTIONS = {
     "contract": ["Approve", "Not yet"],
     "invariants": ["Approve", "Not yet"],
-    "state-chart": ["Approve", "Not yet"],
     "feature-approval": ["Approve", "Not yet"],
     "decision-item": ["Keep", "Change", "Discuss"],
-    "sitting": ["Done", "Not yet"],
-    "tier": tiers.OPTIONS,
     "lean": ["Prove it in Lean", "Not needed"],
     "finding": [review.DECLINE, review.ACCEPT],
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
@@ -73,11 +67,8 @@ _DESCRIPTIONS = {
 _ASKS = {
     "contract": "Approve the contract for",
     "invariants": "Approve the invariants for",
-    "state-chart": "Approve the state chart for",
     "feature-approval": "Approve the feature",
     "decision-item": "Keep the decision item",
-    "sitting": "Is the sitting done for",
-    "tier": "Which is the highest that applies to",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
@@ -93,7 +84,6 @@ _STAGE_CAP = {
     "feature": "Three review rounds left a P1 open. Proceed to approval or rework the feature",
 }
 _RECORDED = (
-    "tier",
     "decision-item",
     "finding",
     review.CAP_DECISION,
@@ -119,9 +109,7 @@ _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 _POSITIVE = {
     "contract": "Approve",
     "invariants": "Approve",
-    "state-chart": "Approve",
     "feature-approval": "Approve",
-    "sitting": "Done",
     "lean": "Prove it in Lean",
     signoff.AFTER: signoff.DONE,
 }
@@ -253,18 +241,11 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the options the person saw for {pending.nonce} differ from the pending question")
     if found.copied:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
-    if pending.kind == "tier":
-        tiers.chosen(found.answer)
     if pending.kind in _CHOSEN and found.answer not in pending.options and not in_own_words(pending, found.answer):
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
     return found
-
-
-def _tier_data(answer: str) -> dict:
-    tier = tiers.chosen(answer)
-    return {"level": tier.level, "fact": tier.fact}
 
 
 def _owner_signs(store: Store, pending: Pending, by: str) -> None:
@@ -301,8 +282,7 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         f"person:{found.session_id}",
         {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"note": note} if note is not None else {})
-        | ({"item": pending.detail} if pending.kind == "decision-item" else {})
-        | (_tier_data(found.answer) if pending.kind == "tier" else {}),
+        | ({"item": pending.detail} if pending.kind == "decision-item" else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

@@ -5,19 +5,19 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, ops, planning, review, tiers, versions
+from deckhand import answers, features, ops, planning, review, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
+from deckhand.steps.stories import map_records
 from deckhand.store.fake import FakeStore
 
 P1 = create_id("ACME:Alpha", "feature")
 
 TEAM = ["--team-key", "ACME"]
-STATE_CHART = "A flow or an entity with several states"
 
 
 def setup(store: FakeStore | None = None) -> FakeStore:
@@ -41,18 +41,15 @@ def load(store: FakeStore) -> features.Feature:
 def decided(store: FakeStore, kind: str, subject: str, answer: str, stories: list[str]) -> None:
     version = versions.version_for(store, load(store), kind, subject)
     data: dict = {"answer": answer}
-    if kind == "tier":
-        tier = tiers.chosen(answer)
-        data |= {"level": tier.level, "fact": tier.fact}
     if kind == "decision-item":
         subject, data = versions.item_subject(subject), {**data, "item": subject}
     for story in stories:
         ops.ensure_record(store, story, Record(kind, subject, version, "person:s", data))
 
 
-def sat(store: FakeStore, story: str, tier_answer: str = tiers.NONE) -> None:
-    decided(store, "tier", story, tier_answer, [story])
-    decided(store, "sitting", story, "Done", [story])
+def mapped(store: FakeStore, story: str, tier: str = "none", chart: str = "") -> None:
+    for record in map_records(story, {"tier": tier, "state_chart": chart}):
+        ops.ensure_record(store, story, record)
 
 
 def reviewed(store: FakeStore) -> None:
@@ -66,8 +63,9 @@ def approve_everything(store: FakeStore) -> None:
     reviewed(store)
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
-    sat(store, "s1")
-    sat(store, "s2")
+    for story in ("s1", "s2"):
+        if versions.held(store.records(story), "tier", story) is None:
+            mapped(store, story)
     assert features.approval_gaps(store, load(store)) == []
     decided(store, "feature-approval", P1, "Approve", ["s1", "s2"])
 
@@ -77,20 +75,17 @@ def test_approval_gaps_lists_each_missing_decision():
     assert features.approval_gaps(store, load(store)) == [
         "the Contract is not approved",
         "the Invariants are not approved",
-        "ACME-1: the tier is not decided",
-        "ACME-1: the sitting is not done",
-        "ACME-2: the tier is not decided",
-        "ACME-2: the sitting is not done",
+        "ACME-1: the story map gives no tier; save the map again",
+        "ACME-2: the story map gives no tier; save the map again",
         "the feature review has not run",
     ]
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1"])
-    sat(store, "s1", STATE_CHART)
+    mapped(store, "s1", "multi_step")
+    mapped(store, "s2")
     assert features.approval_gaps(store, load(store)) == [
         "the Invariants are not approved",
-        "ACME-1: the state chart is not approved",
-        "ACME-2: the tier is not decided",
-        "ACME-2: the sitting is not done",
+        "ACME-1: tier 2 needs a state chart in the story map",
         "the feature review has not run",
     ]
 
@@ -133,8 +128,6 @@ def test_changed_story_voids_feature_approval():
     feature = load(store)
     assert features.phase(feature) is Phase.PLANNING
     assert features.approval_gaps(store, feature) == [
-        "ACME-2: the tier changed after it was decided",
-        "ACME-2: the sitting changed after it was done",
         "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
 
@@ -144,7 +137,7 @@ def test_canceled_story_needs_no_approval():
     store.set_issue_state("s2", "Canceled")
     decided(store, "contract", P1, "Approve", ["s1"])
     decided(store, "invariants", P1, "Approve", ["s1"])
-    sat(store, "s1")
+    mapped(store, "s1")
     reviewed(store)
     assert features.approval_gaps(store, load(store)) == []
     decided(store, "feature-approval", P1, "Approve", ["s1"])
@@ -194,24 +187,19 @@ def test_decision_item_only_on_a_dropped_story_is_open_whatever_the_order(cancel
     assert "decision item Keep orders in one table is open" in gaps
 
 
-def test_old_tier_record_of_fact_keys_asks_for_the_tier_again():
+def test_a_tier_record_without_a_level_asks_for_the_map_again():
     store = setup()
-    version = versions.version_for(store, load(store), "tier", "s1")
-    old = Record("tier", "s1", version, "person:s", {"answer": "x", "facts": ["multi_step"]})
-    store.put_record("s1", old)
+    store.put_record("s1", Record("tier", "s1", "v1", "person:s", {"answer": "x", "facts": ["multi_step"]}))
     gaps = features.approval_gaps(store, load(store))
-    assert "ACME-1: the tier record holds no level; decide the tier again" in gaps
+    assert "ACME-1: the story map gives no tier; save the map again" in gaps
 
 
-def test_odd_tier_answer_with_a_valid_level_does_not_break_context(capsys: pytest.CaptureFixture[str]):
+def test_a_missing_chart_gap_shows_in_feature_context(capsys: pytest.CaptureFixture[str]):
     store = setup()
-    version = versions.version_for(store, load(store), "tier", "s1")
-    odd = Record("tier", "s1", version, "person:s", {"answer": "something else", "level": 2, "fact": "multi_step"})
-    store.put_record("s1", odd)
-    gaps = features.approval_gaps(store, load(store))
-    assert "ACME-1: the state chart is not approved" in gaps
+    mapped(store, "s1", "multi_step")
     Feature(store).context([*TEAM, "--json"])
-    assert "ACME-1: the state chart is not approved" in json.loads(capsys.readouterr().out)["open"][0]["gaps"]
+    shown = json.loads(capsys.readouterr().out)["open"][0]["gaps"]
+    assert "ACME-1: tier 2 needs a state chart in the story map" in shown
 
 
 def test_feature_context_names_the_gaps(capsys: pytest.CaptureFixture[str]):
@@ -280,8 +268,8 @@ def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsy
     store = setup()
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
-    sat(store, "s1")
-    sat(store, "s2")
+    mapped(store, "s1")
+    mapped(store, "s2")
     reviewed(store)
     step = Decide(store)
     step.context(["feature-approval", P1, *TEAM, "--json"])
@@ -313,8 +301,19 @@ def test_a_decision_item_added_after_approval_voids_it():
     assert "ACME-2: decision item Keep receipts a year is not decided" in features.approval_gaps(store, feature)
 
 
-def test_a_state_chart_decided_after_approval_voids_it():
+def test_a_state_chart_edited_after_approval_voids_it():
     store = setup()
+    mapped(store, "s1", "multi_step", "placed -> paid")
     approve_everything(store)
-    decided(store, "state-chart", "s1", "Approve", ["s1"])
+    mapped(store, "s1", "multi_step", "placed -> paid")
+    assert features.phase(load(store)) is Phase.BUILDING
+    mapped(store, "s1", "multi_step", "placed -> paid -> shipped")
     assert features.phase(load(store)) is Phase.PLANNING
+
+
+def test_a_tier_two_story_without_a_chart_is_a_gap():
+    store = setup()
+    [tier, _] = map_records("s1", {"tier": "multi_step", "state_chart": "a -> b"})
+    store.put_record("s1", tier)
+    store.put_record("s1", Record("state-chart", "s1", "v1", "person:s", {"answer": "Approve"}))
+    assert "ACME-1: tier 2 needs a state chart in the story map" in features.approval_gaps(store, load(store))

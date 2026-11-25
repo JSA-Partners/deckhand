@@ -33,8 +33,7 @@ flowchart TB
     subgraph Plan
         direction LR
         Frame --> StoryMap["Story map"]
-        StoryMap --> Sitting
-        Sitting --> Approval
+        StoryMap --> Approval
     end
 
     subgraph Build
@@ -50,8 +49,7 @@ flowchart TB
 | Step | Claude | You, to move it on |
 | --- | --- | --- |
 | Frame | Shapes the problem with you, then lists the facts it rests on and spikes the unverified ones | Write the frame, or take a draft |
-| Story map | Proposes one-line stories and the contract they share | Approve the contract and the invariants |
-| Sitting | Asks about each story where it is uncertain, then checks your answers against the code | Answer before you see its view |
+| Story map | Proposes one-line stories with their tiers, state charts and after-merge chores, and the contract they share | Approve the contract and the invariants |
 | Approval | Reviews the stories against each other | Approve the feature |
 | Hand | Writes the implementation plan and builds it with tests | Answer its questions |
 | Review | Reviews the plan and the branch in rounds, ordered by confidence | Decide what a hand cannot |

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from deckhand import answers, features, fleet, git, inputs, ops, planning, spikes
+from deckhand import answers, features, fleet, git, inputs, ops, planning, spikes, tiers, versions
 from deckhand.linear.client import LinearError
-from deckhand.records import Record
+from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.open import Stores
@@ -12,8 +12,9 @@ from deckhand.store.open import Stores
 USAGE = "stories takes [--team-key KEY] on both verbs, --json on context only, and --file MAP.json on apply"
 MISSED_BY = ("rule", "example", "invariant", "spike", "external")
 _LISTS = ("depends_on", "unknowns", "new_here")
-_REQUIRED = ("key", "title", "outcome", "repository")
-_OPTIONAL = ("missed_by", "cuts", "spends_budget", "decisions")
+_REQUIRED = ("key", "title", "outcome", "repository", "tier")
+_OPTIONAL = ("state_chart", "after_merge", "missed_by", "cuts", "spends_budget", "decisions")
+_TIERS = ", ".join(f"{t.fact} ({t.label})" for t in tiers.TIERS)
 SHAPE = {
     "key": "a short name for the story, unique in the map",
     "title": "the story title",
@@ -22,6 +23,9 @@ SHAPE = {
     "depends_on": "keys of the stories this one waits for",
     "unknowns": "what is not known yet, a list of strings",
     "new_here": "what is new to this codebase, a list of strings",
+    "tier": f"the highest that applies, one of {_TIERS}",
+    "state_chart": "the story's states and the moves between them, required at tiers 2 and 3, empty otherwise",
+    "after_merge": "optional, the chores to do once the story merges, a list of strings",
     "decisions": "optional, the decision items this story expects, a list of strings",
     "missed_by": f"after approval, the planning step that missed this story, one of {', '.join(MISSED_BY)}",
     "cuts": "after approval, the key of a story this one replaces",
@@ -68,14 +72,42 @@ def _check_entry(index: int, entry: object) -> None:
         value = entry.get(name)
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise Refusal(f"entry {index} field {name} must be a list of strings")
-    decisions = entry.get("decisions", [])
-    if not isinstance(decisions, list) or not all(isinstance(item, str) for item in decisions):
-        raise Refusal(f"entry {index} field decisions must be a list of strings")
+    for name in ("decisions", "after_merge"):
+        value = entry.get(name, [])
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise Refusal(f"entry {index} field {name} must be a list of strings")
+    if any(not item.strip() for item in entry.get("after_merge", [])):
+        raise Refusal(f"entry {index} field after_merge holds an empty item")
+    _check_tier(index, entry)
     for name in ("missed_by", "cuts"):
         if name in entry and not isinstance(entry[name], str):
             raise Refusal(f"entry {index} field {name} must be a string")
     if "spends_budget" in entry and not isinstance(entry["spends_budget"], bool):
         raise Refusal(f"entry {index} field spends_budget must be true or false")
+
+
+def _check_tier(index: int, entry: dict) -> None:
+    tier = tiers.named(entry.get("tier"))
+    if tier is None:
+        raise Refusal(f"entry {index} field tier must be one of {', '.join(tiers.FACTS)}")
+    chart = entry.get("state_chart", "")
+    if not isinstance(chart, str):
+        raise Refusal(f"entry {index} field state_chart must be a string")
+    if tier.level in features.STATE_CHART_TIERS and not chart.strip():
+        raise Refusal(f"entry {index} at tier {tier.level} needs a state_chart")
+    if tier.level not in features.STATE_CHART_TIERS and chart.strip():
+        raise Refusal(f"entry {index} has a state_chart at tier {tier.level}; only tiers 2 and 3 take one")
+
+
+def map_records(id: str, entry: dict) -> list[Record]:
+    tier = tiers.named(entry["tier"])
+    if tier is None:
+        raise Refusal(f"{entry['key']}: the tier must be one of {', '.join(tiers.FACTS)}")
+    chart = entry.get("state_chart", "")
+    return [
+        Record("tier", id, content_hash(tier.fact), "agent:stories", {"level": tier.level, "fact": tier.fact}),
+        Record("state-chart", id, versions.chart_version(chart), "agent:stories", {"chart": chart}),
+    ]
 
 
 def _check_graph(entries: list[dict]) -> None:
@@ -231,8 +263,11 @@ class Stories:
                 "unknowns": entry["unknowns"],
                 "new_here": entry["new_here"],
                 "decisions": entry.get("decisions", []),
+                "after_merge": entry.get("after_merge", []),
             }
             ops.ensure_record(store, id, Record("stub", entry["key"], "1", "agent:stories", stub))
+            for record in map_records(id, entry):
+                ops.ensure_record(store, id, record)
             if "missed_by" in entry:
                 record = Record("discovered", entry["key"], "1", "agent:stories", _discovery(entry))
                 ops.ensure_record(store, id, record)

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from deckhand.features import Feature
 
 SECTION_OF = {"contract": "Contract", "invariants": "Invariants"}
-STORY_KINDS = ("tier", "sitting", "state-chart", "lean")
+STORY_KINDS = ("lean",)
 
 
 def _hash(*parts: str) -> str:
@@ -38,9 +38,22 @@ def story_version(issue: dict, records: list[Record]) -> str:
     return _hash(story_text_version(issue), tier.version if tier else "", fact)
 
 
-def expected_items(records: list[Record]) -> object:
+def chart_version(chart: str) -> str:
+    return content_hash(chart)
+
+
+def _stub(records: list[Record]) -> dict:
     stub = next((r for r in records if r.kind == "stub"), None)
-    return stub.data.get("decisions", []) if stub else []
+    return stub.data if stub else {}
+
+
+def expected_items(records: list[Record]) -> object:
+    return _stub(records).get("decisions", [])
+
+
+def after_merge(records: list[Record]) -> list[str]:
+    items = _stub(records).get("after_merge", [])
+    return [item for item in items if isinstance(item, str)] if isinstance(items, list) else []
 
 
 def feature_version(store: Store, feature: Feature) -> str:
@@ -48,7 +61,7 @@ def feature_version(store: Store, feature: Feature) -> str:
     for story in sorted(feature.live, key=lambda s: s["id"]):
         records = feature.records.get(story["id"], [])
         chart = held(records, "state-chart", story["id"])
-        items = json.dumps(expected_items(records), sort_keys=True)
+        items = json.dumps([expected_items(records), after_merge(records)], sort_keys=True)
         parts += [story["id"], story_version(story, records), items, chart.version if chart else ""]
     return _hash(*parts)
 
@@ -70,8 +83,6 @@ def version_for(store: Store, feature: Feature, kind: str, subject: str) -> str:
     if kind not in STORY_KINDS:
         raise Refusal(f"no version is defined for the decision kind {kind!r}")
     story = story_of(feature, subject)
-    if kind == "tier":
-        return story_text_version(story)
     return story_version(story, feature.records.get(story["id"], []))
 
 

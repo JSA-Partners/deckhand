@@ -185,7 +185,6 @@ class Build(StoryStep):
         held = versions.held(records, "tier", story["id"])
         level = tiers.from_record(held.data) if held else None
         plan = store.document(ops.create_id(story["id"], implplan.PURPOSE))
-        sitting = store.document(ops.create_id(story["id"], "sitting"))
         branch = branch_of(records, story) or story["branch_name"]
         approved = spec.gather(store, at.feature, story)
         facts = {
@@ -201,8 +200,8 @@ class Build(StoryStep):
             "examples": approved.examples,
             "invariants": approved.invariants,
             "decisions": approved.decisions,
+            "after_merge": approved.after_merge,
             "plan": plan["body"] if plan else None,
-            "sitting": sitting["body"] if sitting else None,
         }
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
@@ -317,10 +316,9 @@ def _worktree_of(at: Located) -> Path:
 
 def _print(facts: dict, approved: str) -> None:
     first = [f"story: {facts['story']} {facts['title']}", f"worktree: {facts['worktree']} (branch {facts['branch']})"]
-    rest = [f"tier: {facts['tier'] if facts['tier'] is not None else 'not decided'}", "tools:"]
+    rest = [f"tier: {facts['tier'] if facts['tier'] is not None else 'not in the story map'}", "tools:"]
     rest += [f"- {tool}" for tool in facts["tools"]]
     rest += ["checks:", *(f"- {check}" for check in facts["checks"])]
-    for name in ("plan", "sitting"):
-        rest += [f"{name}:", facts[name] or "none saved"]
+    rest += ["plan:", facts["plan"] or "none saved"]
     head, tail = "\n".join(first), "\n".join(rest)
     print(spec.fitted(f"{facts['story']}-build", f"{head}\n{approved}\n", f"{tail}\n"), end="")

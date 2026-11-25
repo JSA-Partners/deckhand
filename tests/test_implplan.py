@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import implplan, review
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.implplan import ImplPlan
 from deckhand.store.fake import FakeStore
@@ -210,3 +211,14 @@ def test_paths_are_normalized_at_parse_time():
 def test_unusable_paths_refuse(data: object, message: str):
     with pytest.raises(Refusal, match=message):
         implplan.parse_manifest(json.dumps(data))
+
+
+def test_implplan_refuses_a_plan_that_drops_an_after_merge_item(tmp_path: Path, repo: Path):
+    store = setup()
+    stub = {"unknowns": [], "new_here": [], "decisions": [], "after_merge": ["rotate the key", "drop the old queue"]}
+    store.put_record("s1", Record("stub", "orders", "1", "agent:stories", stub))
+    approve_everything(store)
+    store.writes.clear()
+    with pytest.raises(Refusal, match="the plan drops the after-merge item rotate the key the person approved"):
+        step(store, repo).apply(files(tmp_path, manifest(after_merge=["drop the old queue", "Rotate the key"])))
+    assert store.writes == []

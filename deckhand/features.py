@@ -58,11 +58,6 @@ _SECTION_GAPS = {
     "contract": ("the Contract is not approved", "the Contract changed after it was approved"),
     "invariants": ("the Invariants are not approved", "the Invariants changed after they were approved"),
 }
-_STORY_GAPS = {
-    "tier": ("the tier is not decided", "the tier changed after it was decided"),
-    "sitting": ("the sitting is not done", "the sitting changed after it was done"),
-    "state-chart": ("the state chart is not approved", "the state chart changed after it was approved"),
-}
 
 
 def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, words: tuple[str, str]) -> str | None:
@@ -85,6 +80,19 @@ def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
     return found
 
 
+def _map_gaps(feature: Feature, story: dict) -> list[str]:
+    records, ref = feature.records.get(story["id"], []), story["identifier"]
+    tier = versions.held(records, "tier", story["id"])
+    level = tiers.from_record(tier.data) if tier else None
+    if level is None:
+        return [f"{ref}: the story map gives no tier; save the map again"]
+    chart = versions.held(records, "state-chart", story["id"])
+    text = chart.data.get("chart") if chart else None
+    if level.level in STATE_CHART_TIERS and not (isinstance(text, str) and text.strip()):
+        return [f"{ref}: tier {level.level} needs a state chart in the story map"]
+    return []
+
+
 def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list[str]:
     gaps = [
         f"the {name} section is not saved"
@@ -103,18 +111,7 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
         elif words[0] in found:
             gaps.append(words[0])
     for story in live:
-        kinds = ["tier", "sitting"]
-        tier = versions.held(feature.records.get(story["id"], []), "tier", story["id"])
-        level = tiers.from_record(tier.data) if tier else None
-        if tier and level is None:
-            gaps.append(f"{story['identifier']}: the tier record holds no level; decide the tier again")
-        if level and level.level in STATE_CHART_TIERS:
-            kinds.append("state-chart")
-        for kind in kinds:
-            version = versions.version_for(store, feature, kind, story["id"])
-            gap = _gap(feature, story, kind, story["id"], version, _STORY_GAPS[kind])
-            if gap:
-                gaps.append(f"{story['identifier']}: {gap}")
+        gaps += _map_gaps(feature, story)
         gaps += [
             f"{story['identifier']}: decision item {item} is not decided" for item in _undecided(store, feature, story)
         ]

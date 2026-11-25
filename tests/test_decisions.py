@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, signoff, tiers
+from deckhand import answers, decisions, signoff
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -92,7 +92,7 @@ def test_decide_twice_writes_once(tmp_path: Path):
     assert [w[0] for w in store.writes] == ["put_record"]
 
 
-@pytest.mark.parametrize("kind,answer", [("contract", "Not yet"), ("sitting", "Not yet")])
+@pytest.mark.parametrize("kind,answer", [("contract", "Not yet"), ("feature-approval", "Not yet")])
 def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer: str):
     question, pending = ask(tmp_path, kind)
     answered(tmp_path, question, answer)
@@ -117,9 +117,9 @@ def test_only_proving_in_lean_records_a_lean_decision(tmp_path: Path, answer: st
 
 
 def test_question_text_is_ascii_and_names_what_is_asked():
-    question = decisions.make_question("state-chart", pin())
+    question = decisions.make_question("invariants", pin())
     assert question.text.isascii()
-    assert "state chart" in question.text and "Checkout" in question.text
+    assert "invariants" in question.text and "Checkout" in question.text
     assert question.options == ["Approve", "Not yet"]
 
 
@@ -188,35 +188,6 @@ def test_question_text_shows_no_hash_but_its_check_tag():
     shown = decisions.Pin("s9", "v1", ["s9"], "head c2", label, [label])
     text = decisions.make_question("sign-off", shown).text
     assert re.fullmatch(r"Sign off ACME-9 Dialog check story: head c2\? \[[0-9a-f]{12}\]", text)
-
-
-def test_tier_is_one_choice_of_four_ending_with_none_of_these():
-    question = decisions.make_question("tier", pin())
-    assert question.options == tiers.OPTIONS
-    assert len(question.options) == 4 and question.options[-1] == "None of these"
-    assert as_tool_input(question)["questions"][0]["multiSelect"] is False
-    assert "highest" in question.text
-
-
-@pytest.mark.parametrize("index,level,fact", [(0, 3, "concurrency"), (2, 1, "data_rule"), (3, 0, "none")])
-def test_tier_record_holds_the_chosen_level_and_fact(tmp_path: Path, index: int, level: int, fact: str):
-    question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, question.options[index])
-    store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
-    [record] = store.records("s1")
-    assert (record.data["level"], record.data["fact"]) == (level, fact)
-    assert "facts" not in record.data
-
-
-@pytest.mark.parametrize("answer", ["anything at all", "None of these, Jobs, retries, webhooks, queues or two writers"])
-def test_tier_answer_other_than_one_option_refuses(tmp_path: Path, answer: str):
-    question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, answer)
-    store = store_with("s1")
-    with pytest.raises(Refusal, match="not one of the offered options"):
-        decisions.decide(store, pending, tmp_path, "viewer-1")
-    assert store.writes == []
 
 
 def test_answer_marked_copied_refuses(tmp_path: Path):
@@ -347,9 +318,13 @@ def test_option_descriptions_say_what_a_choice_does_and_never_repeat_the_subject
     assert shown("question", ["Redis", "SQS"]) == ["", ""]
     assert shown("finding") == ["the finding stays unfixed", "the hand fixes the finding"]
     for kind in decisions.KINDS:
-        if kind not in ("question", "tier"):
+        if kind != "question":
             assert all("Checkout" not in text for text in shown(kind)), kind
 
 
 def test_no_quiz_kind_remains():
     assert "quiz" not in decisions.KINDS
+
+
+def test_no_sitting_kind_remains():
+    assert {"sitting", "tier", "state-chart"}.isdisjoint(decisions.KINDS)

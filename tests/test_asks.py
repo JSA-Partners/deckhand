@@ -94,13 +94,14 @@ def test_a_cap_answer_at_any_round_wakes_the_hand():
 
 
 def test_wake_due_ignores_stories_without_a_hand_and_decisions_a_hand_does_not_wait_on():
-    tier = stamped("tier", "2026-11-19T10:10:00.000Z", "person:s1", "s1")
-    assert asks.wake_due([tier], "s1") is None
+    lean = stamped("lean", "2026-11-19T10:10:00.000Z", "person:s1", "s1")
+    assert asks.wake_due([lean], "s1") is None
     assert asks.wake_due([stamped("question", "2026-11-19T10:10:00.000Z", "person:s1")], "s1") is None
     start = stamped("hand-start", "2026-11-19T10:00:00.000Z", "agent:hand")
-    assert asks.wake_due([start, tier, stamped("sitting", "2026-11-19T10:11:00.000Z", "person:s1", "s1")], "s1") is None
+    contract = stamped("contract", "2026-11-19T10:11:00.000Z", "person:s1", "s1")
+    assert asks.wake_due([start, lean, contract], "s1") is None
     edit = stamped("config-edit-request", "2026-11-19T10:12:00.000Z", "agent:hand")
-    assert asks.wake_due([start, tier, edit], "s1") is None
+    assert asks.wake_due([start, lean, edit], "s1") is None
 
 
 def test_wake_due_only_for_a_decision_this_story_s_hand_waits_on():

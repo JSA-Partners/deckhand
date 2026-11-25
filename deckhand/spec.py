@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import launch, planning
+from deckhand import launch, planning, versions
 from deckhand.features import Feature
 from deckhand.records import Record
 from deckhand.store import Store
@@ -23,6 +23,7 @@ class Spec:
     invariants: str | None
     scope: str
     decisions: list[dict]
+    after_merge: list[str]
 
 
 _CODE = re.compile(
@@ -71,7 +72,8 @@ def gather(store: Store, feature: Feature, story: dict) -> Spec:
     shown = [planning.section(store, feature, name) for name in ("Contract", "Examples", "Invariants")]
     contract, examples, invariants = [None if body is None else plain(body) for body in shown]
     scope = f"{story['title']}\n\n{description}" if description else story["title"]
-    return Spec(contract, examples, invariants, plain(scope), _answered(feature))
+    after_merge = versions.after_merge(feature.records.get(story["id"], []))
+    return Spec(contract, examples, invariants, plain(scope), _answered(feature), after_merge)
 
 
 def _decision(entry: dict) -> str:
@@ -85,8 +87,10 @@ def _blocks(parts: list[tuple[str, str | None]]) -> str:
 
 def text(spec: Spec) -> str:
     decisions = "\n".join(_decision(entry) for entry in spec.decisions)
+    after_merge = "\n".join(f"- {item}" for item in spec.after_merge) or "none"
     return _blocks(
         [
+            ("After merge", after_merge),
             ("Contract", spec.contract),
             ("Decisions", decisions),
             ("Examples", spec.examples),

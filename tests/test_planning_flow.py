@@ -7,23 +7,20 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import cli, features, planning, sitting
+from deckhand import cli, features, planning
 from deckhand.features import Phase
 from deckhand.step import REGISTRY
 from deckhand.steps.decide import Decide
 from deckhand.steps.feature import Feature
 from deckhand.steps.plan import Plan
 from deckhand.steps.review import FeatureReview
-from deckhand.steps.sitting import Sitting
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
-from deckhand.tiers import NONE, OPTIONS
 from tests.test_skills import named_commands, split
 
 TEAM: list[str] = []
 TODAY = date(2026, 11, 20)
 ITEM = "Keep orders in one table"
-CONCURRENCY, _, DATA_RULE, _ = OPTIONS
 
 
 class Session:
@@ -38,7 +35,6 @@ class Session:
             ("plan", Plan(store)),
             ("stories", Stories(store)),
             ("decide", Decide(store)),
-            ("sitting", Sitting(store)),
             ("feature-review", FeatureReview(store)),
         ):
             monkeypatch.setitem(REGISTRY, name, step)
@@ -116,6 +112,9 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
             "depends_on": [],
             "unknowns": [],
             "new_here": [],
+            "tier": "concurrency",
+            "state_chart": "queued -> sent",
+            "after_merge": ["drain the old queue"],
             "decisions": [ITEM],
         },
         {
@@ -126,6 +125,7 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
             "depends_on": ["queue"],
             "unknowns": [],
             "new_here": [],
+            "tier": "none",
         },
         {
             "key": "owner",
@@ -135,6 +135,7 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
             "depends_on": [],
             "unknowns": [],
             "new_here": [],
+            "tier": "data_rule",
         },
     ]
     session.run("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
@@ -143,17 +144,14 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     assert store.relations(owner) == []
     assert session.facts()["phase"] == "planning"
 
+    assert session.facts()["gaps"] == [
+        "the Contract is not approved",
+        "the Invariants are not approved",
+        f"ACME-1: decision item {ITEM} is not decided",
+        "the feature review has not run",
+    ]
     session.decide("contract", alpha, "Approve")
     session.decide("invariants", alpha, "Approve")
-    for ref, answer in (("ACME-1", CONCURRENCY), ("ACME-2", NONE), ("ACME-3", DATA_RULE)):
-        session.decide("tier", ref, answer)
-    session.decide("state-chart", "ACME-1", "Approve")
-    for ref in ("ACME-1", "ACME-2", "ACME-3"):
-        shown = session.run("sitting", "context", ref, *TEAM)
-        assert shown.startswith(f"story: {ref}")
-        assert (sitting.CONTRACT in shown) is (ref != "ACME-3")
-        session.run("sitting", "apply", ref, *TEAM, "--file", session.write(f"{ref}.md", f"Answers for {ref}."))
-        session.decide("sitting", ref, "Done")
     session.decide("decision-item", ITEM, "Keep", "--story", "ACME-1")
 
     assert session.facts()["gaps"] == ["the feature review has not run"]
@@ -243,21 +241,16 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
         {"key": "owner", "title": "Order owner", "outcome": "Owner only.", "repository": "api", "depends_on": []},
     ]
     for entry in stories:
-        entry.update(unknowns=[], new_here=[])
-    stories[0]["decisions"] = [ITEM]
+        entry.update(unknowns=[], new_here=[], tier="data_rule")
+    stories[0].update(decisions=[ITEM], tier="multi_step", state_chart="placed -> queued")
     saved = session.skill("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
-    refs = dict(line.removeprefix("story: ").split()[::-1] for line in saved.splitlines() if line.startswith("story: "))
+    assert [line for line in saved.splitlines() if line.startswith("story: ")] == [
+        "story: ACME-1 queue",
+        "story: ACME-2 owner",
+    ]
 
     session.ask("contract", alpha, "Approve")
     session.ask("invariants", alpha, "Approve")
-    for ref, answer in ((refs["queue"], CONCURRENCY), (refs["owner"], DATA_RULE)):
-        session.ask("tier", ref, answer)
-        shown = session.skill("sitting", "context", ref, *TEAM)
-        tier = int(next(line for line in shown.splitlines() if line.startswith("tier: ")).removeprefix("tier: "))
-        if tier in (2, 3):
-            session.ask("state-chart", ref, "Approve")
-        session.skill("sitting", "apply", ref, *TEAM, "--file", session.write(f"{ref}.md", f"Answers for {ref}."))
-        session.ask("sitting", ref, "Done")
 
     [gap] = [found for found in session.gaps() if ": decision item " in found]
     ref, _, rest = gap.partition(": decision item ")

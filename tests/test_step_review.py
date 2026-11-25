@@ -17,7 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import FeatureReview, Review
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import P1, approve_everything, decided, load, sat, setup
+from tests.test_feature_approval import P1, approve_everything, decided, load, mapped, setup
 from tests.test_implplan import BASE, Git, manifest, repo
 
 __all__ = ["repo"]
@@ -412,8 +412,8 @@ def feature_ready() -> FakeStore:
     store = setup()
     decided(store, "contract", P1, "Approve", ["s1", "s2"])
     decided(store, "invariants", P1, "Approve", ["s1", "s2"])
-    sat(store, "s1")
-    sat(store, "s2")
+    mapped(store, "s1")
+    mapped(store, "s2")
     return store
 
 

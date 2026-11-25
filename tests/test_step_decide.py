@@ -95,15 +95,15 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
 
 def test_story_decision_pins_the_story_by_reference(state: Path, capsys):
     store = feature_store()
-    Decide(store).context(["sitting", "ACME-2", *TEAM, "--json"])
+    Decide(store).context(["lean", "ACME-2", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
-    record_answer(state, shown["tool_input"]["questions"][0], "Done")
+    record_answer(state, shown["tool_input"]["questions"][0], "Prove it in Lean")
     Decide(store).apply([shown["nonce"], *TEAM])
     [record] = store.records("s2")
     feature = features.open_feature(store, "ACME")
     assert feature is not None
-    assert (record.kind, record.subject) == ("sitting", "s2")
-    assert record.version == versions.version_for(store, feature, "sitting", "s2")
+    assert (record.kind, record.subject) == ("lean", "s2")
+    assert record.version == versions.version_for(store, feature, "lean", "s2")
     assert store.records("s1") == []
 
 
@@ -126,7 +126,7 @@ def test_decision_item_shows_its_text_and_records_an_open_answer(state: Path, ca
     [
         (["contract", "p9"], "p9 is not the open feature"),
         (["contract", P1, "--story", "s1"], "--story applies only to decision-item"),
-        (["tier", "ACME-3"], "ACME-3 is not a story of Alpha"),
+        (["lean", "ACME-3"], "ACME-3 is not a story of Alpha"),
         (["decision-item", "Keep it"], "decision-item needs at least one --story"),
         (["contract", P1, "--version", "v1"], "unknown argument --version"),
     ],
@@ -147,7 +147,7 @@ def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, cap
     text = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]["question"]
     assert "Alpha" in text and "ACME-1 One, ACME-2 Two" in text
     assert P1 not in text and "s1" not in text
-    Decide(store).context(["sitting", "ACME-2", *TEAM, "--json"])
+    Decide(store).context(["lean", "ACME-2", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
     assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]
     assert all("s2" not in option["description"] for option in shown["options"])

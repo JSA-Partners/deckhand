@@ -4,8 +4,8 @@ from deckhand import features, ops, planning, versions
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
+from deckhand.steps import stories
 from deckhand.store.fake import FakeStore
-from deckhand.tiers import TIERS
 
 P1 = create_id("ACME:Alpha", "feature")
 
@@ -29,39 +29,28 @@ def record(store: FakeStore, kind: str, answer: str, **data: object) -> None:
     ops.ensure_record(store, "s1", Record(kind, "s1", version, "person:s", {"answer": answer, **data}))
 
 
-def tiered(store: FakeStore, index: int) -> None:
-    tier = TIERS[index]
-    record(store, "tier", tier.label, level=tier.level, fact=tier.fact)
+def tiered(store: FakeStore, fact: str, chart: str = "") -> None:
+    for found in stories.map_records("s1", {"tier": fact, "state_chart": chart}):
+        ops.ensure_record(store, "s1", found)
 
 
-def test_tier_version_depends_only_on_the_story_text():
+def test_changed_story_voids_its_lean_decision():
     store = setup()
-    before = versions.version_for(store, load(store), "tier", "s1")
-    tiered(store, 0)
-    assert versions.version_for(store, load(store), "tier", "s1") == before
-    store.set_issue_text("s1", "Orders", "Outcome: an order is placed twice.")
-    assert versions.version_for(store, load(store), "tier", "s1") != before
-
-
-def test_changed_story_voids_its_sitting():
-    store = setup()
-    tiered(store, 0)
-    record(store, "sitting", "Done")
-    assert versions.current(store, load(store), store.records("s1")[0])
+    tiered(store, "none")
+    record(store, "lean", "Prove it in Lean")
+    lean = next(r for r in store.records("s1") if r.kind == "lean")
+    assert versions.current(store, load(store), lean)
     store.set_issue_text("s1", "Orders and refunds", "Outcome: an order is placed.")
-    feature = load(store)
-    sitting = next(r for r in store.records("s1") if r.kind == "sitting")
-    assert not versions.current(store, feature, sitting)
-    assert "ACME-1: the sitting changed after it was done" in features.approval_gaps(store, feature)
+    assert not versions.current(store, load(store), lean)
 
 
-def test_new_tier_answer_voids_the_sitting():
+def test_a_new_tier_in_the_map_voids_the_lean_decision():
     store = setup()
-    tiered(store, 0)
-    record(store, "sitting", "Done")
-    tiered(store, 2)
-    sitting = next(r for r in store.records("s1") if r.kind == "sitting")
-    assert not versions.current(store, load(store), sitting)
+    tiered(store, "none")
+    record(store, "lean", "Prove it in Lean")
+    tiered(store, "data_rule")
+    lean = next(r for r in store.records("s1") if r.kind == "lean")
+    assert not versions.current(store, load(store), lean)
 
 
 def test_contract_version_follows_only_its_section():
@@ -81,10 +70,33 @@ def test_decision_item_version_is_its_text_hash():
     assert versions.item_subject(text) == content_hash(text)[:12]
 
 
-def test_a_tier_record_of_the_same_fact_keeps_the_sitting():
+def test_the_same_map_saved_again_keeps_the_lean_decision():
     store = setup()
-    tiered(store, 1)
-    record(store, "sitting", "Done")
-    record(store, "tier", "reworded", level=TIERS[1].level, fact=TIERS[1].fact)
-    sitting = next(r for r in store.records("s1") if r.kind == "sitting")
-    assert versions.current(store, load(store), sitting)
+    tiered(store, "multi_step", "a -> b")
+    record(store, "lean", "Prove it in Lean")
+    tiered(store, "multi_step", "a -> b")
+    lean = next(r for r in store.records("s1") if r.kind == "lean")
+    assert versions.current(store, load(store), lean)
+
+
+def test_editing_the_chart_text_changes_its_version():
+    store = setup()
+    for record in stories.map_records("s1", {"tier": "multi_step", "state_chart": "a -> b"}):
+        ops.ensure_record(store, "s1", record)
+    before = versions.feature_version(store, load(store))
+    chart = versions.held(store.records("s1"), "state-chart", "s1")
+    for record in stories.map_records("s1", {"tier": "multi_step", "state_chart": "a -> b -> c"}):
+        ops.ensure_record(store, "s1", record)
+    edited = versions.held(store.records("s1"), "state-chart", "s1")
+    assert chart is not None and edited is not None
+    assert (chart.version, edited.version) == (versions.chart_version("a -> b"), versions.chart_version("a -> b -> c"))
+    assert versions.feature_version(store, load(store)) != before
+
+
+def test_an_edited_after_merge_item_changes_the_feature_version():
+    store = setup()
+    stub = {"unknowns": [], "new_here": [], "decisions": [], "after_merge": ["rotate the key"]}
+    store.put_record("s1", Record("stub", "orders", "1", "agent:stories", stub))
+    before = versions.feature_version(store, load(store))
+    store.put_record("s1", Record("stub", "orders", "1", "agent:stories", {**stub, "after_merge": ["drop it"]}))
+    assert versions.feature_version(store, load(store)) != before

@@ -126,7 +126,7 @@ class Review(StoryStep):
         tier = versions.held(subject.records, "tier", subject.stories[0])
         level = tiers.from_record(tier.data) if tier else None
         if level is None:
-            raise Refusal(f"{subject.label} has no tier decided")
+            raise Refusal(f"{subject.label} has no tier in the story map")
         return lenses.lenses_for(subject.stage, level, policy)
 
     def _target(self, store: Store, subject: Subject, repo: Path) -> Target:
