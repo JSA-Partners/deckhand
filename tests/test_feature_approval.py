@@ -116,7 +116,7 @@ def test_changed_contract_voids_feature_approval():
     assert features.phase(load(store)) is Phase.BUILDING
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     feature = load(store)
-    assert features.phase(feature) is Phase.PLANNING
+    assert feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
         "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
@@ -127,7 +127,7 @@ def test_changed_story_voids_feature_approval():
     approve_everything(store)
     store.set_issue_text("s2", "Receipts by email", "Outcome: a receipt is sent.")
     feature = load(store)
-    assert features.phase(feature) is Phase.PLANNING
+    assert feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
         "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
@@ -231,7 +231,7 @@ def test_an_invariants_edit_voids_the_approval_with_no_gap(capsys: pytest.Captur
     planning.save_section(store, load(store), "Invariants", "A total is zero or more.", False)
     Feature(store).context([*TEAM, "--json"])
     held = json.loads(capsys.readouterr().out)["open"][0]
-    assert (held["phase"], held["gaps"], held["approval_void"]) == ("planning", [], True)
+    assert (held["phase"], held["gaps"], held["approval_void"]) == ("building", [], True)
 
 
 def test_feature_context_tells_the_captain_how_to_propose_a_delivery_finding(capsys: pytest.CaptureFixture[str]):
@@ -257,7 +257,7 @@ def test_feature_context_says_a_frame_change_voided_the_approval(capsys: pytest.
     planning.save_section(store, load(store), "Frame", "Why orders matter.", False)
     Feature(store).context([*TEAM, "--json"])
     held = json.loads(capsys.readouterr().out)["open"][0]
-    assert (held["phase"], held["gaps"], held["approval_void"]) == ("planning", [], True)
+    assert (held["phase"], held["gaps"], held["approval_void"]) == ("building", [], True)
     Feature(store).context(TEAM)
     assert "approval: the feature changed after it was approved" in capsys.readouterr().out
 
@@ -316,7 +316,7 @@ def test_a_decision_item_added_after_approval_voids_it():
     assert features.phase(load(store)) is Phase.BUILDING
     expect(store, "s2", "receipts", "Send receipts by email", "Keep receipts a year")
     feature = load(store)
-    assert features.phase(feature) is Phase.PLANNING
+    assert feature.reapproval_due
     assert "ACME-2: decision item Keep receipts a year is not decided" in features.approval_gaps(store, feature)
 
 
@@ -327,7 +327,7 @@ def test_a_state_chart_edited_after_approval_voids_it():
     mapped(store, "s1", "multi_step", "placed -> paid")
     assert features.phase(load(store)) is Phase.BUILDING
     mapped(store, "s1", "multi_step", "placed -> paid -> shipped")
-    assert features.phase(load(store)) is Phase.PLANNING
+    assert load(store).reapproval_due
 
 
 def test_a_tier_two_story_without_a_chart_is_a_gap():
@@ -350,7 +350,7 @@ def test_a_new_dependency_voids_the_approval():
     approve_everything(store)
     assert features.phase(load(store)) is Phase.BUILDING
     store.relate("s1", "s2")
-    assert features.phase(load(store)) is Phase.PLANNING
+    assert load(store).reapproval_due
 
 
 def test_a_new_repository_leaves_the_approval_standing():

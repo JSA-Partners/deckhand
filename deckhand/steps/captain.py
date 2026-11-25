@@ -139,7 +139,7 @@ def _print(facts: dict) -> None:
         print(UNREAD)
     if facts["top"] is not None:
         for line in facts["top"]["lines"]:
-            print(line)
+            print(brief.clean(line))
         for command in facts["top"]["next"]:
             print(f"next: {command}")
     if facts["cycle"]:

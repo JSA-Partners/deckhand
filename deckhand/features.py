@@ -41,6 +41,14 @@ class Feature:
     def approval_current(self, story: dict) -> bool:
         return any(r.kind == APPROVAL and r.version == self.version for r in self.records.get(story["id"], []))
 
+    @property
+    def approved_once(self) -> bool:
+        return any(self.approved(s) for s in self.live)
+
+    @property
+    def reapproval_due(self) -> bool:
+        return self.approved_once and not all(self.approval_current(s) for s in self.live)
+
 
 def phase(feature: Feature) -> Phase:
     if not feature.project["start_date"]:
@@ -48,10 +56,12 @@ def phase(feature: Feature) -> Phase:
     stories = feature.stories
     if stories and all(s["state"] in FINISHED for s in stories):
         return Phase.RELEASED
-    live = feature.live
-    if live and all(feature.approval_current(s) for s in live):
-        return Phase.BUILDING
-    return Phase.PLANNING
+    return Phase.BUILDING if feature.approved_once else Phase.PLANNING
+
+
+def replanning(feature: Feature) -> bool:
+    current = phase(feature)
+    return current is Phase.PLANNING or (current is Phase.BUILDING and feature.reapproval_due)
 
 
 def undecided(feature: Feature, story: dict) -> list[str]:

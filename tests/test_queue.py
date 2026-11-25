@@ -161,11 +161,12 @@ def test_planning_items_shown_to_everyone():
     assert item.at == "2026-11-16T00:00:00.000Z"
 
 
-def test_a_voided_approval_with_no_gap_is_still_a_planning_item():
+def test_a_voided_approval_with_no_gap_asks_for_the_approval_again():
     store = alpha()
     planning.save_section(store, features.open_feature(store, "ACME"), "Invariants", "Totals are positive.", False)
     [item] = [i for i in waiting(store) if i.kind == "planning"]
-    assert (item.lines, item.next) == (["the feature is ready for approval"], ["/deckhand:feature"])
+    lines = ["the plan changed since approval; approve it again"]
+    assert (item.rank, item.lines, item.next) == (3, lines, ["/deckhand:feature"])
 
 
 def test_a_released_feature_raises_no_planning_item():

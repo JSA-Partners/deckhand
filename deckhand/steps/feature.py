@@ -64,6 +64,7 @@ class Feature:
         for feature in found:
             budget = features.budget_of(feature.project, today)
             current = features.phase(feature)
+            replanning = features.replanning(feature)
             facts["open"].append(
                 {
                     "id": feature.project["id"],
@@ -71,8 +72,8 @@ class Feature:
                     "phase": current.value,
                     "stories": len(feature.stories),
                     "next_planning_step": planning.next_section(store, feature),
-                    "gaps": features.approval_gaps(store, feature, captain=True) if current is Phase.PLANNING else [],
-                    "approval_void": current is Phase.PLANNING and any(feature.approved(s) for s in feature.live),
+                    "gaps": features.approval_gaps(store, feature, captain=True) if replanning else [],
+                    "approval_void": feature.reapproval_due,
                     "story_hint": None
                     if budget is None
                     else {

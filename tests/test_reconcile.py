@@ -5,23 +5,32 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, mirror, queue, spikes, stalls, wakes
+from deckhand import asks, config, features, fleet, implplan, mirror, planning, queue, spikes, stalls, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import Facts, reconcile, reserved
+from deckhand.reconcile import IN_PROGRESS, Facts, reconcile, reserved
 from deckhand.records import HAND, Record, iso
+from deckhand.steps.build import Build
+from deckhand.steps.decide import Decide
+from deckhand.steps.plan import Plan
+from deckhand.steps.review import FeatureReview
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
-from tests.test_feature_approval import P1, approve_everything, reapprove, setup
+from tests.test_feature_approval import P1, TEAM, approve_everything, mapped, reapprove, setup
+from tests.test_implplan import manifest, repo
 from tests.test_mirror import CONTRACT, named
-from tests.test_queue import asked
+from tests.test_queue import asked, waiting
+from tests.test_step_after import CHORES
+from tests.test_step_build import Shell as GitShell
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
+from tests.test_step_review import answer as answered
+from tests.test_step_review import record_round
 from tests.test_step_stories import setup as empty_feature
 
-__all__ = ["clone", "state"]
+__all__ = ["clone", "repo", "state"]
 
 T = 1795000000.0
 BEFORE, AFTER = "2000-01-01T00:00:00.000Z", "2999-01-01T00:00:00.000Z"
@@ -680,3 +689,55 @@ def test_reconcile_wants_each_mirror_not_yet_written_and_none_when_unreadable(cl
     assert reconcile(facts(store, cap=0, contract=CONTRACT, mirrored=written), store) == []
     assert reconcile(facts(store, cap=0, contract=CONTRACT, readable=False), store) == []
     assert reconcile(facts(store, cap=0, contract=CONTRACT, busy=frozenset({"mirror:s1"})), store) == wanted[1:]
+
+
+def replanned(section: str = "Invariants") -> FakeStore:
+    store = setup()
+    store.create_issue("s3", "ACME", "Refunds", "Outcome: a refund is paid.", P1, ["widgets"])
+    mapped(store, "s3")
+    approve_everything(store)
+    for issue in ("s1", "s2", "s3"):
+        store.assign(issue, ME)
+    store.set_issue_state("s1", IN_PROGRESS)
+    started(store)
+    store.put_record("s3", Record(implplan.PURPOSE, "s3", "p1", "agent:implplan", manifest(after_merge=CHORES)))
+    store.set_issue_state("s3", "Done")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, section, "Totals are positive.", False)
+    return store
+
+
+def chore(store: FakeStore, clone: Path) -> Launch:
+    return Launch("hand-ACME-3", "ACME-3", queue.STORY_HAND, clone, story(store, "ACME-3"), ME, False)
+
+
+def test_an_edited_section_mid_build_keeps_building_and_starts_nothing_new(
+    clone: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = replanned()
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert (features.phase(feature), feature.reapproval_due) == (features.Phase.BUILDING, True)
+    found = reconcile(facts(store, hands=(held(),), cap=3), store)
+    assert found == [launch(store, clone, restart=True), chore(store, clone)]
+    capsys.readouterr()
+    Build(store, GitShell(), repo).context(["s1", *TEAM])
+    assert "# Contract" in capsys.readouterr().out
+    [item] = [i for i in waiting(store) if i.kind == "planning"]
+    assert (item.rank, item.lines, item.next) == (3, [queue.REAPPROVE], ["/deckhand:feature"])
+
+
+def test_approving_again_starts_the_waiting_story(
+    clone: Path, tmp_path: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = replanned("Contract")
+    assert all(not isinstance(a, Launch) or a.ref != "ACME-2" for a in reconcile(facts(store, cap=3), store))
+    record_round(FeatureReview(store), tmp_path)
+    capsys.readouterr()
+    Plan(store).context(["approval", *TEAM])
+    assert "Totals are positive." in capsys.readouterr().out
+    answered(state, Decide(store), capsys, ["feature-approval", P1], "Approve")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None and not feature.reapproval_due
+    assert launch(store, clone, "ACME-2") in reconcile(facts(store, cap=3), store)

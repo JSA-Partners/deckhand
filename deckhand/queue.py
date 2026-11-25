@@ -29,6 +29,7 @@ DRAFT_HAND, STORY_HAND = "draft", "story"
 TAKEN = "draft-taken"
 FEATURE_SKILL = "/deckhand:feature"
 READY = "the feature is ready for approval"
+REAPPROVE = "the plan changed since approval; approve it again"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
 SPIKE = "spike"
@@ -223,9 +224,9 @@ def _day(date: str | None) -> str:
 
 
 def _planning(store: Store, feature: Feature) -> list[Item]:
-    if features.phase(feature) is not Phase.PLANNING:
+    if not features.replanning(feature):
         return []
-    found = features.approval_gaps(store, feature) or [READY]
+    found = features.approval_gaps(store, feature) or [REAPPROVE if feature.reapproval_due else READY]
     name = feature.project["name"]
     return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
 
@@ -326,6 +327,7 @@ def _feature_items(
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
+    found += _planning(store, feature)
     if not building:
-        found += _planning(store, feature) + _spikes(store, feature, read, restarts, idle, quiet)
+        found += _spikes(store, feature, read, restarts, idle, quiet)
     return found

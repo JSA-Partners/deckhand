@@ -64,6 +64,8 @@ def why_not(
             return drafted
     elif features.phase(feature) is not Phase.BUILDING:
         return f"{features.describe(feature.project)} is {features.phase(feature).value}, not building"
+    elif feature.reapproval_due and queue.last_start(feature.records.get(story["id"], []), queue.STORY_HAND) is None:
+        return f"{ref} waits for the changed plan's approval"
     else:
         waiting = _blocked_by(story, edges, {s["id"]: s for s in feature.live})
         if waiting:

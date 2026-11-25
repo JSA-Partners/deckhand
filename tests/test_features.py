@@ -15,6 +15,7 @@ from deckhand.features import (
     load,
     open_feature,
     phase,
+    replanning,
     team_features,
 )
 from deckhand.ops import create_id
@@ -41,10 +42,37 @@ def test_phase_parked_planning_building_released():
     assert phase(Feature(project())) is Phase.PLANNING
     approved = {"a": [APPROVAL], "b": [APPROVAL]}
     assert phase(Feature(project(), [story("a"), story("b")], approved, "1")) is Phase.BUILDING
-    assert phase(Feature(project(), [story("a"), story("b")], approved, "2")) is Phase.PLANNING
-    assert phase(Feature(project(), [story("a"), story("b")], {"a": [APPROVAL]})) is Phase.PLANNING
+    assert phase(Feature(project(), [story("a"), story("b")], {"a": []})) is Phase.PLANNING
     done = [story("a", "Done"), story("b", "Canceled"), story("c", "Duplicate")]
     assert phase(Feature(project(), done)) is Phase.RELEASED
+
+
+def test_a_plan_changed_after_approval_keeps_building_and_waits_for_reapproval():
+    stories = [story("a"), story("b")]
+    approved = {"a": [APPROVAL], "b": [APPROVAL]}
+    current = Feature(project(), stories, approved, "1")
+    assert (phase(current), current.approved_once, current.reapproval_due, replanning(current)) == (
+        Phase.BUILDING,
+        True,
+        False,
+        False,
+    )
+    for changed in (Feature(project(), stories, approved, "2"), Feature(project(), stories, {"a": [APPROVAL]}, "1")):
+        assert (phase(changed), changed.approved_once, changed.reapproval_due, replanning(changed)) == (
+            Phase.BUILDING,
+            True,
+            True,
+            True,
+        )
+    never = Feature(project(), stories, {}, "1")
+    assert (phase(never), never.approved_once, never.reapproval_due, replanning(never)) == (
+        Phase.PLANNING,
+        False,
+        False,
+        True,
+    )
+    released = Feature(project(), [story("a", "Done")], {"a": [APPROVAL]})
+    assert (phase(released), replanning(released)) == (Phase.RELEASED, False)
 
 
 def test_open_feature_refuses_two():
