@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 from deckhand import implplan, reading, signoff
 from deckhand.config import LocalConfig
+from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet
 from deckhand.linear.client import LinearError
+from deckhand.ops import create_id
 from deckhand.records import Record
 from deckhand.step import Refusal
+from deckhand.steps.after import After
 from deckhand.store.fake import FakeStore
-from tests.test_chores import opened_next
-from tests.test_feature_approval import approve_everything, setup
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import TEAM, approve_everything, setup
 from tests.test_implplan import manifest
 from tests.test_queue import ME, Clock, alpha, hand, started
+from tests.test_step_build import state
+
+__all__ = ["state"]
 
 DAY = date(2026, 11, 17)
 LOCAL = LocalConfig(slot_cap=1)
@@ -117,3 +124,23 @@ def test_two_open_features_load_no_chore_feature_from_their_signed_stories():
     found = read(store)
     assert found.feature is None and found.notes[0].startswith("more than one feature is open")
     assert (found.chores, found.facts["chores"]) == ([], 0)
+
+
+@pytest.mark.parametrize("name", ["Older", "Zeta"])
+def test_the_feature_merged_last_stays_current_over_one_released_on_the_same_dates(name: str, state: Path):
+    clock = Clock()
+    store = released(store=FakeStore(now=clock))
+    merged, clock.ms = clock.ms, clock.ms - 3_600_000
+    older = create_id(f"ACME:{name}", "feature")
+    store.create_project(older, "ACME", name, "", [FEATURE_LABEL])
+    store.set_project_dates(older, "2026-11-16", "2026-11-23")
+    store.create_issue("s9", "ACME", "Nine", "Outcome.", older, [])
+    store.set_issue_state("s9", "Done")
+    clock.ms = merged
+    found = read(store)
+    assert (found.facts["feature"], found.facts["release"]) == ("Alpha", False)
+    assert [row["ref"] for row in found.facts["order"]] == ["ACME-1", "ACME-2"]
+    for n in ("1", "2"):
+        After(store).apply(["ACME-1", "done", n, "--note", "ran it", *TEAM])
+    found = read(store)
+    assert (found.facts["feature"], found.facts["release"]) == ("Alpha", True)

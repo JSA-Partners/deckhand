@@ -231,8 +231,18 @@ def current(store: Store, team: str) -> Feature | None:
     if found is not None:
         return found
     held = [p for p in team_features(store, team) if p["start_date"] and p["finished"]]
-    latest = max(held, key=lambda p: (p["target_date"] or "", p["start_date"], p["id"]), default=None)
-    return load(store, latest) if latest is not None else None
+    latest = max((_dates(p) for p in held), default=None)
+    # Features released on the same dates are told apart by their last merge, so only those are loaded.
+    tied = [load(store, p) for p in held if _dates(p) == latest]
+    return max(tied, key=_last_merge, default=None)
+
+
+def _dates(project: dict) -> tuple[str, str]:
+    return project["target_date"] or "", project["start_date"]
+
+
+def _last_merge(feature: Feature) -> tuple[str, str]:
+    return max((s.get("completed_at") or "" for s in feature.stories), default=""), feature.project["id"]
 
 
 def parked(store: Store, team: str) -> list[dict]:

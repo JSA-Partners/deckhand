@@ -23,8 +23,8 @@ from tests.test_step_review import answer
 __all__ = ["state"]
 
 
-def released(items: list[str] = CHORES) -> FakeStore:
-    store = setup()
+def released(items: list[str] = CHORES, store: FakeStore | None = None) -> FakeStore:
+    store = setup(store)
     approve_everything(store)
     me = store.viewer()["id"]
     start = {"kind": queue.STORY_HAND, "session": "hand-ACME-1"}
