@@ -45,8 +45,7 @@ def read(
     elsewhere = _elsewhere(store, team, feature, fleet_read, notes)
     me = _me(person, notes)
     waiting = _waiting(store, team, feature, elsewhere, me, fleet_read, local, notes, quiet, restarts, idle)
-    facts = _facts(store, feature, waiting, fleet_read, me, local, today, notes)
-    facts["chores"] = sum(chores.unsettled(f) for f in elsewhere)
+    facts = _facts(store, feature, elsewhere, waiting, fleet_read, me, local, today, notes)
     return Reading(team, feature, me, waiting, facts, notes, elsewhere)
 
 
@@ -59,10 +58,10 @@ def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
 
 
 def _elsewhere(store: Store, team: str, feature: Feature | None, read: fleet.Fleet, notes: list[str]) -> list[Feature]:
-    seen = {s["id"] for s in feature.stories} if feature is not None else set()
     alive = frozenset(s.name for s in read.sessions if fleet.alive(s))
     try:
-        return chores.elsewhere(store, team, seen, alive)
+        held = [feature] if feature is not None else features.open_features(store, team)
+        return chores.elsewhere(store, team, {s["id"] for f in held for s in f.stories}, alive)
     except Refusal as error:
         notes.append(str(error))
     return []
@@ -155,6 +154,7 @@ def _waiting(
 def _facts(
     store: Store,
     feature: Feature | None,
+    elsewhere: list[Feature],
     waiting: list[queue.Item],
     read: fleet.Fleet,
     me: str | None,
@@ -163,10 +163,12 @@ def _facts(
     notes: list[str],
 ) -> dict:
     top = waiting[0] if waiting else None
+    released = feature is not None and features.phase(feature) is Phase.RELEASED
     facts = empty(notes, read, local) | {
         "top": {"lines": top.lines, "next": top.next} if top else None,
         "feature": feature.project["name"] if feature is not None else None,
-        "release": feature is not None and features.phase(feature) is Phase.RELEASED and not chores.open_in(feature),
+        "release": released and not any(chores.open_in(f) for f in [feature, *elsewhere]),
+        "chores": sum(chores.unsettled(f) for f in elsewhere),
     }
     if feature is not None:
         facts["budget"] = _budget(feature, today)

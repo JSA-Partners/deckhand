@@ -109,3 +109,12 @@ def test_a_long_chore_name_is_cut_at_a_word():
     name = store.project(id)["name"]
     assert len(name) <= 64 and name.endswith("...")
     assert name == "Chore: Rotate the webhook signing secret in the vault and..."
+
+
+def test_a_canceled_candidate_loads_no_feature(counting_store: Callable[[FakeStore], CountingStore]):
+    store = released()
+    opened_next(store)
+    store.set_issue_state("s1", "Canceled")
+    counting = counting_store(store)
+    assert chores.elsewhere(CachedStore(counting), "ACME", {"s3"}) == []
+    assert [call[0] for call in counting.log if call[0] in ("issues", "project_issues")] == ["issues"]

@@ -24,7 +24,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
 from deckhand.store.state import STALE_AFTER, LocalState
 from tests.shell import Shell, row
-from tests.test_chores import released
+from tests.test_chores import opened_next, released
 from tests.test_feature_approval import P1, TEAM, setup
 from tests.test_queue import asked
 from tests.test_status import write
@@ -240,6 +240,20 @@ def test_captain_context_holds_the_release_line_while_a_chore_is_open(
     answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "1"], "Done")
     engine_wrote(store)
     assert output([], capsys).splitlines()[-1] == "ready to release: Alpha"
+
+
+def test_an_open_chore_in_an_older_released_feature_holds_the_release_line(
+    clone: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = released(["rotate the webhook secret"])
+    gamma = opened_next(store)
+    store.set_project_dates(gamma, "2026-11-23", "2026-11-30")
+    store.set_issue_state("s3", "Done")
+    engine_wrote(store)
+    assert "ready to release" not in output([], capsys)
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    engine_wrote(store)
+    assert output([], capsys).splitlines()[-1] == "ready to release: Beta"
 
 
 def test_the_json_carries_the_brief_the_engine_and_the_top_item(clone: Path, capsys: pytest.CaptureFixture[str]):

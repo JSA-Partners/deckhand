@@ -84,7 +84,8 @@ def elsewhere(store: Store, team: str, seen: set[str], alive: frozenset[str] = f
     candidates = sorted(id for id in signed - seen if _wanted(store.records(id), id, alive))
     if not candidates:
         return []
-    owning = {issue["project"] for issue in store.issues(candidates) if issue["team"] == team}
+    live = [i for i in store.issues(candidates) if i["team"] == team and i["state"] not in features.DROPPED]
+    owning = {issue["project"] for issue in live}
     held = sorted((p for p in features.team_features(store, team) if p["id"] in owning), key=lambda p: p["id"])
     return [features.load(store, p) for p in held]
 

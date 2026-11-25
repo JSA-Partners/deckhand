@@ -4,13 +4,16 @@ from datetime import date
 
 import pytest
 
-from deckhand import reading
+from deckhand import implplan, reading, signoff
 from deckhand.config import LocalConfig
 from deckhand.fleet import Fleet
 from deckhand.linear.client import LinearError
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
+from tests.test_chores import opened_next
 from tests.test_feature_approval import approve_everything, setup
+from tests.test_implplan import manifest
 from tests.test_queue import ME, Clock, alpha, hand, started
 
 DAY = date(2026, 11, 17)
@@ -103,3 +106,14 @@ def test_missing_clone_degrades_to_a_note():
     policy = reading.policy_for(notes)({"labels": ["widgets"]})
     assert policy.second_signoff is False
     assert [n.startswith("no clone for widgets in ") for n in notes] == [True]
+
+
+def test_two_open_features_load_no_chore_feature_from_their_signed_stories():
+    store = setup()
+    plan = manifest(after_merge=["rotate the webhook secret"])
+    store.put_record("s1", Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", plan))
+    store.put_record("s1", Record(signoff.KIND, "s1", "c1:digest", "person:sess", {"answer": "Sign off"}))
+    opened_next(store)
+    found = read(store)
+    assert found.feature is None and found.notes[0].startswith("more than one feature is open")
+    assert (found.chores, found.facts["chores"]) == ([], 0)
