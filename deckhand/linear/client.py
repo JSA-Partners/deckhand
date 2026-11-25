@@ -70,6 +70,10 @@ class KeepAliveTransport:
         self._connection = None
         self._down = None
 
+    # The linker and the worker share this transport across threads, so a revive never closes the connection.
+    def revive(self) -> None:
+        self._down = None
+
     def __call__(self, request: urllib.request.Request) -> bytes:
         if self._down is not None:
             raise self._down

@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from deckhand import budget, config, fleet, planning, policy, reading
-from deckhand.linear.client import LinearError
+from deckhand.linear.client import LinearError, default_transport
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.step import Refusal
@@ -99,6 +99,7 @@ class Linker:
         last = self._last
         if last is not None and not budget.due(budget.current(), self._clock(), last.at):
             return last
+        default_transport.revive()
         try:
             self._last = link(self._team, self._fleet_now, self._clock, kept=self._kept)
         finally:

@@ -277,6 +277,34 @@ def test_failed_spike_hand_is_stalled(state: Path):
     assert [i.kind for i in waiting(store, sessions=(gone,))] == ["planning", "spike"]
 
 
+def spike_items(store: FakeStore, session: Session, restarts: int, idle: frozenset[str] = frozenset(), **rest) -> list:
+    feature, policy = features.open_feature(store, "ACME"), Policy("widgets")
+    restarted = {fleet.ref_of(session.name): restarts}
+    found = queue.items(
+        store, "ACME", feature, OTHER, Fleet([session]), lambda _: policy, restarts=restarted, idle=idle, **rest
+    )
+    return [(i.kind, i.ref, i.lines) for i in found if i.kind == "stalled"]
+
+
+def test_its_second_stop_gives_a_stalled_item(state: Path):
+    store, project, key = spiked(state)
+    gone = Session("id-s", fleet.spike_name(key), "sid", "/w", iso(1795000000000), "failed", None, None)
+    assert spike_items(store, gone, 0) == []
+    assert spike_items(store, gone, 1) == [("stalled", key, [f"{gone.name} is failed with no answer document"])]
+    assert spike_items(store, gone, 1, quiet=frozenset({key})) == []
+
+
+def test_a_blocked_idle_spike_after_its_nudge_gives_a_stalled_item(state: Path):
+    store, project, key = spiked(state)
+    blocked = Session("id-s", fleet.spike_name(key), "sid", "/w", iso(1795000000000), "blocked", "idle", None)
+    assert spike_items(store, blocked, 1) == []
+    assert spike_items(store, blocked, 0, frozenset({key})) == []
+    found = [("stalled", key, [f"{blocked.name} is idle with no answer document"])]
+    assert spike_items(store, blocked, 1, frozenset({key})) == found
+    answer(store, project, key)
+    assert spike_items(store, blocked, 1, frozenset({key})) == []
+
+
 def test_spike_of_another_feature_never_shows(state: Path):
     store, project, key = spiked(state)
     earlier = spikes.key(create_id("ACME:Alpha", "feature"), QUESTION)

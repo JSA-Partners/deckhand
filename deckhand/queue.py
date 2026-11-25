@@ -230,7 +230,14 @@ def _planning(store: Store, feature: Feature) -> list[Item]:
     return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
 
 
-def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
+def _spikes(
+    store: Store,
+    feature: Feature,
+    read: fleet.Fleet,
+    restarts: Mapping[str, int],
+    idle: frozenset[str],
+    quiet: frozenset[str],
+) -> list[Item]:
     from deckhand import stalls
 
     if feature.stories:
@@ -255,8 +262,10 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
         if fleet.alive(session) and session.waiting_for:
             lines = [f"{session.name} waits on {session.waiting_for}"]
             found.append(Item("prompt", 4, key, session.name, session.started_at, 0, lines, next))
-        elif fleet.failed(session) and key not in answered:
-            lines = [f"{session.name} is {session.state} with no answer document"]
+        elif key in answered or key in quiet or restarts.get(key) == 0:
+            continue
+        elif fleet.failed(session) or key in idle:
+            lines = [f"{session.name} is {'idle' if key in idle else session.state} with no answer document"]
             found.append(Item(stalls.STALLED, 4, key, session.name, session.started_at, 0, lines, next))
     return found
 
@@ -318,5 +327,5 @@ def _feature_items(
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
     if not building:
-        found += _planning(store, feature) + _spikes(store, feature, read)
+        found += _planning(store, feature) + _spikes(store, feature, read, restarts, idle, quiet)
     return found

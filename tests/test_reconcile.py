@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, mirror, queue, stalls, wakes
+from deckhand import asks, config, features, fleet, mirror, queue, spikes, stalls, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
@@ -428,6 +428,53 @@ def test_a_wanted_spike_with_a_stopped_session_restarts(clone: Path):
     spike = HandRow(name, key, P1, "spike", str(clone / ".worktrees" / name), BEFORE, None, None, None, 0)
     found = reconcile(facts(store, spike_row(key, "stopped"), hands=(spike,)), store)
     assert found == [Launch(name, key, "spike", clone, None, ME, restart=True)]
+
+
+QUESTION = "Does the queue keep order?"
+
+
+def spike_hand(clone: Path, **changes: object) -> HandRow:
+    key = spikes.key(P1, QUESTION)
+    name = fleet.spike_name(key)
+    found = HandRow(name, key, "", "spike", str(clone / ".worktrees" / name), BEFORE, "id-x", "sid-x", None, 0)
+    return replace(found, **changes)
+
+
+def spike_answered(store: FakeStore) -> None:
+    key = spikes.key(P1, QUESTION)
+    store.put_document(spikes.answer_id(P1, key), P1, spikes.TITLE + QUESTION, "Yes.")
+
+
+def test_a_started_spike_that_died_is_resumed_once(clone: Path):
+    store, dead = empty_feature(), spike_hand(clone)
+    stopped = spike_row(dead.ref, "stopped")
+    expected = [Resume(dead.name, "sid-x", dead.cwd, wakes.nudge_body(), (), None, restart=True)]
+    assert reconcile(facts(store, stopped, hands=(dead,)), store) == expected
+    assert reconcile(facts(store, stopped, hands=(replace(dead, restarts=1),)), store) == []
+    assert reconcile(facts(store, stopped, hands=(dead,), readable=False), store) == []
+    unadopted = replace(dead, session=None)
+    relaunch = Launch(dead.name, dead.ref, "spike", clone, None, ME, restart=True)
+    assert reconcile(facts(store, stopped, hands=(unadopted,)), store) == [relaunch]
+    spike_answered(store)
+    assert reconcile(facts(store, stopped, hands=(dead,)), store) == []
+
+
+def test_a_spike_of_a_mapped_feature_is_not_restarted(clone: Path):
+    store, dead = empty_feature(), spike_hand(clone)
+    store.create_issue("s9", "ACME", "Orders", "Outcome.", P1, [])
+    assert reconcile(facts(store, spike_row(dead.ref, "stopped"), hands=(dead,)), store) == []
+
+
+def test_an_idle_hand_after_a_killed_turn_gets_its_nudge(clone: Path):
+    store, idle = empty_feature(), spike_hand(clone, turn_ended=at(T - 200))
+    blocked, quiet = spike_row(idle.ref, "blocked", "idle"), frozenset({idle.name})
+    key = f"nudge:{idle.ref}:{idle.turn_ended}"
+    expected = [Post(idle.name, key, wakes.NUDGE, wakes.nudge_body(), "", None, restart=True)]
+    assert reconcile(facts(store, blocked, hands=(idle,), idle=quiet), store) == expected
+    assert reconcile(facts(store, blocked, hands=(idle,)), store) == []
+    assert reconcile(facts(store, blocked, hands=(replace(idle, restarts=1),), idle=quiet), store) == []
+    spike_answered(store)
+    assert reconcile(facts(store, blocked, hands=(idle,), idle=quiet), store) == []
 
 
 def test_a_first_stop_is_restarted_once_with_the_restart_flag(clone: Path):

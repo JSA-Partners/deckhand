@@ -73,6 +73,16 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/deckhand\" hook apply stop"
+          }
+        ]
+      }
     ]
   }
 }

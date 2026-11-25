@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckhand import asks, chores, delivery, fleet, mirror, order, queue, stalls, startable, wakes
+from deckhand import asks, chores, delivery, fleet, mirror, order, queue, spikes, stalls, startable, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
@@ -101,7 +101,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
             found += mirror.due(store, feature, facts.mirrored) if facts.readable else []
         else:
             found += delivery.deliver(tick, None)
-        found += _spikes(tick)
+        found += _spikes(tick) + _stalled_spikes(tick, store, reading.feature)
     return [action for action in found if action.name not in facts.busy]
 
 
@@ -301,3 +301,30 @@ def _spikes(tick: _Tick) -> list[Action]:
             spike = Launch(row.name, row.ref, SPIKE, parents[1], None, tick.me, restart)
             found.append(tick.take(spike, slot=True))
     return found
+
+
+# A spike that died or idles with no answer gets one restart; past it, the stalled item waits for the person.
+def _stalled_spikes(tick: _Tick, store: Store, feature: Feature | None) -> list[Action]:
+    rows = [r for r in tick.facts.hands.values() if r.kind == SPIKE and r.short and not r.restarts]
+    if feature is None or feature.stories or not tick.facts.readable or not rows:
+        return []
+    project = feature.project["id"]
+    answered = {spikes.key_of(project, document) for document in spikes.answered(store, feature)}
+    found: list[Action] = []
+    for row in sorted(rows, key=lambda held: held.name):
+        if row.ref in answered or row.name in tick.acted:
+            continue
+        session = tick.alive(row.name)
+        if session is not None and row.name in tick.facts.idle and row.turn_ended:
+            key = f"nudge:{row.ref}:{row.turn_ended}"
+            found.append(Post(row.name, key, wakes.NUDGE, wakes.nudge_body(), row.issue, None, restart=True))
+        elif session is None and tick.free() and not tick.backing_off(row.name):
+            found += [tick.take(action, slot=True) for action in _restarted_spike(tick, row)]
+    return found
+
+
+def _restarted_spike(tick: _Tick, row: HandRow) -> list[Launch | Resume]:
+    if row.session and tick.listed(row.session):
+        return [Resume(row.name, row.session, row.cwd, wakes.nudge_body(), (), None, restart=True)]
+    parents = Path(row.cwd).parents
+    return [Launch(row.name, row.ref, SPIKE, parents[1], None, tick.me, restart=True)] if len(parents) > 1 else []

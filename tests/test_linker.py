@@ -11,6 +11,9 @@ from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
 from deckhand.store.open import Stores
 from tests.conftest import CountingStore
+from tests.test_linear_client import Wire, wire
+
+__all__ = ["wire"]
 
 DAY = date(2026, 11, 17)
 T = 1_763_546_400.0
@@ -92,3 +95,17 @@ def test_a_link_keeps_what_the_meters_heard(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(store_open, "flush", lambda: flushed.append(True))
     linked_now()
     assert flushed == [True]
+
+
+def test_a_link_after_a_network_error_reads_again(monkeypatch: pytest.MonkeyPatch, wire: Wire) -> None:
+    def link(team, fleet_now, clock, stores=None, today=None, kept=None) -> linker.Linked:
+        return linker.Linked(None, None, clock(), "" if wire.send() else "network")
+
+    now = [T]
+    monkeypatch.setattr(linker, "link", link)
+    monkeypatch.setattr(budget, "current", lambda: budget.Budget(limit=100, remaining=90))
+    linked_now = linker.Linker("ACME", Fleet, lambda: now[0])
+    assert linked_now().error == "network"
+    wire.up, now[0] = True, T + 1
+    assert linked_now().error == ""
+    assert wire.sent == 2

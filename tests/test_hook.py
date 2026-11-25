@@ -384,6 +384,13 @@ def test_hooks_json_uses_the_full_path_form():
     assert pre["Bash"] == ['"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" hook apply bash']
 
 
+def test_a_turn_that_ends_on_an_api_error_marks_its_end_as_a_stop_does():
+    from tests.conftest import ROOT
+
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    assert hooks.get("StopFailure") == hooks["Stop"]
+
+
 def test_permission_gap_recorded_after_the_feature_is_released(monkeypatch, tmp_path: Path):
     from tests.test_step_decide import feature_store
 

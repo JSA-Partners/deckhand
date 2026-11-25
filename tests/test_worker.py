@@ -12,6 +12,9 @@ from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 from deckhand.worker import Runs, Worker, opened_acts
 from tests.shell import Shell
+from tests.test_linear_client import Wire, wire
+
+__all__ = ["wire"]
 
 NAME = "hand-ACME-1"
 
@@ -130,3 +133,24 @@ def test_a_stopped_worker_drops_what_is_still_queued():
     threading.Timer(0.1, gate.set).start()
     worker.stop()
     assert ran == [first]
+
+
+def test_each_worker_action_starts_on_a_reset_transport(wire: Wire):
+    class Sending:
+        def run(self, action: Action) -> str | None:
+            return None if wire.send() else "asleep"
+
+    @contextmanager
+    def opened() -> Iterator[Runs]:
+        yield Sending()
+
+    worker = Worker(opened)
+    worker.start()
+    adopt = Adopt(NAME, "id-ACME-1", "sid-ACME-1")
+    worker.submit(adopt)
+    assert drained(worker, 1) == [(adopt, "asleep")]
+    wire.up = True
+    worker.submit(adopt)
+    assert drained(worker, 1) == [(adopt, None)]
+    worker.stop()
+    assert wire.sent == 2
