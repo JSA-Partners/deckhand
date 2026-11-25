@@ -19,7 +19,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import LocalRecords
 from deckhand.store.state import LocalState
 from tests.shell import Shell, World, row
-from tests.test_mirror import named
+from tests.test_mirror import CONTRACT, named
 from tests.test_reconcile import story
 from tests.test_step_hand import ME, building, clone, state
 
@@ -402,7 +402,7 @@ class Refusing(FakeStore):
 def mirrors(store: FakeStore) -> list[Attach | PutDocument]:
     feature = features.current(named(store), "ACME")
     assert feature is not None
-    return mirror.wanted(store, feature)
+    return mirror.wanted(feature, CONTRACT)
 
 
 def test_an_attach_writes_through_the_app_store_then_its_digest(rows: LocalState, db: Path):
@@ -433,4 +433,4 @@ def test_a_failed_attach_leaves_no_digest_and_is_due_next_read(rows: LocalState,
     feature = features.current(store, "ACME")
     assert feature is not None
     done = {key: body["digest"] for key, body in rows.keyed(mirror.PREFIX).items()}
-    assert first in mirror.due(store, feature, done)
+    assert first in mirror.due(feature, CONTRACT, done)

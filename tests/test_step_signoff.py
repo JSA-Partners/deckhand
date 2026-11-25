@@ -1037,4 +1037,4 @@ def test_a_sign_off_gh_cannot_name_still_records_and_is_not_mirrored(
     assert held.data["answer"] == signoff.SIGN and "repo" not in held.data
     feature = features.current(store, "ACME")
     assert feature is not None
-    assert not [a for a in mirror.wanted(store, feature) if isinstance(a, Attach) and "github.com" in a.url]
+    assert not [a for a in mirror.wanted(feature, "") if isinstance(a, Attach) and "github.com" in a.url]

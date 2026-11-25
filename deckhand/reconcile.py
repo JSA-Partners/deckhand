@@ -37,6 +37,7 @@ class Facts:
     readable: bool = True
     posted: frozenset[str] = frozenset()
     mirrored: Mapping[str, str] = field(default_factory=dict)
+    contract: str = ""
 
 
 @dataclass
@@ -98,7 +99,7 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature)
             found += _sync(tick, feature) + delivery.deliver(tick, feature) + _start(tick, store, feature)
-            found += mirror.due(store, feature, facts.mirrored) if facts.readable else []
+            found += mirror.due(feature, facts.contract, facts.mirrored) if facts.readable else []
         else:
             found += delivery.deliver(tick, None)
         found += _spikes(tick) + _stalled_spikes(tick, store, reading.feature)

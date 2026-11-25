@@ -29,6 +29,7 @@ class Linked:
     problems: tuple[str, ...] = ()
     labels: Mapping[str, list[str]] = field(default_factory=dict)
     broken: Mapping[Path, str] = field(default_factory=dict)
+    contract: str = ""
 
 
 @dataclass
@@ -81,11 +82,13 @@ def link(
                 kept.labels[name] = held("app").repository_labels(name)
         labels = {name: kept.labels[name] for name in teams}
         # Reads the Contract here, so the engine's mirrors never make a Linear read of their own.
+        held_contract = None
         if found.feature is not None and mirror.needs_contract(found.feature):
-            planning.document(held("app"), found.feature, "Contract")
+            held_contract = planning.document(held("app"), found.feature, "Contract")
     except (LinearError, Refusal) as error:
         return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)
-    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken)
+    contract = held_contract["url"] if held_contract else ""
+    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken, contract)
 
 
 # The poller calls this on its timer, on a poke and on a wake alike, so the budget gates all three.

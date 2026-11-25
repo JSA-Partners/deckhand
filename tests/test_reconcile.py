@@ -16,7 +16,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
 from tests.test_feature_approval import P1, approve_everything, reapprove, setup
-from tests.test_mirror import named
+from tests.test_mirror import CONTRACT, named
 from tests.test_queue import asked
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
 from tests.test_step_stories import setup as empty_feature
@@ -666,9 +666,9 @@ def test_reconcile_wants_each_mirror_not_yet_written_and_none_when_unreadable(cl
     store = named(building())
     feature = features.current(store, "ACME")
     assert feature is not None
-    wanted = mirror.wanted(store, feature)
-    assert reconcile(facts(store, cap=0), store) == wanted
+    wanted = mirror.wanted(feature, CONTRACT)
+    assert reconcile(facts(store, cap=0, contract=CONTRACT), store) == wanted
     written = {a.key: a.digest for a in wanted}
-    assert reconcile(facts(store, cap=0, mirrored=written), store) == []
-    assert reconcile(facts(store, cap=0, readable=False), store) == []
-    assert reconcile(facts(store, cap=0, busy=frozenset({"mirror:s1"})), store) == wanted[1:]
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, mirrored=written), store) == []
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, readable=False), store) == []
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, busy=frozenset({"mirror:s1"})), store) == wanted[1:]

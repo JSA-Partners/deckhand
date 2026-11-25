@@ -28,7 +28,7 @@ def signed(store: FakeStore, answer: str = signoff.SIGN) -> Record:
 
 
 def attachments(store: FakeStore) -> list[Attach]:
-    return [a for a in mirror.wanted(store, load(store)) if isinstance(a, Attach)]
+    return [a for a in mirror.wanted(load(store), CONTRACT) if isinstance(a, Attach)]
 
 
 def test_an_approval_wants_one_attachment_per_live_story_at_the_contract_url():
@@ -45,6 +45,10 @@ def test_an_approval_wants_one_attachment_per_live_story_at_the_contract_url():
 
 def test_an_approval_without_a_name_wants_nothing():
     assert attachments(building()) == []
+
+
+def test_an_approval_waits_for_a_link_that_read_the_contract():
+    assert mirror.wanted(load(named(building())), "") == []
 
 
 def test_a_second_approval_rewrites_the_same_url():
@@ -87,10 +91,10 @@ def test_written_mirrors_are_not_due_again():
     store = named(building())
     signed(store)
     feature = load(store)
-    wanted = mirror.wanted(store, feature)
+    wanted = mirror.wanted(feature, CONTRACT)
     assert len(wanted) == 3
-    assert mirror.due(store, feature, {}) == wanted
-    assert mirror.due(store, feature, {a.key: a.digest for a in wanted}) == []
+    assert mirror.due(feature, CONTRACT, {}) == wanted
+    assert mirror.due(feature, CONTRACT, {a.key: a.digest for a in wanted}) == []
 
 
 def mapped_stub(store: FakeStore, story: str, decisions: list[dict], after: list[str]) -> None:
@@ -107,7 +111,7 @@ def test_the_story_map_body_lists_tier_answers_and_chores():
     store.put_record("s1", Record(implplan.PURPOSE, "s1", "p1", "agent:hand", plan))
     store.put_record("s1", chores.after_record(chores.AFTER_DONE, "s1", 1, "Run the backfill", {"note": "ran"}))
     feature = load(store)
-    [document] = [a for a in mirror.wanted(store, feature) if isinstance(a, PutDocument)]
+    [document] = [a for a in mirror.wanted(feature, CONTRACT) if isinstance(a, PutDocument)]
     assert (document.name, document.key) == (f"mirror:{P1}", f"mirror:{P1}:story-map")
     assert (document.id, document.parent, document.title) == (ops.create_id(P1, "story-map"), P1, "Story map")
     assert document.body == (
@@ -128,19 +132,19 @@ def test_the_story_map_body_lists_tier_answers_and_chores():
 def test_no_story_map_is_wanted_without_local_map_records():
     store = building()
     mapped_stub(store, "s1", [], [])
-    assert not [a for a in mirror.wanted(store, load(store)) if isinstance(a, PutDocument)]
+    assert not [a for a in mirror.wanted(load(store), CONTRACT) if isinstance(a, PutDocument)]
     for story in ("s1", "s2"):
         store.set_issue_state(story, "Done")
     released = features.current(store, "ACME")
     assert released is not None and features.phase(released) is features.Phase.RELEASED
-    assert mirror.wanted(store, replace(released, records={})) == []
+    assert mirror.wanted(replace(released, records={}), CONTRACT) == []
 
 
 def test_before_a_plan_the_story_map_lists_the_maps_after_merge_items_as_open():
     store = building()
     mapped_stub(store, "s1", [], ["Run the backfill"])
     mapped_stub(store, "s2", [], [])
-    [document] = [a for a in mirror.wanted(store, load(store)) if isinstance(a, PutDocument)]
+    [document] = [a for a in mirror.wanted(load(store), CONTRACT) if isinstance(a, PutDocument)]
     assert "- After merge: Run the backfill (open)\n" in document.body
 
 

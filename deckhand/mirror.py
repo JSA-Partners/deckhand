@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from deckhand import chores, features, ops, planning, signoff, versions
+from deckhand import chores, features, ops, signoff, versions
 from deckhand.actions import Attach, Mirror, PutDocument
 from deckhand.records import Record, content_hash
-from deckhand.store import Store
 
 PREFIX = "mirror:"
 STORY_MAP = "Story map"
@@ -24,16 +23,15 @@ def _approval(feature: features.Feature, story: dict) -> Record | None:
     return held if held is not None and held.data.get("name") else None
 
 
-def _approvals(store: Store, feature: features.Feature) -> list[Attach]:
-    held = [(story, found) for story in feature.live if (found := _approval(feature, story)) is not None]
-    contract = planning.document(store, feature, "Contract") if held else None
-    if contract is None:
-        return []
+def _approvals(feature: features.Feature, contract: str) -> list[Attach]:
     found = []
-    for story, record in held:
-        name = str(record.data["name"])
-        metadata = {"version": record.version, "approvedBy": name, "approvedAt": record.at}
-        found.append(_attach(story["id"], contract["url"], f"Plan approved by {name}", "{approvedAt__since}", metadata))
+    for story in feature.live if contract else []:
+        record = _approval(feature, story)
+        if record is not None:
+            name = str(record.data["name"])
+            metadata = {"version": record.version, "approvedBy": name, "approvedAt": record.at}
+            title = f"Plan approved by {name}"
+            found.append(_attach(story["id"], contract, title, "{approvedAt__since}", metadata))
     return found
 
 
@@ -95,13 +93,14 @@ def needs_contract(feature: features.Feature) -> bool:
     return any(_approval(feature, story) is not None for story in feature.live)
 
 
-def wanted(store: Store, feature: features.Feature) -> list[Mirror]:
-    found: list[Mirror] = list(_approvals(store, feature))
+# The Contract URL comes from the last link, so an approval named since then waits for the next one.
+def wanted(feature: features.Feature, contract: str) -> list[Mirror]:
+    found: list[Mirror] = list(_approvals(feature, contract))
     for story in feature.live:
         found += _sign_offs(feature.records.get(story["id"], []), story["id"])
     document = _story_map(feature)
     return found + ([document] if document is not None else [])
 
 
-def due(store: Store, feature: features.Feature, mirrored: Mapping[str, str]) -> list[Mirror]:
-    return [action for action in wanted(store, feature) if mirrored.get(action.key) != action.digest]
+def due(feature: features.Feature, contract: str, mirrored: Mapping[str, str]) -> list[Mirror]:
+    return [action for action in wanted(feature, contract) if mirrored.get(action.key) != action.digest]

@@ -963,3 +963,24 @@ def released_link_calls(clone: Path, store: FakeStore) -> int:
 
 def test_a_link_reads_the_contract_only_for_a_named_approval(clone: Path):
     assert released_link_calls(clone, building()) + 1 == released_link_calls(clone, named(building()))
+
+
+def test_an_approval_named_between_links_waits_for_the_next_link_without_a_read(clone: Path):
+    configure(clone, 1)
+    store = building()
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    rig = Rig(store)
+    rig.ready()
+    named(store)
+    calls = rig.down.calls
+    for _ in range(3):
+        rig.landed()
+        rig.step()
+    assert rig.down.calls == calls
+    assert not [a for a in rig.worker.submitted if isinstance(a, Attach)]
+    rig.clock.t += 0.5
+    rig.link()
+    rig.landed()
+    rig.step()
+    assert [a.name for a in rig.worker.submitted if isinstance(a, Attach)] == ["mirror:s1", "mirror:s2"]

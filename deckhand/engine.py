@@ -218,6 +218,7 @@ class Engine:
             policies=good.policies if good is not None else {},
             unheard=acts.unheard(self._state),
             labels=good.labels if good is not None else {},
+            contract=good.contract if good is not None else "",
             idle=self._idle,
             readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
             posted=self._state.posted(),
