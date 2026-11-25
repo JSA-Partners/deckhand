@@ -95,6 +95,8 @@ def _check_decisions(index: int, value: object) -> None:
             raise Refusal(f"entry {index} decision {number} is not an object with item and draft; {shape}")
         if not all(isinstance(text, str) and text.strip() for text in decision.values()):
             raise Refusal(f"entry {index} decision {number} needs a non-empty item and draft; {shape}")
+        if decision["item"] in (earlier["item"] for earlier in value[:number]):
+            raise Refusal(f"entry {index} decision {number} repeats the item {decision['item']}")
 
 
 def _check_tier(index: int, entry: dict) -> None:

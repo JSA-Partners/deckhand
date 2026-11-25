@@ -111,6 +111,15 @@ def test_map_refuses_a_malformed_decisions_field(tmp_path: Path, bad: object):
     assert store.writes == []
 
 
+def test_map_refuses_a_decision_item_named_twice(tmp_path: Path):
+    store = setup()
+    store.writes.clear()
+    twice = [{"item": "Greeting wording", "draft": "Bonjour"}, {"item": "Greeting wording", "draft": "Hola"}]
+    with pytest.raises(Refusal, match="entry 1 decision 1 repeats the item Greeting wording"):
+        run(store, tmp_path, [entry("api"), entry("ui", decisions=twice)])
+    assert store.writes == []
+
+
 def test_map_twice_writes_once(tmp_path: Path):
     store = setup()
     entries = [entry("api"), entry("ui", depends_on=["api"])]
