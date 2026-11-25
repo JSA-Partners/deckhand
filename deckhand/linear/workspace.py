@@ -177,7 +177,7 @@ class Workspace:
         after = None
         while True:
             page = self._client.query(queries.LEGACY_ATTACHMENTS, {"after": after})["attachments"]
-            ids += [node["id"] for node in page["nodes"] if urlsplit(node["url"]).hostname == LEGACY_HOST]
+            ids += [node["id"] for node in page["nodes"] if self._legacy_of(node, team["id"])]
             if not page["pageInfo"]["hasNextPage"]:
                 break
             after = page["pageInfo"]["endCursor"]
@@ -189,6 +189,10 @@ class Workspace:
                 self._client.query(queries.ATTACHMENT_DELETE, {"id": id})
 
         return [Change(f"delete {len(ids)} {LEGACY_HOST} attachments", run)]
+
+    def _legacy_of(self, node: dict[str, Any], team_id: str) -> bool:
+        owner = ((node.get("issue") or {}).get("team") or {}).get("id")
+        return owner == team_id and urlsplit(node["url"]).hostname == LEGACY_HOST
 
     def _create_label(self, fields: dict[str, Any]) -> None:
         try:

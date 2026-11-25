@@ -574,8 +574,8 @@ def test_team_labels_past_one_page_are_read_in_full():
     assert team["id"] == found["id"]
 
 
-def attachment(id: str, url: str) -> dict:
-    return {"id": id, "url": url}
+def attachment(id: str, url: str, team: str = "ACME") -> dict:
+    return {"id": id, "url": url, "issue": {"team": {"id": f"team-{team}"}}}
 
 
 def deletes(linear: FakeLinear) -> list[str]:
@@ -590,7 +590,7 @@ def test_setup_context_counts_legacy_attachments(capsys: pytest.CaptureFixture[s
     ]
     make(linear).context(ARGS)
     assert "delete 2 deckhand.invalid attachments" in capsys.readouterr().out
-    assert deletes(linear) == []
+    assert linear.writes == []
 
 
 def test_setup_apply_deletes_only_that_host(capsys: pytest.CaptureFixture[str]):
@@ -621,4 +621,32 @@ def test_setup_sweeps_legacy_attachments_past_one_page():
     linear.attachments = [attachment(f"a{n}", f"https://deckhand.invalid/record/{n}") for n in range(600)]
     make(linear).apply(ARGS)
     assert len(deletes(linear)) == 600
+    assert linear.attachments == []
+
+
+def test_setup_sweeps_only_the_team_being_set_up(capsys: pytest.CaptureFixture[str]):
+    linear = FakeLinear("ACME", "OTHER")
+    linear.attachments = [
+        attachment("mine", "https://deckhand.invalid/record/one"),
+        attachment("theirs", "https://deckhand.invalid/record/two", team="OTHER"),
+    ]
+    make(linear).context(ARGS)
+    assert "delete 1 deckhand.invalid attachments" in capsys.readouterr().out
+    make(linear).apply(ARGS)
+    assert deletes(linear) == ["mine"]
+    assert [x["id"] for x in linear.attachments] == ["theirs"]
+
+
+def test_rerun_after_a_failed_sweep_deletes_only_the_rest():
+    linear = FakeLinear("ACME")
+    setup = make(linear)
+    setup.apply(ARGS)
+    linear.attachments = [attachment(f"a{n}", f"https://deckhand.invalid/record/{n}") for n in range(3)]
+    linear.fail_after = len(linear.writes) + 1
+    with pytest.raises(LinearError):
+        setup.apply(ARGS)
+    assert deletes(linear) == ["a0"]
+    linear.fail_after = None
+    setup.apply(ARGS)
+    assert deletes(linear) == ["a0", "a1", "a2"]
     assert linear.attachments == []
