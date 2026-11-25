@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import sys
 
 from deckhand import answers, decisions, features, fleet, gaps, launch, ops, spec
@@ -18,12 +19,12 @@ from deckhand.watch import HOLD
 
 CAPTAIN_DENIED = "the captain runs deckhand commands only; check the fact with Read or Grep, or ask a spike"
 BASH_DENIED = (
-    "the captain runs deckhand commands only, each one bare call with no ; & | < > ` $( or line break,"
-    " quoted text included; check the fact with Read or Grep, or ask a spike"
+    "the captain runs deckhand commands only, one call with no unquoted ; & | < > or line break"
+    " and no $( or backtick outside single quotes; check the fact with Read or Grep, or ask a spike"
 )
+OPERATORS = frozenset(";&|<>()")
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
-CHAINS = (";", "&", "|", ">", "<", "`", "$(", "\n", "\r")
 USAGE = (
     "hook apply answer|ask|bash|permission reads one hook event as JSON on stdin; "
     "hook apply session reads one in the captain role and none for a hand"
@@ -103,10 +104,35 @@ def _pre_tool_denial(reason: str) -> None:
     print(json.dumps({"hookSpecificOutput": output}))
 
 
+# $( and backticks still expand inside double quotes, so only single quotes make them text.
+def _expands(command: str) -> bool:
+    quote, escaped = "", False
+    for at, char in enumerate(command):
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char in "`\n" or command.startswith("$(", at):
+            return True
+        elif char == '"':
+            quote = "" if quote else '"'
+        elif char == "'" and not quote:
+            quote = "'"
+    return False
+
+
 def bare_deckhand(command: object) -> bool:
-    if not isinstance(command, str) or not command.startswith("deckhand "):
+    if not isinstance(command, str) or _expands(command):
         return False
-    return not any(mark in command for mark in CHAINS)
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    return tokens[:1] == ["deckhand"] and not any(token and set(token) <= OPERATORS for token in tokens)
 
 
 # The SDK host may skip PermissionRequest and auto-allow read-only commands, so the captain's Bash is checked here.

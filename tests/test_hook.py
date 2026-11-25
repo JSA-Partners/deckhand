@@ -512,8 +512,8 @@ BASH_DENIAL = {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": (
-            "the captain runs deckhand commands only, each one bare call with no ; & | < > ` $( or line break,"
-            " quoted text included; check the fact with Read or Grep, or ask a spike"
+            "the captain runs deckhand commands only, one call with no unquoted ; & | < > or line break"
+            " and no $( or backtick outside single quotes; check the fact with Read or Grep, or ask a spike"
         ),
     }
 }
@@ -525,7 +525,17 @@ def bash(command: object) -> dict:
 
 @pytest.mark.parametrize(
     "command",
-    ["deckhand captain context", 'deckhand feature apply new --name "Help files" --weeks 1'],
+    [
+        "deckhand captain context",
+        "deckhand",
+        " deckhand captain context",
+        'deckhand feature apply new --name "Help files" --weeks 1',
+        'deckhand review apply X resolve --reason "a; b & c"',
+        "deckhand decide context decision-item 'Search & filter'",
+        "deckhand plan context 'a $(b)'",
+        "deckhand plan context 'one\ntwo'",
+        'deckhand plan context "\\$(id)"',
+    ],
 )
 def test_a_captain_bare_deckhand_call_passes(monkeypatch, capsys, command):
     monkeypatch.setenv("DECKHAND_ROLE", "captain")
@@ -537,6 +547,15 @@ def test_a_captain_bare_deckhand_call_passes(monkeypatch, capsys, command):
     "command",
     [
         "deckhand captain context; ls",
+        "deckhand x;rm y",
+        "deckhand x | tee",
+        "deckhand x > f",
+        'deckhand "$(id)"',
+        "deckhand `id`",
+        "deckhand x && y",
+        "deckhand 'unbalanced",
+        'deckhand "a\\" \' $(id) \'"',
+        'deckhand "one\ntwo"',
         "deckhand captain context && ls",
         "deckhand captain context || ls",
         "deckhand captain context & ls",
@@ -548,8 +567,6 @@ def test_a_captain_bare_deckhand_call_passes(monkeypatch, capsys, command):
         "deckhand captain context\nls",
         "ls -R skills/feature",
         "uv run --no-project python -I -c 'print(1)'",
-        "deckhand",
-        " deckhand captain context",
         "DECKHAND_ROLE=hand deckhand captain context",
         None,
         ["deckhand", "captain"],
