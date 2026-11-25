@@ -485,7 +485,8 @@ def installed(settings: dict | str) -> Path:
 
 
 def written() -> dict:
-    return launch.captain_settings(launch.protected(config.config_dir(), answers.state_dir()))
+    clones = config.local().clones.values()
+    return launch.captain_settings(launch.protected(config.config_dir(), answers.state_dir()), clones=clones)
 
 
 def test_captain_settings_this_version_writes_add_no_line(state: Path, capsys: pytest.CaptureFixture[str]):

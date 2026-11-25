@@ -197,6 +197,28 @@ def worktree_detached(clone: Path, name: str, base: str, runner: Runner = run) -
     return path
 
 
+# Without its own .git file, git in the path walks up and acts on the clone itself.
+def is_worktree(clone: Path, path: Path, runner: Runner = run) -> bool:
+    if not (path / ".git").is_file():
+        return False
+    listing = call(["git", "worktree", "list", "--porcelain"], clone, runner)
+    listed = [Path(line[len("worktree ") :]) for line in listing.splitlines() if line.startswith("worktree ")]
+    return any(entry.resolve() == path.resolve() for entry in listed)
+
+
+def refresh_detached(clone: Path, path: Path, ref: str, runner: Runner = run) -> str:
+    if is_worktree(clone, path, runner):
+        call(["git", "checkout", "--detach", ref], path, runner)
+        return head(path, runner)
+    if path.is_dir() and not any(path.iterdir()):
+        path.rmdir()
+    elif path.exists():
+        raise Refusal(f"{path} is not a worktree of {clone} and is not empty; move it aside")
+    call(["git", "worktree", "prune"], clone, runner)
+    call(["git", "worktree", "add", "--detach", str(path), ref], clone, runner)
+    return head(path, runner)
+
+
 def clone_root(cwd: Path, runner: Runner = run) -> Path:
     try:
         common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()
@@ -232,9 +254,17 @@ def changed_since(worktree: Path, reviewed: str, base: str, runner: Runner = run
     return call(["git", "diff", tree, "HEAD"], worktree, runner)
 
 
+def commits_between(path: Path, base: str, head: str, runner: Runner = run) -> list[str]:
+    return call(["git", "log", "--oneline", f"{base}..{head}"], path, runner).splitlines()
+
+
 def changed_files(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     out = call(["git", "diff", "--name-only", f"{base}...HEAD"], worktree, runner)
     return out.splitlines()
+
+
+def show(repo: Path, ref: str, path: str, runner: Runner = run) -> str:
+    return call(["git", "show", f"{ref}:{path}"], repo, runner)
 
 
 def ls_files(repo: Path, ref: str, runner: Runner = run) -> list[str]:

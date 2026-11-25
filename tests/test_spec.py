@@ -7,6 +7,7 @@ import pytest
 
 from deckhand import features, launch, planning, spec, versions
 from deckhand.records import Record, content_hash
+from deckhand.steps.stories import map_records
 from deckhand.store.fake import FakeStore
 from tests.test_step_decide import feature_store
 
@@ -49,22 +50,34 @@ def test_an_unanswered_decision_item_is_left_out():
     assert spec.gather(store, *loaded(store)).decisions == [{"item": "Refunds wait", "answer": "Discuss", "note": None}]
 
 
+def test_each_story_reads_only_its_own_answers():
+    store = feature_store()
+    item(store, "s1", "Greeting wording", {"answer": "Bonjour", "item": "Greeting wording"})
+    item(store, "s2", "Greeting wording", {"answer": "Hola", "item": "Greeting wording"})
+    feature, _ = loaded(store)
+    for ref, said in (("ACME-1", "Bonjour"), ("ACME-2", "Hola")):
+        found = spec.gather(store, feature, features.story(store, feature, ref))
+        assert found.decisions == [{"item": "Greeting wording", "answer": said, "note": None}]
+
+
 def test_a_missing_section_is_none_and_prints_as_not_written():
     store = feature_store()
     found = spec.gather(store, *loaded(store))
     assert (found.examples, found.invariants, found.decisions) == (None, None, [])
     assert spec.text(found) == (
+        "# After merge\n\nnone\n\n"
         "# Contract\n\nWritten by the person.\n\nPOST /orders.\n\n"
         "# Decisions\n\nnot written\n\n"
         "# Examples\n\nnot written\n\n"
         "# Invariants\n\nnot written\n\n"
-        "# Scope\n\nOne\n\nOutcome.\n"
+        "# Scope\n\nOne\n\nOutcome.\n\n"
+        "# State chart\n\nnone\n"
     )
 
 
 def test_decisions_print_as_a_list():
     decisions = [{"item": "Ids", "answer": "Keep", "note": None}, {"item": "X", "answer": "Change", "note": "Y"}]
-    found = spec.Spec("C", "E", "I", "One", decisions)
+    found = spec.Spec("C", "E", "I", "One", decisions, [], "")
     assert "# Decisions\n\n- Ids: Keep\n- X: Change (Y)\n\n# Examples" in spec.text(found)
 
 
@@ -144,3 +157,52 @@ def test_a_first_line_over_the_bound_keeps_its_start(temp: Path):
     first = "\u00e9" * 15000 + "\n"
     shown = spec.fitted("ACME-1-build", first, "rest\n")
     assert size(shown) < spec.LIMIT and shown.startswith("\u00e9" * 100) and spec.CUT in shown
+
+
+def test_plain_undoes_a_self_autolink_and_escapes():
+    assert spec.plain("[greet.sh](<http://greet.sh>) and tests/\\*\\_test.sh") == "greet.sh and tests/*_test.sh"
+    assert spec.plain("[docs](<https://x.io>)") == "[docs](<https://x.io>)"
+    assert spec.plain("a \\`b\\` c") == "a `b` c"
+    assert spec.plain("`[x.io](<http://x.io>) \\*`") == "`[x.io](<http://x.io>) \\*`"
+    assert spec.plain("a ` b \\_c\n\nlater `x` \\*") == "a ` b _c\n\nlater `x` *"
+    fenced = "```\n[x.io](<http://x.io>) \\_\n```\n[y.io](<http://y.io>)"
+    assert spec.plain(fenced) == "```\n[x.io](<http://x.io>) \\_\n```\ny.io"
+
+
+def test_gather_returns_plain_fields_and_the_saved_section_stays_raw():
+    store = feature_store()
+    feature, _ = loaded(store)
+    raw = "See [x.io](<http://x.io>), a\\_b."
+    planning.save_section(store, feature, "Examples", raw, False)
+    item(store, "s1", "Ids", {"answer": "tests/\\*", "item": "Ids", "question": "Q?"})
+    found = spec.gather(store, *loaded(store))
+    assert found.examples == f"{planning.WRITTEN}\n\nSee x.io, a_b."
+    assert found.decisions[0]["answer"] == "tests/*"
+    assert planning.section(store, feature, "Examples") == f"{planning.WRITTEN}\n\n{raw}"
+
+
+def test_the_spec_shows_after_merge_items():
+    store = feature_store()
+    stub = {"unknowns": [], "new_here": [], "decisions": [], "after_merge": ["rotate the key", "drop the old queue"]}
+    store.put_record("s1", Record("stub", "one", "1", "agent:stories", stub))
+    found = spec.gather(store, *loaded(store))
+    assert found.after_merge == ["rotate the key", "drop the old queue"]
+    assert spec.text(found).startswith("# After merge\n\n- rotate the key\n- drop the old queue\n\n# Contract")
+
+
+@pytest.mark.parametrize(
+    "fact,chart,shown", [("concurrency", "queued -> sent", "queued -> sent"), ("data_rule", "", "none")]
+)
+def test_the_spec_shows_the_state_chart_the_map_holds(fact: str, chart: str, shown: str):
+    store = feature_store()
+    for record in map_records("s1", {"tier": fact, "state_chart": chart}):
+        store.put_record("s1", record)
+    found = spec.gather(store, *loaded(store))
+    assert found.state_chart == chart
+    assert spec.text(found).endswith(f"# State chart\n\n{shown}\n")
+
+
+def test_a_chart_written_by_a_person_is_left_unread():
+    store = feature_store()
+    store.put_record("s1", Record("state-chart", "s1", "v1", "person:s", {"chart": "a -> b"}))
+    assert spec.gather(store, *loaded(store)).state_chart == ""

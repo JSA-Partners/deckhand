@@ -33,8 +33,7 @@ flowchart TB
     subgraph Plan
         direction LR
         Frame --> StoryMap["Story map"]
-        StoryMap --> Sitting
-        Sitting --> Approval
+        StoryMap --> Approval
     end
 
     subgraph Build
@@ -50,12 +49,11 @@ flowchart TB
 | Step | Claude | You, to move it on |
 | --- | --- | --- |
 | Frame | Shapes the problem with you, then lists the facts it rests on and spikes the unverified ones | Write the frame, or take a draft |
-| Story map | Proposes one-line stories and the contract they share | Approve the contract and the invariants |
-| Sitting | Asks about each story where it is uncertain, then checks your answers against the code | Answer before you see its view |
-| Approval | Reviews the stories against each other | Approve the feature |
+| Story map | Proposes one-line stories with their tiers, state charts, after-merge chores and drafted answers to the open decisions | Confirm each answer, or give your own |
+| Approval | Shows the contract, the examples, the invariants and the story map on one screen, and reviews the stories against each other | Approve or change |
 | Hand | Writes the implementation plan and builds it with tests | Answer its questions |
 | Review | Reviews the plan and the branch in rounds, ordered by confidence | Decide what a hand cannot |
-| Sign-off | Shows what changed, the evidence, a targeted tuicr pass and a quiz | Sign off |
+| Sign-off | Shows what changed, the evidence and the riskiest lines with why each matters, then your pass in tuicr | Say when tuicr is done, then sign off |
 | Merge | Merges pinned to the commit you signed, then does the after-merge chores it can | Do the ones it leaves you |
 
 You talk only to the captain. The engine, in a terminal tab of its own, starts, resumes and stops
@@ -128,9 +126,9 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 Run setup once per machine, and again when a repository joins. Then launch the captain with the line
 it prints, which starts Claude Code under the captain's own settings, in focus view: your prompt, a
 line summing up its tool calls, and its reply. Without a prompt, the captain runs deckhand, reads
-files, runs a few read-only commands such as `ls` and `git status`, writes in deckhand's own input
-folders and asks you. Anything else shows Claude Code's usual permission prompt, and it never
-messages another session. It runs the feature and sign-off skills for you when an item needs them.
+files, writes in deckhand's own input folders and asks you. Anything else is denied with a message
+rather than prompted, and it never messages another session. It runs the feature and sign-off
+skills for you when an item needs them.
 Hands run `story`, `spike` and `draft` on their own; you never type those.
 
 When the engine is not running, the captain copies its start command for you: open a new terminal

@@ -1,6 +1,6 @@
 ---
 name: signoff
-description: "Walk the person through one story's sign-off, one screen at a time, from what changed to the quiz, and record their decision."
+description: "Walk the person through one story's sign-off, one screen at a time, from what changed to tuicr, and record their decision."
 arguments: story
 argument-hint: "<story>"
 effort: high
@@ -25,20 +25,15 @@ it back, which makes the sign-off "Not yet". A stage stopped at its cap
 is decided with `deckhand decide context review-cap REF --stage branch`, or
 `--stage plan`. When the context above shows no change summary, the hand is not done: stop here.
 
-Then show screens 1 to 3 in one reply, each from `deckhand signoff context REF --screen N`:
-what changed, evidence, findings. Tuicr and the quiz stay separate steps, each waiting for the
+Then show screens 1 to 4 in one reply, each from `deckhand signoff context REF --screen N`:
+what changed, evidence, findings, what to check. Tuicr stays a separate step, waiting for the
 person.
 
-For the tuicr screen, run `deckhand signoff apply REF review --watch` in the
-background. Its first lines are the tuicr command and each file's reason: give them to the person
-as a plain message. It seeds the reasons once tuicr opens and ends when tuicr closes, printing the
-person's own comments. The person need not report opening or closing tuicr. Ask about each comment
-whether it is work for the hand; if one is, say so before the sign-off question. With none, go on
-to the quiz. On a timeout line, run it again.
-
-For the quiz screen, ask each open item with
-`deckhand decide context quiz REF --item 1`, then 2 and on. A wrong answer
-prints the code that answers it: show that code, then ask the item again until it is right.
+For the tuicr screen, run `deckhand signoff apply REF review`. Give the person its lines as a plain
+message: the hunks and head, the tuicr command, each file's reason. Then ask a plain dialog, not a
+deckhand question: "Done in tuicr?" with Done and Later. On Later, record nothing and stop. On Done,
+read `deckhand signoff context REF --screen 5`. Ask about each comment whether it is work for the
+hand; if one is, say so before the sign-off question.
 
 Last, decide `deckhand decide context sign-off REF`. While anything is missing it offers
 "Not yet" and "Back"; "Back" records nothing. Run it early for hand work. The answer to this question is final: never ask

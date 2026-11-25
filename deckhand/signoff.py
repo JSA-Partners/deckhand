@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import features, implplan, quiz, review, versions
+from deckhand import features, implplan, review, review_gaps, tuicr, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
-from deckhand.step import Refusal
+from deckhand.review_gaps import Gap, both
+from deckhand.step import Refusal, hand_role
 from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
@@ -27,6 +28,17 @@ def summary_record(story: str, head: str, summary: ChangeSummary) -> Record:
     return Record(SUMMARY, story, found, "agent:signoff", {"summary": asdict(summary), "digest": found, "head": head})
 
 
+# A diff that only deletes, renames or changes modes shows no new line, so it has nothing to check.
+def check_to_check(summary: ChangeSummary, hunks: list[tuicr.Hunk]) -> None:
+    shown = tuicr.describe_ranges(tuicr.shown_ranges(hunks))
+    if shown and not summary.to_check:
+        raise Refusal("summary field to_check must hold at least one entry, the riskiest line of the diff")
+    for index, entry in enumerate(summary.to_check):
+        if not tuicr.holds(hunks, entry.where):
+            where = f"to_check entry {index} names {entry.where}"
+            raise Refusal(f"{where}, which the diff does not show; it shows {shown or 'no new line'}")
+
+
 def held_summary(records: list[Record], story: str, head: str) -> ChangeSummary | None:
     held = versions.held(records, SUMMARY, story)
     if held is None or held.data.get("head") != head:
@@ -37,60 +49,64 @@ def held_summary(records: list[Record], story: str, head: str) -> ChangeSummary 
         return None
 
 
-def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSummary | None) -> list[str]:
-    held = quiz.held_set(records, story)
-    if held is None or held.data.get("head") != head:
-        return [f"no quiz is saved at {head}; a story with nothing to ask still saves an empty quiz"]
-    found = []
-    if summary is not None and held.data.get("summary") != digest(summary):
-        found.append("the change summary differs from the one the quiz was written from; save the quiz again")
-    if not quiz.passed(records, story, head):
-        found.append("quiz items still open: " + ", ".join(str(n) for n in quiz.open_items(records, story)))
-    return found
-
-
-def _branch_gap(records: list[Record], story: str, head: str) -> list[str]:
+def _branch_gap(records: list[Record], story: str, head: str) -> list[Gap]:
     if review.cleared(records, story, "branch", head):
         return []
     latest = review.last(review.counted(records, f"{story}:branch")[0])
     if latest is None or review.reviewed(latest) != head:
-        return [f"the branch review has not reviewed the signed head {head}; run a branch round"]
-    return ["the branch review has not stopped clean, a P1 is open; fix it; at the cap the person decides"]
+        return [
+            Gap(
+                "branch-review",
+                f"the branch review has not reviewed the signed head {head}; run a branch round",
+                f"the branch review has not reviewed the signed head {head}",
+            )
+        ]
+    return [
+        Gap(
+            "branch-review",
+            "the branch review has not stopped clean, a P1 is open; fix it; at the cap the person decides",
+            "the branch review has not stopped clean, a P1 is open",
+        )
+    ]
 
 
-def _plan_gap(records: list[Record], story: str) -> list[str]:
+def _plan_gap(records: list[Record], story: str) -> list[Gap]:
     plan = versions.held(records, implplan.PURPOSE, story)
     if plan is None or not review.cleared(records, story, "plan", plan.version):
-        return ["the plan review has not stopped clean at the current plan version"]
+        return [both("plan-review", "the plan review has not stopped clean at the current plan version")]
     return []
 
 
-def _tuicr_gap(records: list[Record], story: str, head: str) -> list[str]:
+def _tuicr_gap(records: list[Record], story: str, head: str) -> list[Gap]:
     held = versions.held(records, TUICR, story)
-    if held is None or held.data.get("head") != head:
-        return [f"no tuicr review is built at {head}; run signoff apply REF review"]
+    summary = held_summary(records, story, head)
+    stale = summary is not None and held is not None and held.data.get("summary") != digest(summary)
+    if held is None or held.data.get("head") != head or stale:
+        text = f"no tuicr review is built at {head}"
+        return [Gap("tuicr", f"{text}; it waits for the person's tuicr review", text)]
     return []
 
 
-def gaps(records: list[Record], story: str, head: str) -> list[str]:
+def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     summary = held_summary(records, story, head)
-    found = [] if summary else [f"no change summary is saved at {head}"]
-    found += _quiz_gap(records, story, head, summary)
+    found = [] if summary else [both("summary", f"no change summary is saved at {head}")]
     for stage in ("plan", "branch"):
         found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
-        found += review.delivery_gaps(records, story, stage) + review.left_open_gaps(records, story, stage)
+        found += review_gaps.delivery_gaps(records, story, stage, ref)
+        found += review_gaps.left_open_gaps(records, story, stage, ref)
     found += _tuicr_gap(records, story, head)
     if not passing(records, story, head):
-        found.append(f"checks are not passing at {head}")
+        found.append(both("checks", f"checks are not passing at {head}"))
     return found
 
 
-def version(records: list[Record], story: str, head: str) -> str | None:
+def version(head: str, summary: ChangeSummary) -> str:
+    return f"{head}:{digest(summary)}"
+
+
+def version_at(records: list[Record], story: str, head: str) -> str | None:
     summary = held_summary(records, story, head)
-    held = quiz.held_set(records, story)
-    if summary is None or held is None:
-        return None
-    return f"{head}:{digest(summary)}:{held.version}"
+    return version(head, summary) if summary is not None else None
 
 
 def signed(records: list[Record], story: str) -> Record | None:
@@ -116,8 +132,8 @@ def _first(records: list[Record], story: str, head: str) -> bool:
     return (
         held is not None
         and held.data.get("answer") == SIGN
-        and held.version == version(records, story, head)
-        and not gaps(records, story, head)
+        and held.version == version_at(records, story, head)
+        and not gaps(records, story, head, story)
         and voided(records, story, held) is None
     )
 
@@ -162,9 +178,9 @@ def standing(records: list[Record], story: str, head: str, second: bool = False)
     if at != head:
         return f"the head moved to {head}"
     unreviewed = _plan_gap(records, story) + _branch_gap(records, story, head)
-    if unreviewed and held.version == version(records, story, head):
-        return unreviewed[0]
-    return "the sign-off no longer matches the change summary or the quiz"
+    if unreviewed and held.version == version_at(records, story, head):
+        return unreviewed[0].hand if hand_role() else unreviewed[0].person
+    return "the sign-off no longer matches the change summary"
 
 
 def after_items(records: list[Record], story: str) -> list[str]:

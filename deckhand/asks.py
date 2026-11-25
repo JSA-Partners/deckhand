@@ -4,7 +4,7 @@ import json
 import posixpath
 from pathlib import PurePosixPath
 
-from deckhand import fleet, review, signoff
+from deckhand import fleet, review, review_gaps, signoff
 from deckhand.questions import MAX_OPTIONS, MIN_OPTIONS, RECOMMENDED
 from deckhand.records import HAND, Record, content_hash
 from deckhand.step import Refusal
@@ -103,9 +103,10 @@ def proposed(records: list[Record], finding: str) -> Record | None:
     return next((r for r in open_proposals(records) if r.subject == finding), None)
 
 
-def proposal_line(proposal: Record) -> str:
+def proposal_line(proposal: Record, feature: bool = False) -> str:
     verb = "accept" if proposed_answer(proposal) == review.ACCEPT else "decline"
-    return f"the hand proposes to {verb} it: {proposal.data.get('reason', '')}"
+    who = "the captain" if feature else "the hand"
+    return f"{who} proposes to {verb} it: {proposal.data.get('reason', '')}"
 
 
 def _holding(records: list[Record], prefix: str, finding: str) -> Record:
@@ -124,7 +125,7 @@ def resolutions(
     last = review.last(review.rounds_of(records, prefix))
     held = {item["id"]: item for item in last.data["findings"]} if last else {}
     owner, stage = prefix.rsplit(":", 1)
-    earlier = {f["id"]: f for f in review.undecided_delivery(records, owner, stage)}
+    earlier = {f["id"]: f for f in review_gaps.undecided_delivery(records, owner, stage)}
     by_person = review.decided(records)
     ids = accept + [id for id, _ in propose]
     for id in ids:

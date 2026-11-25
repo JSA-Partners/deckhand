@@ -12,6 +12,7 @@ from deckhand.step import Refusal
 from deckhand.steps.checks import Checks, run_command
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
+from tests.test_feature_approval import reapprove
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import TEAM, BranchGit, planned, raw, record_round
 
@@ -51,7 +52,20 @@ def test_checks_record_pins_head(tmp_path: Path, repo: Path):
     assert commands.ran == [("make lint", repo / ".worktrees" / BRANCH), ("make types", repo / ".worktrees" / BRANCH)]
     record = held(store)
     assert record.version == "c2"
-    assert record.data == {"head": "c2", "passed": True, "command": None, "tail": None}
+    assert record.data == {
+        "head": "c2",
+        "passed": True,
+        "command": None,
+        "tail": None,
+        "commands": ["make lint", "make types"],
+    }
+
+
+def test_checks_record_the_commands_that_ran(tmp_path: Path, repo: Path):
+    store = labeled(tmp_path, repo)
+    configured(repo, "make lint")
+    run(store, repo, Commands())
+    assert held(store).data["commands"] == ["make lint"]
 
 
 def test_failing_check_is_recorded_then_refused_and_stops(tmp_path: Path, repo: Path):
@@ -123,6 +137,7 @@ def test_checks_without_a_worktree_refuses(tmp_path: Path, repo: Path):
 def test_checks_in_another_repository_refuses(tmp_path: Path, repo: Path):
     store = labeled(tmp_path, repo)
     store.set_labels("s1", ["gadgets"])
+    reapprove(store)
     commands = Commands()
     with pytest.raises(Refusal, match="another repository"):
         run(store, repo, commands)

@@ -77,7 +77,7 @@ def pending_for(state: Path, nonce: str, question: str, options: list[str]) -> N
         json.dumps(
             {
                 "nonce": nonce,
-                "kind": "contract",
+                "kind": "feature-approval",
                 "subject": "s",
                 "version": "v",
                 "stories": ["s1"],
@@ -290,6 +290,62 @@ def test_permission_hook_silent_outside_hands(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+CAPTAIN_DENIAL = {
+    "hookSpecificOutput": {
+        "hookEventName": "PermissionRequest",
+        "decision": {
+            "behavior": "deny",
+            "message": "the captain runs deckhand commands only; check the fact with Read or Grep, or ask a spike",
+        },
+    }
+}
+
+
+def test_a_captain_permission_request_is_denied_except_ask(monkeypatch, capsys):
+    from tests.test_step_decide import feature_store
+
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    for tool, input in (("Bash", {"command": "git log"}), ("Write", {"file_path": "/x"}), ("WebFetch", {})):
+        hook_with(
+            monkeypatch,
+            store,
+            ["permission"],
+            {"hook_event_name": "PermissionRequest", "tool_name": tool, "tool_input": input},
+        )
+        assert json.loads(capsys.readouterr().out) == CAPTAIN_DENIAL
+    asked_request = {"hook_event_name": "PermissionRequest", "tool_name": "AskUserQuestion", "tool_input": {}}
+    hook_with(monkeypatch, store, ["permission"], asked_request)
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert capsys.readouterr().out == ""
+    assert store.records("s1") == []
+
+
+@pytest.mark.parametrize("payload", ["not json", [], ""])
+def test_a_captain_permission_request_that_cannot_be_read_is_denied(monkeypatch, capsys, payload):
+    from tests.test_step_decide import feature_store
+
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    hook_with(monkeypatch, feature_store(), ["permission"], payload)
+    assert json.loads(capsys.readouterr().out) == CAPTAIN_DENIAL
+
+
+def test_a_hand_permission_request_is_unchanged(monkeypatch, capsys, tmp_path: Path):
+    from deckhand import gaps
+    from tests.test_step_decide import feature_store
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    request = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "git log"}}
+    hook_with(monkeypatch, store, ["permission"], request)
+    assert capsys.readouterr().out == ""
+    [held] = store.records("s1")
+    assert held.to_json() == gaps.record("s1", "PermissionRequest", "Bash", "git log", "").to_json()
+
+
 def test_permission_hook_never_decides(monkeypatch, capsys, tmp_path: Path):
     from tests.test_step_decide import feature_store
 
@@ -324,6 +380,8 @@ def test_hooks_json_uses_the_full_path_form():
         assert entry["matcher"] == matcher
         [command] = entry["hooks"]
         assert command["command"] == f'"${{CLAUDE_PLUGIN_ROOT}}/bin/deckhand" hook apply {action}'
+    pre = {entry["matcher"]: [h["command"] for h in entry["hooks"]] for entry in hooks["PreToolUse"]}
+    assert pre["Bash"] == ['"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" hook apply bash']
 
 
 def test_permission_gap_recorded_after_the_feature_is_released(monkeypatch, tmp_path: Path):
@@ -447,3 +505,111 @@ def test_a_captain_session_with_unreadable_input_still_prints_its_context_as_a_s
         assert rows.get(HOLD) is None
     assert context == [[]]
     assert capsys.readouterr().err == ""
+
+
+BASH_DENIAL = {
+    "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            "the captain runs deckhand commands only: deckhand, then words of letters, digits and _./:=@,+%-,"
+            " 'single-quoted' text or \"double-quoted\" text without $ ` \\ !, separated by spaces;"
+            " check the fact with Read or Grep, or ask a spike"
+        ),
+    }
+}
+
+
+def bash(command: object) -> dict:
+    return {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "deckhand captain context",
+        "deckhand",
+        'deckhand feature apply new --name "Help files" --weeks 1',
+        'deckhand review apply X resolve --reason "a; b & c"',
+        "deckhand decide context decision-item 'Search & filter'",
+        "deckhand plan apply Facts --file /tmp/x/facts.md --drafted",
+        'deckhand x "don\'t stop"',
+        "deckhand plan context 'a $(b)'",
+        'deckhand x \'say "hi"\' "a # * ? [b] ~ {c}"',
+    ],
+)
+def test_a_captain_bare_deckhand_call_passes(monkeypatch, capsys, command):
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    assert run(monkeypatch, ["bash"], bash(command)) == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "deckhand captain context; ls",
+        "deckhand next#;echo PWNED",
+        "deckhand next # '\necho PWNED\n# '",
+        "deckhand $'\\'' $(echo PWNED) '$'\\'''",
+        'deckhand x "a $(b)"',
+        'deckhand plan context "\\$(id)"',
+        'deckhand x "hi!"',
+        'deckhand x a"b"',
+        "deckhand x 'a''b'",
+        "deckhand plan context 'one\ntwo'",
+        "deckhand x\techo",
+        "deckhand x 'café'",
+        "deckhand x ~/f",
+        "deckhand x *",
+        "deckhand x {a,b}",
+        " deckhand captain context",
+        "deckhand captain context ",
+        "deckhandx",
+        "",
+        "deckhand x;rm y",
+        "deckhand x | tee",
+        "deckhand x > f",
+        'deckhand "$(id)"',
+        "deckhand `id`",
+        "deckhand x && y",
+        "deckhand 'unbalanced",
+        'deckhand "a\\" \' $(id) \'"',
+        'deckhand "one\ntwo"',
+        "deckhand captain context && ls",
+        "deckhand captain context || ls",
+        "deckhand captain context & ls",
+        "deckhand captain context | head",
+        "deckhand captain context > out.txt",
+        "deckhand stories apply --file < map.json",
+        "deckhand plan context spike `cat key`",
+        "deckhand plan context spike $(cat key)",
+        "deckhand captain context\nls",
+        "ls -R skills/feature",
+        "uv run --no-project python -I -c 'print(1)'",
+        "DECKHAND_ROLE=hand deckhand captain context",
+        None,
+        ["deckhand", "captain"],
+    ],
+)
+def test_a_captain_bash_call_other_than_one_bare_deckhand_is_denied(monkeypatch, capsys, command):
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    assert run(monkeypatch, ["bash"], bash(command)) == 0
+    assert json.loads(capsys.readouterr().out) == BASH_DENIAL
+
+
+@pytest.mark.parametrize("payload", ["not json", [], "", {"tool_name": "Bash"}])
+def test_a_captain_bash_call_that_cannot_be_read_is_denied(monkeypatch, capsys, payload):
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    assert run(monkeypatch, ["bash"], payload) == 0
+    assert json.loads(capsys.readouterr().out) == BASH_DENIAL
+
+
+@pytest.mark.parametrize("role", ["hand", None])
+@pytest.mark.parametrize("payload", [bash("ls -R skills; cat x | head"), bash("deckhand story context"), "not json"])
+def test_the_bash_hook_leaves_a_hand_and_a_plain_session_alone(monkeypatch, capsys, role, payload):
+    if role:
+        monkeypatch.setenv("DECKHAND_ROLE", role)
+    else:
+        monkeypatch.delenv("DECKHAND_ROLE", raising=False)
+    assert run(monkeypatch, ["bash"], payload) == 0
+    assert capsys.readouterr().out == ""

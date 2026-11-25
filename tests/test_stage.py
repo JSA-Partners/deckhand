@@ -62,7 +62,7 @@ def summarized(log: Log, head: str = HEAD) -> Record:
 
 def signed(log: Log, head: str = HEAD) -> Record:
     data = {"answer": signoff.SIGN, "nonce": "n1", "by": "viewer-1"}
-    return log.add(Record(signoff.KIND, "s1", f"{head}:digest:quiz", PERSON, data))
+    return log.add(Record(signoff.KIND, "s1", f"{head}:digest", PERSON, data))
 
 
 def cap_answer(log: Log, stage_name: str, latest: Record, answer: str) -> Record:
@@ -285,7 +285,7 @@ def test_an_answer_other_than_sign_off_is_not_merging():
     built(log)
     checked(log)
     summary = summarized(log)
-    log.add(Record(signoff.KIND, "s1", f"{HEAD}:digest:quiz", PERSON, {"answer": signoff.NOT_YET, "nonce": "n1"}))
+    log.add(Record(signoff.KIND, "s1", f"{HEAD}:digest", PERSON, {"answer": signoff.NOT_YET, "nonce": "n1"}))
     assert log.of() == stage.Stage(stage.SIGN_OFF, None, summary.at)
 
 

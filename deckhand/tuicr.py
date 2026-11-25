@@ -9,9 +9,8 @@ from pathlib import Path
 from deckhand.git import Runner, apply_hunks, call, run
 from deckhand.policy import Policy
 from deckhand.step import Refusal
-from deckhand.summary import ChangeSummary
+from deckhand.summary import ChangeSummary, location
 
-USERNAME = "deckhand"
 REF_PREFIX = "refs/deckhand/review/"
 _RANGE = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
@@ -107,6 +106,7 @@ def select_hunks(
             reasons.append("invariant site")
         if summary:
             reasons += [f"new here: {n.text}" for n in summary.new_here if n.path in hunk.paths]
+            reasons += [f"to check: {c.why}" for c in summary.to_check if holds([hunk], c.where)]
         if not reasons:
             continue
         if not hunk.lines and "\nBinary files " in hunk.header:
@@ -158,25 +158,13 @@ def shows(ranges: list[tuple[str, int, int]], path: str, line: int) -> bool:
     return any(path == shown and first <= line <= last for shown, first, last in ranges)
 
 
+def holds(hunks: list[Hunk], where: str) -> bool:
+    path, line = location(where)
+    return shows(shown_ranges(hunks), path, line)
+
+
 def describe_ranges(ranges: list[tuple[str, int, int]]) -> str:
     return "; ".join(f"{path} lines {first}-{last}" for path, first, last in ranges)
-
-
-def _anchor(hunk: Hunk) -> tuple[int, str]:
-    old_start, old_count, _, _ = _counts(hunk.lines[0])
-    old = old_start
-    new = old_start + (1 if old_count == 0 else 0)
-    first_removed = None
-    for line in hunk.lines[1:]:
-        if line.startswith("+"):
-            return new, "new"
-        if line.startswith("-"):
-            first_removed = first_removed or old
-            old += 1
-        elif line.startswith(" "):
-            old += 1
-            new += 1
-    return first_removed or old_start, "old"
 
 
 def file_reasons(pairs: list[tuple[str, str]]) -> dict[str, str]:
@@ -186,32 +174,6 @@ def file_reasons(pairs: list[tuple[str, str]]) -> dict[str, str]:
         if reason not in held:
             held.append(reason)
     return {path: "; ".join(reasons) for path, reasons in found.items()}
-
-
-# The first selected hunk of a file starts the trimmed commit's file, so it needs no line shift.
-def seed_comments(
-    session: str, hunks: list[Hunk], repo: Path | None = None, runner: Runner = run, present: list[dict] | None = None
-) -> int:
-    held = Counter((c.get("path"), c.get("content")) for c in present or [])
-    reasons = file_reasons([(hunk.path, hunk.reason) for hunk in hunks])
-    firsts: dict[str, Hunk] = {}
-    for hunk in hunks:
-        firsts.setdefault(hunk.path, hunk)
-    added = 0
-    for path, hunk in firsts.items():
-        argv = ["tuicr", "review", "add", "--session", session]
-        if repo is not None:
-            argv += ["--repo", str(repo)]
-        argv += ["--target-file", path]
-        if hunk.lines:
-            line, side = _anchor(hunk)
-            argv += ["--line", str(line), "--side", side]
-        if held[(path, reasons[path])]:
-            held[(path, reasons[path])] -= 1
-            continue
-        call([*argv, "--username", USERNAME, reasons[path]], None, runner)
-        added += 1
-    return added
 
 
 def persons(comments: list[dict], reasons: list[dict]) -> list[dict]:

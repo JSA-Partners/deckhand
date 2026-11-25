@@ -1,6 +1,6 @@
 ---
 name: feature
-description: "Plan one feature a screen at a time, from its frame to its approval, saving each answer as it is given."
+description: "Plan one feature from its frame to its approval, drafting and saving each section without asking."
 effort: high
 allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(impeccable:*)
 ---
@@ -9,41 +9,40 @@ allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(super
 
 !`deckhand feature context`
 
-Above: the open feature, its phase, next step and input folder, for each file you hand in.
-Work one feature and one screen at a time: show one thing, get one answer, move on. Each step offers writing it yourself or taking a draft, never
-a decision. Keep the given option order; mark none recommended.
+Above: the feature, its phase, next step and input folder.
+Work one feature at a time. Keep the given option order; mark none recommended.
 
-Open, pick, or park a feature with `deckhand feature apply new --name N [--reference REF]`,
-`deckhand feature apply pick --project ID --weeks 1|2`, or `deckhand feature apply park --project ID`.
+Open a feature with `deckhand feature apply new --name N --weeks 1|2 [--reference REF]`; pick or
+park one with `deckhand feature apply pick --project ID --weeks 1|2` or
+`deckhand feature apply park --project ID`. Read code only with Read and Grep in the planning
+worktree; refresh it with `deckhand feature apply fetch` on resuming.
 Shape it with superpowers:brainstorming before its Frame; use impeccable:impeccable for any story a
 person sees.
 
-`deckhand plan context` lists the sections; name one to read it back. Save every answer as
-given with `deckhand plan apply SECTION --file PATH [--drafted]`, `--drafted` for a draft, so
-stopping is safe.
+`deckhand plan context` lists the sections and each answered spike's KEY. Draft and save every
+section, asking nothing, with `deckhand plan apply SECTION --file PATH --drafted`.
 
-At Facts, offer each unverified fact a spike, its one-line question in a file:
-`deckhand hand apply spike --repository LABEL --file QUESTION.md`. Before the story map, read each
-answered `Spike:` document with the person.
+At Facts, ask as a spike each fact that needs a command run, its one-line question in a file:
+`deckhand hand apply spike --repository LABEL --file QUESTION.md`. Draft what does not rest
+on it, then end the turn. On `deckhand: a spike was answered`, read it with
+`deckhand plan context spike KEY` and fold it into Facts.
 
-Turn the settled plan into stories: `deckhand stories context` prints the map's fields, each story's
-decisions naming its expected items. Save it with `deckhand stories apply --file MAP.json`, which
-names each REF.
+Plan the stories from the fields `deckhand stories context` prints: a tier, a state chart at tier
+2 or 3, after-merge chores, and decision items with drafted answers. Save the map with
+`deckhand stories apply --file MAP.json`, which names each REF; ask each item with
+`deckhand decide context decision-item ITEM --story REF`.
 
 For every decision, run `deckhand decide context KIND SUBJECT`, pass its JSON unchanged to the
-question dialog, then `deckhand decide apply NONCE` once answered. Contract, invariants and
-feature-approval take the project id; tier, state-chart and sitting take the story; finding takes a
-story and `--finding ID`.
+dialog, then `deckhand decide apply NONCE` once answered. feature-approval, finding and
+review-cap take the project id.
 
-Decide the contract and invariants first; the contract gates the drafts and the sittings. Then take
-each story in turn: when its hand left a Draft document, offer `deckhand draft apply REF take`;
-decide its tier, walk its sitting with `deckhand sitting context REF`, decide its state-chart at
-tier 2 or 3, record answers with `deckhand sitting apply REF --file ANSWERS.md`, and decide the
-sitting. Ask each expected item with `deckhand decide context decision-item ITEM --story REF`, ITEM
-its map text.
+Drafts wait for the Contract and their answered items. Take each finished Draft with
+`deckhand draft apply REF take`, unasked.
 
-Then decide each gap `deckhand feature context` names. For the feature review, pass the lens and
-target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence scores
-the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`, HASH
-the target_hash line. A P1 is a gap: fix the Contract or story and review again, or the person
-declines it. Decide the feature-approval once no gap is left.
+Settle each gap `deckhand feature context` names. For the feature review, pass the
+lens and target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence
+scores the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`,
+HASH the target_hash line. Decide a proposed finding with
+`deckhand decide context finding PROJECT --finding ID`, the cap with
+`deckhand decide context review-cap PROJECT --stage feature`. Once no gap remains, and again
+after revising for a Change, show `deckhand plan context approval` and decide feature-approval.

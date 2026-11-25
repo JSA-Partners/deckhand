@@ -342,6 +342,6 @@ def test_recorded_lists_the_issues_holding_a_kind() -> None:
     store = FakeStore()
     store.put_record("s2", Record("tier", "s2", "v1", "person", {}))
     store.put_record("s1", Record("tier", "s1", "v1", "person", {}))
-    store.put_record("s1", Record("quiz", "s1", "v1", "person", {}))
+    store.put_record("s1", Record("sign-off-void", "s1", "v1", "person", {}))
     assert store.recorded("tier") == ["s1", "s2"]
     assert store.recorded("sign-off") == []

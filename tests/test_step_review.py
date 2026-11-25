@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, features, planning, review
+from deckhand import answers, asks, features, planning, review, review_gaps
 from deckhand.features import FEATURE_LABEL
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -17,7 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import FeatureReview, Review
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import P1, approve_everything, decided, load, sat, setup
+from tests.test_feature_approval import P1, approve_everything, decided, load, mapped, reapprove, setup
 from tests.test_implplan import BASE, Git, manifest, repo
 
 __all__ = ["repo"]
@@ -194,9 +194,8 @@ def test_a_delivery_finding_of_an_earlier_round_can_still_be_proposed(tmp_path: 
     step.apply([*resolve, "--propose-decline", finding_id(delivery), "--reason", "out of scope"])
     [proposal] = [r for r in store.records("s1") if r.kind == asks.PROPOSAL]
     assert (proposal.subject, proposal.version) == (finding_id(delivery), first.version)
-    assert review.delivery_gaps(store.records("s1"), "s1", "plan") == [
-        f"{finding_id(delivery)} waits for the person's decision"
-    ]
+    [gap] = review_gaps.delivery_gaps(store.records("s1"), "s1", "plan", "ACME-1")
+    assert gap.hand == f"{finding_id(delivery)} waits for the person's decision"
 
 
 def test_a_re_proposal_after_a_change_of_mind_is_the_newest(tmp_path: Path, repo: Path, capsys):
@@ -411,11 +410,18 @@ def test_branch_context_without_passing_checks_stops(tmp_path: Path, repo: Path,
 
 def feature_ready() -> FakeStore:
     store = setup()
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
-    decided(store, "invariants", P1, "Approve", ["s1", "s2"])
-    sat(store, "s1")
-    sat(store, "s2")
+    mapped(store, "s1")
+    mapped(store, "s2")
     return store
+
+
+def test_the_feature_review_target_is_plain_and_its_hash_raw(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = feature_ready()
+    planning.save_section(store, load(store), "Contract", "Reads [a.io](<http://a.io>) and x\\_y.", False)
+    first = shown(FeatureReview(store), capsys)
+    text = Path(first["target"]).read_text()
+    assert "Reads a.io and x_y." in text
+    assert first["target_hash"] == review.content_hash(features.review_text(store, load(store)) or "")
 
 
 def test_feature_review_p1_is_an_approval_gap(tmp_path: Path, state: Path, capsys: pytest.CaptureFixture[str]):
@@ -482,7 +488,7 @@ def test_branch_commit_after_context_refuses_the_round(tmp_path: Path, repo: Pat
     assert store.writes == before
 
 
-def test_the_feature_cap_names_the_proposal_route(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+def test_the_feature_cap_is_the_persons_to_decide(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     store = feature_ready()
     step = FeatureReview(store)
     for n in (1, 2, 3, 4):
@@ -492,9 +498,7 @@ def test_the_feature_cap_names_the_proposal_route(tmp_path: Path, capsys: pytest
     capsys.readouterr()
     step.context([*TEAM])
     out = capsys.readouterr().out
-    assert "stop, cap: three rounds left a P1 open; propose declining each open P1" in out
-    assert "--propose-decline ID --reason TEXT" in out
-    assert "proceed or rework" not in out
+    assert "stop, cap: three rounds left a P1 open; the person decides whether to proceed or rework" in out
 
 
 def test_feature_review_is_mandatory_until_a_round_runs(tmp_path: Path):
@@ -503,7 +507,6 @@ def test_feature_review_is_mandatory_until_a_round_runs(tmp_path: Path):
     record_round(FeatureReview(store), tmp_path)
     assert features.approval_gaps(store, load(store)) == []
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
     assert features.approval_gaps(store, load(store)) == [
         "the feature review has not reviewed the current contract and stories; run a feature round"
     ]
@@ -618,7 +621,7 @@ def test_a_proceed_after_a_rework_keeps_the_rework_cut(
     records = capped_twice(tmp_path, repo, state, capsys, "Rework").records("s1")
     assert review.counted(records, "s1:plan")[1] == 3
     assert review.waived(records, "s1:plan") == {finding_id(raw(severity="P1", summary="Gap 6."))}
-    assert review.left_open(records, "s1", "plan") == []
+    assert review_gaps.left_open(records, "s1", "plan") == []
 
 
 def test_a_second_proceed_keeps_the_first_waiver(
@@ -649,6 +652,7 @@ def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path
     store = setup()
     approve_everything(store)
     store.set_labels("s1", ["gadgets"])
+    reapprove(store)
     with pytest.raises(Refusal, match="another repository"):
         submit(store, tmp_path, repo)
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []

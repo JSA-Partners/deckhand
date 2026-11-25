@@ -55,6 +55,11 @@ def test_unknown_command_exits_2_and_names_it(capsys):
     assert "nope" in capsys.readouterr().err
 
 
+def test_the_quiz_command_is_gone(capsys):
+    assert main(["quiz", "context", "ACME-1"]) == 2
+    assert "unknown command 'quiz'" in capsys.readouterr().err
+
+
 def test_refusal_prints_rule_and_exits_1(registry, capsys):
     @register("probe")
     class Probe:
@@ -334,7 +339,7 @@ def refused(argv: list[str], capsys) -> bool:
     "argv",
     [
         ["setup", "apply", "--team-key", "ACME"],
-        ["feature", "apply", "new", "--name", "N"],
+        ["feature", "apply", "new", "--name", "N", "--weeks", "1"],
         ["stories", "apply", "--file", "map.json"],
         ["hand", "apply", "start", "ACME-1"],
         ["nonesuch", "apply", "ACME-1"],

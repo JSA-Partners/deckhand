@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, features, planning, spikes, versions
+from deckhand import answers, decisions, features, ops, planning, spikes, tiers, versions
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record
@@ -37,6 +37,7 @@ def entry(key: str, **over: object) -> dict:
         "depends_on": [],
         "unknowns": [],
         "new_here": [],
+        "tier": "none",
     }
     return {**found, **over}
 
@@ -75,28 +76,47 @@ def test_map_creates_stubs_with_labels_and_blockers(tmp_path: Path):
     assert "- rate limits" in api["description"]
     assert "- queue" in api["description"]
     assert store.relations(story_id("api")) == [(story_id("api"), story_id("ui"))]
-    [stub] = store.records(story_id("api"))
-    assert (stub.kind, stub.subject) == ("stub", "api")
-    assert stub.data == {"unknowns": ["rate limits"], "new_here": ["queue"], "decisions": []}
+    [stub] = [r for r in store.records(story_id("api")) if r.kind == "stub"]
+    assert stub.subject == "api"
+    assert stub.data == {"unknowns": ["rate limits"], "new_here": ["queue"], "decisions": [], "after_merge": []}
 
 
 def test_map_keeps_expected_decisions_in_the_stub_and_reruns_write_nothing(tmp_path: Path):
     store = setup()
-    entries = [entry("api", decisions=["Keep orders in one table"])]
+    entries = [entry("api", decisions=[{"item": "Keep orders in one table", "draft": "Yes"}])]
     run(store, tmp_path, entries)
-    [stub] = store.records(story_id("api"))
-    assert stub.data["decisions"] == ["Keep orders in one table"]
+    [stub] = [r for r in store.records(story_id("api")) if r.kind == "stub"]
+    assert stub.data["decisions"] == [{"item": "Keep orders in one table", "draft": "Yes"}]
     store.writes.clear()
     run(store, tmp_path, entries)
     assert store.writes == []
 
 
-@pytest.mark.parametrize("bad", ["Keep it", ["Keep it", 3]])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "Keep it",
+        ["Keep it"],
+        [{"item": "Keep it"}],
+        [{"item": "Keep it", "draft": " "}],
+        [{"item": "Keep it", "draft": "Yes", "why": "x"}],
+        [{"item": "Keep it", "draft": 3}],
+    ],
+)
 def test_map_refuses_a_malformed_decisions_field(tmp_path: Path, bad: object):
     store = setup()
     store.writes.clear()
-    with pytest.raises(Refusal, match="entry 1 field decisions must be a list of strings"):
+    with pytest.raises(Refusal, match=r"entry 1 .*decisions? .*\{\"item\": text, \"draft\": text\}"):
         run(store, tmp_path, [entry("api"), entry("ui", decisions=bad)])
+    assert store.writes == []
+
+
+def test_map_refuses_a_decision_item_named_twice(tmp_path: Path):
+    store = setup()
+    store.writes.clear()
+    twice = [{"item": "Greeting wording", "draft": "Bonjour"}, {"item": "Greeting wording", "draft": "Hola"}]
+    with pytest.raises(Refusal, match="entry 1 decision 1 repeats the item Greeting wording"):
+        run(store, tmp_path, [entry("api"), entry("ui", decisions=twice)])
     assert store.writes == []
 
 
@@ -280,6 +300,9 @@ FIELDS = {
     "depends_on",
     "unknowns",
     "new_here",
+    "tier",
+    "state_chart",
+    "after_merge",
     "decisions",
     "missed_by",
     "cuts",
@@ -335,6 +358,25 @@ def test_stories_refuse_while_spike_live(tmp_path: Path, monkeypatch: pytest.Mon
     assert store.writes != written
 
 
+@pytest.mark.parametrize("readable", [True, False])
+def test_an_answered_spike_never_blocks_the_map_while_its_session_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readable: bool
+):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store, question = setup(), "Does the queue keep order?"
+    key = asked_spike(question)
+    ops.ensure_document(store, P1, "spike:" + key, P1, spikes.TITLE + question, "Yes, in order.")
+    path = tmp_path / "map.json"
+    path.write_text(json.dumps([entry("a")]))
+
+    def broken(argv, cwd=None, stdin=None):
+        return subprocess.CompletedProcess(argv, 1, "", "no")
+
+    runner = fleet_of(spike_row(key, "working", "busy")) if readable else broken
+    Stories(store, runner).apply([*TEAM, "--file", str(path)])
+    assert store.issue(story_id("a")) is not None
+
+
 def test_stories_refuse_when_the_fleet_cannot_be_read_with_spikes_asked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -360,3 +402,34 @@ def test_context_prints_when_the_labels_cannot_be_read(capsys: pytest.CaptureFix
     store.repository_labels = fails
     Stories(store).context(TEAM)
     assert "repositories: unknown, more than 250 labels" in capsys.readouterr().out.splitlines()
+
+
+def test_the_map_records_tier_and_chart_without_a_dialog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store = setup()
+    chart = "queued -> sent -> done"
+    run(store, tmp_path, [entry("api", tier="multi_step", state_chart=chart), entry("ui")])
+    held = {r.kind: r for r in store.records(story_id("api"))}
+    assert tiers.from_record(held["tier"].data) == tiers.TIERS[1]
+    assert held["state-chart"].data == {"chart": chart}
+    assert {r.author for r in held.values()} == {"agent:stories"}
+    assert {"tier", "state-chart"}.isdisjoint(decisions.KINDS)
+    assert not (tmp_path / "state" / decisions.PENDING).exists()
+
+
+@pytest.mark.parametrize(
+    "over,match",
+    [
+        ({"tier": "high"}, "entry 0 field tier must be one of concurrency, multi_step, data_rule, none"),
+        ({"tier": "concurrency"}, "entry 0 at tier 3 needs a state_chart"),
+        ({"state_chart": "a -> b"}, "entry 0 has a state_chart at tier 0; only tiers 2 and 3 take one"),
+        ({"after_merge": ["rotate", 3]}, "entry 0 field after_merge must be a list of strings"),
+        ({"after_merge": ["rotate", " "]}, "entry 0 field after_merge holds an empty item"),
+    ],
+)
+def test_the_map_refuses_a_bad_tier_chart_or_after_merge_before_any_write(tmp_path: Path, over: dict, match: str):
+    store = setup()
+    store.writes.clear()
+    with pytest.raises(Refusal, match=match):
+        run(store, tmp_path, [entry("api", **over)])
+    assert store.writes == []

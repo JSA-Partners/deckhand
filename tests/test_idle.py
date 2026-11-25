@@ -51,6 +51,10 @@ def test_a_working_stopped_or_prompting_hand_is_not_idle() -> None:
         assert found(session) == frozenset()
 
 
+def test_a_story_hand_reported_working_after_a_turn_end_is_not_idle() -> None:
+    assert found(row("ACME-1", "working", "busy", at=int((T - 30) * 1000))) == frozenset()
+
+
 def test_mail_waiting_ends_idleness_but_its_own_nudge_does_not() -> None:
     assert found(blocked(), pending=(message(asks.ANSWER),)) == frozenset()
     assert found(blocked(), pending=(message(wakes.NUDGE),)) == {NAME}

@@ -13,7 +13,7 @@ SHAPE = {
     "docs_false": 'a list of {"path", "sentence"}, the docs this story makes false',
     "contract_sites": "a list of paths where the Contract is honored",
     "invariant_sites": "a list of paths where an Invariant is enforced",
-    "after_merge": "optional, a list of follow-ups to do after the merge",
+    "after_merge": "optional, the follow-ups after the merge, with each After merge item of the spec word for word",
 }
 _REQUIRED = ("files", "criteria", "docs_false", "contract_sites", "invariant_sites")
 

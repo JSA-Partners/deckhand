@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, asks, config, features, fleet, launch, spikes, startable
+from deckhand.planning import save_section
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
@@ -13,8 +14,8 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
 from deckhand.store.state import HandRow, LocalState
 from tests.shell import Shell, row
-from tests.test_feature_approval import P1, approve_everything, setup
-from tests.test_feature_approval import decided as decide_kind
+from tests.test_feature_approval import P1, approve_everything, expect, setup
+from tests.test_feature_approval import decided as answered
 from tests.test_queue import started
 from tests.test_step_stories import setup as empty_feature
 
@@ -99,9 +100,7 @@ QUESTION = "Does the queue keep order?"
 
 
 def planning() -> FakeStore:
-    store = setup()
-    decide_kind(store, "contract", P1, "Approve", ["s1", "s2"])
-    return store
+    return setup()
 
 
 def question_file(tmp_path: Path, text: str = QUESTION) -> str:
@@ -228,3 +227,36 @@ def test_spike_refuses_a_repository_without_a_clone(clone: Path, tmp_path: Path)
         hand(store, shell).apply(["spike", "--repository", "gadgets", "--file", question_file(tmp_path), *TEAM])
     assert shell.launches() == []
     assert wanted() == {}
+
+
+def test_a_draft_hand_starts_once_the_contract_is_saved(clone: Path):
+    store = setup(unsaved=("Contract",))
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    story = features.story(store, feature, "ACME-1")
+    clones = config.local().clones
+    reason = f"the Contract of {features.describe(feature.project)} is not saved, so no story is drafted yet"
+    assert startable.why_not(store, feature, story, ME, [], clones) == reason
+    save_section(store, feature, "Contract", "POST /orders.", True)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    found = startable.startable(store, feature, ME, clones)
+    assert [(w.story["identifier"], w.kind) for w in found] == [("ACME-1", "draft"), ("ACME-2", "draft")]
+
+
+def test_a_draft_hand_waits_until_each_decision_item_of_its_story_is_answered(clone: Path):
+    store = setup()
+    expect(store, "s2", "receipts", "Send receipts by email")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    story = features.story(store, feature, "ACME-2")
+    clones = config.local().clones
+    reason = "ACME-2 waits on its decision item Send receipts by email, not answered yet"
+    assert startable.why_not(store, feature, story, ME, [], clones) == reason
+    found = startable.startable(store, feature, ME, clones)
+    assert [(w.story["identifier"], w.kind) for w in found] == [("ACME-1", "draft")]
+    answered(store, "decision-item", "Send receipts by email", "Only on request", ["s2"])
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    found = startable.startable(store, feature, ME, clones)
+    assert [(w.story["identifier"], w.kind) for w in found] == [("ACME-1", "draft"), ("ACME-2", "draft")]

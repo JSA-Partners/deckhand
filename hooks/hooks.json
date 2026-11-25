@@ -53,6 +53,15 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/deckhand\" hook apply ask"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/deckhand\" hook apply bash"
+          }
+        ]
       }
     ],
     "Stop": [

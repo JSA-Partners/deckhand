@@ -11,13 +11,13 @@ from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
 from deckhand.store.fake import FakeStore
-from tests.test_quiz import ask, decide, item, reply, submit
 from tests.test_step_build import Shell, repo, state
 from tests.test_step_review import TEAM, answer, checked, raw
 from tests.test_step_signoff import (
     Clock,
     Gh,
     branch_round,
+    built,
     gap_text,
     overview,
     ready,
@@ -155,12 +155,10 @@ def test_not_yet_after_sign_off_is_not_current(
         merge(store, repo, Gh())
 
 
-def quizzed(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]) -> FakeStore:
-    store = signable(tmp_path, repo)
+def summarized(tmp_path: Path, repo: Path) -> FakeStore:
+    store = signable(tmp_path, repo, tuicr=False)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
-    quizzer = decide(store, repo)
-    reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
+    built(store)
     checked(store, "c2")
     return store
 
@@ -168,7 +166,7 @@ def quizzed(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixtu
 def test_proceed_does_not_cover_later_commits(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
-    store = quizzed(tmp_path, repo, state, capsys)
+    store = summarized(tmp_path, repo)
     for n in (1, 2, 3):
         branch_round(store, raw(severity="P1"), n=n, head="c1")
     cap = ["review-cap", "ACME-1", "--stage", "branch"]
@@ -187,12 +185,12 @@ def test_proceed_does_not_cover_later_commits(
 def test_a_sign_off_past_the_last_reviewed_head_never_merges(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
-    store = quizzed(tmp_path, repo, state, capsys)
+    store = summarized(tmp_path, repo)
     for n in (1, 2, 3):
         branch_round(store, n=n, head="c1")
     gap = "the branch review has not reviewed the signed head c2; run a branch round"
-    assert signoff.gaps(store.records("s1"), "s1", "c2") == [gap]
-    held = signoff.version(store.records("s1"), "s1", "c2")
+    assert [g.hand for g in signoff.gaps(store.records("s1"), "s1", "c2", "ACME-1")] == [gap]
+    held = signoff.version_at(store.records("s1"), "s1", "c2")
     data = {"answer": signoff.SIGN, "nonce": "n1", "by": "viewer-1"}
     store.put_record("s1", Record(signoff.KIND, "s1", held, "person:pat", data))
     gh = Gh()

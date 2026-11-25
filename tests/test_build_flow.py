@@ -6,22 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import features, quiz, review, signoff
+from deckhand import features, review, signoff
 from deckhand.features import Phase
 from deckhand.step import Refusal
 from deckhand.steps.build import Build
 from deckhand.steps.checks import Checks
 from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
-from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
 from deckhand.steps.signoff import Signoff
 from tests.test_feature_approval import approve_everything, load, setup
-from tests.test_quiz import SOURCE, ask, item, reader, reply, summary
 from tests.test_step_build import BRANCH, repo, state
 from tests.test_step_checks import Commands
 from tests.test_step_review import PLAN, TEAM, answer, finding_id, raw, record_round, shown, submit
-from tests.test_step_signoff import Clock, Diffing, Gh, overview, voids
+from tests.test_step_signoff import Clock, Diffing, Gh, overview, summary, voids
 
 SHOWN = "src/a.py:1"
 
@@ -54,8 +52,7 @@ class Hand:
         return Review(self.store, self.world, self.repo)
 
     def decide(self) -> Decide:
-        files = reader(self.repo / ".worktrees" / BRANCH, {"src/a.py": SOURCE})
-        return Decide(self.store, runner=self.world, repo=self.repo, reader=files)
+        return Decide(self.store, runner=self.world, repo=self.repo)
 
     def plan_and_push(self) -> None:
         Build(self.store, self.world, self.repo).apply(["s1", "worktree", *TEAM])
@@ -90,31 +87,10 @@ class Hand:
         record_round(step, self.tmp, *items, stage="branch")
         assert shown(step, self.capsys, "s1", "--stage", "branch")["stop"] == "clean"
 
-    def summarize_and_quiz(self) -> None:
+    def summarize(self) -> None:
         made = self.tmp / "change.json"
-        made.write_text(json.dumps(summary(1)))
+        made.write_text(json.dumps(summary(1, where=SHOWN)))
         Signoff(self.store, self.world, self.repo).apply(["s1", "summary", "--summary", str(made), *TEAM])
-        self.capsys.readouterr()
-        Quiz(self.store, self.world, self.repo).context(["s1", *TEAM, "--json"])
-        sized = json.loads(self.capsys.readouterr().out)
-        assert (sized["tier"], sized["base"], sized["head"]) == (0, 0, self.world.head)
-        written = self.tmp / "quiz.json"
-        written.write_text(json.dumps([item(where=SHOWN), item(where=SHOWN, question="Another?")]))
-        with pytest.raises(Refusal, match="its size by tier and new_here is 1"):
-            Quiz(self.store, self.world, self.repo).apply(["s1", *TEAM, "--quiz", str(written), "--summary", str(made)])
-        written.write_text(json.dumps([item(where=SHOWN)]))
-        Quiz(self.store, self.world, self.repo).apply(["s1", *TEAM, "--quiz", str(written), "--summary", str(made)])
-
-    def pass_quiz(self) -> None:
-        step = self.decide()
-        first = ask(step, self.capsys)
-        assert "where" not in first
-        reply(self.state, step, first, "A new key")
-        assert quiz.open_items(self.store.records("s1"), "s1") == [1]
-        again = ask(step, self.capsys)
-        assert again["where"] == SHOWN and again["code"]
-        reply(self.state, step, again, "The idempotency key")
-        assert quiz.passed(self.store.records("s1"), "s1", self.world.head)
 
     def sign_off(self) -> None:
         Signoff(self.store, self.world, self.repo).apply(["s1", "review", *TEAM])
@@ -124,8 +100,7 @@ class Hand:
         assert signoff.current(self.store.records("s1"), "s1", self.world.head)
 
     def signed_at_head(self) -> None:
-        self.summarize_and_quiz()
-        self.pass_quiz()
+        self.summarize()
         self.sign_off()
 
     def through_sign_off(self) -> None:

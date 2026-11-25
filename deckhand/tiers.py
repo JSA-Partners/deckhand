@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from deckhand.records import Record
-from deckhand.step import Refusal
 
 
 @dataclass(frozen=True)
@@ -11,10 +10,6 @@ class Tier:
     fact: str
     label: str
     level: int
-
-    @property
-    def data_rule(self) -> bool:
-        return self.fact == "data_rule"
 
 
 TIERS: tuple[Tier, ...] = (
@@ -24,21 +19,16 @@ TIERS: tuple[Tier, ...] = (
     Tier("none", "None of these", 0),
 )
 
-NONE = TIERS[-1].label
-OPTIONS = [tier.label for tier in TIERS]
-_BY_FACT = {tier.fact: tier for tier in TIERS}
+FACTS = tuple(tier.fact for tier in TIERS)
+BY_FACT = {tier.fact: tier for tier in TIERS}
 
 
-def chosen(answer: str) -> Tier:
-    found = next((tier for tier in TIERS if tier.label == answer), None)
-    if found is None:
-        raise Refusal(f"the tier answer {answer!r} is not one of the offered options")
-    return found
+def named(fact: object) -> Tier | None:
+    return BY_FACT.get(fact) if isinstance(fact, str) else None
 
 
 def from_record(data: dict) -> Tier | None:
-    fact = data.get("fact")
-    found = _BY_FACT.get(fact) if isinstance(fact, str) else None
+    found = named(data.get("fact"))
     return found if found is not None and data.get("level") == found.level else None
 
 

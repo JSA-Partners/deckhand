@@ -1,6 +1,6 @@
 ---
 name: story
-description: "Build one story in its worktree, from implementation plan through review to its change summary and quiz, then stop for the person's sign-off."
+description: "Build one story in its worktree, from implementation plan through review to its change summary, then stop for the person's sign-off."
 arguments: story
 argument-hint: "<story>"
 effort: high
@@ -43,10 +43,9 @@ edits. Sync with `deckhand build apply REF sync`, committing resolved conflicts,
 Review the branch likewise with `--stage branch`. After each round fix, commit, rerun checks and
 push; every new head owes a round until clean or proceeded.
 
-`deckhand quiz context REF` gives quiz size and shapes. Write the change summary by intent
-and the quiz on the hunks tuicr shows; save with
-`deckhand signoff apply REF summary --summary SUMMARY.json` and
-`deckhand quiz apply REF --quiz QUIZ.json --summary SUMMARY.json`, then stop.
+Write the change summary by intent, shaped as `deckhand signoff context REF` prints, with
+`to_check` the riskiest lines and why each matters; save with
+`deckhand signoff apply REF summary --summary SUMMARY.json`, then stop.
 
 After sign-off, run `deckhand merge apply REF`; fix and review a void. Once merged, take main with
 `deckhand after apply REF sync` and do what you can of `deckhand after context REF` with

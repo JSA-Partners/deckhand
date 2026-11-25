@@ -220,7 +220,7 @@ def test_recorded_lists_each_issue_holding_a_record_of_a_kind_once(tmp_path: Pat
     store.put_record(OTHER, tier("a"))
     store.put_record(OTHER, tier("b"))
     store.put_record(ID, tier())
-    store.put_record(ID, Record("quiz", "s", "v1", "person", {}))
+    store.put_record(ID, Record("sign-off-void", "s", "v1", "person", {}))
     assert store.recorded("tier") == sorted([ID, OTHER])
-    assert store.recorded("quiz") == [ID]
+    assert store.recorded("sign-off-void") == [ID]
     assert store.recorded("sign-off") == []

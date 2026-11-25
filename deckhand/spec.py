@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import launch, planning
+from deckhand import launch, planning, versions
 from deckhand.features import Feature
 from deckhand.records import Record
 from deckhand.store import Store
@@ -22,16 +23,45 @@ class Spec:
     invariants: str | None
     scope: str
     decisions: list[dict]
+    after_merge: list[str]
+    state_chart: str
 
 
-def _answered(feature: Feature) -> list[dict]:
+_CODE = re.compile(
+    r"(^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\2[`~]*[ \t]*$|\Z)|(?<!\\)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\3(?!`))",
+    re.MULTILINE | re.DOTALL,
+)
+_AUTOLINK = re.compile(r"\[([^\]\n]+)\]\(<https?://([^>\s]+)>\)")
+_ESCAPED = re.compile(r"\\([*_`])")
+
+
+def _unmarked(match: re.Match[str]) -> str:
+    return match[1] if match[2].rstrip("/") == match[1] else match[0]
+
+
+def _prose(text: str) -> str:
+    return _ESCAPED.sub(r"\1", _AUTOLINK.sub(_unmarked, text))
+
+
+def plain(text: str) -> str:
+    kept, end = [], 0
+    for code in _CODE.finditer(text):
+        kept += [_prose(text[end : code.start()]), code[0]]
+        end = code.end()
+    return "".join(kept) + _prose(text[end:])
+
+
+def _answered(records: list[Record]) -> list[dict]:
     latest: dict[str, Record] = {}
-    for story in feature.stories:
-        for record in feature.records.get(story["id"], []):
-            if record.kind == "decision-item":
-                latest[record.subject] = record
+    for record in records:
+        if record.kind == "decision-item":
+            latest[record.subject] = record
     return [
-        {"item": str(r.data.get("item", r.subject)), "answer": r.data["answer"], "note": r.data.get("note")}
+        {
+            "item": plain(str(r.data.get("item", r.subject))),
+            "answer": plain(str(r.data["answer"])),
+            "note": plain(str(r.data["note"])) if r.data.get("note") else r.data.get("note"),
+        }
         for r in latest.values()
         if r.data.get("answer")
     ]
@@ -39,13 +69,12 @@ def _answered(feature: Feature) -> list[dict]:
 
 def gather(store: Store, feature: Feature, story: dict) -> Spec:
     description = story["description"] or ""
-    return Spec(
-        planning.section(store, feature, "Contract"),
-        planning.section(store, feature, "Examples"),
-        planning.section(store, feature, "Invariants"),
-        f"{story['title']}\n\n{description}" if description else story["title"],
-        _answered(feature),
-    )
+    shown = [planning.section(store, feature, name) for name in ("Contract", "Examples", "Invariants")]
+    contract, examples, invariants = [None if body is None else plain(body) for body in shown]
+    scope = f"{story['title']}\n\n{description}" if description else story["title"]
+    records = feature.records.get(story["id"], [])
+    chart = versions.chart(records, story["id"])
+    return Spec(contract, examples, invariants, plain(scope), _answered(records), versions.after_merge(records), chart)
 
 
 def _decision(entry: dict) -> str:
@@ -59,13 +88,16 @@ def _blocks(parts: list[tuple[str, str | None]]) -> str:
 
 def text(spec: Spec) -> str:
     decisions = "\n".join(_decision(entry) for entry in spec.decisions)
+    after_merge = "\n".join(f"- {item}" for item in spec.after_merge) or "none"
     return _blocks(
         [
+            ("After merge", after_merge),
             ("Contract", spec.contract),
             ("Decisions", decisions),
             ("Examples", spec.examples),
             ("Invariants", spec.invariants),
             ("Scope", spec.scope),
+            ("State chart", spec.state_chart.strip() or "none"),
         ]
     )
 

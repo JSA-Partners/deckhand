@@ -11,8 +11,9 @@ from deckhand import (
     fleet,
     gaps,
     order,
-    quiz,
+    planning,
     review,
+    review_gaps,
     signoff,
     spikes,
     versions,
@@ -26,6 +27,7 @@ DRAFT = "story-draft"
 DRAFT_HAND, STORY_HAND = "draft", "story"
 TAKEN = "draft-taken"
 FEATURE_SKILL = "/deckhand:feature"
+READY = "the feature is ready for approval"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
 STALLED = "stalled"
@@ -66,13 +68,10 @@ def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], ne
 
 def _signoff(story: dict, records: list[Record]) -> list[Item]:
     summary = versions.held(records, signoff.SUMMARY, story["id"])
-    held = quiz.held_set(records, story["id"])
     head = summary.data.get("head") if summary else None
-    if summary is None or held is None or not head or held.data.get("head") != head:
-        return []
-    version = signoff.version(records, story["id"], head)
+    version = signoff.version_at(records, story["id"], head) if isinstance(head, str) else None
     sign = versions.held(records, signoff.KIND, story["id"])
-    if version is None or (sign is not None and sign.version == version):
+    if summary is None or version is None or (sign is not None and sign.version == version):
         return []
     next = [f"{SIGNOFF_SKILL} {story['identifier']}"]
     return [_story_item(signoff.KIND, 0, story, summary.at, [f"ready to sign off at {head[:12]}"], next, head)]
@@ -109,19 +108,38 @@ def finding_line(records: list[Record], finding: str) -> tuple[str, str]:
 def finding_lines(records: list[Record], finding: str) -> list[str]:
     _, line = finding_line(records, finding)
     found = review.locate(records, finding)
-    lines = [line] + ([review.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
+    lines = [line] + ([review_gaps.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
     proposal = asks.proposed(records, finding)
-    return lines + ([asks.proposal_line(proposal)] if proposal else [])
+    return lines + ([asks.proposal_line(proposal, _of_feature(records, finding))] if proposal else [])
+
+
+def _of_feature(records: list[Record], finding: str) -> bool:
+    found = review.locate(records, finding)
+    return found is not None and review.cap_prefix(found[0].subject).endswith(":feature")
 
 
 def _findings(story: dict, records: list[Record]) -> list[Item]:
     ref, found = story["identifier"], []
     for proposal in asks.open_proposals(records):
+        if _of_feature(records, proposal.subject):
+            continue
         lines = finding_lines(records, proposal.subject)
         next = [f"decide context finding {ref} --finding {proposal.subject}"]
         found.append(_story_item(review.DECISION, 1, story, proposal.at, lines, next))
     for stage in STAGES:
         found += _cap(story, records, stage)
+    return found
+
+
+def _feature_findings(feature: Feature) -> list[Item]:
+    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+    project, name = feature.project["id"], feature.project["name"]
+    found = []
+    for proposal in asks.open_proposals(records):
+        if _of_feature(records, proposal.subject):
+            lines = [name, *finding_lines(records, proposal.subject)]
+            next = [f"decide context finding {project} --finding {proposal.subject}"]
+            found.append(Item(review.DECISION, 1, name, name, proposal.at, 0, lines, next))
     return found
 
 
@@ -178,7 +196,8 @@ def _prompt(story: dict, records: list[Record], session: fleet.Session | None, r
 
 
 def _for_person(story: dict, records: list[Record], rank: int) -> list[Item]:
-    found = _signoff(story, records) + _findings(story, records)
+    findings = _findings(story, records)
+    found = ([] if findings else _signoff(story, records)) + findings
     return found + _questions(story, records, rank) + _edits(story, records, rank)
 
 
@@ -202,7 +221,8 @@ def merged_at(story: dict) -> str:
 
 
 def _waiting(story: dict, records: list[Record], second: bool) -> bool:
-    if second or _for_person(story, records, 2) or signoff.after_merge_for_person(records, story["id"]):
+    asked = _for_person(story, records, 2) or asks.open_proposals(records)
+    if second or asked or signoff.after_merge_for_person(records, story["id"]):
         return True
     return asks.wake_due(records, story["id"], merged_at(story)) is not None
 
@@ -274,9 +294,9 @@ def _day(date: str | None) -> str:
 
 
 def _planning(store: Store, feature: Feature) -> list[Item]:
-    found = features.approval_gaps(store, feature)
-    if not found:
+    if features.phase(feature) is not Phase.PLANNING:
         return []
+    found = features.approval_gaps(store, feature) or [READY]
     name = feature.project["name"]
     return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
 
@@ -286,9 +306,12 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
         return []
     project = feature.project["id"]
     found, answered = [], set()
+    facts = planning.saved_at(store, feature, "Facts")
     for document in spikes.answered(store, feature):
         key = spikes.key_of(project, document) or ""
         answered.add(key)
+        if facts is not None and facts > document["at"]:
+            continue
         lines = [f"spike answered, read it: {document['title']}"]
         found.append(Item(SPIKE, 3, key, document["title"], document["at"], 0, lines, [document["url"]]))
     if read.note:
@@ -360,7 +383,7 @@ def _feature_items(
                     found += _stalled(story, records, session, rank, launch, second, restarts.get(ref), ref in idle)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
-    found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found]
+    found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
     if not building:
         found += _planning(store, feature) + _spikes(store, feature, read)
     return found

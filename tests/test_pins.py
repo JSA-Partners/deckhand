@@ -75,13 +75,13 @@ def test_config_edit_pin_takes_an_item_id_and_names_the_edit():
 def test_guards_still_hold_for_the_other_kinds():
     store, feature = asked()
     with pytest.raises(Refusal, match="--story applies only to decision-item and question"):
-        pins.pin(store, feature, "contract", "p", ["ACME-1"])
-    with pytest.raises(Refusal, match="--item applies only to quiz, after-merge, config-edit"):
-        pins.pin(store, feature, "contract", "p", [], item="1")
-    with pytest.raises(Refusal, match="quiz needs --item N"):
-        pins.pin(store, feature, "quiz", "ACME-1", [])
+        pins.pin(store, feature, "feature-approval", "p", ["ACME-1"])
+    with pytest.raises(Refusal, match="--item applies only to after-merge, config-edit"):
+        pins.pin(store, feature, "feature-approval", "p", [], item="1")
+    with pytest.raises(Refusal, match="after-merge needs --item N"):
+        pins.pin(store, feature, "after-merge", "ACME-1", [])
     with pytest.raises(Refusal, match="--item takes an item number from 1"):
-        pins.pin(store, feature, "quiz", "ACME-1", [], item="x")
+        pins.pin(store, feature, "after-merge", "ACME-1", [], item="x")
 
 
 def capped(store, *items: dict) -> Record:
@@ -133,3 +133,51 @@ def test_finding_pin_shows_what_the_finding_touches_and_the_proposal():
         "P2 correctness a.py:1 A hole.; touches: Contract: ships the same day;"
         " the hand proposes to accept it: the spec allows it"
     )
+
+
+def test_feature_cap_pin_holds_every_live_story_and_takes_only_the_project():
+    store, _ = asked()
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    found = review.parse_findings(json.dumps([P1]))
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, scoped=n > 1, base_hash="")
+        for story in feature.live:
+            store.put_record(story["id"], review.round_record(project, "feature", plan, f"hash{n}", found))
+    feature = features.open_feature(store, "ACME")
+    held = pins.pin(store, feature, review.CAP_DECISION, project, [], stage="feature")
+    latest = review.last(review.rounds_of(store.records("s1"), f"{project}:feature"))
+    assert (held.subject, held.version) == (latest.subject, review.cap_version(latest))
+    assert held.stories == [s["id"] for s in feature.live] and held.label == "Alpha"
+    with pytest.raises(Refusal, match="not the open feature"):
+        pins.pin(store, feature, review.CAP_DECISION, "ACME-1", [], stage="feature")
+
+
+def test_finding_pin_takes_the_project_for_a_feature_finding():
+    store, _ = asked()
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    found = review.parse_findings(json.dumps([P2]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), "hash1", found)
+    for story in feature.live:
+        store.put_record(story["id"], round)
+    [finding] = round.data["findings"]
+    feature = features.open_feature(store, "ACME")
+    held = pins.pin(store, feature, review.DECISION, project, [], finding=finding["id"])
+    assert (held.subject, held.stories, held.label) == (finding["id"], [s["id"] for s in feature.live], "Alpha")
+    assert held.stage == "feature"
+
+
+def test_a_feature_finding_proposal_is_the_captains():
+    store, _ = asked()
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    found = review.parse_findings(json.dumps([P2]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), "hash1", found)
+    [finding] = round.data["findings"]
+    for story in feature.live:
+        store.put_record(story["id"], round)
+        store.put_record(story["id"], asks.proposal_record(finding["id"], round.version, "noise"))
+    feature = features.open_feature(store, "ACME")
+    held = pins.pin(store, feature, review.DECISION, project, [], finding=finding["id"])
+    assert held.detail.endswith("; the captain proposes to decline it: noise")

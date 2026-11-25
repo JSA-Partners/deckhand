@@ -91,13 +91,9 @@ def _config_text(team_key: str, slot_cap: int, sandbox_write: list[str], clones:
 def _local_files(parsed: dict[str, Any]) -> dict[Path, str]:
     directory = config.config_dir()
     current = config.local()
-    text = _config_text(
-        parsed["team_key"],
-        parsed["slot_cap"] or current.slot_cap,
-        current.sandbox_write,
-        {**current.clones, **parsed["clones"]},
-    )
-    captain = launch.captain_settings(launch.protected(directory, answers.state_dir()))
+    clones = {**current.clones, **parsed["clones"]}
+    text = _config_text(parsed["team_key"], parsed["slot_cap"] or current.slot_cap, current.sandbox_write, clones)
+    captain = launch.captain_settings(launch.protected(directory, answers.state_dir()), clones=clones.values())
     return {directory / config.FILE: text, directory / launch.CAPTAIN_SETTINGS: json.dumps(captain, indent=2) + "\n"}
 
 

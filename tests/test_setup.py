@@ -424,7 +424,8 @@ def test_setup_writes_config_once(tmp_path: Path, capsys: pytest.CaptureFixture[
         sandbox_write=["~/.cache/uv"],
     )
     captain = json.loads((config_dir / "captain-settings.json").read_text())
-    assert captain == launch.captain_settings(launch.protected(config_dir, answers.state_dir()))
+    clones = [Path("/elsewhere"), clone]
+    assert captain == launch.captain_settings(launch.protected(config_dir, answers.state_dir()), clones=clones)
     launch_line = f'claude --settings {config_dir / "captain-settings.json"} --name captain "/deckhand:captain"'
     assert out.splitlines()[-1] == launch_line
     assert f"wrote {config_dir / 'config.toml'}" in out

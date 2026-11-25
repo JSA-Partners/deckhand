@@ -5,15 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, decisions, features, planning, queue, review, versions
+from deckhand import answers, asks, decisions, features, planning, queue, review, spec, versions, watch
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
-from deckhand.records import HAND, Record, content_hash
+from deckhand.records import HAND, Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.store import open as store_open
 from deckhand.store.fake import FakeStore
+from deckhand.store.local import default_path
+from deckhand.store.state import LocalState
+from tests.test_feature_approval import mapped, reviewed, setup
 from tests.test_queue import alpha, started
 
 P1 = create_id("ACME:Alpha", "feature")
@@ -64,12 +67,13 @@ def record_answer(state: Path, asked: dict, answer: str) -> None:
 
 
 def test_pending_question_round_trips_through_context_and_apply(state: Path, capsys):
-    store = feature_store()
+    store = approved_ready()
+    store.create_issue("x1", "ACME", "Elsewhere", "", None, [])
     feature = features.open_feature(store, "ACME")
     assert feature is not None
-    version = versions.version_for(store, feature, "contract", P1)
+    version = versions.version_for(store, feature, "feature-approval", P1)
     step = Decide(store)
-    step.context(["contract", P1, *TEAM, "--json"])
+    step.context(["feature-approval", P1, *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     nonce = shown["nonce"]
     asked = shown["tool_input"]["questions"][0]
@@ -86,8 +90,8 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
     )
     step.apply([nonce, *TEAM])
     for story in ("s1", "s2"):
-        [record] = store.records(story)
-        assert (record.kind, record.version, record.author) == ("contract", version, "person:sess")
+        [record] = [r for r in store.records(story) if r.kind == "feature-approval"]
+        assert (record.version, record.author) == (version, "person:sess")
         assert record.data["by"] == "viewer-1"
     assert store.records("x1") == []
     assert not decisions.pending_path(nonce, state).exists()
@@ -95,40 +99,142 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
 
 def test_story_decision_pins_the_story_by_reference(state: Path, capsys):
     store = feature_store()
-    Decide(store).context(["sitting", "ACME-2", *TEAM, "--json"])
+    Decide(store).context(["lean", "ACME-2", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
-    record_answer(state, shown["tool_input"]["questions"][0], "Done")
+    record_answer(state, shown["tool_input"]["questions"][0], "Prove it in Lean")
     Decide(store).apply([shown["nonce"], *TEAM])
     [record] = store.records("s2")
     feature = features.open_feature(store, "ACME")
     assert feature is not None
-    assert (record.kind, record.subject) == ("sitting", "s2")
-    assert record.version == versions.version_for(store, feature, "sitting", "s2")
+    assert (record.kind, record.subject) == ("lean", "s2")
+    assert record.version == versions.version_for(store, feature, "lean", "s2")
     assert store.records("s1") == []
 
 
-def test_decision_item_shows_its_text_and_records_an_open_answer(state: Path, capsys):
-    store = feature_store()
-    text = "Keep orders in one table"
-    Decide(store).context(["decision-item", text, "--story", "ACME-1", *TEAM, "--json"])
+def mapped_item(store: FakeStore, draft: str = "'Bonjour'", stories: tuple[str, ...] = ("s1",)) -> None:
+    data = {"unknowns": [], "new_here": [], "decisions": [{"item": "Greeting wording", "draft": draft}]}
+    for story in stories:
+        store.put_record(story, Record("stub", "greeting", "1", versions.MAP_AUTHOR, data))
+
+
+def ask_item(store: FakeStore, capsys, answer: str, state: Path) -> None:
+    Decide(store).context(["decision-item", "Greeting wording", "--story", "ACME-1", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     asked = shown["tool_input"]["questions"][0]
-    assert text in asked["question"]
-    record_answer(state, asked, "Change")
+    assert asked["question"].startswith("Greeting wording: 'Bonjour'? [")
+    assert [o["label"] for o in asked["options"]] == ["Yes", "Change"]
+    record_answer(state, asked, answer)
     Decide(store).apply([shown["nonce"], *TEAM])
-    [record] = store.records("s1")
-    assert (record.subject, record.version) == (versions.item_subject(text), content_hash(text))
-    assert (record.data["answer"], record.data["item"]) == ("Change", text)
+
+
+def test_yes_records_the_draft_with_a_version_that_covers_it(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "Yes", state)
+    [record] = [r for r in store.records("s1") if r.kind == "decision-item"]
+    assert (record.subject, record.version) == (
+        versions.item_subject("Greeting wording"),
+        versions.item_version("Greeting wording", "'Bonjour'"),
+    )
+    assert (record.data["answer"], record.data["item"]) == ("'Bonjour'", "Greeting wording")
+
+
+def test_own_words_are_what_the_hand_receives(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "'Salut'", state)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    found = spec.gather(store, feature, features.story(store, feature, "ACME-1"))
+    assert found.decisions == [{"item": "Greeting wording", "answer": "'Salut'", "note": None}]
+    assert "- Greeting wording: 'Salut'" in spec.text(found)
+    assert "Change" not in spec.text(found)
+
+
+def test_yes_hands_the_draft_to_the_hand(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "Yes", state)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    shown = spec.text(spec.gather(store, feature, features.story(store, feature, "ACME-1")))
+    assert "# Decisions\n\n- Greeting wording: 'Bonjour'\n" in shown
+
+
+def test_approval_drops_the_hold(state: Path, capsys):
+    store = approved_ready()
+    with LocalState(default_path()) as rows:
+        rows.put(watch.HOLD, {})
+    asked_approval(store, capsys, state, "Change")
+    with LocalState(default_path()) as rows:
+        assert rows.get(watch.HOLD) is not None
+    asked_approval(store, capsys, state, "Approve")
+    with LocalState(default_path()) as rows:
+        assert rows.get(watch.HOLD) is None
+
+
+def approved_ready() -> FakeStore:
+    store = setup()
+    for story in ("s1", "s2"):
+        mapped(store, story)
+    reviewed(store)
+    return store
+
+
+def asked_approval(store: FakeStore, capsys, state: Path, answer: str) -> None:
+    Decide(store).context(["feature-approval", P1, *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    asked = shown["tool_input"]["questions"][0]
+    assert [o["label"] for o in asked["options"]] == ["Approve", "Change"]
+    record_answer(state, asked, answer)
+    Decide(store).apply([shown["nonce"], *TEAM])
+    capsys.readouterr()
+
+
+def test_a_bare_change_records_nothing_and_the_item_is_asked_again(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    store.writes.clear()
+    ask_item(store, capsys, "Change", state)
+    assert store.writes == []
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert features.approval_gaps(store, feature)[-1:] != []
+    assert "ACME-1: decision item Greeting wording is not decided" in features.approval_gaps(store, feature)
+
+
+def test_a_changed_draft_is_asked_again(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "Yes", state)
+    gap = "ACME-1: decision item Greeting wording is not decided"
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert gap not in features.approval_gaps(store, feature)
+    mapped_item(store, "'Salut'")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert gap in features.approval_gaps(store, feature)
+
+
+def test_an_item_outside_the_map_or_with_two_drafts_is_refused(state: Path):
+    store = feature_store()
+    mapped_item(store)
+    with pytest.raises(Refusal, match="not a decision item of the story map"):
+        Decide(store).context(["decision-item", "Other", "--story", "ACME-1", *TEAM])
+    mapped_item(store, "'Salut'", ("s2",))
+    with pytest.raises(Refusal, match="one draft for every --story"):
+        Decide(store).context(["decision-item", "Greeting wording", "--story", "ACME-1", "--story", "ACME-2", *TEAM])
 
 
 @pytest.mark.parametrize(
     "args,match",
     [
-        (["contract", "p9"], "p9 is not the open feature"),
-        (["contract", P1, "--story", "s1"], "--story applies only to decision-item"),
-        (["tier", "ACME-3"], "ACME-3 is not a story of Alpha"),
+        (["feature-approval", "p9"], "p9 is not the open feature"),
+        (["feature-approval", P1, "--story", "s1"], "--story applies only to decision-item"),
+        (["lean", "ACME-3"], "ACME-3 is not a story of Alpha"),
         (["decision-item", "Keep it"], "decision-item needs at least one --story"),
-        (["contract", P1, "--version", "v1"], "unknown argument --version"),
+        (["feature-approval", P1, "--version", "v1"], "unknown argument --version"),
     ],
 )
 def test_context_refuses_what_it_cannot_pin(state: Path, args: list[str], match: str):
@@ -142,14 +248,14 @@ def test_apply_without_pending_refuses(state: Path):
 
 
 def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, capsys):
-    store = feature_store()
-    Decide(store).context(["contract", P1, *TEAM, "--json"])
+    store = approved_ready()
+    Decide(store).context(["feature-approval", P1, *TEAM, "--json"])
     text = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]["question"]
-    assert "Alpha" in text and "ACME-1 One, ACME-2 Two" in text
+    assert "Alpha" in text and "ACME-1 Orders, ACME-2 Receipts" in text
     assert P1 not in text and "s1" not in text
-    Decide(store).context(["sitting", "ACME-2", *TEAM, "--json"])
+    Decide(store).context(["lean", "ACME-2", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
-    assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]
+    assert "ACME-2 Receipts" in shown["question"] and "s2" not in shown["question"]
     assert all("s2" not in option["description"] for option in shown["options"])
 
 
@@ -172,7 +278,7 @@ def roles_connected(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
     roles = roles_connected(monkeypatch)
     with pytest.raises(Connected):
-        Decide().context(["contract", P1, *TEAM])
+        Decide().context(["lean", "ACME-1", *TEAM])
     assert roles == ["person"]
 
 
@@ -190,7 +296,7 @@ def test_a_hand_never_opens_a_decision(state: Path, monkeypatch: pytest.MonkeyPa
     store = feature_store()
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     with pytest.raises(Refusal, match="a hand never decides"):
-        Decide(store).context(["contract", P1, *TEAM])
+        Decide(store).context(["lean", "ACME-1", *TEAM])
     assert not (state / decisions.PENDING).exists()
 
 
@@ -245,3 +351,25 @@ def test_a_branch_cap_question_needs_no_worktree_head(state: Path, capsys: pytes
     Decide(store).context(["review-cap", "ACME-1", "--stage", "branch", *TEAM, "--json"])
     nonce = json.loads(capsys.readouterr().out)["nonce"]
     assert decisions.load_pending(nonce, answers.state_dir()).version == review.cap_version(latest)
+
+
+def test_review_cap_context_takes_the_feature_stage(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = feature_store()
+    p1 = {"lens": "correctness", "severity": "P1", "path": "Contract", "line": 1, "summary": "A hole."}
+    found = review.parse_findings(json.dumps([p1 | {"fix": "Fill it.", "evidence": "Contract", "confidence": 0.9}]))
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, scoped=n > 1, base_hash="")
+        for story in ("s1", "s2"):
+            store.put_record(story, review.round_record(P1, "feature", plan, f"hash{n}", found))
+    Decide(store).context(["review-cap", P1, "--stage", "feature", *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    asked = shown["tool_input"]["questions"][0]
+    assert asked["question"].startswith("Three review rounds left a P1 open. Proceed to approval or rework the feature")
+    assert "Alpha: 3 rounds left a P1 open" in asked["question"]
+    assert [o["label"] for o in asked["options"]] == [review.PROCEED, review.REWORK]
+    record_answer(state, asked, review.REWORK)
+    Decide(store).apply([shown["nonce"], *TEAM])
+    for story in ("s1", "s2"):
+        [record] = [r for r in store.records(story) if r.kind == review.CAP_DECISION]
+        assert record.data["answer"] == review.REWORK
+    assert review.counted(store.records("s1"), f"{P1}:feature") == ([], 3)

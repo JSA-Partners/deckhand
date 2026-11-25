@@ -36,7 +36,7 @@ again until the person writes something or another item is on top.
 A `build order cycle` line is the person's to break in Linear; say it once.
 
 Before planning a feature, run `deckhand captain apply hold`; while held, a spike's answer or prompt
-rings its own line: take it, plan on. On its approval, or when the person pauses, run
+rings its own line: take it, plan on. When the person pauses, run
 `deckhand captain apply release`, then read the context.
 
 On `deckhand: the engine stopped`, say so once and give the start command again from

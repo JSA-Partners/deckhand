@@ -8,8 +8,8 @@ import pytest
 from deckhand import features, launch, ops, planning, queue, spec
 from deckhand.step import Refusal
 from deckhand.steps.draft import Draft
-from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import P1, approve_everything, decided, expect, setup
+from tests.test_feature_approval import DRAFT as ITEM_DRAFT
+from tests.test_feature_approval import approve_everything, decided, expect, setup
 
 TEAM = ["--team-key", "ACME"]
 DRAFT = "Outcome: an order is placed.\n\nExamples:\n- a paid order ships.\n"
@@ -21,22 +21,16 @@ def draft_file(tmp_path: Path, text: str = DRAFT) -> str:
     return str(path)
 
 
-def approved_contract() -> FakeStore:
-    store = setup()
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
-    return store
-
-
 def test_draft_refused_before_contract(tmp_path: Path):
-    store = setup()
+    store = setup(unsaved=("Contract",))
     written = list(store.writes)
-    with pytest.raises(Refusal, match="Contract is not approved"):
+    with pytest.raises(Refusal, match="the Contract is not saved"):
         Draft(store, me=lambda: "viewer-1").apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
     assert store.writes == written
 
 
 def test_draft_saves_a_document_and_a_record(tmp_path: Path):
-    store = approved_contract()
+    store = setup()
     before = len(store.writes)
     Draft(store, me=lambda: "viewer-1").apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
     assert store.writes[before:] == [
@@ -52,7 +46,7 @@ def test_draft_saves_a_document_and_a_record(tmp_path: Path):
 
 
 def test_draft_rerun_writes_nothing(tmp_path: Path):
-    store = approved_contract()
+    store = setup()
     path = draft_file(tmp_path)
     Draft(store, me=lambda: "viewer-1").apply(["ACME-1", "--file", path, *TEAM])
     written = list(store.writes)
@@ -61,7 +55,7 @@ def test_draft_rerun_writes_nothing(tmp_path: Path):
 
 
 def test_draft_refuses_another_persons_story(tmp_path: Path):
-    store = approved_contract()
+    store = setup()
     store.assign("s1", "someone-else")
     written = list(store.writes)
     with pytest.raises(Refusal, match="ACME-1 belongs to someone-else"):
@@ -78,9 +72,8 @@ def test_draft_refused_once_the_feature_is_building(tmp_path: Path):
     assert store.writes == written
 
 
-def test_draft_taken_writes_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-7")
-    store = approved_contract()
+def test_draft_taken_writes_text(tmp_path: Path):
+    store = setup()
     step = Draft(store, me=lambda: "viewer-1")
     step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
     before = len(store.writes)
@@ -90,7 +83,7 @@ def test_draft_taken_writes_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         ("put_record", "s1", queue.TAKEN),
     ]
     [taken] = [r for r in store.records("s1") if r.kind == queue.TAKEN]
-    assert taken.author == "person:session-7"
+    assert taken.author == "agent:captain"
     assert store.issue("s1")["description"] == DRAFT
     assert [r.kind for r in store.records("s1") if r.kind == queue.TAKEN] == [queue.TAKEN]
     written = list(store.writes)
@@ -99,7 +92,7 @@ def test_draft_taken_writes_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_take_refuses_without_a_draft():
-    store = approved_contract()
+    store = setup()
     written = list(store.writes)
     with pytest.raises(Refusal, match="ACME-1 has no draft"):
         Draft(store, me=lambda: "viewer-1").apply(["ACME-1", "take", *TEAM])
@@ -107,7 +100,7 @@ def test_take_refuses_without_a_draft():
 
 
 def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.CaptureFixture[str]):
-    store = approved_contract()
+    store = setup()
     Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
     out = capsys.readouterr().out
     assert "ACME-1 Orders" in out
@@ -118,7 +111,7 @@ def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.Captu
 
 
 def test_draft_refused_once_the_draft_is_taken(tmp_path: Path):
-    store = approved_contract()
+    store = setup()
     step = Draft(store, me=lambda: "viewer-1")
     step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
     step.apply(["ACME-1", "take", *TEAM])
@@ -132,7 +125,7 @@ def test_a_long_feature_prints_what_was_approved_and_saves_the_whole_draft_conte
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    store = approved_contract()
+    store = setup()
     feature = features.open_feature(store, "ACME")
     assert feature is not None
     planning.save_section(store, feature, "Examples", "A paid order of two ships.\n" * 1500, True)
@@ -148,7 +141,7 @@ def test_a_long_frame_leaves_the_contract_and_the_stub_decisions_inline(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    store = approved_contract()
+    store = setup()
     expect(store, "s1", "orders", "Send receipts by email")
     feature = features.open_feature(store, "ACME")
     assert feature is not None
@@ -159,3 +152,13 @@ def test_a_long_frame_leaves_the_contract_and_the_stub_decisions_inline(
     assert "The Contract of Alpha." in out and "decisions: Send receipts by email" in out
     assert out.index("The Contract of Alpha.") < out.index("decisions: Send") < out.index("# Frame")
     assert "never settled here" not in out
+
+
+def test_the_draft_context_shows_each_decision_item_in_the_persons_own_words(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+    expect(store, "s1", "orders", "Send receipts by email")
+    decided(store, "decision-item", "Send receipts by email", "Only when the buyer asks for one.", ["s1"])
+    Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
+    lines = capsys.readouterr().out.splitlines()
+    assert "decisions: Send receipts by email: Only when the buyer asks for one." in lines
+    assert f"decisions: Send receipts by email: {ITEM_DRAFT}" not in lines

@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, policy, queue, quiz, review, signoff, spikes
+from deckhand import asks, features, fleet, gaps, implplan, planning, policy, queue, review, signoff, spikes
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
-from deckhand.summary import ChangeSummary, digest
-from tests.test_feature_approval import approve_everything, setup
+from deckhand.summary import ChangeSummary, ToCheck
+from tests.test_feature_approval import approve_everything, reapprove, setup
 from tests.test_implplan import manifest
 from tests.test_step_build import repo, state
 from tests.test_step_review import raw
@@ -23,7 +23,7 @@ __all__ = ["repo", "state"]
 
 ME = "viewer-1"
 OTHER = "someone-else"
-EMPTY = ChangeSummary([], [], [], None)
+SUMMARY = ChangeSummary([], [], [], None, [ToCheck("src/a.py:1", "the charge")])
 
 
 class Clock:
@@ -59,8 +59,7 @@ def hand(ref: str, state: str, status: str | None, waiting_for: str | None = Non
 
 
 def summarized(store: FakeStore, story: str, head: str) -> None:
-    store.put_record(story, signoff.summary_record(story, head, EMPTY))
-    store.put_record(story, quiz.set_record(story, head, [], digest(EMPTY), 0))
+    store.put_record(story, signoff.summary_record(story, head, SUMMARY))
 
 
 def asked(store: FakeStore, story: str, text: str = "Which queue?") -> None:
@@ -93,13 +92,28 @@ def test_rank_order_across_all_kinds():
     store = alpha(planning=True)
     sessions = every_kind(store)
     assert kinds(waiting(store, sessions=sessions)) == [
-        ("sign-off", 0, "ACME-1"),
         ("finding", 1, "ACME-1"),
         ("after-merge", 2, "ACME-2"),
         ("planning", 3, "Alpha"),
         ("config-edit", 4, "ACME-1"),
         ("question", 4, "ACME-1"),
     ]
+
+
+def test_a_story_with_an_open_finding_item_shows_no_signoff_item():
+    store = alpha()
+    summarized(store, "s1", "c2")
+    assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
+    store.put_record("s1", asks.proposal_record("f1", "v1", "out of scope"))
+    assert kinds(waiting(store)) == [("finding", 1, "ACME-1")]
+    store.put_record("s1", Record(review.DECISION, "f1", "v1", "person:pat", {"answer": review.ACCEPT}))
+    assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
+
+
+def test_the_signoff_item_needs_only_a_summary_at_head():
+    store = alpha()
+    store.put_record("s1", signoff.summary_record("s1", "c2", SUMMARY))
+    assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
 
 
 def test_question_and_stalled_rank_with_blocked_hands_in_build():
@@ -121,6 +135,7 @@ def test_ties_unblocks_then_oldest():
     late = hand("ACME-1", "blocked", "waiting", fleet.PERMISSION, iso(1795009999000))
     assert kinds(waiting(store, sessions=(late,))) == [("question", 2, "ACME-2"), ("prompt", 2, "ACME-1")]
     store.relate("s1", "s2")
+    reapprove(store)
     found = waiting(store, sessions=(late,))
     assert kinds(found) == [("prompt", 2, "ACME-1"), ("question", 2, "ACME-2")]
     assert [i.unblocks for i in found] == [1, 0]
@@ -142,8 +157,25 @@ def test_planning_items_shown_to_everyone():
     assert kinds(waiting(store, me=OTHER)) == [("planning", 3, "Alpha")]
     [item] = waiting(store, me=OTHER)
     assert item.next == ["/deckhand:feature"]
-    assert item.lines == ["the Contract is not approved"]
+    assert item.lines == ["ACME-1: the story map gives no tier; save the map again"]
     assert item.at == "2026-11-16T00:00:00.000Z"
+
+
+def test_a_voided_approval_with_no_gap_is_still_a_planning_item():
+    store = alpha()
+    planning.save_section(store, features.open_feature(store, "ACME"), "Invariants", "Totals are positive.", False)
+    [item] = [i for i in waiting(store) if i.kind == "planning"]
+    assert (item.lines, item.next) == (["the feature is ready for approval"], ["/deckhand:feature"])
+
+
+def test_a_released_feature_raises_no_planning_item():
+    store = alpha()
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    feature = features.current(store, "ACME")
+    assert feature is not None and features.phase(feature) is features.Phase.RELEASED
+    found = queue.items(store, "ACME", feature, ME, Fleet([], ""), lambda story: Policy("widgets"))
+    assert [i for i in found if i.kind == "planning"] == []
 
 
 def test_second_signoff_shown_only_to_others(
@@ -162,7 +194,7 @@ def test_void_is_not_a_signoff_item_until_new_summary():
     summarized(store, "s1", "c2")
     [item] = waiting(store)
     assert (item.kind, item.next) == ("sign-off", ["/deckhand:signoff ACME-1"])
-    version = signoff.version(store.records("s1"), "s1", "c2")
+    version = signoff.version("c2", SUMMARY)
     held = Record(signoff.KIND, "s1", version, review.PERSON + "s", {"answer": "Sign off", "nonce": "n1", "by": ME})
     store.put_record("s1", held)
     assert waiting(store) == []
@@ -599,3 +631,30 @@ def test_an_idle_hand_waiting_on_the_person_is_not_stalled():
     started(store, "s1")
     asked(store, "s1")
     assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1}) == []
+
+
+def test_one_feature_finding_makes_one_queue_item_across_stories():
+    store = alpha(planning=True)
+    feature = features.open_feature(store, "ACME")
+    store.create_issue("s3", "ACME", "Refunds", "Outcome: a refund is paid.", feature.project["id"], ["widgets"])
+    store.assign("s3", ME)
+    project = feature.project["id"]
+    found = review.parse_findings(json.dumps([raw(changes_delivery=True)]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), "fh1", found)
+    [finding] = round.data["findings"]
+    for story in ("s1", "s2", "s3"):
+        store.put_record(story, round)
+        store.put_record(story, asks.proposal_record(finding["id"], round.version, "out of scope"))
+    [item] = [i for i in waiting(store) if i.kind == review.DECISION]
+    assert (item.ref, item.next) == ("Alpha", [f"decide context finding {project} --finding {finding['id']}"])
+
+
+def test_a_spike_item_drops_once_facts_is_saved_after_the_answer(state: Path):
+    store, project, key = spiked(state)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Facts", "Before the answer.", False)
+    answer(store, project, key)
+    assert [i.ref for i in waiting(store, me=OTHER) if i.kind == "spike"] == [key]
+    planning.save_section(store, feature, "Facts", "Folded in.", False)
+    assert [i for i in waiting(store, me=OTHER) if i.kind == "spike"] == []

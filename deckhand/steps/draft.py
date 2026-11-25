@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
-
-from deckhand import claims, features, inputs, ops, queue, spec
+from deckhand import approval, claims, features, inputs, ops, planning, queue, spec, versions
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -44,13 +42,18 @@ class Draft(StoryStep):
         feature = features.owning(store, team_key(parsed), parsed["words"][0])
         story = features.story(store, feature, parsed["words"][0])
         ref = story["identifier"]
-        stub = next((r for r in feature.records.get(story["id"], []) if r.kind == "stub"), None)
+        records = feature.records.get(story["id"], [])
+        stub = next((r for r in records if r.kind == "stub"), None)
 
         def items(name: str) -> list[str]:
             return [f"{name}: {item}" for item in (stub.data.get(name, []) if stub else [])]
 
+        def decisions() -> list[str]:
+            items = versions.drafts(records).items()
+            return [f"decisions: {item}: {approval.item_answer(records, item, draft)}" for item, draft in items]
+
         first = [f"story: {ref} {story['title']}", spec.planning_text(store, feature, ("Contract",))]
-        first += [*items("decisions"), spec.planning_text(store, feature, ("Frame", "Shape", "Examples"))]
+        first += [*decisions(), spec.planning_text(store, feature, ("Frame", "Shape", "Examples"))]
         rest = [story["description"] or "no description", *items("unknowns"), *items("new_here")]
         rest += ["the draft holds, in this order:", *(f"- {part}" for part in SHAPE)]
         print(spec.fitted(f"{ref}-draft", "\n".join(first) + "\n", "\n".join(rest) + "\n"), end="")
@@ -72,8 +75,8 @@ class Draft(StoryStep):
 
     def _save(self, store: Store, feature: features.Feature, story: dict, path: str) -> None:
         text = inputs.read(path, "--file", USAGE)
-        if not features.contract_approved(store, feature):
-            raise Refusal("the Contract is not approved; a draft waits for it")
+        if planning.section(store, feature, "Contract") is None:
+            raise Refusal("the Contract is not saved; a draft waits for it")
         if not text.strip():
             raise Refusal("the draft is empty")
         if any(r.kind == queue.TAKEN for r in feature.records.get(story["id"], [])):
@@ -88,7 +91,6 @@ class Draft(StoryStep):
         if held is None:
             raise Refusal(f"{story['identifier']} has no draft to take")
         ops.ensure_issue_text(store, story["id"], story["title"], held["body"])
-        author = f"person:{os.environ.get('CLAUDE_CODE_SESSION_ID', '')}"
-        record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), author, {})
+        record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), "agent:captain", {})
         ops.ensure_record(store, story["id"], record)
         print(f"done: took the draft as the description of {story['identifier']}")

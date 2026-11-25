@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from deckhand import launch
+from deckhand import git, launch
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
 from deckhand.ops import create_id
@@ -21,8 +23,51 @@ TEAM = ["--team-key", "ACME"]
 TODAY = date(2026, 11, 20)
 
 
-def step(store: FakeStore) -> Feature:
-    return Feature(store, lambda: TODAY)
+class Git:
+    def __init__(self, *listed: Path) -> None:
+        self.listed = listed
+        self.calls: list[tuple[list[str], Path | None]] = []
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        self.calls.append((argv, cwd))
+        out = ""
+        if argv[:2] == ["git", "rev-parse"]:
+            out = "abc123\n"
+        elif argv[:3] == ["git", "worktree", "list"]:
+            out = "".join(f"worktree {path}\nHEAD abc123\ndetached\n\n" for path in (cwd, *self.listed))
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+
+def configured() -> Path:
+    folder = Path(os.environ["DECKHAND_CONFIG_DIR"])
+    clone = folder.parent / "widgets"
+    folder.mkdir(exist_ok=True)
+    (folder / "config.toml").write_text(f'[clones]\nwidgets = "{clone}"\n')
+    return clone
+
+
+def step(store: FakeStore, runner=None) -> Feature:
+    if runner is None:
+        configured()
+    return Feature(store, lambda: TODAY, runner or Git())
+
+
+def refreshed(clone: Path, add: bool) -> list[tuple[list[str], Path | None]]:
+    planning = clone / ".worktrees" / "planning"
+    added = [
+        (["git", "worktree", "prune"], clone),
+        (["git", "worktree", "add", "--detach", str(planning), "origin/HEAD"], clone),
+    ]
+    moved = [
+        (["git", "worktree", "list", "--porcelain"], clone),
+        (["git", "checkout", "--detach", "origin/HEAD"], planning),
+    ]
+    return [
+        (["git", "fetch", "origin", "--prune"], clone),
+        (["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"], clone),
+        *(added if add else moved),
+        (["git", "rev-parse", "HEAD"], planning),
+    ]
 
 
 P1 = create_id("ACME:Alpha", "feature")
@@ -65,23 +110,41 @@ def test_weeks_other_than_1_or_2_refuses(weeks: str):
 
 def test_reference_marked_as_reference_in_description():
     store = FakeStore()
-    args = ["new", *TEAM, "--name", "Alpha", "--reference", "ACME-4"]
+    args = ["new", *TEAM, "--name", "Alpha", "--weeks", "1", "--reference", "ACME-4"]
     step(store).apply(args)
     step(store).apply(args)
     [made] = store.team_projects("ACME")
     assert made["id"] == create_id("ACME:Alpha", "feature")
     assert "Reference (not a decision):\n- ACME-4" in made["description"]
-    assert made["start_date"] is None
     assert made["labels"] == ["deckhand"]
-    assert store.writes == [("create_project", made["id"])]
+    assert store.writes == [("create_project", P1), ("set_project_dates", P1, "2026-11-20", "2026-11-27")]
+
+
+def test_new_with_weeks_sets_dates_and_refuses_while_another_is_open(capsys: pytest.CaptureFixture[str]):
+    store = FakeStore()
+    step(store).apply(["new", *TEAM, "--name", "Alpha", "--weeks", "2"])
+    assert store.writes == [("create_project", P1), ("set_project_dates", P1, "2026-11-20", "2026-12-04")]
+    assert capsys.readouterr().out.splitlines()[-1] == f"done: opened Alpha ({P1}), target 2026-12-04"
+    store.writes.clear()
+    with pytest.raises(Refusal, match=rf"Alpha \({P1}\) is still open"):
+        step(store).apply(["new", *TEAM, "--name", "Beta", "--weeks", "1"])
+    assert store.writes == []
+
+
+@pytest.mark.parametrize("weeks", [[], ["--weeks", "3"]])
+def test_new_refuses_without_one_or_two_weeks(weeks: list[str]):
+    store = FakeStore()
+    with pytest.raises(Refusal, match="1 or 2"):
+        step(store).apply(["new", *TEAM, "--name", "Alpha", *weeks])
+    assert store.writes == []
 
 
 def test_new_labels_a_project_an_older_run_left_unlabeled():
     store = FakeStore()
     store.create_project(P1, "ACME", "Alpha", "")
-    step(store).apply(["new", *TEAM, "--name", "Alpha"])
+    step(store).apply(["new", *TEAM, "--name", "Alpha", "--weeks", "1"])
     assert store.project(P1)["labels"] == ["deckhand"]
-    assert [w[0] for w in store.writes] == ["create_project", "set_project_labels"]
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_labels", "set_project_dates"]
 
 
 def test_park_refuses_with_an_approved_story():
@@ -155,20 +218,19 @@ def test_a_hand_made_project_with_dates_is_not_a_feature(capsys: pytest.CaptureF
     store = FakeStore()
     store.create_project("hand", "ACME", "Hand made", "")
     store.set_project_dates("hand", "2026-11-16", "2026-11-23")
-    step(store).apply(["new", *TEAM, "--name", "Alpha"])
-    alpha = create_id("ACME:Alpha", "feature")
+    parked(store)
     capsys.readouterr()
     step(store).context([*TEAM, "--json"])
     facts = json.loads(capsys.readouterr().out)
-    assert (facts["open"], facts["parked"]) == ([], [{"id": alpha, "name": "Alpha"}])
-    step(store).apply(["pick", *TEAM, "--project", alpha, "--weeks", "1"])
-    assert store.writes[-1] == ("set_project_dates", alpha, "2026-11-20", "2026-11-27")
+    assert (facts["open"], facts["parked"]) == ([], [{"id": P1, "name": "Alpha"}])
+    step(store).apply(["new", *TEAM, "--name", "Beta", "--weeks", "1"])
+    assert store.writes[-1] == ("set_project_dates", P2, "2026-11-20", "2026-11-27")
 
 
 @pytest.mark.parametrize("action", [["pick", "--weeks", "1"], ["park"]])
 def test_pick_and_park_refuse_another_teams_feature_and_a_hand_made_project(action: list[str]):
     store = FakeStore()
-    step(store).apply(["new", "--team-key", "OTHER", "--name", "Alpha"])
+    step(store).apply(["new", "--team-key", "OTHER", "--name", "Alpha", "--weeks", "1"])
     store.create_project("hand", "ACME", "Hand made", "")
     store.writes.clear()
     for project in (create_id("OTHER:Alpha", "feature"), "hand"):
@@ -180,7 +242,7 @@ def test_pick_and_park_refuse_another_teams_feature_and_a_hand_made_project(acti
 def test_feature_writes_as_person(monkeypatch: pytest.MonkeyPatch):
     roles = roles_connected(monkeypatch)
     with pytest.raises(Connected):
-        Feature().apply(["new", *TEAM, "--name", "Alpha"])
+        Feature().apply(["new", *TEAM, "--name", "Alpha", "--weeks", "1"])
     assert roles == ["person"]
 
 
@@ -208,3 +270,112 @@ def test_context_names_the_input_folder_before_any_linear_read(
     with pytest.raises(LinearError):
         Feature(Unreachable()).context(TEAM)
     assert capsys.readouterr().out == f"input folder: {tmp_path / launch.INPUT}\n"
+
+
+def test_new_fetches_and_moves_the_planning_worktree_to_origin(capsys: pytest.CaptureFixture[str]):
+    clone, runner, store = configured(), Git(), FakeStore()
+    step(store, runner).apply(["new", *TEAM, "--name", "Alpha", "--weeks", "1"])
+    assert runner.calls == refreshed(clone, add=True)
+    assert f"read the code in: {clone / '.worktrees' / 'planning'} at abc123" in capsys.readouterr().out
+
+
+def test_pick_fetches_and_moves_the_planning_worktree():
+    clone, runner, store = configured(), Git(), FakeStore()
+    parked(store)
+    step(store, runner).apply(["pick", *TEAM, "--project", P1, "--weeks", "1"])
+    assert runner.calls == refreshed(clone, add=True)
+
+
+def test_a_refused_new_fetches_nothing():
+    configured()
+    runner, store = Git(), FakeStore()
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
+    with pytest.raises(Refusal):
+        step(store, runner).apply(["new", *TEAM, "--name", "Beta", "--weeks", "1"])
+    assert runner.calls == []
+
+
+def test_fetch_moves_an_existing_planning_worktree(capsys: pytest.CaptureFixture[str]):
+    clone = configured()
+    planning = clone / ".worktrees" / "planning"
+    planning.mkdir(parents=True)
+    (planning / ".git").write_text("gitdir: elsewhere\n")
+    runner, store = Git(planning), FakeStore()
+    step(store, runner).apply(["fetch", *TEAM])
+    assert runner.calls == refreshed(clone, add=False)
+    assert store.writes == []
+    assert capsys.readouterr().out == f"read the code in: {planning} at abc123\n"
+
+
+def test_fetch_adds_a_worktree_in_place_of_an_empty_unlisted_directory():
+    clone = configured()
+    planning = clone / ".worktrees" / "planning"
+    planning.mkdir(parents=True)
+    runner = Git()
+    step(FakeStore(), runner).apply(["fetch", *TEAM])
+    assert runner.calls == refreshed(clone, add=True)
+    assert not planning.exists()
+
+
+@pytest.mark.parametrize("action", [["fetch"], ["new", "--name", "Alpha", "--weeks", "1"]])
+def test_without_a_clone_fetch_and_new_refuse_before_any_write(action: list[str]):
+    runner, store = Git(), FakeStore()
+    with pytest.raises(Refusal, match="no clone is configured"):
+        step(store, runner).apply([action[0], *TEAM, *action[1:]])
+    assert (runner.calls, store.writes) == ([], [])
+
+
+def test_without_a_clone_pick_refuses_before_any_write():
+    runner, store = Git(), FakeStore()
+    parked(store)
+    store.writes.clear()
+    with pytest.raises(Refusal, match="no clone is configured"):
+        step(store, runner).apply(["pick", *TEAM, "--project", P1, "--weeks", "1"])
+    assert (runner.calls, store.writes) == ([], [])
+
+
+def test_feature_context_names_the_planning_worktree_and_sha_without_fetching(capsys: pytest.CaptureFixture[str]):
+    clone = configured()
+    planning = clone / ".worktrees" / "planning"
+    missing = "read the code in: no planning worktree for widgets yet; fetch one"
+    step(FakeStore(), Git()).context(TEAM)
+    assert missing in capsys.readouterr().out
+    planning.mkdir(parents=True)
+    unlisted = Git()
+    step(FakeStore(), unlisted).context(TEAM)
+    assert missing in capsys.readouterr().out
+    assert unlisted.calls == []
+    (planning / ".git").write_text("gitdir: elsewhere\n")
+    step(FakeStore(), unlisted).context(TEAM)
+    assert missing in capsys.readouterr().out
+    assert unlisted.calls == [(["git", "worktree", "list", "--porcelain"], clone)]
+    runner = Git(planning)
+    step(FakeStore(), runner).context(TEAM)
+    assert f"read the code in: {planning} at abc123" in capsys.readouterr().out.splitlines()
+    assert runner.calls == [
+        (["git", "worktree", "list", "--porcelain"], clone),
+        (["git", "rev-parse", "HEAD"], planning),
+    ]
+    step(FakeStore(), runner).context([*TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["planning"] == [
+        {"label": "widgets", "path": str(planning), "sha": "abc123"}
+    ]
+
+
+def test_a_worktree_that_lost_its_git_file_never_moves_or_names_the_clone(capsys: pytest.CaptureFixture[str]):
+    clone = configured()
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(clone)], check=True)
+    subprocess.run(commit, cwd=clone, check=True)
+    planning = git.worktree_path(clone, "planning")
+    git.worktree_detached(clone, "planning", "main")
+    (planning / ".git").unlink()
+    Feature(FakeStore(), lambda: TODAY).context(TEAM)
+    out = capsys.readouterr().out
+    assert "read the code in: no planning worktree for widgets yet; fetch one" in out
+    assert git.head(clone) not in out
+    git.refresh_detached(clone, planning, "main")
+    branch = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], cwd=clone, capture_output=True, text=True)
+    assert branch.stdout.strip() == "main"
+    assert git.is_worktree(clone, planning)

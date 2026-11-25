@@ -2,28 +2,24 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from deckhand import answers, asks, ops, queue, quiz, review, signoff, tiers
+from deckhand import answers, asks, ops, queue, review, signoff
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
 
+ITEM = "decision-item"
+
 KINDS = (
-    "contract",
-    "invariants",
-    "state-chart",
-    "decision-item",
-    "tier",
-    "sitting",
+    ITEM,
     "lean",
     "feature-approval",
     "finding",
     review.CAP_DECISION,
-    quiz.KIND,
     signoff.KIND,
     signoff.SECOND,
     signoff.AFTER,
@@ -32,16 +28,11 @@ KINDS = (
     queue.STALLED,
 )
 
-_PIN_OPTIONS = (quiz.KIND, asks.ANSWER, signoff.KIND)
+_PIN_OPTIONS = (asks.ANSWER, signoff.KIND)
 
 _OPTIONS = {
-    "contract": ["Approve", "Not yet"],
-    "invariants": ["Approve", "Not yet"],
-    "state-chart": ["Approve", "Not yet"],
-    "feature-approval": ["Approve", "Not yet"],
-    "decision-item": ["Keep", "Change", "Discuss"],
-    "sitting": ["Done", "Not yet"],
-    "tier": tiers.OPTIONS,
+    "feature-approval": ["Approve", "Change"],
+    ITEM: ["Yes", "Change"],
     "lean": ["Prove it in Lean", "Not needed"],
     "finding": [review.DECLINE, review.ACCEPT],
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
@@ -59,7 +50,8 @@ _SIGN_OFF = {
 }
 
 _DESCRIPTIONS = {
-    "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
+    ITEM: ["the draft is the answer", "type the answer in your own words"],
+    "feature-approval": ["the feature moves to the build", "type what to change in your own words"],
     "finding": ["the finding stays unfixed", "the hand fixes the finding"],
     review.CAP_DECISION: [
         "carry on with those P1s open; every later change is still reviewed",
@@ -70,19 +62,19 @@ _DESCRIPTIONS = {
     asks.EDIT: ["you made the change", "the hand carries on without it"],
     queue.STALLED: ["the hand starts again", "the hand stays stopped"],
 }
+_FEATURE_DESCRIPTIONS = {
+    "finding": ["the finding stays unfixed", "the captain fixes the finding"],
+    review.CAP_DECISION: [
+        "carry on with those P1s open; every later change is still reviewed",
+        "the captain reworks the feature and the rounds count again",
+    ],
+}
 
 _ASKS = {
-    "contract": "Approve the contract for",
-    "invariants": "Approve the invariants for",
-    "state-chart": "Approve the state chart for",
     "feature-approval": "Approve the feature",
-    "decision-item": "Keep the decision item",
-    "sitting": "Is the sitting done for",
-    "tier": "Which is the highest that applies to",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
-    quiz.KIND: "Quiz on",
     signoff.KIND: "Sign off",
     signoff.SECOND: "Second sign-off on",
     signoff.AFTER: "Is this after-merge item done for",
@@ -90,13 +82,13 @@ _ASKS = {
     asks.EDIT: "Make this change to Claude Code's own config for",
     queue.STALLED: "",
 }
-_BRANCH_CAP = "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for"
+_STAGE_CAP = {
+    "branch": "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for",
+    "feature": "Three review rounds left a P1 open. Proceed to approval or rework the feature",
+}
 _RECORDED = (
-    "tier",
-    "decision-item",
     "finding",
     review.CAP_DECISION,
-    quiz.KIND,
     signoff.KIND,
     signoff.SECOND,
     asks.ANSWER,
@@ -106,7 +98,6 @@ _RECORDED = (
 _CHOSEN = (
     "finding",
     review.CAP_DECISION,
-    quiz.KIND,
     signoff.KIND,
     signoff.SECOND,
     signoff.AFTER,
@@ -118,11 +109,7 @@ _OWN_WORDS = (signoff.KIND, signoff.SECOND)
 _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 
 _POSITIVE = {
-    "contract": "Approve",
-    "invariants": "Approve",
-    "state-chart": "Approve",
     "feature-approval": "Approve",
-    "sitting": "Done",
     "lean": "Prove it in Lean",
     signoff.AFTER: signoff.DONE,
 }
@@ -143,6 +130,8 @@ class Pending:
     detail: str = ""
     label: str = ""
     story_labels: list[str] = field(default_factory=list)
+    draft: str = ""
+    stage: str = ""
 
 
 @dataclass(frozen=True)
@@ -154,6 +143,8 @@ class Pin:
     label: str = ""
     story_labels: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
+    draft: str = ""
+    stage: str = ""
 
 
 def make_question(kind: str, pin: Pin) -> Question:
@@ -162,18 +153,18 @@ def make_question(kind: str, pin: Pin) -> Question:
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
     options = (pin.options or _OPTIONS.get(kind, [])) if kind in _PIN_OPTIONS else _OPTIONS[kind]
-    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else _DESCRIPTIONS.get(kind)
+    held = (_FEATURE_DESCRIPTIONS.get(kind) if pin.stage == "feature" else None) or _DESCRIPTIONS.get(kind)
+    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else held
     return build(kind, pin.label or pin.subject, question_text(kind, pin), options, descriptions)
 
 
 def question_text(kind: str, pin: Pin) -> str:
     fields = {"kind": kind, **asdict(pin)}
     check = content_hash(json.dumps(fields, sort_keys=True))[:12]
-    ask = (
-        _BRANCH_CAP
-        if kind == review.CAP_DECISION and review.cap_prefix(pin.subject).endswith(":branch")
-        else _ASKS[kind]
-    )
+    if kind == ITEM:
+        return f"{pin.detail}: {pin.draft}? [{check}]"
+    stage = review.cap_prefix(pin.subject).rpartition(":")[2] if kind == review.CAP_DECISION else ""
+    ask = _STAGE_CAP.get(stage, _ASKS[kind])
     shown = " ".join(part for part in (ask, pin.label) if part)
     if pin.detail:
         shown += f": {pin.detail}"
@@ -197,6 +188,8 @@ def save_pending(question: Question, pin: Pin, state: Path) -> None:
         pin.detail,
         pin.label,
         pin.story_labels,
+        pin.draft,
+        pin.stage,
     )
     folder = state / PENDING
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -221,6 +214,8 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
+    if pending.kind == ITEM:
+        return bool(answer.strip()) and answer != "Change"
     if pending.kind == signoff.KIND and answer == signoff.BACK:
         return False
     if pending.kind in _RECORDED:
@@ -248,7 +243,15 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"no recorded answer for {pending.nonce} in {state / answers.FILE}")
     options = pending.options if pending.kind in _PIN_OPTIONS and pending.options != _OPTIONS.get(pending.kind) else []
     pin = Pin(
-        pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels, options
+        pending.subject,
+        pending.version,
+        pending.stories,
+        pending.detail,
+        pending.label,
+        pending.story_labels,
+        options,
+        pending.draft,
+        pending.stage,
     )
     asked = question_text(pending.kind, pin)
     if pending.question != asked:
@@ -257,18 +260,13 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the options the person saw for {pending.nonce} differ from the pending question")
     if found.copied:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
-    if pending.kind == "tier":
-        tiers.chosen(found.answer)
+    said = found.answer.strip().casefold()
+    found = replace(found, answer=next((o for o in pending.options if o.casefold() == said), found.answer))
     if pending.kind in _CHOSEN and found.answer not in pending.options and not in_own_words(pending, found.answer):
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:
         raise Refusal(f"the answer for {pending.nonce} is an option description, not a choice")
     return found
-
-
-def _tier_data(answer: str) -> dict:
-    tier = tiers.chosen(answer)
-    return {"level": tier.level, "fact": tier.fact}
 
 
 def _owner_signs(store: Store, pending: Pending, by: str) -> None:
@@ -294,14 +292,12 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     answer = signoff.NOT_YET if note is not None else found.answer
     if not _creates_record(pending, answer):
         return False
+    if pending.kind == ITEM and answer == "Yes":
+        answer = pending.draft
     if pending.kind == signoff.KIND:
         _owner_signs(store, pending, by)
     if pending.kind == signoff.SECOND:
         _another_signs(store, pending, by)
-    graded = {}
-    if pending.kind == quiz.KIND:
-        records = store.records(pending.stories[0])
-        graded = {"correct": quiz.grade(records, pending.subject, pending.version, pending.options, found.answer)}
     record = Record(
         pending.kind,
         pending.subject,
@@ -309,9 +305,7 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         f"person:{found.session_id}",
         {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"note": note} if note is not None else {})
-        | ({"item": pending.detail} if pending.kind == "decision-item" else {})
-        | (_tier_data(found.answer) if pending.kind == "tier" else {})
-        | graded,
+        | ({"item": pending.detail} if pending.kind == ITEM else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

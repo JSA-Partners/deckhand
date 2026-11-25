@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, signoff, tiers
+from deckhand import answers, decisions, review, signoff
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -19,9 +19,14 @@ def pin(stories: list[str] | None = None, version: str = "v1") -> decisions.Pin:
     return decisions.Pin("Checkout", version, stories, label="Checkout", story_labels=[f"ACME-{s}" for s in stories])
 
 
-def ask(tmp_path: Path, kind: str = "contract", stories: list[str] | None = None):
-    question = decisions.make_question(kind, pin(stories))
-    decisions.save_pending(question, pin(stories), tmp_path)
+def item_pin(draft: str = "'Bonjour'") -> decisions.Pin:
+    return decisions.Pin("abc", "v1", ["s1"], "Greeting wording", "", ["ACME-1"], draft=draft)
+
+
+def ask(tmp_path: Path, kind: str = "feature-approval", stories: list[str] | None = None):
+    shown = item_pin() if kind == "decision-item" else pin(stories)
+    question = decisions.make_question(kind, shown)
+    decisions.save_pending(question, shown, tmp_path)
     return question, decisions.load_pending(question.nonce, tmp_path)
 
 
@@ -73,7 +78,7 @@ def test_decide_records_on_every_story(tmp_path: Path):
     assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     for story in ("s1", "s2"):
         [record] = store.records(story)
-        assert (record.kind, record.subject, record.version) == ("contract", "Checkout", "v1")
+        assert (record.kind, record.subject, record.version) == ("feature-approval", "Checkout", "v1")
         assert record.author == "person:sess-9"
         assert record.data == {
             "answer": "Approve",
@@ -92,7 +97,7 @@ def test_decide_twice_writes_once(tmp_path: Path):
     assert [w[0] for w in store.writes] == ["put_record"]
 
 
-@pytest.mark.parametrize("kind,answer", [("contract", "Not yet"), ("sitting", "Not yet")])
+@pytest.mark.parametrize("kind,answer", [("feature-approval", "Change"), ("feature-approval", "Later, maybe")])
 def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer: str):
     question, pending = ask(tmp_path, kind)
     answered(tmp_path, question, answer)
@@ -117,10 +122,12 @@ def test_only_proving_in_lean_records_a_lean_decision(tmp_path: Path, answer: st
 
 
 def test_question_text_is_ascii_and_names_what_is_asked():
-    question = decisions.make_question("state-chart", pin())
+    question = decisions.make_question("feature-approval", pin())
     assert question.text.isascii()
-    assert "state chart" in question.text and "Checkout" in question.text
-    assert question.options == ["Approve", "Not yet"]
+    assert "feature" in question.text and "Checkout" in question.text
+    assert question.options == ["Approve", "Change"]
+    [_, change] = as_tool_input(question)["questions"][0]["options"]
+    assert "type" in change["description"]
 
 
 def test_unknown_kind_refuses():
@@ -168,16 +175,16 @@ def test_pending_edited_after_the_answer_is_refused(tmp_path: Path, changes: dic
 
 def test_question_text_states_story_labels_not_ids():
     shown = decisions.Pin("p1", "v1", ["u1", "u2"], label="Alpha", story_labels=["ACME-1 Orders", "ACME-2 Receipts"])
-    question = decisions.make_question("contract", shown)
+    question = decisions.make_question("feature-approval", shown)
     assert re.fullmatch(
-        r"Approve the contract for Alpha \(stories ACME-1 Orders, ACME-2 Receipts\)\? \[[0-9a-f]{12}\]", question.text
+        r"Approve the feature Alpha \(stories ACME-1 Orders, ACME-2 Receipts\)\? \[[0-9a-f]{12}\]", question.text
     )
-    assert decisions.make_question("contract", replace(shown, version="v2")).text != question.text
+    assert decisions.make_question("feature-approval", replace(shown, version="v2")).text != question.text
     assert not any(id in question.text for id in ("p1", "u1", "u2"))
     assert question.text.isascii()
     assert (
         decisions.make_question(
-            "contract", decisions.Pin("p1", "v1", ["u1", "u3"], label="Alpha", story_labels=shown.story_labels)
+            "feature-approval", decisions.Pin("p1", "v1", ["u1", "u3"], label="Alpha", story_labels=shown.story_labels)
         ).text
         != question.text
     )
@@ -188,35 +195,6 @@ def test_question_text_shows_no_hash_but_its_check_tag():
     shown = decisions.Pin("s9", "v1", ["s9"], "head c2", label, [label])
     text = decisions.make_question("sign-off", shown).text
     assert re.fullmatch(r"Sign off ACME-9 Dialog check story: head c2\? \[[0-9a-f]{12}\]", text)
-
-
-def test_tier_is_one_choice_of_four_ending_with_none_of_these():
-    question = decisions.make_question("tier", pin())
-    assert question.options == tiers.OPTIONS
-    assert len(question.options) == 4 and question.options[-1] == "None of these"
-    assert as_tool_input(question)["questions"][0]["multiSelect"] is False
-    assert "highest" in question.text
-
-
-@pytest.mark.parametrize("index,level,fact", [(0, 3, "concurrency"), (2, 1, "data_rule"), (3, 0, "none")])
-def test_tier_record_holds_the_chosen_level_and_fact(tmp_path: Path, index: int, level: int, fact: str):
-    question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, question.options[index])
-    store = store_with("s1")
-    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
-    [record] = store.records("s1")
-    assert (record.data["level"], record.data["fact"]) == (level, fact)
-    assert "facts" not in record.data
-
-
-@pytest.mark.parametrize("answer", ["anything at all", "None of these, Jobs, retries, webhooks, queues or two writers"])
-def test_tier_answer_other_than_one_option_refuses(tmp_path: Path, answer: str):
-    question, pending = ask(tmp_path, "tier")
-    answered(tmp_path, question, answer)
-    store = store_with("s1")
-    with pytest.raises(Refusal, match="not one of the offered options"):
-        decisions.decide(store, pending, tmp_path, "viewer-1")
-    assert store.writes == []
 
 
 def test_answer_marked_copied_refuses(tmp_path: Path):
@@ -238,14 +216,41 @@ def test_answer_marked_copied_refuses(tmp_path: Path):
     assert store.writes == []
 
 
-@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
-def test_every_decision_item_answer_is_recorded(tmp_path: Path, answer: str):
+def test_a_decision_item_is_asked_with_its_draft(tmp_path: Path):
+    question, _ = ask(tmp_path, "decision-item")
+    [asked] = as_tool_input(question)["questions"]
+    assert re.fullmatch(r"Greeting wording: 'Bonjour'\? \[[0-9a-f]{12}\]", asked["question"])
+    assert [o["label"] for o in asked["options"]] == ["Yes", "Change"]
+    assert not any("recommended" in o["label"] + o["description"] for o in asked["options"])
+    assert "type" in asked["options"][1]["description"]
+
+
+def test_yes_records_the_draft_as_the_answer(tmp_path: Path):
     question, pending = ask(tmp_path, "decision-item")
-    answered(tmp_path, question, answer)
+    answered(tmp_path, question, "Yes")
     store = store_with("s1")
     assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     [record] = store.records("s1")
-    assert record.data["answer"] == answer
+    assert (record.data["answer"], record.data["item"]) == ("'Bonjour'", "Greeting wording")
+    assert "note" not in record.data
+
+
+def test_own_words_are_recorded_as_the_answer(tmp_path: Path):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, "'Salut'")
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
+    [record] = store.records("s1")
+    assert record.data["answer"] == "'Salut'"
+    assert "note" not in record.data
+
+
+def test_a_bare_change_records_nothing(tmp_path: Path):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, "Change")
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is False
+    assert store.writes == []
 
 
 def test_load_pending_refuses_a_nonce_outside_the_pending_folder(tmp_path: Path):
@@ -288,7 +293,7 @@ def test_options_the_person_saw_must_match_the_pending_question(tmp_path: Path, 
 def test_question_text_ending_in_a_question_mark_gets_no_second_one():
     label = "ACME-9 Dialog check story"
     shown = decisions.Pin("s9", "v1", ["s9"], "item 1 of 1, What happens?", label, [label])
-    assert "??" not in decisions.make_question("quiz", replace(shown, options=["a", "b"])).text
+    assert "??" not in decisions.make_question("question", replace(shown, options=["a", "b"])).text
 
 
 def test_decision_names_who(tmp_path: Path):
@@ -344,9 +349,62 @@ def test_option_descriptions_say_what_a_choice_does_and_never_repeat_the_subject
         question = decisions.make_question(kind, replace(pin(), options=options or []))
         return [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
 
-    assert shown("quiz", ["The key", "A new key"]) == ["", ""]
     assert shown("question", ["Redis", "SQS"]) == ["", ""]
     assert shown("finding") == ["the finding stays unfixed", "the hand fixes the finding"]
     for kind in decisions.KINDS:
-        if kind not in ("quiz", "question", "tier"):
+        if kind != "question":
             assert all("Checkout" not in text for text in shown(kind)), kind
+
+
+def test_no_quiz_kind_remains():
+    assert "quiz" not in decisions.KINDS
+
+
+def test_no_sitting_kind_remains():
+    assert {"sitting", "tier", "state-chart"}.isdisjoint(decisions.KINDS)
+
+
+def test_no_contract_or_invariants_kind_remains():
+    assert {"contract", "invariants"}.isdisjoint(decisions.KINDS)
+    with pytest.raises(Refusal, match="unknown decision kind"):
+        decisions.make_question("contract", pin())
+
+
+def test_yes_settles_a_draft_that_reads_change(tmp_path: Path):
+    shown = item_pin("Change")
+    question = decisions.make_question("decision-item", shown)
+    decisions.save_pending(question, shown, tmp_path)
+    answered(tmp_path, question, "Yes")
+    store = store_with("s1")
+    assert decisions.decide(store, decisions.load_pending(question.nonce, tmp_path), tmp_path, "viewer-1") is True
+    [record] = store.records("s1")
+    assert record.data["answer"] == "Change"
+
+
+@pytest.mark.parametrize("said,recorded", [("yes", "'Bonjour'"), ("YES", "'Bonjour'"), ("change", None)])
+def test_an_option_typed_in_another_case_is_that_option(tmp_path: Path, said: str, recorded: str | None):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, said)
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is (recorded is not None)
+    assert [r.data["answer"] for r in store.records("s1")] == ([recorded] if recorded else [])
+
+
+def test_a_feature_question_names_the_captain_in_its_options():
+    def shown(kind: str) -> list[str]:
+        question = decisions.make_question(kind, replace(pin(), subject="p1:feature:3", stage="feature"))
+        return [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
+
+    assert shown("finding") == ["the finding stays unfixed", "the captain fixes the finding"]
+    assert shown(review.CAP_DECISION)[1] == "the captain reworks the feature and the rounds count again"
+    for kind in ("finding", review.CAP_DECISION):
+        assert not any("hand" in text for text in shown(kind))
+    assert shown("feature-approval") == ["the feature moves to the build", "type what to change in your own words"]
+
+
+def test_the_stage_of_a_pin_survives_the_pending_round_trip(tmp_path: Path):
+    shown = replace(pin(), stage="feature")
+    question = decisions.make_question("finding", shown)
+    decisions.save_pending(question, shown, tmp_path)
+    answered(tmp_path, question, review.ACCEPT)
+    assert decisions.check(decisions.load_pending(question.nonce, tmp_path), tmp_path).answer == review.ACCEPT

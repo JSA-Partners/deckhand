@@ -125,7 +125,7 @@ def _outdated() -> str | None:
         installed = None
     try:
         protected = launch.protected(config.config_dir(), answers.state_dir())
-        return None if launch.captain_current(installed, protected) else OUTDATED
+        return None if launch.captain_current(installed, protected, config.local().clones.values()) else OUTDATED
     except Refusal:
         return None
 
