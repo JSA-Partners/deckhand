@@ -170,3 +170,59 @@ def test_a_hand_watcher_with_no_ref_parks_without_printing(db: Path, monkeypatch
 def test_watch_apply_takes_captain_or_hand(args):
     with pytest.raises(Refusal, match="watch apply captain\\|hand"):
         Watch(sleep=passes({}, 1)).apply(args)
+
+
+def test_a_held_captain_watcher_rings_for_a_spike_answer_and_not_a_question(db: Path, capsys):
+    from deckhand.queue import SPIKE, Item
+
+    answer = Item(SPIKE, 3, "0123456789ab", "Spike: does it merge?", "2026-11-20T09:40:00.000Z", 0, [], ["https://x"])
+    write(db.parent, snapshot([question("q1")]))
+    with LocalState(db) as rows:
+        rows.put(watch.HOLD, {})
+
+    def newer() -> None:
+        write(db.parent, snapshot([question("q2")]))
+
+    def answered() -> None:
+        write(db.parent, snapshot([question("q2"), answer]))
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: newer, 4: answered}, 6)).apply(["captain"])
+    assert capsys.readouterr().out == watch.SPIKE + "\n"
+
+
+def test_a_held_captain_watcher_rings_for_a_spike_prompt_with_its_attach_line(db: Path, capsys):
+    from deckhand.fleet import spike_name
+    from deckhand.queue import Item
+    from tests.test_status import session
+
+    key = "0123456789ab"
+    spike = session(spike_name(key), "blocked", "permission")
+    prompt = Item("prompt", 4, key, spike.name, spike.started_at, 0, [], ["claude attach id-x"])
+    story = Item("prompt", 4, "ACME-1", "hand-ACME-1", spike.started_at, 0, [], ["claude attach id-y"])
+    write(db.parent, snapshot([question("q1")], [spike]))
+    with LocalState(db) as rows:
+        rows.put(watch.HOLD, {})
+
+    def stuck() -> None:
+        write(db.parent, snapshot([question("q1"), story, prompt], [spike]))
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: stuck}, 4)).apply(["captain"])
+    assert capsys.readouterr().out == f"{watch.STUCK}: claude attach id-x\n"
+
+
+def test_a_restarted_held_watcher_does_not_ring_for_a_spike_already_answered(db: Path, capsys):
+    from deckhand.queue import SPIKE, Item
+
+    answer = Item(SPIKE, 3, "0123456789ab", "Spike: does it merge?", "2026-11-20T09:40:00.000Z", 0, [], ["https://x"])
+    write(db.parent, snapshot([question("q1"), answer]))
+    with LocalState(db) as rows:
+        rows.put(watch.HOLD, {})
+
+    def again() -> None:
+        write(db.parent, snapshot([question("q1"), answer]))
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: again}, 4)).apply(["captain"])
+    assert capsys.readouterr().out == ""

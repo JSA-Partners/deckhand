@@ -11,6 +11,8 @@ QUEUE = "deckhand: something needs the person"
 STOPPED = "deckhand: the engine stopped"
 RUNNING = "deckhand: the engine is running"
 MAIL = "deckhand: a message waits"
+SPIKE = "deckhand: a spike was answered"
+STUCK = "deckhand: a spike needs the person"
 HOLD = "hold"
 WATCHER = "watcher"
 BEAT_EVERY = 10.0
@@ -25,12 +27,20 @@ class Seen:
     at: float
     stale: bool = False
     recovered: str = ""
+    spikes: tuple[str, ...] = ()
 
 
 # The captain withholds every item while the engine is down, so an item still on top rings when it returns.
 # A top of None is a snapshot that could not be read: it neither rings nor clears what was shown.
+# spikes pairs each spike item's key with its ring line; while held, only a spike item not seen before rings.
 def captain(
-    seen: Seen, top: str | None, held: bool, beat: float | None, now: float, stale: bool = False
+    seen: Seen,
+    top: str | None,
+    held: bool,
+    beat: float | None,
+    now: float,
+    stale: bool = False,
+    spikes: tuple[tuple[str, str], ...] = (),
 ) -> tuple[Seen, list[str]]:
     if now - seen.at > state.SLEEP_GAP:
         return replace(seen, at=now), []
@@ -46,9 +56,14 @@ def captain(
     elif top is not None and top != shown and not held:
         lines.append(QUEUE)
         shown = top
+    heard = seen.spikes
+    if top is not None:
+        if held:
+            lines += [line for key, line in spikes if key not in heard]
+        heard = tuple(key for key, _ in spikes)
     if seen.engine is not None and engine != seen.engine:
         lines.append(RUNNING if engine else STOPPED)
-    return Seen(shown, engine, seen.seq, now, seen.stale if top is None else stale, recovered), lines
+    return Seen(shown, engine, seen.seq, now, seen.stale if top is None else stale, recovered, heard), lines
 
 
 def hand(seen: Seen, newest: int, now: float) -> tuple[Seen, list[str]]:

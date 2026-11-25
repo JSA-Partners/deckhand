@@ -4,7 +4,7 @@ from deckhand import watch
 from deckhand.fleet import Fleet, Session
 from deckhand.records import iso
 from deckhand.store.state import SLEEP_GAP
-from deckhand.watch import MAIL, QUEUE, RUNNING, STOPPED, Seen
+from deckhand.watch import MAIL, QUEUE, RUNNING, SPIKE, STOPPED, Seen
 
 T = 1795000000.0
 
@@ -163,3 +163,50 @@ def test_a_flapping_linear_read_rings_once_for_one_top_item():
     seen, _ = watch.captain(seen, "k2", False, T + 10, T + 10, stale=True)
     _, lines = watch.captain(seen, "k2", False, T + 11, T + 11)
     assert lines == [QUEUE]
+
+
+ANSWER = (("s1", SPIKE),)
+
+
+def test_a_held_queue_rings_only_for_a_new_spike_item():
+    seen, lines = watch.captain(Seen("k1", True, 0, T), "k1", True, T, T + 1)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k2", True, T + 1, T + 2)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k2", True, T + 2, T + 3, spikes=ANSWER)
+    assert lines == [SPIKE]
+    seen, lines = watch.captain(seen, "k2", True, T + 3, T + 4, spikes=ANSWER)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k2", True, T + 4, T + 5, spikes=(*ANSWER, ("s2", "stuck: claude attach x")))
+    assert lines == ["stuck: claude attach x"]
+    _, lines = watch.captain(seen, "k2", False, T + 5, T + 6, spikes=ANSWER)
+    assert lines == [QUEUE]
+
+
+def test_a_release_with_the_top_unchanged_stays_silent():
+    seen, _ = watch.captain(Seen("k1", True, 0, T), "k1", True, T, T + 1, spikes=ANSWER)
+    _, lines = watch.captain(seen, "k1", False, T + 1, T + 2, spikes=ANSWER)
+    assert lines == []
+
+
+def test_a_spike_heard_before_the_hold_does_not_ring_on_hold():
+    seen, lines = watch.captain(Seen("k1", True, 0, T), "k1", False, T, T + 1, spikes=ANSWER)
+    assert lines == []
+    _, lines = watch.captain(seen, "k1", True, T + 1, T + 2, spikes=ANSWER)
+    assert lines == []
+
+
+def test_a_held_spike_already_heard_stays_silent_when_the_engine_or_linear_returns():
+    seen = Seen("k1", False, 0, T, spikes=("s1",))
+    _, lines = watch.captain(seen, "k1", True, T + 1, T + 1, spikes=ANSWER)
+    assert lines == [RUNNING]
+    seen = Seen("k1", True, 0, T, stale=True, spikes=("s1",))
+    _, lines = watch.captain(seen, "k1", True, T + 1, T + 1, spikes=ANSWER)
+    assert lines == []
+
+
+def test_an_unreadable_snapshot_while_held_keeps_the_spikes_heard():
+    seen, lines = watch.captain(Seen("k1", True, 0, T, spikes=("s1",)), None, True, T + 1, T + 1)
+    assert (seen.spikes, lines) == (("s1",), [])
+    _, lines = watch.captain(seen, "k1", True, T + 2, T + 2, spikes=ANSWER)
+    assert lines == []

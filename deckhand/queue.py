@@ -29,6 +29,7 @@ FEATURE_SKILL = "/deckhand:feature"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
 STALLED = "stalled"
+SPIKE = "spike"
 RESTART, LEAVE = "Restart", "Leave it stopped"
 POLICY = "policy"
 # Below every story's item, so a policy the person puts off never holds back work already in flight.
@@ -289,7 +290,7 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
         key = spikes.key_of(project, document) or ""
         answered.add(key)
         lines = [f"spike answered, read it: {document['title']}"]
-        found.append(Item("spike", 3, key, document["title"], document["at"], 0, lines, [document["url"]]))
+        found.append(Item(SPIKE, 3, key, document["title"], document["at"], 0, lines, [document["url"]]))
     if read.note:
         return found
     asked = spikes.keys(answers.state_dir(), project)
