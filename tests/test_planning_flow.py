@@ -200,11 +200,12 @@ def test_planning_flow_from_new_to_approval(tmp_path: Path, monkeypatch: pytest.
     assert drafts() == []
     contract = session.write("contract.md", "POST /orders returns 201.")
     session.run("plan", "apply", "Contract", *TEAM, "--drafted", "--file", contract)
+    assert drafts() == []
+    session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
     assert drafts() == ["ACME-1"]
 
     session.run("draft", "apply", "ACME-1", *TEAM, "--file", session.write("draft.md", "Outcome: queued once, by id."))
     session.run("draft", "apply", "ACME-1", "take", *TEAM)
-    session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
     session.review_feature(session.run)
     assert session.facts()["gaps"] == []
 

@@ -71,6 +71,13 @@ def item_version(item: str, draft: str) -> str:
     return content_hash(item + "\0" + draft)
 
 
+def answer(records: list[Record], item: str, draft: str) -> str | None:
+    found = held(records, "decision-item", item_subject(item))
+    if found is None or found.version != item_version(item, draft) or not found.data.get("answer"):
+        return None
+    return str(found.data["answer"])
+
+
 def drafts(records: list[Record]) -> dict[str, str]:
     expected = expected_items(records)
     entries = [e for e in expected if isinstance(e, dict)] if isinstance(expected, list) else []

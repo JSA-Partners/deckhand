@@ -8,7 +8,8 @@ import pytest
 from deckhand import features, launch, ops, planning, queue, spec
 from deckhand.step import Refusal
 from deckhand.steps.draft import Draft
-from tests.test_feature_approval import approve_everything, expect, setup
+from tests.test_feature_approval import DRAFT as ITEM_DRAFT
+from tests.test_feature_approval import approve_everything, decided, expect, setup
 
 TEAM = ["--team-key", "ACME"]
 DRAFT = "Outcome: an order is placed.\n\nExamples:\n- a paid order ships.\n"
@@ -151,3 +152,13 @@ def test_a_long_frame_leaves_the_contract_and_the_stub_decisions_inline(
     assert "The Contract of Alpha." in out and "decisions: Send receipts by email" in out
     assert out.index("The Contract of Alpha.") < out.index("decisions: Send") < out.index("# Frame")
     assert "never settled here" not in out
+
+
+def test_the_draft_context_shows_each_decision_item_in_the_persons_own_words(capsys: pytest.CaptureFixture[str]):
+    store = setup()
+    expect(store, "s1", "orders", "Send receipts by email")
+    decided(store, "decision-item", "Send receipts by email", "Only when the buyer asks for one.", ["s1"])
+    Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
+    lines = capsys.readouterr().out.splitlines()
+    assert "decisions: Send receipts by email: Only when the buyer asks for one." in lines
+    assert f"decisions: Send receipts by email: {ITEM_DRAFT}" not in lines

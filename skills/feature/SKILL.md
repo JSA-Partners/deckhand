@@ -9,7 +9,7 @@ allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(super
 
 !`deckhand feature context`
 
-Above: the open feature, its phase, next step and input folder.
+Above: the feature, its phase, next step and input folder.
 Work one feature at a time. Keep the given option order; mark none recommended.
 
 Open a feature with `deckhand feature apply new --name N --weeks 1|2 [--reference REF]`; pick or
@@ -23,20 +23,21 @@ person sees.
 section, asking nothing, with `deckhand plan apply SECTION --file PATH --drafted`.
 
 At Facts, ask as a spike each fact that needs a command run, its one-line question in a file:
-`deckhand hand apply spike --repository LABEL --file QUESTION.md`. Keep drafting what does not rest
+`deckhand hand apply spike --repository LABEL --file QUESTION.md`. Draft what does not rest
 on it, then end the turn. On `deckhand: a spike was answered`, read it with
 `deckhand plan context spike KEY` and fold it into Facts.
 
 Plan the stories from the fields `deckhand stories context` prints: a tier, a state chart at tier
 2 or 3, after-merge chores, and decision items with drafted answers. Save the map with
-`deckhand stories apply --file MAP.json`, which names each REF.
+`deckhand stories apply --file MAP.json`, which names each REF; ask each item with
+`deckhand decide context decision-item ITEM --story REF`.
 
 For every decision, run `deckhand decide context KIND SUBJECT`, pass its JSON unchanged to the
 dialog, then `deckhand decide apply NONCE` once answered. feature-approval, finding and
 review-cap take the project id.
 
-A saved Contract starts the drafts. Take each finished Draft with `deckhand draft apply REF take`,
-unasked. Ask each expected item with `deckhand decide context decision-item ITEM --story REF`.
+Drafts wait for the Contract and their answered items. Take each finished Draft with
+`deckhand draft apply REF take`, unasked.
 
 Settle each gap `deckhand feature context` names. For the feature review, pass the
 lens and target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence

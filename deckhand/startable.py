@@ -45,6 +45,10 @@ def why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
         return f"{story['identifier']} is already drafted"
     if planning.section(store, feature, "Contract") is None:
         return f"the Contract of {features.describe(feature.project)} is not saved, so no story is drafted yet"
+    open_items = features.undecided(feature, story)
+    if open_items:
+        noun = "item" if len(open_items) == 1 else "items"
+        return f"{story['identifier']} waits on its decision {noun} {', '.join(open_items)}, not answered yet"
     return None
 
 

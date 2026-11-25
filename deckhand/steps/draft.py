@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import claims, features, inputs, ops, planning, queue, spec, versions
+from deckhand import approval, claims, features, inputs, ops, planning, queue, spec, versions
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -42,13 +42,15 @@ class Draft(StoryStep):
         feature = features.owning(store, team_key(parsed), parsed["words"][0])
         story = features.story(store, feature, parsed["words"][0])
         ref = story["identifier"]
-        stub = next((r for r in feature.records.get(story["id"], []) if r.kind == "stub"), None)
+        records = feature.records.get(story["id"], [])
+        stub = next((r for r in records if r.kind == "stub"), None)
 
         def items(name: str) -> list[str]:
             return [f"{name}: {item}" for item in (stub.data.get(name, []) if stub else [])]
 
         def decisions() -> list[str]:
-            return [f"decisions: {item}: {draft}" for item, draft in versions.drafts([stub] if stub else []).items()]
+            items = versions.drafts(records).items()
+            return [f"decisions: {item}: {approval.item_answer(records, item, draft)}" for item, draft in items]
 
         first = [f"story: {ref} {story['title']}", spec.planning_text(store, feature, ("Contract",))]
         first += [*decisions(), spec.planning_text(store, feature, ("Frame", "Shape", "Examples"))]

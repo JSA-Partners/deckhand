@@ -8,11 +8,9 @@ from deckhand.store import Store
 SECTIONS = ("Contract", "Examples", "Invariants")
 
 
-def _answer(records: list[Record], item: str, draft: str) -> str:
-    held = versions.held(records, "decision-item", versions.item_subject(item))
-    if held is not None and held.version == versions.item_version(item, draft) and held.data.get("answer"):
-        return str(held.data["answer"])
-    return f"{draft} (not decided)"
+def item_answer(records: list[Record], item: str, draft: str) -> str:
+    answered = versions.answer(records, item, draft)
+    return answered if answered is not None else f"{draft} (not decided)"
 
 
 def _listed(name: str, lines: list[str]) -> str:
@@ -25,7 +23,7 @@ def _story(store: Store, feature: Feature, story: dict) -> str:
     blockers = [s["identifier"] for s in feature.live if s["id"] in ids]
     repositories = versions.repositories(store, story)
     level = versions.tier(records, story["id"])
-    items = [f"- {item}: {_answer(records, item, draft)}" for item, draft in versions.drafts(records).items()]
+    items = [f"- {item}: {item_answer(records, item, draft)}" for item, draft in versions.drafts(records).items()]
     chart = versions.chart(records, story["id"]).strip()
     head = [
         f"## {story['identifier']} {story['title']}",

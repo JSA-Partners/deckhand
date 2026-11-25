@@ -54,7 +54,7 @@ def phase(feature: Feature) -> Phase:
     return Phase.PLANNING
 
 
-def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
+def undecided(feature: Feature, story: dict) -> list[str]:
     records = feature.records.get(story["id"], [])
     found = []
     for item, draft in versions.drafts(records).items():
@@ -99,9 +99,7 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
     project = feature.project["id"]
     for story in live:
         gaps += _map_gaps(feature, story)
-        gaps += [
-            f"{story['identifier']}: decision item {item} is not decided" for item in _undecided(store, feature, story)
-        ]
+        gaps += [f"{story['identifier']}: decision item {item} is not decided" for item in undecided(feature, story)]
     items: dict[str, str] = {}
     settled: set[str] = set()
     for story in sorted(feature.stories, key=lambda s: s["id"]):
