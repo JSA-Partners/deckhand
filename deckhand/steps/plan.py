@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from deckhand import features, inputs, planning
+from deckhand import features, inputs, planning, spec, spikes
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.open import Stores
 
 USAGE = (
     "plan takes [--team-key KEY] on both verbs, --json on context only; context [SECTION],"
-    " apply SECTION --file PATH [--drafted]"
+    " spike KEY, apply SECTION --file PATH [--drafted]"
 )
 
 
@@ -46,7 +46,16 @@ class Plan:
         parsed = _parse(args)
         store = self._store_for_run()
         feature = self._feature(store, parsed)
-        if len(parsed["words"]) > 1:
+        words = parsed["words"]
+        project = feature.project["id"]
+        held = {k: d for d in spikes.answered(store, feature) if (k := spikes.key_of(project, d))}
+        if words[:1] == ["spike"]:
+            if len(words) != 2:
+                raise Refusal(f"context spike takes one KEY; {USAGE}")
+            found = held.get(words[1])
+            print(spec.plain(found["body"]) if found else f"no answered spike {words[1]}")
+            return
+        if len(words) > 1:
             raise Refusal(f"context takes at most one SECTION; {USAGE}")
         if parsed["words"]:
             name = parsed["words"][0]
@@ -58,12 +67,17 @@ class Plan:
             return
         saved = {name: planning.section(store, feature, name) is not None for name in planning.SECTIONS}
         following = planning.next_section(store, feature)
+        titles = {key: d["title"] for key, d in held.items()}
         if parsed["json"]:
-            print(json.dumps({"sections": saved, "next": following}, indent=2))
+            print(json.dumps({"sections": saved, "next": following, "spikes": titles}, indent=2))
             return
         for name, held in saved.items():
             print(f"{name}: {'saved' if held else 'empty'}")
         print(f"next: {following}" if following else "next: nothing")
+        if titles:
+            print("answered spikes:")
+            for key, title in sorted(titles.items()):
+                print(f"{key} {title}")
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)

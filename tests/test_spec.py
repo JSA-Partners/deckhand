@@ -144,3 +144,24 @@ def test_a_first_line_over_the_bound_keeps_its_start(temp: Path):
     first = "\u00e9" * 15000 + "\n"
     shown = spec.fitted("ACME-1-build", first, "rest\n")
     assert size(shown) < spec.LIMIT and shown.startswith("\u00e9" * 100) and spec.CUT in shown
+
+
+def test_plain_undoes_a_self_autolink_and_escapes():
+    assert spec.plain("[greet.sh](<http://greet.sh>) and tests/\\*\\_test.sh") == "greet.sh and tests/*_test.sh"
+    assert spec.plain("[docs](<https://x.io>)") == "[docs](<https://x.io>)"
+    assert spec.plain("a \\`b\\` c") == "a `b` c"
+    assert spec.plain("`[x.io](<http://x.io>) \\*`") == "`[x.io](<http://x.io>) \\*`"
+    fenced = "```\n[x.io](<http://x.io>) \\_\n```\n[y.io](<http://y.io>)"
+    assert spec.plain(fenced) == "```\n[x.io](<http://x.io>) \\_\n```\ny.io"
+
+
+def test_gather_returns_plain_fields_and_versions_stay_raw():
+    store = feature_store()
+    feature, _ = loaded(store)
+    raw = "See [x.io](<http://x.io>), a\\_b."
+    planning.save_section(store, feature, "Examples", raw, False)
+    item(store, "s1", "Ids", {"answer": "tests/\\*", "item": "Ids", "question": "Q?"})
+    found = spec.gather(store, *loaded(store))
+    assert found.examples == f"{planning.WRITTEN}\n\nSee x.io, a_b."
+    assert found.decisions[0]["answer"] == "tests/*"
+    assert planning.section(store, feature, "Examples") == f"{planning.WRITTEN}\n\n{raw}"

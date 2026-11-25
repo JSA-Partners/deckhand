@@ -417,6 +417,15 @@ def feature_ready() -> FakeStore:
     return store
 
 
+def test_the_feature_review_target_is_plain_and_its_hash_raw(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = feature_ready()
+    planning.save_section(store, load(store), "Contract", "Reads [a.io](<http://a.io>) and x\\_y.", False)
+    first = shown(FeatureReview(store), capsys)
+    text = Path(first["target"]).read_text()
+    assert "Reads a.io and x_y." in text
+    assert first["target_hash"] == review.content_hash(features.review_text(store, load(store)) or "")
+
+
 def test_feature_review_p1_is_an_approval_gap(tmp_path: Path, state: Path, capsys: pytest.CaptureFixture[str]):
     store = feature_ready()
     step = FeatureReview(store)

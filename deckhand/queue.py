@@ -11,6 +11,7 @@ from deckhand import (
     fleet,
     gaps,
     order,
+    planning,
     review,
     review_gaps,
     signoff,
@@ -304,9 +305,12 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
         return []
     project = feature.project["id"]
     found, answered = [], set()
+    facts = planning.saved_at(store, feature, "Facts")
     for document in spikes.answered(store, feature):
         key = spikes.key_of(project, document) or ""
         answered.add(key)
+        if facts is not None and facts > document["at"]:
+            continue
         lines = [f"spike answered, read it: {document['title']}"]
         found.append(Item(SPIKE, 3, key, document["title"], document["at"], 0, lines, [document["url"]]))
     if read.note:

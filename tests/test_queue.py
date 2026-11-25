@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, policy, queue, review, signoff, spikes
+from deckhand import asks, features, fleet, gaps, implplan, planning, policy, queue, review, signoff, spikes
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
@@ -629,3 +629,14 @@ def test_one_feature_finding_makes_one_queue_item_across_stories():
         store.put_record(story, asks.proposal_record(finding["id"], round.version, "out of scope"))
     [item] = [i for i in waiting(store) if i.kind == review.DECISION]
     assert (item.ref, item.next) == ("Alpha", [f"decide context finding {project} --finding {finding['id']}"])
+
+
+def test_a_spike_item_drops_once_facts_is_saved_after_the_answer(state: Path):
+    store, project, key = spiked(state)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, "Facts", "Before the answer.", False)
+    answer(store, project, key)
+    assert [i.ref for i in waiting(store, me=OTHER) if i.kind == "spike"] == [key]
+    planning.save_section(store, feature, "Facts", "Folded in.", False)
+    assert [i for i in waiting(store, me=OTHER) if i.kind == "spike"] == []

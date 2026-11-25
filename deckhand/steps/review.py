@@ -135,7 +135,7 @@ class Review(StoryStep):
             text = features.review_text(store, subject.feature)
             if text is None:
                 raise Refusal("the Contract section is not saved")
-            found = Target(content_hash(text), text=text)
+            found = Target(content_hash(text), text=spec.plain(text))
         elif subject.stage == "plan":
             plan = versions.held(subject.records, implplan.PURPOSE, subject.stories[0])
             if plan is None:

@@ -30,10 +30,19 @@ def save_section(store: Store, feature: Feature, name: str, body: str, drafted: 
     ops.ensure_document(store, key, purpose, key, name, text)
 
 
-def section(store: Store, feature: Feature, name: str) -> str | None:
+def _document(store: Store, feature: Feature, name: str) -> dict | None:
     id = ops.create_id(*_id(feature, name))
-    found = next((d for d in store.project_documents(feature.project["id"]) if d["id"] == id), None)
+    return next((d for d in store.project_documents(feature.project["id"]) if d["id"] == id), None)
+
+
+def section(store: Store, feature: Feature, name: str) -> str | None:
+    found = _document(store, feature, name)
     return found["body"] if found else None
+
+
+def saved_at(store: Store, feature: Feature, name: str) -> str | None:
+    found = _document(store, feature, name)
+    return found["at"] if found else None
 
 
 def next_section(store: Store, feature: Feature) -> str | None:
