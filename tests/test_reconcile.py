@@ -71,6 +71,7 @@ def facts(
     **rest: object,
 ) -> Facts:
     reading = Reading("ACME", features.current(store, "ACME"), me, [], {}, [])
+    rest.setdefault("asked", frozenset(h.ref for h in hands if h.kind == "spike"))
     if "labels" not in rest:
         rest["labels"] = {"ACME": store.repository_labels("ACME")}
     if "clones" not in rest:
@@ -457,6 +458,13 @@ def test_a_started_spike_that_died_is_resumed_once(clone: Path):
     assert reconcile(facts(store, stopped, hands=(unadopted,)), store) == [relaunch]
     spike_answered(store)
     assert reconcile(facts(store, stopped, hands=(dead,)), store) == []
+
+
+def test_a_dead_spike_of_another_feature_is_not_restarted(clone: Path):
+    store, dead = empty_feature(), spike_hand(clone)
+    stopped = spike_row(dead.ref, "stopped")
+    assert reconcile(facts(store, stopped, hands=(dead,), asked=frozenset()), store) == []
+    assert reconcile(facts(store, stopped, hands=(dead,), asked=frozenset({dead.ref})), store) != []
 
 
 def test_a_spike_of_a_mapped_feature_is_not_restarted(clone: Path):

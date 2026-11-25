@@ -10,10 +10,7 @@ from deckhand.store import open as store_open
 from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
 from deckhand.store.open import Stores
-from tests.conftest import CountingStore
-from tests.test_linear_client import Wire, wire
-
-__all__ = ["wire"]
+from tests.conftest import CountingStore, Wire
 
 DAY = date(2026, 11, 17)
 T = 1_763_546_400.0

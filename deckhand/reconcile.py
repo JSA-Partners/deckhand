@@ -37,6 +37,7 @@ class Facts:
     readable: bool = True
     posted: frozenset[str] = frozenset()
     mirrored: Mapping[str, str] = field(default_factory=dict)
+    asked: frozenset[str] = frozenset()
     contract: str = ""
 
 
@@ -306,7 +307,8 @@ def _spikes(tick: _Tick) -> list[Action]:
 
 # A spike that died or idles with no answer gets one restart; past it, the stalled item waits for the person.
 def _stalled_spikes(tick: _Tick, store: Store, feature: Feature | None) -> list[Action]:
-    rows = [r for r in tick.facts.hands.values() if r.kind == SPIKE and r.short and not r.restarts]
+    asked = tick.facts.asked
+    rows = [r for r in tick.facts.hands.values() if r.kind == SPIKE and r.short and not r.restarts and r.ref in asked]
     if feature is None or feature.stories or not tick.facts.readable or not rows:
         return []
     project = feature.project["id"]

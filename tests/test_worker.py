@@ -11,10 +11,8 @@ from deckhand.step import Refusal
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 from deckhand.worker import Runs, Worker, opened_acts
+from tests.conftest import Wire
 from tests.shell import Shell
-from tests.test_linear_client import Wire, wire
-
-__all__ = ["wire"]
 
 NAME = "hand-ACME-1"
 

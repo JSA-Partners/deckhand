@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, stalls, status, watch
+from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, spikes, stalls, status, watch
 from deckhand.actions import Action, Attach, Launch, Post, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
@@ -25,9 +25,11 @@ from deckhand.store.open import Stores
 from deckhand.store.state import LocalState
 from deckhand.worker import Worker
 from tests.shell import Shell, row
+from tests.test_feature_approval import P1
 from tests.test_mirror import named
 from tests.test_queue import asked, started
 from tests.test_step_hand import building, clone, configure, state
+from tests.test_step_stories import setup as empty_feature
 
 __all__ = ["clone", "state"]
 
@@ -984,3 +986,19 @@ def test_an_approval_named_between_links_waits_for_the_next_link_without_a_read(
     rig.landed()
     rig.step()
     assert [a.name for a in rig.worker.submitted if isinstance(a, Attach)] == ["mirror:s1", "mirror:s2"]
+
+
+def test_reconcile_hears_only_the_spikes_asked_in_this_feature(clone: Path, monkeypatch: pytest.MonkeyPatch):
+    configure(clone, 1)
+    rig = Rig(empty_feature())
+    here, elsewhere = spikes.key(P1, "Does it keep order?"), spikes.key("p-other", "Does it keep order?")
+    for key in (here, elsewhere):
+        path = spikes.question_path(answers.state_dir(), key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Does it keep order?")
+    seen = []
+    real = engine.reconcile
+    monkeypatch.setattr(engine, "reconcile", lambda facts, store: seen.append(facts.asked) or real(facts, store))
+    rig.ready()
+    rig.step()
+    assert seen and seen[-1] == frozenset({here})

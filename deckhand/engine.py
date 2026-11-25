@@ -9,11 +9,27 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, budget, config, features, fleet, git, idle, mirror, reading, shown, status, watch
+from deckhand import (
+    acts,
+    answers,
+    budget,
+    config,
+    features,
+    fleet,
+    git,
+    idle,
+    mirror,
+    reading,
+    shown,
+    spikes,
+    status,
+    watch,
+)
 from deckhand.actions import Action, Adopt, Attach, Launch, Post, PutDocument, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
+from deckhand.reading import Reading
 from deckhand.reconcile import Facts, reconcile
 from deckhand.records import Record, epoch, iso
 from deckhand.step import Refusal
@@ -223,6 +239,7 @@ class Engine:
             readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
             posted=self._state.posted(),
             mirrored={key: str(body.get("digest")) for key, body in self._state.keyed(mirror.PREFIX).items()},
+            asked=_asked(self._reading),
         )
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
@@ -330,3 +347,11 @@ class Engine:
 
     def _iso(self, at: float) -> str:
         return iso(int(at * 1000))
+
+
+# Hand rows outlive their feature, so only a spike asked in the feature being planned may be restarted.
+def _asked(held: Reading | None) -> frozenset[str]:
+    feature = held.feature if held is not None else None
+    if feature is None or feature.stories:
+        return frozenset()
+    return frozenset(spikes.keys(answers.state_dir(), feature.project["id"]))

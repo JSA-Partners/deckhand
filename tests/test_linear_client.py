@@ -4,16 +4,17 @@ import http.client
 import io
 import json
 import ssl
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
 
 import pytest
 
 from deckhand import __version__
 from deckhand.credentials import APP_FILE
-from deckhand.linear.client import URL, DuplicateId, KeepAliveTransport, LinearClient, LinearError, default_transport
+from deckhand.linear.client import DuplicateId, KeepAliveTransport, LinearClient, LinearError
 from deckhand.linear.meter import Meter, clock
 from deckhand.linear.oauth import fetch_app_token
 from deckhand.step import Refusal
@@ -402,45 +403,27 @@ def test_revive_clears_the_latch_and_keeps_the_connection() -> None:
     assert len(connections.made) == 2 and not connections.made[1].closed
 
 
-class Wire:
-    def __init__(self) -> None:
-        self.up = False
-        self.sent = 0
+def test_two_threads_never_share_the_connection_mid_request() -> None:
+    events: list[str] = []
 
-    def send(self) -> bool:
-        try:
-            default_transport(urllib.request.Request(URL, data=b"{}"))
-        except OSError:
-            return False
-        return True
-
-
-@pytest.fixture
-def wire(monkeypatch: pytest.MonkeyPatch) -> Iterator[Wire]:
-    found = Wire()
-
-    class Asleep:
-        def __init__(self, host: str, port: int | None = None, timeout: float | None = None) -> None:
-            pass
-
-        def set_tunnel(self, host: str) -> None:
-            pass
-
+    class Slow(Connection):
         def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
-            found.sent += 1
-            if not found.up:
-                raise ConnectionRefusedError("asleep")
+            events.append("enter")
+            time.sleep(0.02)
+            super().request(method, url, body, headers)
 
         def getresponse(self) -> Response:
-            return Response(200, ok({}))
+            events.append("exit")
+            return super().getresponse()
 
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(http.client, "HTTPSConnection", Asleep)
-    default_transport.reset()
-    yield found
-    default_transport.reset()
+    connections = Connections([Response(200, ok({})) for _ in range(6)], kind=Slow)
+    linear = client(KeepAliveTransport(connections))
+    threads = [threading.Thread(target=lambda: [linear.query("q", {}) for _ in range(3)]) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert events == ["enter", "exit"] * 6
 
 
 def test_requests_name_deckhand_as_the_user_agent() -> None:
