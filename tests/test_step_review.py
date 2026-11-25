@@ -454,7 +454,7 @@ def test_a_feature_round_runs_while_reapproval_is_due(tmp_path: Path):
     approve_everything(store)
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     assert features.phase(load(store)) is features.Phase.BUILDING
-    stale = "the feature review has not reviewed the current contract and stories; run a feature round"
+    stale = "the feature review has not reviewed the current contract and stories; a feature review is due"
     assert features.approval_gaps(store, load(store)) == [stale]
     record_round(FeatureReview(store), tmp_path)
     assert features.approval_gaps(store, load(store)) == []
@@ -519,7 +519,7 @@ def test_feature_review_is_mandatory_until_a_round_runs(tmp_path: Path):
     assert features.approval_gaps(store, load(store)) == []
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     assert features.approval_gaps(store, load(store)) == [
-        "the feature review has not reviewed the current contract and stories; run a feature round"
+        "the feature review has not reviewed the current contract and stories; a feature review is due"
     ]
     record_round(FeatureReview(store), tmp_path)
     assert features.approval_gaps(store, load(store)) == []

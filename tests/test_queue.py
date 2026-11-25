@@ -524,3 +524,54 @@ def test_a_spike_item_drops_once_facts_is_saved_after_the_answer(state: Path):
     assert [i.ref for i in waiting(store, me=OTHER) if i.kind == "spike"] == [key]
     planning.save_section(store, feature, "Facts", "Folded in.", False)
     assert [i for i in waiting(store, me=OTHER) if i.kind == "spike"] == []
+
+
+def capped_rounds(store: FakeStore) -> list[Record]:
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    p1 = review.parse_findings(json.dumps([raw(severity="P1")]))
+    current = features.content_hash(features.review_text(store, feature))
+    rounds = []
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, n > 1, f"h{n - 1}" if n > 1 else "")
+        rounds.append(review.round_record(project, "feature", plan, current if n == 3 else f"h{n}", p1))
+    for round in rounds:
+        for story in ("s1", "s2"):
+            store.put_record(story, round)
+    return rounds
+
+
+def voided() -> FakeStore:
+    store = alpha()
+    planning.save_section(store, features.open_feature(store, "ACME"), "Invariants", "Totals are positive.", False)
+    return store
+
+
+def test_three_capped_feature_rounds_make_a_cap_item():
+    store = voided()
+    capped_rounds(store)
+    project = features.open_feature(store, "ACME").project["id"]
+    [item] = [i for i in waiting(store) if i.kind == review.DECISION]
+    assert (item.rank, item.ref, item.lines) == (1, "Alpha", ["three feature review rounds left a P1 open"])
+    assert item.next == [f"decide context review-cap {project} --stage feature"]
+
+
+def test_proceed_clears_it():
+    store = voided()
+    rounds = capped_rounds(store)
+    answer = Record(
+        review.CAP_DECISION,
+        review.cap_subject(rounds[-1]),
+        review.cap_version(rounds[-1]),
+        "person:pat",
+        {"answer": review.PROCEED},
+    )
+    store.put_record("s1", answer)
+    assert [i for i in waiting(store) if i.kind == review.DECISION] == []
+
+
+def test_a_feature_finding_is_not_also_the_planning_line():
+    store = voided()
+    capped_rounds(store)
+    lines = [line for i in waiting(store) if i.kind == "planning" for line in i.lines]
+    assert not any("open P1" in line for line in lines)

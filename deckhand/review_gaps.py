@@ -108,6 +108,9 @@ def _feature_delivery(records: list[Record], project: str, ref: str) -> list[Gap
     return found
 
 
+OPEN_P1 = "the feature review holds an open P1"
+
+
 def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) -> list[Gap]:
     held, excusing = counted(records, prefix)[0], excused(records, prefix)
     capped = at_cap(held, excusing, proceeded(records, prefix))
@@ -116,7 +119,7 @@ def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) ->
     found = []
     for f in open_p1(latest, excusing):
         id = f["id"]
-        person = f"the feature review holds an open P1 {id}: {f['summary']}"
+        person = f"{OPEN_P1} {id}: {f['summary']}"
         if id in proposed:
             hand = f"{person}; it waits for the person: decide context finding {ref} --finding {id}"
         elif capped:
@@ -138,8 +141,8 @@ def feature_gaps(project: str, records: list[Record], at: str, ref: str) -> list
     if latest is None:
         return [both("feature-review", "the feature review has not run")]
     if reviewed(latest) != at:
-        text = "the feature review has not reviewed the current contract and stories; run a feature round"
-        return [both("feature-review", text)]
+        text = "the feature review has not reviewed the current contract and stories"
+        return [Gap("feature-review", f"{text}; run a feature round", f"{text}; a feature review is due")]
     p1 = _feature_p1(records, prefix, latest, ref)
     held = {gap.id for gap in p1}
     return p1 + [gap for gap in _feature_delivery(records, project, ref) if gap.id not in held]

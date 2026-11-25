@@ -631,7 +631,9 @@ def bash_hook_command() -> str:
     return entry["hooks"][0]["command"]
 
 
-def run_bash_hook(root: Path, role: str | None, stub: str | None) -> int:
+def run_bash_hook(base: Path, role: str | None, stub: str | None) -> int:
+    root = base / "plugin root"
+    root.mkdir()
     if stub is not None:
         (root / "bin").mkdir()
         script = root / "bin" / "deckhand"

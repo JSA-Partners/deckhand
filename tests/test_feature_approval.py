@@ -125,7 +125,7 @@ def test_changed_contract_voids_feature_approval():
     feature = load(store)
     assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
-        "the feature review has not reviewed the current contract and stories; run a feature round",
+        "the feature review has not reviewed the current contract and stories; a feature review is due",
     ]
 
 
@@ -136,7 +136,7 @@ def test_changed_story_voids_feature_approval():
     feature = load(store)
     assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
-        "the feature review has not reviewed the current contract and stories; run a feature round",
+        "the feature review has not reviewed the current contract and stories; a feature review is due",
     ]
 
 

@@ -776,3 +776,14 @@ def test_context_of_a_merged_story_names_its_after_merge_work(capsys: pytest.Cap
     assert capsys.readouterr().out.splitlines() == [
         "ACME-1 has merged; do its after-merge items from deckhand after context ACME-1"
     ]
+
+
+def test_a_branch_named_planning_is_refused(tmp_path: Path, repo: Path):
+    store = planned(tmp_path, repo)
+    store.set_labels("s1", ["widgets"])
+    store._issues["s1"]["branch_name"] = "planning"
+    shell = Shell()
+    with pytest.raises(Refusal, match="planning"):
+        Build(store, shell, repo).apply(["s1", "worktree", *TEAM])
+    assert not shell.ran("git", "worktree", "add")
+    assert [r for r in store.records("s1") if r.kind == "worktree"] == []

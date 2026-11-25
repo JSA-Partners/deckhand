@@ -145,6 +145,19 @@ def _feature_findings(feature: Feature) -> list[Item]:
     return found
 
 
+def _feature_cap(feature: Feature) -> list[Item]:
+    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+    project, name = feature.project["id"], feature.project["name"]
+    prefix = f"{project}:feature"
+    held, _ = review.counted(records, prefix)
+    latest = review.last(held)
+    if latest is None or not review.at_cap(held, review.excused(records, prefix), review.proceeded(records, prefix)):
+        return []
+    lines = ["three feature review rounds left a P1 open"]
+    next = [f"decide context review-cap {project} --stage feature"]
+    return [Item(review.DECISION, 1, name, name, latest.at, 0, lines, next)]
+
+
 def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
     prefix = f"{story['id']}:{stage}"
     held, _ = review.counted(records, prefix)
@@ -225,10 +238,25 @@ def _day(date: str | None) -> str:
     return f"{date}T00:00:00.000Z" if date else ""
 
 
+def _own_findings(feature: Feature) -> list[str]:
+    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+    return [p.subject for p in asks.open_proposals(records) if _of_feature(records, p.subject)]
+
+
 def _planning(store: Store, feature: Feature) -> list[Item]:
     if not features.replanning(feature):
         return []
-    found = features.approval_gaps(store, feature) or [REAPPROVE if feature.reapproval_due else READY]
+    gaps = features.approval_gaps(store, feature)
+    own = {f"{review_gaps.OPEN_P1} {i}:" for i in _own_findings(feature)}
+    if _feature_cap(feature):
+        own.add(review_gaps.OPEN_P1)
+    found = (
+        [g for g in gaps if not any(mark in g for mark in own)]
+        if gaps
+        else [REAPPROVE if feature.reapproval_due else READY]
+    )
+    if not found:
+        return []
     name = feature.project["name"]
     return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
 
@@ -332,6 +360,8 @@ def _feature_items(
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
     found += _planning(store, feature)
+    if features.replanning(feature):
+        found += _feature_cap(feature)
     if not building:
         found += _spikes(store, feature, read, restarts, idle, quiet)
     return found
