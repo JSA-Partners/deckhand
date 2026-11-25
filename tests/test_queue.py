@@ -174,7 +174,7 @@ def test_planning_items_shown_to_everyone():
     [item] = waiting(store, me=OTHER)
     assert item.next == ["/deckhand:feature"]
     assert item.lines == ["ACME-1: the story map gives no tier; save the map again"]
-    assert item.at == "2026-11-16T00:00:00.000Z"
+    assert item.at == ""
 
 
 def test_a_voided_approval_with_no_gap_asks_for_the_approval_again():

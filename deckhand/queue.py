@@ -242,10 +242,6 @@ def _after_merge(held: list[Feature], me: str) -> list[Item]:
     return found
 
 
-def _day(date: str | None) -> str:
-    return f"{date}T00:00:00.000Z" if date else ""
-
-
 def _planning(store: Store, feature: Feature, cap: list[Item]) -> list[Item]:
     if not features.replanning(feature):
         return []
@@ -260,7 +256,8 @@ def _planning(store: Store, feature: Feature, cap: list[Item]) -> list[Item]:
     if not found:
         return []
     name = feature.project["name"]
-    return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
+    # A feature's start is a date with no time of day, so the planning item has no honest age to show.
+    return [Item("planning", 3, name, name, "", 0, [found[0]], [FEATURE_SKILL])]
 
 
 def _spikes(
