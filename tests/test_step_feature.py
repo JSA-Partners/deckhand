@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -21,8 +22,40 @@ TEAM = ["--team-key", "ACME"]
 TODAY = date(2026, 11, 20)
 
 
-def step(store: FakeStore) -> Feature:
-    return Feature(store, lambda: TODAY)
+def step(store: FakeStore, runner=None) -> Feature:
+    return Feature(store, lambda: TODAY) if runner is None else Feature(store, lambda: TODAY, runner)
+
+
+class Git:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], Path | None]] = []
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        self.calls.append((argv, cwd))
+        return subprocess.CompletedProcess(argv, 0, "abc123\n" if argv[:2] == ["git", "rev-parse"] else "", "")
+
+
+def configured(tmp_path: Path) -> Path:
+    clone = tmp_path / "widgets"
+    folder = tmp_path / "isolated-config"
+    folder.mkdir()
+    (folder / "config.toml").write_text(f'[clones]\nwidgets = "{clone}"\n')
+    return clone
+
+
+def refreshed(clone: Path, add: bool) -> list[tuple[list[str], Path | None]]:
+    planning = clone / ".worktrees" / "planning"
+    move = (
+        (["git", "worktree", "add", "--detach", str(planning), "origin/HEAD"], clone)
+        if add
+        else (["git", "checkout", "--detach", "origin/HEAD"], planning)
+    )
+    return [
+        (["git", "fetch", "origin", "--prune"], clone),
+        (["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"], clone),
+        move,
+        (["git", "rev-parse", "HEAD"], planning),
+    ]
 
 
 P1 = create_id("ACME:Alpha", "feature")
@@ -225,3 +258,61 @@ def test_context_names_the_input_folder_before_any_linear_read(
     with pytest.raises(LinearError):
         Feature(Unreachable()).context(TEAM)
     assert capsys.readouterr().out == f"input folder: {tmp_path / launch.INPUT}\n"
+
+
+def test_new_fetches_and_moves_the_planning_worktree_to_origin(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    clone, runner, store = configured(tmp_path), Git(), FakeStore()
+    step(store, runner).apply(["new", *TEAM, "--name", "Alpha", "--weeks", "1"])
+    assert runner.calls == refreshed(clone, add=True)
+    assert f"read the code in: {clone / '.worktrees' / 'planning'} at abc123" in capsys.readouterr().out
+
+
+def test_pick_fetches_and_moves_the_planning_worktree(tmp_path: Path):
+    clone, runner, store = configured(tmp_path), Git(), FakeStore()
+    parked(store)
+    step(store, runner).apply(["pick", *TEAM, "--project", P1, "--weeks", "1"])
+    assert runner.calls == refreshed(clone, add=True)
+
+
+def test_a_refused_new_fetches_nothing(tmp_path: Path):
+    configured(tmp_path)
+    runner, store = Git(), FakeStore()
+    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
+    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
+    with pytest.raises(Refusal):
+        step(store, runner).apply(["new", *TEAM, "--name", "Beta", "--weeks", "1"])
+    assert runner.calls == []
+
+
+def test_fetch_moves_an_existing_planning_worktree(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    clone, runner, store = configured(tmp_path), Git(), FakeStore()
+    (clone / ".worktrees" / "planning").mkdir(parents=True)
+    step(store, runner).apply(["fetch", *TEAM])
+    assert runner.calls == refreshed(clone, add=False)
+    assert store.writes == []
+    assert capsys.readouterr().out == f"read the code in: {clone / '.worktrees' / 'planning'} at abc123\n"
+
+
+def test_fetch_without_a_clone_refuses(tmp_path: Path):
+    runner = Git()
+    with pytest.raises(Refusal, match="no clone"):
+        step(FakeStore(), runner).apply(["fetch", *TEAM])
+    assert runner.calls == []
+
+
+def test_feature_context_names_the_planning_worktree_and_sha_without_fetching(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    clone, runner = configured(tmp_path), Git()
+    planning = clone / ".worktrees" / "planning"
+    step(FakeStore(), runner).context(TEAM)
+    assert "read the code in: no planning worktree for widgets yet; fetch one" in capsys.readouterr().out
+    assert runner.calls == []
+    planning.mkdir(parents=True)
+    step(FakeStore(), runner).context(TEAM)
+    assert f"read the code in: {planning} at abc123" in capsys.readouterr().out.splitlines()
+    assert runner.calls == [(["git", "rev-parse", "HEAD"], planning)]
+    step(FakeStore(), runner).context([*TEAM, "--json"])
+    assert json.loads(capsys.readouterr().out)["planning"] == [
+        {"label": "widgets", "path": str(planning), "sha": "abc123"}
+    ]

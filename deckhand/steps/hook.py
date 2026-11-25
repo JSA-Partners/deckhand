@@ -16,6 +16,7 @@ from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 from deckhand.watch import HOLD
 
+CAPTAIN_DENIED = "the captain runs deckhand commands only; check the fact with Read or Grep, or ask a spike"
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
 USAGE = (
@@ -80,6 +81,14 @@ def _denied(hook_input: dict) -> bool:
     return "answers" in (hook_input.get("tool_input") or {}) or _recommended(items) or _unpending(items)
 
 
+# A request reaches this hook only when the captain's allow list does not hold the call.
+def _deny_captain(hook_input: dict) -> None:
+    if hook_input.get("hook_event_name") != "PermissionRequest" or hook_input.get("tool_name") == "AskUserQuestion":
+        return
+    decision = {"behavior": "deny", "message": CAPTAIN_DENIED}
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
+
+
 @register("hook")
 class Hook(StoryStep):
     def __init__(self, store: Store | None = None, captain: Captain | None = None) -> None:
@@ -110,6 +119,9 @@ class Hook(StoryStep):
                 rows.turn_ended(fleet.session_of(ref))
 
     def _permission(self, hook_input: dict) -> None:
+        if os.environ.get("DECKHAND_ROLE") == "captain":
+            _deny_captain(hook_input)
+            return
         ref = os.environ.get("DECKHAND_STORY", "")
         if not hand_role() or not ref:
             return

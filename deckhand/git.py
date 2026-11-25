@@ -197,6 +197,14 @@ def worktree_detached(clone: Path, name: str, base: str, runner: Runner = run) -
     return path
 
 
+def refresh_detached(clone: Path, path: Path, ref: str, runner: Runner = run) -> str:
+    if path.exists():
+        call(["git", "checkout", "--detach", ref], path, runner)
+    else:
+        call(["git", "worktree", "add", "--detach", str(path), ref], clone, runner)
+    return head(path, runner)
+
+
 def clone_root(cwd: Path, runner: Runner = run) -> Path:
     try:
         common = call(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, runner).strip()

@@ -279,7 +279,7 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
     for section in planning.SECTIONS:
         assert section in session.skill("plan", "context", *TEAM)
         path = session.write(f"{section}.md", f"The {section} of Alpha.")
-        session.skill("plan", "apply", section, *TEAM, "--file", path)
+        session.skill("plan", "apply", section, *TEAM, "--file", path, "--drafted")
 
     assert "decisions: " in session.skill("stories", "context", *TEAM)
     stories = [

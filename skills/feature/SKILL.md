@@ -10,24 +10,24 @@ allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(super
 !`deckhand feature context`
 
 Above: the open feature, its phase, next step and input folder.
-Work one feature and one screen at a time. Each step offers writing it yourself or taking a draft, never
-a decision. Keep the given option order; mark none recommended.
+Work one feature at a time. Keep the given option order; mark none recommended.
 
 Open a feature with `deckhand feature apply new --name N --weeks 1|2 [--reference REF]`; pick or
 park one with `deckhand feature apply pick --project ID --weeks 1|2` or
-`deckhand feature apply park --project ID`.
+`deckhand feature apply park --project ID`. Read code only with Read and Grep in the planning
+worktree above; refresh it with `deckhand feature apply fetch` on resuming.
 Shape it with superpowers:brainstorming before its Frame; use impeccable:impeccable for any story a
 person sees.
 
-`deckhand plan context` lists the sections and the answered spikes with their keys. Save every
-answer as given with `deckhand plan apply SECTION --file PATH [--drafted]`, `--drafted` for a draft.
+`deckhand plan context` lists the sections and each answered spike's KEY. Draft every section and
+save it, asking nothing, with `deckhand plan apply SECTION --file PATH --drafted`.
 
-At Facts, ask each fact that reading the code cannot settle as a spike, its one-line question in a
-file: `deckhand hand apply spike --repository LABEL --file QUESTION.md`. Keep drafting what does
-not rest on it, then end the turn. On `deckhand: a spike was answered`, read it with
+At Facts, ask as a spike each fact that needs a command run, its one-line question in a file:
+`deckhand hand apply spike --repository LABEL --file QUESTION.md`. Keep drafting what does not rest
+on it, then end the turn. On `deckhand: a spike was answered`, read it with
 `deckhand plan context spike KEY` and fold it into Facts.
 
-Turn the plan into stories: `deckhand stories context` prints the map's fields. Give each
+Plan the stories: `deckhand stories context` prints the map's fields. Give each
 story its tier, a state chart at tier 2 or 3, its after-merge chores, and each decision item with
 your drafted answer. Save it with
 `deckhand stories apply --file MAP.json`, which names each REF.

@@ -126,9 +126,9 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 Run setup once per machine, and again when a repository joins. Then launch the captain with the line
 it prints, which starts Claude Code under the captain's own settings, in focus view: your prompt, a
 line summing up its tool calls, and its reply. Without a prompt, the captain runs deckhand, reads
-files, runs a few read-only commands such as `ls` and `git status`, writes in deckhand's own input
-folders and asks you. Anything else shows Claude Code's usual permission prompt, and it never
-messages another session. It runs the feature and sign-off skills for you when an item needs them.
+files, writes in deckhand's own input folders and asks you. Anything else is denied with a message
+rather than prompted, and it never messages another session. It runs the feature and sign-off
+skills for you when an item needs them.
 Hands run `story`, `spike` and `draft` on their own; you never type those.
 
 When the engine is not running, the captain copies its start command for you: open a new terminal

@@ -187,15 +187,19 @@ def test_the_captain_can_ask_read_and_plan_but_not_send_or_notify(layout: dict) 
         "Skill(deckhand:signoff)",
         "Skill(superpowers:*)",
         "Skill(impeccable:*)",
-        *(f"Bash({command} *)" for command in launch.READ_ONLY),
     ]
-    unprompted = set(launch.READ_ONLY) | set(permissions["allow"])
-    assert not {"find", "git diff", "git log", "git show", "Bash", "Write", "Edit"} & unprompted
+    assert not {"Bash", "Write", "Edit"} & set(permissions["allow"])
     assert permissions["defaultMode"] == "default"
     assert {"SendMessage", "PushNotification", "NotebookEdit", "mcp__*"} <= set(permissions["deny"])
     assert "AskUserQuestion" not in permissions["deny"]
     assert layout["captain"]["sandbox"]["autoAllowBashIfSandboxed"] is False
     assert layout["captain"]["env"] == {"DECKHAND_ROLE": "captain"}
+
+
+def test_captain_settings_hold_no_read_only_shell_allows(layout: dict) -> None:
+    shell = [rule for rule in layout["captain"]["permissions"]["allow"] if rule.startswith("Bash")]
+    assert shell == ["Bash(deckhand *)"]
+    assert not hasattr(launch, "READ_ONLY")
 
 
 def test_the_captain_writes_only_in_the_deckhand_input_folders(layout: dict) -> None:

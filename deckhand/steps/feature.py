@@ -3,17 +3,20 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import date, timedelta
+from pathlib import Path
 
-from deckhand import features, launch, ops, planning
+from deckhand import config, features, git, launch, ops, planning
 from deckhand.features import Phase
 from deckhand.step import Refusal, register, team_key
+from deckhand.steps.build import DEFAULT_BASE, fetch_origin
 from deckhand.store import Store
 from deckhand.store.open import Stores
 
 USAGE = (
     "feature takes [--team-key KEY] on both verbs, --json on context only, and on apply one of:"
-    " new --name N --weeks 1|2 [--reference REF ...], pick --project ID --weeks 1|2, park --project ID"
+    " new --name N --weeks 1|2 [--reference REF ...], pick --project ID --weeks 1|2, park --project ID, fetch"
 )
+PLANNING = "planning"
 
 
 def _parse(args: list[str]) -> dict:
@@ -28,7 +31,7 @@ def _parse(args: list[str]) -> dict:
                 found["references"].append(value)
             else:
                 found[arg[2:].replace("-", "_")] = value
-        elif "action" not in found and arg in ("new", "pick", "park"):
+        elif "action" not in found and arg in ("new", "pick", "park", "fetch"):
             found["action"] = arg
         else:
             raise Refusal(f"unknown argument {arg}; {USAGE}")
@@ -43,9 +46,12 @@ def _description(references: list[str]) -> str:
 
 @register("feature")
 class Feature:
-    def __init__(self, store: Store | None = None, today: Callable[[], date] = date.today) -> None:
+    def __init__(
+        self, store: Store | None = None, today: Callable[[], date] = date.today, runner: git.Runner = git.run
+    ) -> None:
         self._stores = Stores(person=store)
         self._today = today
+        self._runner = runner
 
     def _store_for_run(self) -> Store:
         return self._stores("person")
@@ -94,7 +100,11 @@ class Feature:
         folder = _input_folder()
         if folder and not parsed["json"]:
             print(f"input folder: {folder}", flush=True)
-        facts = self._facts(self._store_for_run(), team_key(parsed)) | {"input_folder": folder}
+        read = self._planning()
+        if not parsed["json"]:
+            for row in read:
+                print(_read_line(row), flush=True)
+        facts = self._facts(self._store_for_run(), team_key(parsed)) | {"input_folder": folder, "planning": read}
         if parsed["json"]:
             print(json.dumps(facts, indent=2))
             return
@@ -132,8 +142,26 @@ class Feature:
             self._new(parsed)
         elif action in ("pick", "park"):
             self._move(action, parsed)
+        elif action == "fetch":
+            if not config.local().clones:
+                raise Refusal(f"no clone is configured in {config.config_dir() / config.FILE}; run setup")
+            self._refresh()
         else:
-            raise Refusal(f"apply takes new, pick or park; {USAGE}")
+            raise Refusal(f"apply takes new, pick, park or fetch; {USAGE}")
+
+    # Planning reads every clone at a fresh origin, never the person's own checkout.
+    def _refresh(self) -> None:
+        for clone in config.local().clones.values():
+            fetch_origin(clone, self._runner)
+            path = git.worktree_path(clone, PLANNING)
+            print(f"read the code in: {path} at {git.refresh_detached(clone, path, DEFAULT_BASE, self._runner)}")
+
+    def _planning(self) -> list[dict]:
+        found = []
+        for label, clone in config.local().clones.items():
+            path = git.worktree_path(clone, PLANNING)
+            found.append({"label": label, "path": str(path), "sha": _sha(path, self._runner)})
+        return found
 
     def _new(self, parsed: dict) -> None:
         name = parsed.get("name", "").strip()
@@ -143,6 +171,7 @@ class Feature:
         store, team = self._store_for_run(), team_key(parsed)
         key = features.key(team, name)
         _none_open(store, team, ops.create_id(key, features.PURPOSE))
+        self._refresh()
         id = ops.ensure_project(
             store, key, features.PURPOSE, team, name, _description(parsed["references"]), [features.FEATURE_LABEL]
         )
@@ -172,6 +201,7 @@ class Feature:
             if current is not Phase.PARKED:
                 raise Refusal(f"{features.describe(project)} is {current.value}, not parked")
             _none_open(store, team, project["id"])
+            self._refresh()
             print(f"done: picked {project['name']}, target {self._open(store, project['id'], parsed)}")
             return
         if any(feature.approved(s) for s in feature.stories):
@@ -192,6 +222,21 @@ def _none_open(store: Store, team: str, id: str) -> None:
     if held:
         names = ", ".join(features.describe(f.project) for f in held)
         raise Refusal(f"{names} is still open; finish or park it first")
+
+
+def _sha(path: Path, runner: git.Runner) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        return git.head(path, runner)
+    except git.GitError:
+        return None
+
+
+def _read_line(row: dict) -> str:
+    if row["sha"] is None:
+        return f"read the code in: no planning worktree for {row['label']} yet; fetch one"
+    return f"read the code in: {row['path']} at {row['sha']}"
 
 
 def _input_folder() -> str | None:

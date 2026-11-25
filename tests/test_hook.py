@@ -290,6 +290,53 @@ def test_permission_hook_silent_outside_hands(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+CAPTAIN_DENIAL = {
+    "hookSpecificOutput": {
+        "hookEventName": "PermissionRequest",
+        "decision": {
+            "behavior": "deny",
+            "message": "the captain runs deckhand commands only; check the fact with Read or Grep, or ask a spike",
+        },
+    }
+}
+
+
+def test_a_captain_permission_request_is_denied_except_ask(monkeypatch, capsys):
+    from tests.test_step_decide import feature_store
+
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    for tool, input in (("Bash", {"command": "git log"}), ("Write", {"file_path": "/x"}), ("WebFetch", {})):
+        hook_with(
+            monkeypatch,
+            store,
+            ["permission"],
+            {"hook_event_name": "PermissionRequest", "tool_name": tool, "tool_input": input},
+        )
+        assert json.loads(capsys.readouterr().out) == CAPTAIN_DENIAL
+    asked_request = {"hook_event_name": "PermissionRequest", "tool_name": "AskUserQuestion", "tool_input": {}}
+    hook_with(monkeypatch, store, ["permission"], asked_request)
+    hook_with(monkeypatch, store, ["permission"], GAP)
+    assert capsys.readouterr().out == ""
+    assert store.records("s1") == []
+
+
+def test_a_hand_permission_request_is_unchanged(monkeypatch, capsys, tmp_path: Path):
+    from deckhand import gaps
+    from tests.test_step_decide import feature_store
+
+    (tmp_path / "isolated-config").mkdir()
+    (tmp_path / "isolated-config" / "config.toml").write_text('team_key = "ACME"\n')
+    store = feature_store()
+    monkeypatch.setenv("DECKHAND_ROLE", "hand")
+    monkeypatch.setenv("DECKHAND_STORY", "ACME-1")
+    request = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "git log"}}
+    hook_with(monkeypatch, store, ["permission"], request)
+    assert capsys.readouterr().out == ""
+    [held] = store.records("s1")
+    assert held.to_json() == gaps.record("s1", "PermissionRequest", "Bash", "git log", "").to_json()
+
+
 def test_permission_hook_never_decides(monkeypatch, capsys, tmp_path: Path):
     from tests.test_step_decide import feature_store
 

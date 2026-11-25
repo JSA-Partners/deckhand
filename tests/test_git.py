@@ -562,3 +562,16 @@ def test_commits_between_lists_the_range_newest_first() -> None:
     assert git.commits_between(Path("/w"), "c1", "c3", fake) == ["c3 third", "c2 second"]
     assert fake.calls[0][0] == ["git", "log", "--oneline", "c1..c3"]
     assert fake.calls[0][1] == Path("/w")
+
+
+def test_refresh_detached_adds_then_moves_the_worktree(tmp_path: Path) -> None:
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=clone, check=True)
+    subprocess.run(commit, cwd=clone, check=True)
+    path = git.worktree_path(clone, "planning")
+    first = git.refresh_detached(clone, path, "main")
+    subprocess.run(commit, cwd=clone, check=True)
+    second = git.refresh_detached(clone, path, "main")
+    assert first != second == git.head(clone) == git.head(path)
