@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from deckhand import claims, features, inputs, ops, queue, spec, versions
+from deckhand import claims, features, inputs, ops, planning, queue, spec, versions
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -75,8 +75,8 @@ class Draft(StoryStep):
 
     def _save(self, store: Store, feature: features.Feature, story: dict, path: str) -> None:
         text = inputs.read(path, "--file", USAGE)
-        if not features.contract_approved(store, feature):
-            raise Refusal("the Contract is not approved; a draft waits for it")
+        if planning.section(store, feature, "Contract") is None:
+            raise Refusal("the Contract is not saved; a draft waits for it")
         if not text.strip():
             raise Refusal("the draft is empty")
         if any(r.kind == queue.TAKEN for r in feature.records.get(story["id"], [])):

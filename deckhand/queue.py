@@ -27,6 +27,7 @@ DRAFT = "story-draft"
 DRAFT_HAND, STORY_HAND = "draft", "story"
 TAKEN = "draft-taken"
 FEATURE_SKILL = "/deckhand:feature"
+READY = "the feature is ready for approval"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
 STALLED = "stalled"
@@ -293,9 +294,9 @@ def _day(date: str | None) -> str:
 
 
 def _planning(store: Store, feature: Feature) -> list[Item]:
-    found = features.approval_gaps(store, feature)
-    if not found:
+    if features.phase(feature) is not Phase.PLANNING:
         return []
+    found = features.approval_gaps(store, feature) or [READY]
     name = feature.project["name"]
     return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
 

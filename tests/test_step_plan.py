@@ -33,3 +33,11 @@ def test_a_section_still_prints_by_name(capsys: pytest.CaptureFixture[str]):
     store = feature_store()
     Plan(store).context(["Contract", "--team-key", KEY])
     assert capsys.readouterr().out == f"{planning.WRITTEN}\n\nPOST /orders.\n"
+
+
+def test_plan_context_approval_prints_the_screen(capsys: pytest.CaptureFixture[str]):
+    store = feature_store()
+    Plan(store).context(["approval", "--team-key", KEY])
+    shown = capsys.readouterr().out
+    assert shown.startswith(f"# Contract\n\n{planning.WRITTEN}\n\nPOST /orders.\n\n# Examples\n\nnot written\n")
+    assert "# Story map\n\n## ACME-1 One\n" in shown

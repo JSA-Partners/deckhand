@@ -15,8 +15,6 @@ from deckhand.store import Store
 ITEM = "decision-item"
 
 KINDS = (
-    "contract",
-    "invariants",
     ITEM,
     "lean",
     "feature-approval",
@@ -33,9 +31,7 @@ KINDS = (
 _PIN_OPTIONS = (asks.ANSWER, signoff.KIND)
 
 _OPTIONS = {
-    "contract": ["Approve", "Not yet"],
-    "invariants": ["Approve", "Not yet"],
-    "feature-approval": ["Approve", "Not yet"],
+    "feature-approval": ["Approve", "Change"],
     ITEM: ["Yes", "Change"],
     "lean": ["Prove it in Lean", "Not needed"],
     "finding": [review.DECLINE, review.ACCEPT],
@@ -55,6 +51,7 @@ _SIGN_OFF = {
 
 _DESCRIPTIONS = {
     ITEM: ["the draft is the answer", "type the answer in your own words"],
+    "feature-approval": ["the feature moves to the build", "type what to change in your own words"],
     "finding": ["the finding stays unfixed", "the hand fixes the finding"],
     review.CAP_DECISION: [
         "carry on with those P1s open; every later change is still reviewed",
@@ -67,8 +64,6 @@ _DESCRIPTIONS = {
 }
 
 _ASKS = {
-    "contract": "Approve the contract for",
-    "invariants": "Approve the invariants for",
     "feature-approval": "Approve the feature",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
@@ -107,14 +102,13 @@ _OWN_WORDS = (signoff.KIND, signoff.SECOND)
 _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 
 _POSITIVE = {
-    "contract": "Approve",
-    "invariants": "Approve",
     "feature-approval": "Approve",
     "lean": "Prove it in Lean",
     signoff.AFTER: signoff.DONE,
 }
 
 PENDING = "pending"
+SHORT = 12
 
 
 @dataclass(frozen=True)
@@ -152,7 +146,17 @@ def make_question(kind: str, pin: Pin) -> Question:
         raise Refusal("a decision needs a subject")
     options = (pin.options or _OPTIONS.get(kind, [])) if kind in _PIN_OPTIONS else _OPTIONS[kind]
     descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else _DESCRIPTIONS.get(kind)
-    return build(kind, pin.label or pin.subject, question_text(kind, pin), options, descriptions)
+    named = short_name(pin.detail) if kind == ITEM else pin.label or pin.subject
+    return build(kind, named, question_text(kind, pin), options, descriptions)
+
+
+def short_name(text: str) -> str:
+    name = ""
+    for word in text.split():
+        if len(f"{name} {word}".strip()) > SHORT:
+            break
+        name = f"{name} {word}".strip()
+    return name or text.strip()[:SHORT]
 
 
 def question_text(kind: str, pin: Pin) -> str:
@@ -283,10 +287,10 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     found = check(pending, state)
     note = found.answer if in_own_words(pending, found.answer) else None
     answer = signoff.NOT_YET if note is not None else found.answer
-    if pending.kind == ITEM and answer == "Yes":
-        answer = pending.draft
     if not _creates_record(pending, answer):
         return False
+    if pending.kind == ITEM and answer == "Yes":
+        answer = pending.draft
     if pending.kind == signoff.KIND:
         _owner_signs(store, pending, by)
     if pending.kind == signoff.SECOND:

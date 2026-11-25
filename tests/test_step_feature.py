@@ -65,23 +65,41 @@ def test_weeks_other_than_1_or_2_refuses(weeks: str):
 
 def test_reference_marked_as_reference_in_description():
     store = FakeStore()
-    args = ["new", *TEAM, "--name", "Alpha", "--reference", "ACME-4"]
+    args = ["new", *TEAM, "--name", "Alpha", "--weeks", "1", "--reference", "ACME-4"]
     step(store).apply(args)
     step(store).apply(args)
     [made] = store.team_projects("ACME")
     assert made["id"] == create_id("ACME:Alpha", "feature")
     assert "Reference (not a decision):\n- ACME-4" in made["description"]
-    assert made["start_date"] is None
     assert made["labels"] == ["deckhand"]
-    assert store.writes == [("create_project", made["id"])]
+    assert store.writes == [("create_project", P1), ("set_project_dates", P1, "2026-11-20", "2026-11-27")]
+
+
+def test_new_with_weeks_sets_dates_and_refuses_while_another_is_open(capsys: pytest.CaptureFixture[str]):
+    store = FakeStore()
+    step(store).apply(["new", *TEAM, "--name", "Alpha", "--weeks", "2"])
+    assert store.writes == [("create_project", P1), ("set_project_dates", P1, "2026-11-20", "2026-12-04")]
+    assert capsys.readouterr().out == f"done: opened Alpha ({P1}), target 2026-12-04\n"
+    store.writes.clear()
+    with pytest.raises(Refusal, match=rf"Alpha \({P1}\) is still open"):
+        step(store).apply(["new", *TEAM, "--name", "Beta", "--weeks", "1"])
+    assert store.writes == []
+
+
+@pytest.mark.parametrize("weeks", [[], ["--weeks", "3"]])
+def test_new_refuses_without_one_or_two_weeks(weeks: list[str]):
+    store = FakeStore()
+    with pytest.raises(Refusal, match="1 or 2"):
+        step(store).apply(["new", *TEAM, "--name", "Alpha", *weeks])
+    assert store.writes == []
 
 
 def test_new_labels_a_project_an_older_run_left_unlabeled():
     store = FakeStore()
     store.create_project(P1, "ACME", "Alpha", "")
-    step(store).apply(["new", *TEAM, "--name", "Alpha"])
+    step(store).apply(["new", *TEAM, "--name", "Alpha", "--weeks", "1"])
     assert store.project(P1)["labels"] == ["deckhand"]
-    assert [w[0] for w in store.writes] == ["create_project", "set_project_labels"]
+    assert [w[0] for w in store.writes] == ["create_project", "set_project_labels", "set_project_dates"]
 
 
 def test_park_refuses_with_an_approved_story():
@@ -155,20 +173,19 @@ def test_a_hand_made_project_with_dates_is_not_a_feature(capsys: pytest.CaptureF
     store = FakeStore()
     store.create_project("hand", "ACME", "Hand made", "")
     store.set_project_dates("hand", "2026-11-16", "2026-11-23")
-    step(store).apply(["new", *TEAM, "--name", "Alpha"])
-    alpha = create_id("ACME:Alpha", "feature")
+    parked(store)
     capsys.readouterr()
     step(store).context([*TEAM, "--json"])
     facts = json.loads(capsys.readouterr().out)
-    assert (facts["open"], facts["parked"]) == ([], [{"id": alpha, "name": "Alpha"}])
-    step(store).apply(["pick", *TEAM, "--project", alpha, "--weeks", "1"])
-    assert store.writes[-1] == ("set_project_dates", alpha, "2026-11-20", "2026-11-27")
+    assert (facts["open"], facts["parked"]) == ([], [{"id": P1, "name": "Alpha"}])
+    step(store).apply(["new", *TEAM, "--name", "Beta", "--weeks", "1"])
+    assert store.writes[-1] == ("set_project_dates", P2, "2026-11-20", "2026-11-27")
 
 
 @pytest.mark.parametrize("action", [["pick", "--weeks", "1"], ["park"]])
 def test_pick_and_park_refuse_another_teams_feature_and_a_hand_made_project(action: list[str]):
     store = FakeStore()
-    step(store).apply(["new", "--team-key", "OTHER", "--name", "Alpha"])
+    step(store).apply(["new", "--team-key", "OTHER", "--name", "Alpha", "--weeks", "1"])
     store.create_project("hand", "ACME", "Hand made", "")
     store.writes.clear()
     for project in (create_id("OTHER:Alpha", "feature"), "hand"):
@@ -180,7 +197,7 @@ def test_pick_and_park_refuse_another_teams_feature_and_a_hand_made_project(acti
 def test_feature_writes_as_person(monkeypatch: pytest.MonkeyPatch):
     roles = roles_connected(monkeypatch)
     with pytest.raises(Connected):
-        Feature().apply(["new", *TEAM, "--name", "Alpha"])
+        Feature().apply(["new", *TEAM, "--name", "Alpha", "--weeks", "1"])
     assert roles == ["person"]
 
 

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 
-from deckhand import answers, asks, decisions, features, pins, queue, signoff
+from deckhand import answers, asks, decisions, features, pins, queue, signoff, watch
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
+from deckhand.store.local import default_path
+from deckhand.store.state import LocalState
 
 USAGE = (
     "decide takes [--team-key KEY] on both verbs; context KIND SUBJECT [--story REF ...] [--json],"
@@ -95,6 +97,9 @@ class Decide(StoryStep):
         store = self._store_for_run()
         if decisions.decide(store, pending, state, self.viewer()):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
+            if pending.kind == features.APPROVAL:
+                with LocalState(default_path()) as rows:
+                    rows.drop(watch.HOLD)
             print(f"done: recorded {pending.kind} for {pending.subject} on {len(pending.stories)} stories")
             return
         decisions.pending_path(nonce, state).unlink(missing_ok=True)

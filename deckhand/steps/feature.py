@@ -11,8 +11,8 @@ from deckhand.store import Store
 from deckhand.store.open import Stores
 
 USAGE = (
-    "feature takes [--team-key KEY] on both verbs, --json on context only, and on apply one of: new --name N"
-    " [--reference REF ...], pick --project ID --weeks 1|2, park --project ID"
+    "feature takes [--team-key KEY] on both verbs, --json on context only, and on apply one of:"
+    " new --name N --weeks 1|2 [--reference REF ...], pick --project ID --weeks 1|2, park --project ID"
 )
 
 
@@ -139,21 +139,27 @@ class Feature:
         name = parsed.get("name", "").strip()
         if not name:
             raise Refusal(f"--name is required; {USAGE}")
-        team = team_key(parsed)
+        _weeks(parsed)
+        store, team = self._store_for_run(), team_key(parsed)
+        key = features.key(team, name)
+        _none_open(store, team, ops.create_id(key, features.PURPOSE))
         id = ops.ensure_project(
-            self._store_for_run(),
-            features.key(team, name),
-            features.PURPOSE,
-            team,
-            name,
-            _description(parsed["references"]),
-            [features.FEATURE_LABEL],
+            store, key, features.PURPOSE, team, name, _description(parsed["references"]), [features.FEATURE_LABEL]
         )
-        print(f"done: parked feature {name} ({id})")
+        print(f"done: opened {name} ({id}), target {self._open(store, id, parsed)}")
+
+    def _open(self, store: Store, id: str, parsed: dict) -> str:
+        held = store.project(id)
+        if held is not None and held["start_date"] and held["target_date"]:
+            return held["target_date"]
+        today = self._today()
+        target = today + timedelta(days=7 * int(parsed["weeks"]))
+        ops.ensure_project_dates(store, id, today.isoformat(), target.isoformat())
+        return target.isoformat()
 
     def _move(self, action: str, parsed: dict) -> None:
-        if action == "pick" and parsed.get("weeks") not in ("1", "2"):
-            raise Refusal(f"--weeks must be 1 or 2, not {parsed.get('weeks', '')!r}")
+        if action == "pick":
+            _weeks(parsed)
         store = self._store_for_run()
         team = team_key(parsed)
         wanted = parsed.get("project", "")
@@ -165,14 +171,8 @@ class Feature:
         if action == "pick":
             if current is not Phase.PARKED:
                 raise Refusal(f"{features.describe(project)} is {current.value}, not parked")
-            held = features.open_features(store, team)
-            if held:
-                names = ", ".join(features.describe(f.project) for f in held)
-                raise Refusal(f"{names} is still open; finish or park it first")
-            today = self._today()
-            target = today + timedelta(days=7 * int(parsed["weeks"]))
-            ops.ensure_project_dates(store, project["id"], today.isoformat(), target.isoformat())
-            print(f"done: picked {project['name']}, target {target.isoformat()}")
+            _none_open(store, team, project["id"])
+            print(f"done: picked {project['name']}, target {self._open(store, project['id'], parsed)}")
             return
         if any(feature.approved(s) for s in feature.stories):
             raise Refusal(f"{features.describe(project)} has a story with a feature-approval record")
@@ -180,6 +180,18 @@ class Feature:
             raise Refusal(f"{features.describe(project)} is {current.value}, only a feature in planning can be parked")
         ops.ensure_project_dates(store, project["id"], None, None)
         print(f"done: parked {project['name']}")
+
+
+def _weeks(parsed: dict) -> None:
+    if parsed.get("weeks") not in ("1", "2"):
+        raise Refusal(f"--weeks must be 1 or 2, not {parsed.get('weeks', '')!r}")
+
+
+def _none_open(store: Store, team: str, id: str) -> None:
+    held = [f for f in features.open_features(store, team) if f.project["id"] != id]
+    if held:
+        names = ", ".join(features.describe(f.project) for f in held)
+        raise Refusal(f"{names} is still open; finish or park it first")
 
 
 def _input_folder() -> str | None:

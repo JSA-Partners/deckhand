@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+from deckhand import order, queue, spec, versions
+from deckhand.features import Feature
+from deckhand.records import Record
+from deckhand.store import Store
+
+SECTIONS = ("Contract", "Examples", "Invariants")
+
+
+def _answer(records: list[Record], item: str, draft: str) -> str:
+    held = versions.held(records, "decision-item", versions.item_subject(item))
+    if held is not None and held.version == versions.item_version(item, draft) and held.data.get("answer"):
+        return str(held.data["answer"])
+    return f"{draft} (not decided)"
+
+
+def _listed(name: str, lines: list[str]) -> str:
+    return f"{name}:\n" + "".join(f"{line}\n" for line in lines) if lines else f"{name}: none\n"
+
+
+def _story(store: Store, feature: Feature, story: dict, edges: list[tuple[str, str]]) -> str:
+    records = feature.records.get(story["id"], [])
+    by_id = {s["id"]: s["identifier"] for s in feature.live}
+    blockers = [by_id[a] for a, b in edges if b == story["id"] and a in by_id]
+    level = versions.tier(records, story["id"])
+    repositories = sorted(set(story["labels"]) & set(store.repository_labels(story["team"]))) or story["labels"]
+    items = [f"- {item}: {_answer(records, item, draft)}" for item, draft in versions.drafts(records).items()]
+    chart = versions.chart(records, story["id"]).strip()
+    head = [
+        f"## {story['identifier']} {story['title']}",
+        f"repository: {', '.join(repositories) or 'none'}",
+        f"depends on: {', '.join(blockers) or 'none'}",
+        f"tier: {level.label if level else 'not given'}",
+        "",
+        (story["description"] or "").strip() or "no description",
+        "",
+    ]
+    kinds = {r.kind for r in records}
+    tail = "draft: saved, not taken\n" if queue.DRAFT in kinds and queue.TAKEN not in kinds else ""
+    tail += _listed("decisions", items)
+    tail += f"state chart:\n{chart}\n" if chart else "state chart: none\n"
+    tail += _listed("after merge", [f"- {item}" for item in versions.after_merge(records)])
+    return "\n".join(head) + "\n" + tail
+
+
+def screen(store: Store, feature: Feature) -> str:
+    edges = order.edges(store, feature)
+    stories, _ = order.build_order(feature.live, edges)
+    shown = [spec.planning_text(store, feature, SECTIONS), "# Story map\n"]
+    shown += [_story(store, feature, s, edges) for s in stories]
+    return "\n".join(spec.plain(part) for part in shown)

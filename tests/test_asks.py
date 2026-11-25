@@ -98,7 +98,7 @@ def test_wake_due_ignores_stories_without_a_hand_and_decisions_a_hand_does_not_w
     assert asks.wake_due([lean], "s1") is None
     assert asks.wake_due([stamped("question", "2026-11-19T10:10:00.000Z", "person:s1")], "s1") is None
     start = stamped("hand-start", "2026-11-19T10:00:00.000Z", "agent:hand")
-    contract = stamped("contract", "2026-11-19T10:11:00.000Z", "person:s1", "s1")
+    contract = stamped("feature-approval", "2026-11-19T10:11:00.000Z", "person:s1", "s1")
     assert asks.wake_due([start, lean, contract], "s1") is None
     edit = stamped("config-edit-request", "2026-11-19T10:12:00.000Z", "agent:hand")
     assert asks.wake_due([start, lean, edit], "s1") is None

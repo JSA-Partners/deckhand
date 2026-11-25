@@ -11,7 +11,6 @@ from deckhand.store import Store
 if TYPE_CHECKING:
     from deckhand.features import Feature
 
-SECTION_OF = {"contract": "Contract", "invariants": "Invariants"}
 STORY_KINDS = ("lean",)
 MAP_AUTHOR = "agent:stories"
 
@@ -101,8 +100,6 @@ def story_of(feature: Feature, id: str) -> dict:
 
 
 def version_for(store: Store, feature: Feature, kind: str, subject: str) -> str:
-    if kind in SECTION_OF:
-        return _hash(planning.section(store, feature, SECTION_OF[kind]) or "")
     if kind == "feature-approval":
         return feature_version(store, feature)
     if kind not in STORY_KINDS:

@@ -339,7 +339,7 @@ def refused(argv: list[str], capsys) -> bool:
     "argv",
     [
         ["setup", "apply", "--team-key", "ACME"],
-        ["feature", "apply", "new", "--name", "N"],
+        ["feature", "apply", "new", "--name", "N", "--weeks", "1"],
         ["stories", "apply", "--file", "map.json"],
         ["hand", "apply", "start", "ACME-1"],
         ["nonesuch", "apply", "ACME-1"],

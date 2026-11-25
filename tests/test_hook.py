@@ -77,7 +77,7 @@ def pending_for(state: Path, nonce: str, question: str, options: list[str]) -> N
         json.dumps(
             {
                 "nonce": nonce,
-                "kind": "contract",
+                "kind": "feature-approval",
                 "subject": "s",
                 "version": "v",
                 "stories": ["s1"],

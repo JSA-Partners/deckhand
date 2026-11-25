@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from deckhand import features, ops, planning, versions
+import pytest
+
+from deckhand import features, ops, versions
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
+from deckhand.step import Refusal
 from deckhand.steps import stories
 from deckhand.store.fake import FakeStore
 
@@ -53,14 +56,10 @@ def test_a_new_tier_in_the_map_voids_the_lean_decision():
     assert not versions.current(store, load(store), lean)
 
 
-def test_contract_version_follows_only_its_section():
+def test_no_version_is_defined_for_a_removed_kind():
     store = setup()
-    planning.save_section(store, load(store), "Contract", "POST /orders.", False)
-    before = versions.version_for(store, load(store), "contract", P1)
-    planning.save_section(store, load(store), "Frame", "Why.", False)
-    assert versions.version_for(store, load(store), "contract", P1) == before
-    planning.save_section(store, load(store), "Contract", "POST /orders and GET /orders.", False)
-    assert versions.version_for(store, load(store), "contract", P1) != before
+    with pytest.raises(Refusal, match="no version is defined for the decision kind 'contract'"):
+        versions.version_for(store, load(store), "contract", P1)
 
 
 def test_decision_item_version_covers_its_draft():

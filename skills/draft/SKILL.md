@@ -24,6 +24,6 @@ prints, save it with `deckhand ask apply $story --file QUESTION.json`, and stop.
 draft proposes and never decides.
 
 Write the draft to a temporary file outside the worktree and save it with
-`deckhand draft apply $story --file DRAFT.md`, then stop. It refuses until the Contract is approved.
+`deckhand draft apply $story --file DRAFT.md`, then stop. It refuses until the Contract is saved.
 When a command refuses, fix the rule it names. Run every deckhand call as its own command, never
 chained after `cd`, and do not reread a context already printed.

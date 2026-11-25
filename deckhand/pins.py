@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import asks, features, planning, queue, review, signoff, startable, versions
+from deckhand import asks, features, queue, review, signoff, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -217,8 +217,6 @@ def pin(
         version = versions.version_for(store, feature, kind, story["id"])
         return Pin(story["id"], version, [story["id"]], "", _label(story), [_label(story)])
     project = feature.project["id"]
-    if kind in versions.SECTION_OF and planning.section(store, feature, versions.SECTION_OF[kind]) is None:
-        raise Refusal(f"the {versions.SECTION_OF[kind]} section is not saved; save it before approving it")
     if subject != project:
         raise Refusal(f"{subject} is not the open feature; the open feature is {features.describe(feature.project)}")
     if kind == features.APPROVAL:

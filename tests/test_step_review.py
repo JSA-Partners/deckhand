@@ -410,8 +410,6 @@ def test_branch_context_without_passing_checks_stops(tmp_path: Path, repo: Path,
 
 def feature_ready() -> FakeStore:
     store = setup()
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
-    decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     mapped(store, "s1")
     mapped(store, "s2")
     return store
@@ -509,7 +507,6 @@ def test_feature_review_is_mandatory_until_a_round_runs(tmp_path: Path):
     record_round(FeatureReview(store), tmp_path)
     assert features.approval_gaps(store, load(store)) == []
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
     assert features.approval_gaps(store, load(store)) == [
         "the feature review has not reviewed the current contract and stories; run a feature round"
     ]

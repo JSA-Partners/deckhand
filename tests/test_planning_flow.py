@@ -7,15 +7,18 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import cli, features, planning
+from deckhand import cli, features, planning, queue, startable, watch
 from deckhand.features import Phase
 from deckhand.step import REGISTRY
 from deckhand.steps.decide import Decide
+from deckhand.steps.draft import Draft
 from deckhand.steps.feature import Feature
 from deckhand.steps.plan import Plan
 from deckhand.steps.review import FeatureReview
 from deckhand.steps.stories import Stories
 from deckhand.store.fake import FakeStore
+from deckhand.store.local import default_path
+from deckhand.store.state import LocalState
 from tests.test_skills import named_commands, split
 
 TEAM: list[str] = []
@@ -37,6 +40,7 @@ class Session:
             ("stories", Stories(store)),
             ("decide", Decide(store)),
             ("feature-review", FeatureReview(store)),
+            ("draft", Draft(store, me=lambda: "viewer-1")),
         ):
             monkeypatch.setitem(REGISTRY, name, step)
         capsys.readouterr()
@@ -95,10 +99,8 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     store.add_repository_label("ACME", "web")
     session = Session(store, tmp_path, monkeypatch, capsys)
 
-    session.run("feature", "apply", "new", *TEAM, "--name", "Alpha")
-    session.run("feature", "apply", "new", *TEAM, "--name", "Beta")
-    alpha, beta = (p["id"] for p in sorted(store.team_projects("ACME"), key=lambda p: p["name"]))
-    session.run("feature", "apply", "pick", *TEAM, "--project", alpha, "--weeks", "1")
+    session.run("feature", "apply", "new", *TEAM, "--name", "Alpha", "--weeks", "1")
+    [alpha] = (p["id"] for p in store.team_projects("ACME"))
 
     for section in planning.SECTIONS:
         session.save(section, f"The {section} of Alpha.")
@@ -140,19 +142,15 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
         },
     ]
     session.run("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
-    queue, page, owner = (s["id"] for s in sorted(store.project_issues(alpha), key=lambda s: s["number"]))
-    assert store.relations(page) == [(queue, page)]
+    queue_story, page, owner = (s["id"] for s in sorted(store.project_issues(alpha), key=lambda s: s["number"]))
+    assert store.relations(page) == [(queue_story, page)]
     assert store.relations(owner) == []
     assert session.facts()["phase"] == "planning"
 
     assert session.facts()["gaps"] == [
-        "the Contract is not approved",
-        "the Invariants are not approved",
         f"ACME-1: decision item {ITEM} is not decided",
         "the feature review has not run",
     ]
-    session.decide("contract", alpha, "Approve")
-    session.decide("invariants", alpha, "Approve")
     session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
 
     assert session.facts()["gaps"] == ["the feature review has not run"]
@@ -166,13 +164,63 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     held = session.facts()
     assert held["phase"] == "planning"
     assert held["approval_void"] is True
-    assert "the Contract changed after it was approved" in held["gaps"]
+    stale = "the feature review has not reviewed the current contract and stories; run a feature round"
+    assert held["gaps"] == [stale]
     assert features.phase(features.open_feature(store, "ACME")) is Phase.PLANNING
 
     store.writes.clear()
-    refusal = session.refuse("feature", "apply", "pick", *TEAM, "--project", beta, "--weeks", "1")
+    refusal = session.refuse("feature", "apply", "new", *TEAM, "--name", "Beta", "--weeks", "1")
     assert f"Alpha ({alpha}) is still open" in refusal
     assert store.writes == []
+
+
+def test_planning_flow_from_new_to_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    monkeypatch.setenv("DECKHAND_STATE_DIR", str(tmp_path / "state"))
+    store = FakeStore()
+    store.add_repository_label("ACME", "api")
+    session = Session(store, tmp_path, monkeypatch, capsys)
+    session.run("captain", "apply", "hold")
+
+    session.run("feature", "apply", "new", *TEAM, "--name", "Alpha", "--weeks", "1")
+    [alpha] = (p["id"] for p in store.team_projects("ACME"))
+    for section in planning.SECTIONS:
+        if section != "Contract":
+            session.run("plan", "apply", section, *TEAM, "--drafted", "--file", session.write("s.md", section))
+    entry = {"key": "queue", "title": "Queue orders", "outcome": "Queued once.", "repository": "api"}
+    entry |= {"depends_on": [], "unknowns": [], "new_here": [], "tier": "none", "decisions": [DECISION]}
+    session.run("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps([entry])))
+
+    def drafts() -> list[str]:
+        feature = features.open_feature(store, "ACME")
+        assert feature is not None
+        work = startable.startable(store, feature, "viewer-1", {"api": tmp_path})
+        return [w.story["identifier"] for w in work if w.kind == startable.DRAFT]
+
+    assert drafts() == []
+    contract = session.write("contract.md", "POST /orders returns 201.")
+    session.run("plan", "apply", "Contract", *TEAM, "--drafted", "--file", contract)
+    assert drafts() == ["ACME-1"]
+
+    session.run("draft", "apply", "ACME-1", *TEAM, "--file", session.write("draft.md", "Outcome: queued once, by id."))
+    session.run("draft", "apply", "ACME-1", "take", *TEAM)
+    session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
+    session.review_feature(session.run)
+    assert session.facts()["gaps"] == []
+
+    screen = session.run("plan", "context", "approval", *TEAM)
+    for part in ("# Contract", "POST /orders returns 201.", "# Invariants", "Outcome: queued once, by id."):
+        assert part in screen
+    assert f"- {ITEM}: Yes" in screen
+    session.decide("feature-approval", alpha, "Approve")
+
+    assert features.phase(features.open_feature(store, "ACME")) is Phase.BUILDING
+    [story] = store.project_issues(alpha)
+    decided = sorted(
+        r.kind for r in store.records(story["id"]) if r.author.startswith("person:") and r.kind != queue.TAKEN
+    )
+    assert decided == ["decision-item", "feature-approval"]
+    with LocalState(default_path()) as rows:
+        assert rows.get(watch.HOLD) is None
 
 
 SKILL = Path(__file__).resolve().parent.parent / "skills" / "feature" / "SKILL.md"
@@ -228,9 +276,8 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
     store.add_repository_label("ACME", "api")
     session = SkillSession(store, tmp_path, monkeypatch, capsys)
 
-    session.skill("feature", "apply", "new", *TEAM, "--name", "Alpha")
+    session.skill("feature", "apply", "new", *TEAM, "--name", "Alpha", "--weeks", "1")
     [alpha] = (p["id"] for p in store.team_projects("ACME"))
-    session.skill("feature", "apply", "pick", *TEAM, "--project", alpha, "--weeks", "1")
     for section in planning.SECTIONS:
         assert section in session.skill("plan", "context", *TEAM)
         path = session.write(f"{section}.md", f"The {section} of Alpha.")
@@ -250,15 +297,11 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
         "story: ACME-2 owner",
     ]
 
-    session.ask("contract", alpha, "Approve")
-    session.ask("invariants", alpha, "Approve")
-
-    [gap] = [found for found in session.gaps() if ": decision item " in found]
-    ref, _, rest = gap.partition(": decision item ")
-    session.ask("decision-item", rest.removesuffix(" is not decided"), "Yes", "--story", ref)
+    session.ask("decision-item", ITEM, "Yes", "--story", "ACME-1")
     assert session.gaps() == ["the feature review has not run"]
     session.review_feature(session.skill)
     assert session.gaps() == []
+    assert "# Story map" in session.skill("plan", "context", "approval", *TEAM)
     session.ask("feature-approval", alpha, "Approve")
 
     assert features.phase(features.open_feature(store, "ACME")) is Phase.BUILDING

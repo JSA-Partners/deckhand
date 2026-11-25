@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, decisions, features, planning, queue, review, spec, versions
+from deckhand import answers, asks, decisions, features, planning, queue, review, spec, versions, watch
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
@@ -14,6 +14,9 @@ from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.store import open as store_open
 from deckhand.store.fake import FakeStore
+from deckhand.store.local import default_path
+from deckhand.store.state import LocalState
+from tests.test_feature_approval import mapped, reviewed, setup
 from tests.test_queue import alpha, started
 
 P1 = create_id("ACME:Alpha", "feature")
@@ -64,12 +67,13 @@ def record_answer(state: Path, asked: dict, answer: str) -> None:
 
 
 def test_pending_question_round_trips_through_context_and_apply(state: Path, capsys):
-    store = feature_store()
+    store = approved_ready()
+    store.create_issue("x1", "ACME", "Elsewhere", "", None, [])
     feature = features.open_feature(store, "ACME")
     assert feature is not None
-    version = versions.version_for(store, feature, "contract", P1)
+    version = versions.version_for(store, feature, "feature-approval", P1)
     step = Decide(store)
-    step.context(["contract", P1, *TEAM, "--json"])
+    step.context(["feature-approval", P1, *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     nonce = shown["nonce"]
     asked = shown["tool_input"]["questions"][0]
@@ -86,8 +90,8 @@ def test_pending_question_round_trips_through_context_and_apply(state: Path, cap
     )
     step.apply([nonce, *TEAM])
     for story in ("s1", "s2"):
-        [record] = store.records(story)
-        assert (record.kind, record.version, record.author) == ("contract", version, "person:sess")
+        [record] = [r for r in store.records(story) if r.kind == "feature-approval"]
+        assert (record.version, record.author) == (version, "person:sess")
         assert record.data["by"] == "viewer-1"
     assert store.records("x1") == []
     assert not decisions.pending_path(nonce, state).exists()
@@ -147,6 +151,46 @@ def test_own_words_are_what_the_hand_receives(state: Path, capsys):
     assert "Change" not in spec.text(found)
 
 
+def test_yes_hands_the_draft_to_the_hand(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "Yes", state)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    shown = spec.text(spec.gather(store, feature, features.story(store, feature, "ACME-1")))
+    assert "# Decisions\n\n- Greeting wording: 'Bonjour'\n" in shown
+
+
+def test_approval_drops_the_hold(state: Path, capsys):
+    store = approved_ready()
+    with LocalState(default_path()) as rows:
+        rows.put(watch.HOLD, {})
+    asked_approval(store, capsys, state, "Change")
+    with LocalState(default_path()) as rows:
+        assert rows.get(watch.HOLD) is not None
+    asked_approval(store, capsys, state, "Approve")
+    with LocalState(default_path()) as rows:
+        assert rows.get(watch.HOLD) is None
+
+
+def approved_ready() -> FakeStore:
+    store = setup()
+    for story in ("s1", "s2"):
+        mapped(store, story)
+    reviewed(store)
+    return store
+
+
+def asked_approval(store: FakeStore, capsys, state: Path, answer: str) -> None:
+    Decide(store).context(["feature-approval", P1, *TEAM, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    asked = shown["tool_input"]["questions"][0]
+    assert [o["label"] for o in asked["options"]] == ["Approve", "Change"]
+    record_answer(state, asked, answer)
+    Decide(store).apply([shown["nonce"], *TEAM])
+    capsys.readouterr()
+
+
 def test_a_bare_change_records_nothing_and_the_item_is_asked_again(state: Path, capsys):
     store = feature_store()
     mapped_item(store)
@@ -186,11 +230,11 @@ def test_an_item_outside_the_map_or_with_two_drafts_is_refused(state: Path):
 @pytest.mark.parametrize(
     "args,match",
     [
-        (["contract", "p9"], "p9 is not the open feature"),
-        (["contract", P1, "--story", "s1"], "--story applies only to decision-item"),
+        (["feature-approval", "p9"], "p9 is not the open feature"),
+        (["feature-approval", P1, "--story", "s1"], "--story applies only to decision-item"),
         (["lean", "ACME-3"], "ACME-3 is not a story of Alpha"),
         (["decision-item", "Keep it"], "decision-item needs at least one --story"),
-        (["contract", P1, "--version", "v1"], "unknown argument --version"),
+        (["feature-approval", P1, "--version", "v1"], "unknown argument --version"),
     ],
 )
 def test_context_refuses_what_it_cannot_pin(state: Path, args: list[str], match: str):
@@ -204,14 +248,14 @@ def test_apply_without_pending_refuses(state: Path):
 
 
 def test_questions_show_identifiers_titles_and_the_feature_name(state: Path, capsys):
-    store = feature_store()
-    Decide(store).context(["contract", P1, *TEAM, "--json"])
+    store = approved_ready()
+    Decide(store).context(["feature-approval", P1, *TEAM, "--json"])
     text = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]["question"]
-    assert "Alpha" in text and "ACME-1 One, ACME-2 Two" in text
+    assert "Alpha" in text and "ACME-1 Orders, ACME-2 Receipts" in text
     assert P1 not in text and "s1" not in text
     Decide(store).context(["lean", "ACME-2", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)["tool_input"]["questions"][0]
-    assert "ACME-2 Two" in shown["question"] and "s2" not in shown["question"]
+    assert "ACME-2 Receipts" in shown["question"] and "s2" not in shown["question"]
     assert all("s2" not in option["description"] for option in shown["options"])
 
 
@@ -234,7 +278,7 @@ def roles_connected(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_decide_writes_as_person(state: Path, monkeypatch: pytest.MonkeyPatch):
     roles = roles_connected(monkeypatch)
     with pytest.raises(Connected):
-        Decide().context(["contract", P1, *TEAM])
+        Decide().context(["lean", "ACME-1", *TEAM])
     assert roles == ["person"]
 
 
@@ -252,7 +296,7 @@ def test_a_hand_never_opens_a_decision(state: Path, monkeypatch: pytest.MonkeyPa
     store = feature_store()
     monkeypatch.setenv("DECKHAND_ROLE", "hand")
     with pytest.raises(Refusal, match="a hand never decides"):
-        Decide(store).context(["contract", P1, *TEAM])
+        Decide(store).context(["lean", "ACME-1", *TEAM])
     assert not (state / decisions.PENDING).exists()
 
 

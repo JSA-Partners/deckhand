@@ -20,12 +20,12 @@ P1 = create_id("ACME:Alpha", "feature")
 TEAM = ["--team-key", "ACME"]
 
 
-def setup(store: FakeStore | None = None) -> FakeStore:
+def setup(store: FakeStore | None = None, unsaved: tuple[str, ...] = ()) -> FakeStore:
     store = store if store is not None else FakeStore()
     store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
     store.set_project_dates(P1, "2026-11-16", "2026-11-23")
     feature = load(store)
-    for name in planning.SECTIONS:
+    for name in (n for n in planning.SECTIONS if n not in unsaved):
         planning.save_section(store, feature, name, f"The {name} of Alpha.", False)
     store.create_issue("s1", "ACME", "Orders", "Outcome: an order is placed.", P1, ["widgets"])
     store.create_issue("s2", "ACME", "Receipts", "Outcome: a receipt is sent.", P1, ["widgets"])
@@ -66,8 +66,6 @@ def reviewed(store: FakeStore) -> None:
 
 def approve_everything(store: FakeStore) -> None:
     reviewed(store)
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
-    decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     for story in ("s1", "s2"):
         if versions.held(store.records(story), "tier", story) is None:
             mapped(store, story)
@@ -78,18 +76,13 @@ def approve_everything(store: FakeStore) -> None:
 def test_approval_gaps_lists_each_missing_decision():
     store = setup()
     assert features.approval_gaps(store, load(store)) == [
-        "the Contract is not approved",
-        "the Invariants are not approved",
         "ACME-1: the story map gives no tier; save the map again",
         "ACME-2: the story map gives no tier; save the map again",
         "the feature review has not run",
     ]
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
-    decided(store, "invariants", P1, "Approve", ["s1"])
     mapped(store, "s1", "multi_step")
     mapped(store, "s2")
     assert features.approval_gaps(store, load(store)) == [
-        "the Invariants are not approved",
         "ACME-1: tier 2 needs a state chart in the story map",
         "the feature review has not run",
     ]
@@ -109,7 +102,7 @@ def test_approval_gaps_name_each_unsaved_section_first():
         "the Pre-mortem section is not saved",
         "the Facts section is not saved",
         "the Invariants section is not saved",
-        "the Contract is not approved",
+        "ACME-1: the story map gives no tier; save the map again",
     ]
 
 
@@ -121,7 +114,6 @@ def test_changed_contract_voids_feature_approval():
     feature = load(store)
     assert features.phase(feature) is Phase.PLANNING
     assert features.approval_gaps(store, feature) == [
-        "the Contract changed after it was approved",
         "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
 
@@ -140,8 +132,6 @@ def test_changed_story_voids_feature_approval():
 def test_canceled_story_needs_no_approval():
     store = setup()
     store.set_issue_state("s2", "Canceled")
-    decided(store, "contract", P1, "Approve", ["s1"])
-    decided(store, "invariants", P1, "Approve", ["s1"])
     mapped(store, "s1")
     reviewed(store)
     assert features.approval_gaps(store, load(store)) == []
@@ -209,14 +199,21 @@ def test_a_missing_chart_gap_shows_in_feature_context(capsys: pytest.CaptureFixt
 
 def test_feature_context_names_the_gaps(capsys: pytest.CaptureFixture[str]):
     store = setup()
+    Feature(store).context([*TEAM, "--json"])
+    held = json.loads(capsys.readouterr().out)["open"][0]
+    assert held["phase"] == "planning"
+    assert held["gaps"][0] == "ACME-1: the story map gives no tier; save the map again"
+    Feature(store).context(TEAM)
+    assert "gap: ACME-1: the story map gives no tier; save the map again" in capsys.readouterr().out
+
+
+def test_an_invariants_edit_voids_the_approval_with_no_gap(capsys: pytest.CaptureFixture[str]):
+    store = setup()
     approve_everything(store)
     planning.save_section(store, load(store), "Invariants", "A total is zero or more.", False)
     Feature(store).context([*TEAM, "--json"])
     held = json.loads(capsys.readouterr().out)["open"][0]
-    assert held["phase"] == "planning"
-    assert held["gaps"] == ["the Invariants changed after they were approved"]
-    Feature(store).context(TEAM)
-    assert "gap: the Invariants changed after they were approved" in capsys.readouterr().out
+    assert (held["phase"], held["gaps"], held["approval_void"]) == ("planning", [], True)
 
 
 def test_feature_context_tells_the_captain_how_to_propose_a_delivery_finding(capsys: pytest.CaptureFixture[str]):
@@ -253,26 +250,15 @@ def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "state"
 
 
-def test_decide_context_refuses_approving_a_missing_section(state: Path):
-    store = FakeStore()
-    store.create_project(P1, "ACME", "Alpha", "", [FEATURE_LABEL])
-    store.set_project_dates(P1, "2026-11-16", "2026-11-23")
-    store.create_issue("s1", "ACME", "Orders", "Outcome.", P1, [])
-    with pytest.raises(Refusal, match="the Invariants section is not saved"):
-        Decide(store).context(["invariants", P1, *TEAM])
-    assert store.records("s1") == []
-
-
 def test_decide_context_refuses_feature_approval_with_gaps(state: Path):
-    store = setup()
-    with pytest.raises(Refusal, match="not ready for approval: the Contract is not approved"):
+    store = setup(unsaved=("Invariants",))
+    with pytest.raises(Refusal, match="not ready for approval: the Invariants section is not saved"):
         Decide(store).context(["feature-approval", P1, *TEAM])
+    assert store.records("s1") == []
 
 
 def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsys: pytest.CaptureFixture[str]):
     store = setup()
-    decided(store, "contract", P1, "Approve", ["s1", "s2"])
-    decided(store, "invariants", P1, "Approve", ["s1", "s2"])
     mapped(store, "s1")
     mapped(store, "s2")
     reviewed(store)

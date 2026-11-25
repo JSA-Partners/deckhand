@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from deckhand import features, inputs, planning, spec, spikes
+from deckhand import approval, features, inputs, planning, spec, spikes
 from deckhand.step import Refusal, register, team_key
 from deckhand.store import Store
 from deckhand.store.open import Stores
 
 USAGE = (
     "plan takes [--team-key KEY] on both verbs, --json on context only; context [SECTION],"
-    " spike KEY, apply SECTION --file PATH [--drafted]"
+    " spike KEY, approval, apply SECTION --file PATH [--drafted]"
 )
 
 
@@ -57,6 +57,9 @@ class Plan:
             return
         if len(words) > 1:
             raise Refusal(f"context takes at most one SECTION; {USAGE}")
+        if words == ["approval"]:
+            print(spec.fitted("approval", approval.screen(store, feature), ""), end="")
+            return
         if words:
             name = words[0]
             text = planning.section(store, feature, name)

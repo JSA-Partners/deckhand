@@ -54,19 +54,6 @@ def phase(feature: Feature) -> Phase:
     return Phase.PLANNING
 
 
-_SECTION_GAPS = {
-    "contract": ("the Contract is not approved", "the Contract changed after it was approved"),
-    "invariants": ("the Invariants are not approved", "the Invariants changed after they were approved"),
-}
-
-
-def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, words: tuple[str, str]) -> str | None:
-    record = versions.held(feature.records.get(story["id"], []), kind, subject)
-    if record is None:
-        return words[0]
-    return None if record.version == version else words[1]
-
-
 def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
     records = feature.records.get(story["id"], [])
     found = []
@@ -97,13 +84,6 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
     if not live:
         return [*gaps, "the feature has no stories"]
     project = feature.project["id"]
-    for kind, words in _SECTION_GAPS.items():
-        version = versions.version_for(store, feature, kind, project)
-        found = {_gap(feature, s, kind, project, version, words) for s in live}
-        if words[1] in found:
-            gaps.append(words[1])
-        elif words[0] in found:
-            gaps.append(words[0])
     for story in live:
         gaps += _map_gaps(feature, story)
         gaps += [
@@ -135,14 +115,6 @@ def review_text(store: Store, feature: Feature) -> str | None:
     for story in sorted(feature.live, key=lambda s: s["id"]):
         parts += [f"# {story['identifier']} {story['title']}", story["description"] or ""]
     return "\n\n".join(parts) + "\n"
-
-
-def contract_approved(store: Store, feature: Feature) -> bool:
-    project = feature.project["id"]
-    version = versions.version_for(store, feature, "contract", project)
-    return bool(feature.live) and all(
-        _gap(feature, s, "contract", project, version, ("", "")) is None for s in feature.live
-    )
 
 
 def story(store: Store, feature: Feature, ref: str) -> dict:

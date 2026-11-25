@@ -23,7 +23,7 @@ def item_pin(draft: str = "'Bonjour'") -> decisions.Pin:
     return decisions.Pin("abc", "v1", ["s1"], "Greeting wording", "", ["ACME-1"], draft=draft)
 
 
-def ask(tmp_path: Path, kind: str = "contract", stories: list[str] | None = None):
+def ask(tmp_path: Path, kind: str = "feature-approval", stories: list[str] | None = None):
     shown = item_pin() if kind == "decision-item" else pin(stories)
     question = decisions.make_question(kind, shown)
     decisions.save_pending(question, shown, tmp_path)
@@ -78,7 +78,7 @@ def test_decide_records_on_every_story(tmp_path: Path):
     assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     for story in ("s1", "s2"):
         [record] = store.records(story)
-        assert (record.kind, record.subject, record.version) == ("contract", "Checkout", "v1")
+        assert (record.kind, record.subject, record.version) == ("feature-approval", "Checkout", "v1")
         assert record.author == "person:sess-9"
         assert record.data == {
             "answer": "Approve",
@@ -97,7 +97,7 @@ def test_decide_twice_writes_once(tmp_path: Path):
     assert [w[0] for w in store.writes] == ["put_record"]
 
 
-@pytest.mark.parametrize("kind,answer", [("contract", "Not yet"), ("feature-approval", "Not yet")])
+@pytest.mark.parametrize("kind,answer", [("feature-approval", "Change"), ("feature-approval", "Later, maybe")])
 def test_non_positive_answers_write_no_record(tmp_path: Path, kind: str, answer: str):
     question, pending = ask(tmp_path, kind)
     answered(tmp_path, question, answer)
@@ -122,10 +122,12 @@ def test_only_proving_in_lean_records_a_lean_decision(tmp_path: Path, answer: st
 
 
 def test_question_text_is_ascii_and_names_what_is_asked():
-    question = decisions.make_question("invariants", pin())
+    question = decisions.make_question("feature-approval", pin())
     assert question.text.isascii()
-    assert "invariants" in question.text and "Checkout" in question.text
-    assert question.options == ["Approve", "Not yet"]
+    assert "feature" in question.text and "Checkout" in question.text
+    assert question.options == ["Approve", "Change"]
+    [_, change] = as_tool_input(question)["questions"][0]["options"]
+    assert "type" in change["description"]
 
 
 def test_unknown_kind_refuses():
@@ -173,16 +175,16 @@ def test_pending_edited_after_the_answer_is_refused(tmp_path: Path, changes: dic
 
 def test_question_text_states_story_labels_not_ids():
     shown = decisions.Pin("p1", "v1", ["u1", "u2"], label="Alpha", story_labels=["ACME-1 Orders", "ACME-2 Receipts"])
-    question = decisions.make_question("contract", shown)
+    question = decisions.make_question("feature-approval", shown)
     assert re.fullmatch(
-        r"Approve the contract for Alpha \(stories ACME-1 Orders, ACME-2 Receipts\)\? \[[0-9a-f]{12}\]", question.text
+        r"Approve the feature Alpha \(stories ACME-1 Orders, ACME-2 Receipts\)\? \[[0-9a-f]{12}\]", question.text
     )
-    assert decisions.make_question("contract", replace(shown, version="v2")).text != question.text
+    assert decisions.make_question("feature-approval", replace(shown, version="v2")).text != question.text
     assert not any(id in question.text for id in ("p1", "u1", "u2"))
     assert question.text.isascii()
     assert (
         decisions.make_question(
-            "contract", decisions.Pin("p1", "v1", ["u1", "u3"], label="Alpha", story_labels=shown.story_labels)
+            "feature-approval", decisions.Pin("p1", "v1", ["u1", "u3"], label="Alpha", story_labels=shown.story_labels)
         ).text
         != question.text
     )
@@ -360,3 +362,28 @@ def test_no_quiz_kind_remains():
 
 def test_no_sitting_kind_remains():
     assert {"sitting", "tier", "state-chart"}.isdisjoint(decisions.KINDS)
+
+
+def test_no_contract_or_invariants_kind_remains():
+    assert {"contract", "invariants"}.isdisjoint(decisions.KINDS)
+    with pytest.raises(Refusal, match="unknown decision kind"):
+        decisions.make_question("contract", pin())
+
+
+def test_yes_settles_a_draft_that_reads_change(tmp_path: Path):
+    shown = item_pin("Change")
+    question = decisions.make_question("decision-item", shown)
+    decisions.save_pending(question, shown, tmp_path)
+    answered(tmp_path, question, "Yes")
+    store = store_with("s1")
+    assert decisions.decide(store, decisions.load_pending(question.nonce, tmp_path), tmp_path, "viewer-1") is True
+    [record] = store.records("s1")
+    assert record.data["answer"] == "Change"
+
+
+def test_a_decision_item_is_named_by_a_short_name_from_its_text():
+    question = decisions.make_question("decision-item", item_pin())
+    assert question.subject == "Greeting"
+    assert question.header == f"dh {question.nonce}"
+    long_word = replace(item_pin(), detail="Internationalization")
+    assert decisions.make_question("decision-item", long_word).subject == "Internationa"

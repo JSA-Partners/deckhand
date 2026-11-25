@@ -156,8 +156,25 @@ def test_planning_items_shown_to_everyone():
     assert kinds(waiting(store, me=OTHER)) == [("planning", 3, "Alpha")]
     [item] = waiting(store, me=OTHER)
     assert item.next == ["/deckhand:feature"]
-    assert item.lines == ["the Contract is not approved"]
+    assert item.lines == ["ACME-1: the story map gives no tier; save the map again"]
     assert item.at == "2026-11-16T00:00:00.000Z"
+
+
+def test_a_voided_approval_with_no_gap_is_still_a_planning_item():
+    store = alpha()
+    planning.save_section(store, features.open_feature(store, "ACME"), "Invariants", "Totals are positive.", False)
+    [item] = [i for i in waiting(store) if i.kind == "planning"]
+    assert (item.lines, item.next) == (["the feature is ready for approval"], ["/deckhand:feature"])
+
+
+def test_a_released_feature_raises_no_planning_item():
+    store = alpha()
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    feature = features.current(store, "ACME")
+    assert feature is not None and features.phase(feature) is features.Phase.RELEASED
+    found = queue.items(store, "ACME", feature, ME, Fleet([], ""), lambda story: Policy("widgets"))
+    assert [i for i in found if i.kind == "planning"] == []
 
 
 def test_second_signoff_shown_only_to_others(

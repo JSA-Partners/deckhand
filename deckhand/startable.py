@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import asks, config, features, fleet, order, queue, signoff
+from deckhand import asks, config, features, fleet, order, planning, queue, signoff
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -43,8 +43,8 @@ def kind(feature: Feature, story: dict) -> str:
 def why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
     if any(r.kind in (queue.DRAFT, queue.TAKEN) for r in feature.records.get(story["id"], [])):
         return f"{story['identifier']} is already drafted"
-    if not features.contract_approved(store, feature):
-        return f"the Contract of {features.describe(feature.project)} is not approved, so no story is drafted yet"
+    if planning.section(store, feature, "Contract") is None:
+        return f"the Contract of {features.describe(feature.project)} is not saved, so no story is drafted yet"
     return None
 
 
