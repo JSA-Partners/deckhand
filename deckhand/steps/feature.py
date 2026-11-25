@@ -143,15 +143,16 @@ class Feature:
         elif action in ("pick", "park"):
             self._move(action, parsed)
         elif action == "fetch":
-            if not config.local().clones:
-                raise Refusal(f"no clone is configured in {config.config_dir() / config.FILE}; run setup")
             self._refresh()
         else:
             raise Refusal(f"apply takes new, pick, park or fetch; {USAGE}")
 
     # Planning reads every clone at a fresh origin, never the person's own checkout.
     def _refresh(self) -> None:
-        for clone in config.local().clones.values():
+        clones = config.local().clones
+        if not clones:
+            raise Refusal(f"no clone is configured in {config.config_dir() / config.FILE}; run setup")
+        for clone in clones.values():
             fetch_origin(clone, self._runner)
             path = git.worktree_path(clone, PLANNING)
             print(f"read the code in: {path} at {git.refresh_detached(clone, path, DEFAULT_BASE, self._runner)}")
@@ -160,7 +161,7 @@ class Feature:
         found = []
         for label, clone in config.local().clones.items():
             path = git.worktree_path(clone, PLANNING)
-            found.append({"label": label, "path": str(path), "sha": _sha(path, self._runner)})
+            found.append({"label": label, "path": str(path), "sha": _sha(clone, path, self._runner)})
         return found
 
     def _new(self, parsed: dict) -> None:
@@ -224,11 +225,11 @@ def _none_open(store: Store, team: str, id: str) -> None:
         raise Refusal(f"{names} is still open; finish or park it first")
 
 
-def _sha(path: Path, runner: git.Runner) -> str | None:
-    if not path.exists():
+def _sha(clone: Path, path: Path, runner: git.Runner) -> str | None:
+    if not path.is_dir():
         return None
     try:
-        return git.head(path, runner)
+        return git.head(path, runner) if git.is_worktree(clone, path, runner) else None
     except git.GitError:
         return None
 

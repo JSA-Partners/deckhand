@@ -85,6 +85,10 @@ def _denied(hook_input: dict) -> bool:
 def _deny_captain(hook_input: dict) -> None:
     if hook_input.get("hook_event_name") != "PermissionRequest" or hook_input.get("tool_name") == "AskUserQuestion":
         return
+    _captain_denial()
+
+
+def _captain_denial() -> None:
     decision = {"behavior": "deny", "message": CAPTAIN_DENIED}
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
 
@@ -168,4 +172,6 @@ class Hook(StoryStep):
                     )
                 )
         except Exception as problem:
+            if action == "permission" and os.environ.get("DECKHAND_ROLE") == "captain":
+                _captain_denial()
             print(f"deckhand: hook {action} skipped: {type(problem).__name__}", file=sys.stderr)

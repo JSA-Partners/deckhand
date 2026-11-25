@@ -321,6 +321,15 @@ def test_a_captain_permission_request_is_denied_except_ask(monkeypatch, capsys):
     assert store.records("s1") == []
 
 
+@pytest.mark.parametrize("payload", ["not json", [], ""])
+def test_a_captain_permission_request_that_cannot_be_read_is_denied(monkeypatch, capsys, payload):
+    from tests.test_step_decide import feature_store
+
+    monkeypatch.setenv("DECKHAND_ROLE", "captain")
+    hook_with(monkeypatch, feature_store(), ["permission"], payload)
+    assert json.loads(capsys.readouterr().out) == CAPTAIN_DENIAL
+
+
 def test_a_hand_permission_request_is_unchanged(monkeypatch, capsys, tmp_path: Path):
     from deckhand import gaps
     from tests.test_step_decide import feature_store

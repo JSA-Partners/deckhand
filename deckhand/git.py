@@ -197,11 +197,25 @@ def worktree_detached(clone: Path, name: str, base: str, runner: Runner = run) -
     return path
 
 
+def is_worktree(clone: Path, path: Path, runner: Runner = run) -> bool:
+    listing = call(["git", "worktree", "list", "--porcelain"], clone, runner)
+    listed = [Path(line[len("worktree ") :]) for line in listing.splitlines() if line.startswith("worktree ")]
+    return any(entry.resolve() == path.resolve() for entry in listed)
+
+
+# A directory that is not a listed worktree would let git walk up and move the clone itself.
 def refresh_detached(clone: Path, path: Path, ref: str, runner: Runner = run) -> str:
-    if path.exists():
+    listed = is_worktree(clone, path, runner)
+    if listed and path.is_dir():
         call(["git", "checkout", "--detach", ref], path, runner)
-    else:
-        call(["git", "worktree", "add", "--detach", str(path), ref], clone, runner)
+        return head(path, runner)
+    if path.is_dir() and not any(path.iterdir()):
+        path.rmdir()
+    elif path.exists():
+        raise Refusal(f"{path} is not a worktree of {clone} and is not empty; move it aside")
+    if listed:
+        call(["git", "worktree", "prune"], clone, runner)
+    call(["git", "worktree", "add", "--detach", str(path), ref], clone, runner)
     return head(path, runner)
 
 

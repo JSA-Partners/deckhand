@@ -20,6 +20,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 from tests.test_skills import named_commands, split
+from tests.test_step_feature import Git
 
 TEAM: list[str] = []
 TODAY = date(2026, 11, 20)
@@ -31,11 +32,11 @@ class Session:
     def __init__(self, store: FakeStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         self.store, self.tmp, self.monkeypatch, self.capsys = store, tmp_path, monkeypatch, capsys
         (tmp_path / "config").mkdir()
-        (tmp_path / "config" / "config.toml").write_text('team_key = "ACME"\n')
+        (tmp_path / "config" / "config.toml").write_text(f'team_key = "ACME"\n\n[clones]\napi = "{tmp_path / "api"}"\n')
         monkeypatch.setenv("DECKHAND_CONFIG_DIR", str(tmp_path / "config"))
         cli.main(["hook", "context"])
         for name, step in (
-            ("feature", Feature(store, lambda: TODAY)),
+            ("feature", Feature(store, lambda: TODAY, Git())),
             ("plan", Plan(store)),
             ("stories", Stories(store)),
             ("decide", Decide(store)),

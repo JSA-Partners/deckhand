@@ -1,6 +1,6 @@
 ---
 name: feature
-description: "Plan one feature a screen at a time, from its frame to its approval, saving each answer as it is given."
+description: "Plan one feature from its frame to its approval, drafting and saving each section without asking."
 effort: high
 allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(superpowers:*) Skill(impeccable:*)
 ---

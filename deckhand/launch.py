@@ -4,6 +4,7 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -186,8 +187,9 @@ def hand_settings(
 
 
 # Planning saves its answers through --file, so the captain writes only in deckhand's own input folders.
-def captain_settings(protected: Protected, temp: Path | None = None) -> dict[str, Any]:
+def captain_settings(protected: Protected, temp: Path | None = None, clones: Iterable[Path] = ()) -> dict[str, Any]:
     guarded, roots = _guarded(protected, [], []), captain_inputs(temp)
+    planning = [str(git.worktree_path(clone, "planning")) for clone in clones]
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",
@@ -198,18 +200,18 @@ def captain_settings(protected: Protected, temp: Path | None = None) -> dict[str
             "defaultMode": "default",
             "allow": [*CAPTAIN_ALLOW, *(_rule(tool, root, "/**") for root in roots for tool in ("Write", "Edit"))],
             "deny": [*CAPTAIN_DENY, *guarded["deny"]],
-            "additionalDirectories": [str(root) for root in roots],
+            "additionalDirectories": [*(str(root) for root in roots), *planning],
         },
         "sandbox": _sandbox(CAPTAIN_EXEMPT, guarded["filesystem"], guarded["credentials"], auto_allow=False),
     }
 
 
 # Setup and the captain may see different $TMPDIRs, so the temp folder is taken from the installed file.
-def captain_current(installed: object, protected: Protected) -> bool:
+def captain_current(installed: object, protected: Protected, clones: Iterable[Path] = ()) -> bool:
     permissions = installed.get("permissions") if isinstance(installed, dict) else None
     listed = permissions.get("additionalDirectories") if isinstance(permissions, dict) else None
     temps = [Path(entry).parent for entry in listed if isinstance(entry, str)] if isinstance(listed, list) else []
-    return any(installed == captain_settings(protected, temp) for temp in temps)
+    return any(installed == captain_settings(protected, temp, clones) for temp in temps)
 
 
 def hand_argv(name: str, settings: dict[str, Any], prompt: str, plugin_dir: Path | None) -> list[str]:

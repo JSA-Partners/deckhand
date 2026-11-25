@@ -202,6 +202,16 @@ def test_captain_settings_hold_no_read_only_shell_allows(layout: dict) -> None:
     assert not hasattr(launch, "READ_ONLY")
 
 
+def test_the_captain_may_read_each_clone_planning_worktree(tmp_path: Path) -> None:
+    protected = launch.protected(tmp_path / "config", tmp_path / "state")
+    clones = [tmp_path / "widgets", tmp_path / "gadgets"]
+    settings = launch.captain_settings(protected, clones=clones)
+    listed = settings["permissions"]["additionalDirectories"]
+    assert listed[-2:] == [str(clone / ".worktrees" / "planning") for clone in clones]
+    assert launch.captain_current(settings, protected, clones)
+    assert not launch.captain_current(settings, protected)
+
+
 def test_the_captain_writes_only_in_the_deckhand_input_folders(layout: dict) -> None:
     permissions = layout["captain"]["permissions"]
     roots = launch.captain_inputs()
