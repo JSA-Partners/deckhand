@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import features, implplan, order, review, signoff, versions
+from deckhand import asks, features, implplan, order, review, signoff, versions
 from deckhand.records import HAND, Record, content_hash
 from deckhand.store import Store
 
@@ -51,28 +51,46 @@ def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int,
     return [(n, text, str(held.data.get("why", ""))) for n, text, held in _left(records, story)]
 
 
-def _left_elsewhere(store: Store, team: str, seen: set[str]) -> list[dict]:
-    projects: set[str] = set()
-    for issue in store.recorded(AFTER_PERSON):
-        if issue in seen or not _left(store.records(issue), issue):
-            continue
-        held = store.issue(issue)
-        if held is not None and held["project"] and held["team"] == team:
-            projects.add(held["project"])
-    found = [store.project(id) for id in sorted(projects)]
-    return [p for p in found if p is not None and features.is_feature(p)]
+def settled(status: str) -> bool:
+    return status in (BY_HAND, BY_PERSON)
 
 
-def after_merge_queue(store: Store, team: str, me: str) -> list[tuple[dict, int, str, str, str]]:
-    held = features.open_features(store, team)
-    for project in _left_elsewhere(store, team, {s["id"] for feature in held for s in feature.stories}):
-        held.append(features.load(store, project))
+def _unsettled(records: list[Record], story: str) -> int:
+    items = enumerate(after_items(records, story), start=1)
+    return sum(not settled(after_status(records, story, n, text)[0]) for n, text in items)
+
+
+def unsettled(feature: features.Feature) -> int:
+    return sum(_unsettled(feature.records.get(s["id"], []), s["id"]) for s in feature.live)
+
+
+def open_in(feature: features.Feature) -> bool:
+    return unsettled(feature) > 0
+
+
+def _wanted(records: list[Record], story: str, alive: frozenset[str]) -> bool:
+    start = max((r for r in records if r.kind == asks.HAND_START), key=lambda r: r.at, default=None)
+    return _unsettled(records, story) > 0 or (start is not None and start.data.get("session") in alive)
+
+
+# A feature whose hand is still alive stays loaded, so the engine can stop that hand once its items are done.
+def elsewhere(store: Store, team: str, seen: set[str], alive: frozenset[str] = frozenset()) -> list[features.Feature]:
+    signed = set(store.recorded(signoff.KIND)) & set(store.recorded(implplan.PURPOSE))
+    candidates = sorted(id for id in signed - seen if _wanted(store.records(id), id, alive))
+    if not candidates:
+        return []
+    owning = {issue["project"] for issue in store.issues(candidates) if issue["team"] == team}
+    held = sorted((p for p in features.team_features(store, team) if p["id"] in owning), key=lambda p: p["id"])
+    return [features.load(store, p) for p in held]
+
+
+def after_merge_queue(held: list[features.Feature], me: str) -> list[tuple[dict, int, str, str, str]]:
     found = []
     for feature in held:
         for story in feature.stories:
             if story["assignee"] == me:
-                held = _left(feature.records.get(story["id"], []), story["id"])
-                found += [(story, n, text, str(left.data.get("why", "")), left.at) for n, text, left in held]
+                left = _left(feature.records.get(story["id"], []), story["id"])
+                found += [(story, n, text, str(record.data.get("why", "")), record.at) for n, text, record in left]
     return found
 
 

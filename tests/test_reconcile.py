@@ -5,13 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, implplan, mirror, planning, queue, spikes, stalls, wakes
+from deckhand import asks, chores, config, features, fleet, implplan, mirror, planning, queue, spikes, stalls, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.reconcile import IN_PROGRESS, Facts, reconcile, reserved
 from deckhand.records import HAND, Record, iso
+from deckhand.steps.after import After
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
 from deckhand.steps.draft import Draft
@@ -20,6 +21,7 @@ from deckhand.steps.review import FeatureReview
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
+from tests.test_chores import opened_next, released
 from tests.test_feature_approval import P1, TEAM, approve_everything, mapped, reapprove, setup
 from tests.test_implplan import manifest, repo
 from tests.test_mirror import CONTRACT, named
@@ -81,7 +83,11 @@ def facts(
     me: str | None = ME,
     **rest: object,
 ) -> Facts:
-    reading = Reading("ACME", features.current(store, "ACME"), me, [], {}, [])
+    read = fleet.sessions(Shell(*sessions))
+    current = features.current(store, "ACME")
+    seen = {s["id"] for s in current.stories} if current is not None else set()
+    alive = frozenset(s.name for s in read.sessions if fleet.alive(s))
+    reading = Reading("ACME", current, me, [], {}, [], chores.elsewhere(store, "ACME", seen, alive))
     rest.setdefault("asked", frozenset(h.ref for h in hands if h.kind == "spike"))
     if "labels" not in rest:
         rest["labels"] = {"ACME": store.repository_labels("ACME")}
@@ -91,7 +97,7 @@ def facts(
     return Facts(
         now=now,
         woke=woke,
-        read=fleet.sessions(Shell(*sessions)),
+        read=read,
         hands={h.name: h for h in hands},
         pending=list(pending),
         reading=reading,
@@ -122,6 +128,21 @@ def test_a_failed_fleet_read_does_nothing(clone: Path):
     broken = Facts(found.now, found.woke, fleet.sessions(Shell(fleet_fails=True)), {}, [], found.reading, 2)
     assert broken.read.note
     assert reconcile(broken, store) == []
+
+
+def test_a_chore_on_a_released_feature_gets_a_hand_after_the_next_feature_opens(clone: Path):
+    store = released(CHORES[:1])
+    opened_next(store)
+    alpha = next(s for s in store.project_issues(P1) if s["id"] == "s1")
+    found = reconcile(facts(store), store)
+    assert found == [Launch("hand-ACME-1", "ACME-1", queue.STORY_HAND, clone, alpha, ME, True)]
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    idle = row("ACME-1", "idle", "idle")
+    assert reconcile(facts(store, idle, hands=(held(),)), store) == [Stop("hand-ACME-1", "id-ACME-1", "finished")]
+    store = released(CHORES[:1])
+    opened_next(store)
+    store.assign("s1", "someone-else")
+    assert reconcile(facts(store), store) == []
 
 
 def test_a_free_slot_launches_the_next_story_in_build_order(clone: Path):

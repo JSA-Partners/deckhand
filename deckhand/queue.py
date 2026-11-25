@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -212,9 +212,9 @@ def merged_at(story: dict) -> str:
     return (story.get("completed_at") or "") if story["state"] == order.DONE else ""
 
 
-def _after_merge(store: Store, team: str, me: str) -> list[Item]:
+def _after_merge(held: list[Feature], me: str) -> list[Item]:
     found = []
-    for story, n, text, why, at in chores.after_merge_queue(store, team, me):
+    for story, n, text, why, at in chores.after_merge_queue(held, me):
         lines = [f"item {n}: {text}", f"left for the person: {why}"]
         next = [f"decide context after-merge {story['identifier']} --item {n}"]
         found.append(_story_item(chores.AFTER, 2, story, at, lines, next))
@@ -284,8 +284,9 @@ def items(
     quiet: frozenset[str] = frozenset(),
     restarts: Mapping[str, int] | None = None,
     idle: frozenset[str] = frozenset(),
+    elsewhere: Sequence[Feature] = (),
 ) -> list[Item]:
-    found = _after_merge(store, team, me)
+    found = _after_merge([*([feature] if feature is not None else []), *elsewhere], me)
     if feature is not None:
         found += _feature_items(store, feature, me, read, policy_for, quiet, restarts or {}, idle)
     return ranked(found)

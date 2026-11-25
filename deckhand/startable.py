@@ -85,6 +85,13 @@ def startable(store: Store, feature: Feature, me: str, clones: Mapping[str, Path
     return [w for w in build + after if w.clone is not None]
 
 
+# A released feature only ever starts a hand for its own after-merge items, so its build order is never read.
+def after_merge(feature: Feature, me: str, clones: Mapping[str, Path]) -> list[Work]:
+    done = [s for s in feature.live if s["state"] == order.DONE]
+    found = [s for s in done if s["assignee"] == me and chores.open_chores(s, feature.records.get(s["id"], []))]
+    return [Work(s, AFTER, clone) for s in found if (clone := clone_of(s, clones)) is not None]
+
+
 def launch_of(kind: str) -> str:
     return queue.DRAFT_HAND if kind == DRAFT else queue.STORY_HAND
 

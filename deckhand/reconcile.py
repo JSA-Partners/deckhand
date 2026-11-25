@@ -98,12 +98,16 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         tick = _Tick(facts, sessions, reading.me, used(facts), set(facts.busy), set(reserved(facts)))
         feature = reading.feature
         if feature is not None:
-            found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature)
-            found += _sync(tick, feature) + delivery.deliver(tick, feature) + _start(tick, store, feature)
+            found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature) + _sync(tick, feature)
+        for chore in reading.chores:
+            found += _finished(tick, chore) + _idle(tick, chore)
+        found += delivery.deliver(tick, reading.held)
+        if feature is not None:
+            found += _start(tick, feature, startable.startable(store, feature, tick.me, facts.clones))
             found += mirror.due(feature, facts.contract, facts.mirrored) if facts.readable else []
-        else:
-            found += delivery.deliver(tick, None)
-        found += _spikes(tick) + _stalled_spikes(tick, store, reading.feature)
+        for chore in reading.chores:
+            found += _start(tick, chore, startable.after_merge(chore, tick.me, facts.clones))
+        found += _spikes(tick) + _stalled_spikes(tick, store, feature)
     return [action for action in found if action.name not in facts.busy]
 
 
@@ -126,8 +130,7 @@ def _resumable(facts: Facts, name: str) -> bool:
     session = row.session if row is not None else newest.session_id if newest is not None else None
     if not session or not any(s.session_id == session for s in facts.read.sessions):
         return False
-    feature = facts.reading.feature if facts.reading is not None else None
-    story = delivery.story_of(feature, name)
+    feature, story = delivery.story_of(facts.reading.held if facts.reading is not None else [], name)
     if feature is None or story is None:
         return True
     records = _records(feature, story)
@@ -263,10 +266,10 @@ def _held_elsewhere(story: dict, records: list[Record], me: str) -> bool:
     return story["state"] == IN_PROGRESS and story["assignee"] == me and queue.last_start(records) is None
 
 
-def _start(tick: _Tick, store: Store, feature: Feature) -> list[Action]:
+def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[Action]:
     hands = fleet.hands(tick.sessions)
     found: list[Action] = []
-    for work in startable.startable(store, feature, tick.me, tick.facts.clones):
+    for work in works:
         if not tick.free():
             break
         if work.clone not in tick.facts.policies:

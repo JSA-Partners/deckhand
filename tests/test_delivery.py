@@ -6,9 +6,11 @@ from deckhand import queue, wakes
 from deckhand.actions import Resume, Stop
 from deckhand.reconcile import reconcile
 from deckhand.records import HAND, Record
+from deckhand.steps.after import After
 from deckhand.store.state import Message
 from tests.shell import row
-from tests.test_feature_approval import setup
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import TEAM, setup
 from tests.test_reconcile import T, alone, at, clone, facts, hand_row, held, launch, mail, resume, started, state
 from tests.test_step_hand import ME, building
 
@@ -133,3 +135,10 @@ def test_an_unheard_stop_waits_for_a_slot_to_resume_into(clone: Path):
     sync = Message(1, "sync:s3:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-3 merged.", at(T), None, None)
     sessions = (row("ACME-1", "idle", "idle"), row("ACME-9", "working", "busy"))
     assert reconcile(facts(store, *sessions, hands=(held(),), pending=(sync,), now=T + 121), store) == []
+
+
+def test_a_hand_that_left_its_chore_to_the_person_is_not_resumed_in_a_released_feature(clone: Path):
+    store = released(["rotate the webhook secret"])
+    opened_next(store)
+    After(store).apply(["ACME-1", "person", "1", "--why", "the secret lives in the vault", *TEAM])
+    assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(mail(),)), store) == []

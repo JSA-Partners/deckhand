@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import fleet, stage, status
+from deckhand import board, brief, fleet, stage, status
 from deckhand.fleet import Session
 from deckhand.queue import Item
 from deckhand.step import Refusal
@@ -92,6 +92,7 @@ def test_snapshot_shape():
             },
         ],
         "release": False,
+        "chores": 0,
         "stale_since": None,
         "person_unknown": False,
     }
@@ -176,3 +177,16 @@ def test_an_idle_hand_is_marked_in_the_snapshot():
     hand = session(fleet.hand_name("ACME-1"), "blocked")
     found = status.snapshot(AT, "ACME", FACTS, [], [hand], idle=frozenset({"hand-ACME-1"}))
     assert [entry["idle"] for entry in found["hands"]] == [True]
+
+
+def test_the_board_counts_chores_in_other_features(tmp_path: Path):
+    write(tmp_path, status.snapshot(AT, "ACME", FACTS | {"chores": 2}, [], []))
+    found = status.read(tmp_path)
+    assert found is not None and found["chores"] == 2
+    shown = board.build(found, None, 1795000000.0, 0.0, brief.glyphs("utf-8"))
+    assert shown.facts == ("Alpha", "day 4 of 7", "chores open in other features: 2")
+    write(tmp_path, status.snapshot(AT, "ACME", FACTS, [], []))
+    assert board.build(status.read(tmp_path), None, 1795000000.0, 0.0, brief.glyphs("utf-8")).facts == (
+        "Alpha",
+        "day 4 of 7",
+    )

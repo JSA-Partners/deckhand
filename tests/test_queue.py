@@ -343,7 +343,8 @@ def test_released_feature_chore_stays_in_the_queue():
     chore(store, "s1")
     store.set_issue_state("s2", "Done")
     assert features.open_feature(store, "ACME") is None
-    found = queue.items(store, "ACME", None, ME, Fleet(), lambda story: Policy("widgets"))
+    current = features.current(store, "ACME")
+    found = queue.items(store, "ACME", current, ME, Fleet(), lambda story: Policy("widgets"))
     assert [(i.kind, i.ref, i.next) for i in found] == [
         ("after-merge", "ACME-1", ["decide context after-merge ACME-1 --item 1"])
     ]

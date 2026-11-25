@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, spikes, stalls, status, watch
+from deckhand import acts, answers, asks, budget, chores, engine, fleet, linker, queue, spikes, stalls, status, watch
 from deckhand.actions import Action, Attach, Launch, Post, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
@@ -18,6 +18,7 @@ from deckhand.linker import Linked
 from deckhand.reconcile import RETRY_AFTER
 from deckhand.records import iso
 from deckhand.step import Refusal
+from deckhand.steps.after import After
 from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
@@ -25,7 +26,8 @@ from deckhand.store.open import Stores
 from deckhand.store.state import LocalState
 from deckhand.worker import Worker
 from tests.shell import Shell, row
-from tests.test_feature_approval import P1
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import P1, TEAM
 from tests.test_mirror import named
 from tests.test_queue import asked, started
 from tests.test_step_hand import building, clone, configure, state
@@ -666,6 +668,26 @@ def test_a_record_reaches_reconcile_when_the_read_fails(rig: Rig, monkeypatch: p
     feature = seen[-1].feature
     assert asks.QUESTION in [r.kind for r in feature.records["s1"]]
     assert rig.engine.note() == "cannot read: network: Linear is unreachable"
+
+
+def test_a_chore_record_reaches_reconcile_when_the_read_fails(clone: Path, monkeypatch: pytest.MonkeyPatch):
+    configure(clone, 1)
+    store = released(["rotate the webhook secret"])
+    opened_next(store)
+    rig = Rig(store)
+    rig.ready()
+    seen = []
+    real = engine.reconcile
+    monkeypatch.setattr(engine, "reconcile", lambda facts, store: seen.append(facts.reading) or real(facts, store))
+
+    def down(*args: Any, **kwargs: Any) -> Any:
+        raise LinearError("network", "Linear is unreachable")
+
+    monkeypatch.setattr(engine.reading, "read", down)
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    rig.step()
+    [alpha] = seen[-1].chores
+    assert chores.AFTER_DONE in [r.kind for r in alpha.records["s1"]]
 
 
 def test_a_later_post_keeps_a_failed_launch_backing_off(clone: Path):

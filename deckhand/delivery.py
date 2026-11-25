@@ -16,7 +16,7 @@ UNHEARD = 120.0
 _started = attrgetter("started_at")
 
 
-def deliver(tick: _Tick, feature: Feature | None) -> list[Action]:
+def deliver(tick: _Tick, held: list[Feature]) -> list[Action]:
     waiting: dict[str, list[Message]] = {}
     for message in tick.facts.pending:
         waiting.setdefault(message.hand, []).append(message)
@@ -27,7 +27,7 @@ def deliver(tick: _Tick, feature: Feature | None) -> list[Action]:
         unheard = [m for m in messages if m.delivered is None and m.seq not in tick.facts.unheard]
         session = tick.alive(name)
         if session is None:
-            resume = _resume(tick, feature, name, messages)
+            resume = _resume(tick, held, name, messages)
             if resume is not None:
                 found.append(tick.take(resume, slot=True))
         elif unheard and session.state != fleet.WORKING and not session.waiting_for and _deaf(tick, name, unheard):
@@ -37,7 +37,7 @@ def deliver(tick: _Tick, feature: Feature | None) -> list[Action]:
     return found
 
 
-def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Message]) -> Resume | None:
+def _resume(tick: _Tick, held: list[Feature], name: str, messages: list[Message]) -> Resume | None:
     row = tick.facts.hands.get(name)
     last = max((s for s in tick.sessions if s.name == name), key=_started, default=None)
     if row is not None:
@@ -46,7 +46,7 @@ def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Mess
         session, cwd = (last.session_id, last.cwd) if last is not None else (None, "")
     if session is None or not tick.listed(session) or not tick.room(name) or tick.backing_off(name):
         return None
-    story = story_of(feature, name)
+    feature, story = story_of(held, name)
     records = feature.records.get(story["id"], []) if feature is not None and story is not None else []
     start = queue.last_start(records)
     if story is not None and start is not None and chores.finished(story, records, start):
@@ -62,10 +62,13 @@ def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Mess
     return Resume(name, session, cwd, text, seqs, fresh, restart=True)
 
 
-def story_of(feature: Feature | None, name: str) -> dict | None:
-    if feature is None or not name.startswith(fleet.HAND):
-        return None
-    return next((s for s in feature.live if fleet.hand_name(s["identifier"]) == name), None)
+def story_of(held: list[Feature], name: str) -> tuple[Feature | None, dict | None]:
+    if name.startswith(fleet.HAND):
+        for feature in held:
+            story = next((s for s in feature.live if fleet.hand_name(s["identifier"]) == name), None)
+            if story is not None:
+                return feature, story
+    return None, None
 
 
 def _deaf(tick: _Tick, name: str, messages: list[Message]) -> bool:

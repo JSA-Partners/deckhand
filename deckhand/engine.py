@@ -243,20 +243,24 @@ class Engine:
         )
 
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
-        feature = self._reading.feature if self._reading is not None else None
-        if feature is None or good.stores is None:
+        held = self._reading.held if self._reading is not None else []
+        stories = [s for feature in held for s in feature.stories]
+        if not stories or good.stores is None:
             return None
         try:
-            fresh = {s["id"]: good.stores("app").records(s["id"]) for s in feature.stories}
+            fresh = {s["id"]: good.stores("app").records(s["id"]) for s in stories}
         except Refusal:
             return None
-        return None if fresh == {s["id"]: feature.records.get(s["id"], []) for s in feature.stories} else fresh
+        kept = {s["id"]: feature.records.get(s["id"], []) for feature in held for s in feature.stories}
+        return None if fresh == kept else fresh
 
     # A read that misses the memo while Linear is down still hands reconcile the records written since.
     def _keep_records(self, fresh: dict[str, list[Record]]) -> None:
         held = self._reading
-        if held is not None and held.feature is not None:
-            self._reading = replace(held, feature=replace(held.feature, records=fresh))
+        if held is None:
+            return
+        feature = replace(held.feature, records=fresh) if held.feature is not None else None
+        self._reading = replace(held, feature=feature, chores=[replace(f, records=fresh) for f in held.chores])
 
     def _reconcile(self, good: Linked, facts: Facts) -> None:
         assert good.stores is not None

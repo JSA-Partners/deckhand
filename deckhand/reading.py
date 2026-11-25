@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from deckhand import claims, config, features, fleet, order, queue, stage
+from deckhand import chores, claims, config, features, fleet, order, queue, stage
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.step import Refusal
@@ -20,6 +20,11 @@ class Reading:
     waiting: list[queue.Item]
     facts: dict
     notes: list[str]
+    chores: list[Feature] = field(default_factory=list)
+
+    @property
+    def held(self) -> list[Feature]:
+        return [*([self.feature] if self.feature is not None else []), *self.chores]
 
 
 def read(
@@ -37,10 +42,12 @@ def read(
     if notes is None:
         notes = [fleet_read.note] if fleet_read.note else []
     feature = _current(store, team, notes)
+    elsewhere = _elsewhere(store, team, feature, fleet_read, notes)
     me = _me(person, notes)
-    waiting = _waiting(store, team, feature, me, fleet_read, local, notes, quiet, restarts, idle)
+    waiting = _waiting(store, team, feature, elsewhere, me, fleet_read, local, notes, quiet, restarts, idle)
     facts = _facts(store, feature, waiting, fleet_read, me, local, today, notes)
-    return Reading(team, feature, me, waiting, facts, notes)
+    facts["chores"] = sum(chores.unsettled(f) for f in elsewhere)
+    return Reading(team, feature, me, waiting, facts, notes, elsewhere)
 
 
 def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
@@ -49,6 +56,16 @@ def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
     except Refusal as error:
         notes.append(str(error))
     return None
+
+
+def _elsewhere(store: Store, team: str, feature: Feature | None, read: fleet.Fleet, notes: list[str]) -> list[Feature]:
+    seen = {s["id"] for s in feature.stories} if feature is not None else set()
+    alive = frozenset(s.name for s in read.sessions if fleet.alive(s))
+    try:
+        return chores.elsewhere(store, team, seen, alive)
+    except Refusal as error:
+        notes.append(str(error))
+    return []
 
 
 def _me(person: Callable[[], Store], notes: list[str]) -> str | None:
@@ -118,6 +135,7 @@ def _waiting(
     store: Store,
     team: str,
     feature: Feature | None,
+    elsewhere: list[Feature],
     me: str | None,
     read: fleet.Fleet,
     local: config.LocalConfig,
@@ -129,7 +147,9 @@ def _waiting(
     if me is None:
         return []
     policy = policy_for(notes, local.clones)
-    return queue.items(store, team, feature, me, read, policy, quiet=quiet, restarts=restarts, idle=idle)
+    return queue.items(
+        store, team, feature, me, read, policy, quiet=quiet, restarts=restarts, idle=idle, elsewhere=elsewhere
+    )
 
 
 def _facts(
@@ -146,7 +166,7 @@ def _facts(
     facts = empty(notes, read, local) | {
         "top": {"lines": top.lines, "next": top.next} if top else None,
         "feature": feature.project["name"] if feature is not None else None,
-        "release": feature is not None and features.phase(feature) is Phase.RELEASED,
+        "release": feature is not None and features.phase(feature) is Phase.RELEASED and not chores.open_in(feature),
     }
     if feature is not None:
         facts["budget"] = _budget(feature, today)
@@ -165,4 +185,5 @@ def empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> dic
         "order": [],
         "cycle": [],
         "release": False,
+        "chores": 0,
     }

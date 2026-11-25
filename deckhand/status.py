@@ -62,6 +62,7 @@ def snapshot(
         "cycle": facts.get("cycle", []),
         "hands": _hands(sessions, idle, resuming),
         "release": facts["release"],
+        "chores": facts.get("chores", 0),
         "stale_since": None,
         "person_unknown": person_unknown,
     }
@@ -130,6 +131,7 @@ def _valid(found: dict) -> bool:
         and "budget" in found
         and _budget_ok(found["budget"])
         and isinstance(found.get("release"), bool)
+        and _count(found.get("chores", 0))
         and isinstance(items, list)
         and all(_item_ok(entry) for entry in items)
         and _strings(found.get("cycle", []))
@@ -156,6 +158,10 @@ def get(rows: LocalState) -> dict | None:
 
 def cycle_line(cycle: list[str]) -> str:
     return f"build order cycle: {', '.join(cycle)}; break it in Linear"
+
+
+def chores_line(count: int) -> str:
+    return f"chores open in other features: {count}"
 
 
 def stale(previous: dict, at: str) -> dict:

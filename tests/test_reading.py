@@ -58,6 +58,7 @@ def test_read_returns_the_building_facts():
         ],
         "cycle": [],
         "release": False,
+        "chores": 0,
     }
 
 

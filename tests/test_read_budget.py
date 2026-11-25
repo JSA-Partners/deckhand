@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, reading
+from deckhand import answers, implplan, reading, signoff
 from deckhand.config import LocalConfig
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet
 from deckhand.ops import create_id
+from deckhand.records import Record
 from deckhand.steps.after import After
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
@@ -28,7 +29,7 @@ from tests.conftest import CountingStore
 from tests.fake_graphql import FakeGraphQL
 from tests.shell import Shell
 from tests.test_feature_approval import P1, load, mapped, reapprove, reviewed, setup
-from tests.test_implplan import BASE, Git, repo
+from tests.test_implplan import BASE, Git, manifest, repo
 from tests.test_step_after import chored
 from tests.test_step_build import Shell as BuildShell
 from tests.test_step_hand import TEAM, clone
@@ -182,6 +183,20 @@ def test_engine_read_with_no_open_feature_loads_one_feature(linear: Serve):
     assert found.facts["feature"] == "F5"
     assert queries(served).count("ProjectIssues") == 1
     assert len(queries(served)) < BOUND
+
+
+def test_one_chore_candidate_adds_at_most_two_requests(linear: Serve):
+    store = alpha(2)
+    served = linear(store)
+    engine_read()
+    before = len(queries(served))
+    plan = manifest(after_merge=["rotate the webhook secret"])
+    store.put_record("beta0", Record(implplan.PURPOSE, "beta0", "p1", "agent:implplan", plan))
+    store.put_record("beta0", Record(signoff.KIND, "beta0", "c1:digest", "person:sess", {"answer": "Sign off"}))
+    served = linear(store)
+    found = engine_read()
+    assert [f.project["name"] for f in found.chores] == ["Beta"]
+    assert len(queries(served)) <= before + 2, Counter(queries(served))
 
 
 def test_request_count_is_constant_in_story_count(linear: Serve):
