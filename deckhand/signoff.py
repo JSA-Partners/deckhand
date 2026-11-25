@@ -3,24 +3,20 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import features, implplan, review, review_gaps, tuicr, versions
+from deckhand import implplan, review, review_gaps, tuicr, versions
 from deckhand.checks import passing
-from deckhand.records import HAND, Record, content_hash
+from deckhand.records import Record
 from deckhand.review_gaps import Gap, both
 from deckhand.step import Refusal, hand_role
-from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
 KIND = "sign-off"
-SIGN, NOT_YET, DONE, BACK = "Sign off", "Not yet", "Done", "Back"
+SIGN, NOT_YET, DONE, BACK, LATER = "Sign off", "Not yet", "Done", "Back", "Later"
 SUMMARY = "change-summary"
 VOID = "sign-off-void"
 TUICR = "tuicr-review"
+IN_TUICR = "tuicr"
 SECOND = "second-sign-off"
-AFTER = "after-merge"
-AFTER_DONE = "after-merge-done"
-AFTER_PERSON = "after-merge-person"
-OPEN, BY_HAND, FOR_PERSON, BY_PERSON = "open", "done by the hand", "left for the person", "done by the person"
 
 
 def summary_record(story: str, head: str, summary: ChangeSummary) -> Record:
@@ -87,6 +83,11 @@ def _tuicr_gap(records: list[Record], story: str, head: str) -> list[Gap]:
     return []
 
 
+def done_in_tuicr(records: list[Record], story: str, sha: str | None) -> bool:
+    held = versions.held(records, IN_TUICR, story)
+    return bool(sha) and held is not None and held.version == sha and held.author.startswith(review.PERSON)
+
+
 def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     summary = held_summary(records, story, head)
     found = [] if summary else [both("summary", f"no change summary is saved at {head}")]
@@ -120,7 +121,9 @@ def signed_head(record: Record) -> str:
 
 def void_record(story: str, sign: Record, reason: str, author: str = "agent:merge") -> Record:
     nonce, head = sign.data.get("nonce", ""), signed_head(sign)
-    return Record(VOID, f"{story}:{nonce}", head, author, {"head": head, "nonce": nonce, "reason": reason})
+    shown = {key: sign.data[key] for key in ("name", "repo") if key in sign.data}
+    data = {"head": head, "nonce": nonce, "reason": reason, "signed_at": sign.at} | shown
+    return Record(VOID, f"{story}:{nonce}", head, author, data)
 
 
 def voided(records: list[Record], story: str, sign: Record) -> Record | None:
@@ -181,69 +184,3 @@ def standing(records: list[Record], story: str, head: str, second: bool = False)
     if unreviewed and held.version == version_at(records, story, head):
         return unreviewed[0].hand if hand_role() else unreviewed[0].person
     return "the sign-off no longer matches the change summary"
-
-
-def after_items(records: list[Record], story: str) -> list[str]:
-    plan = versions.held(records, implplan.PURPOSE, story)
-    return [str(text) for text in plan.data.get("after_merge", [])] if plan else []
-
-
-def after_record(kind: str, story: str, n: int, text: str, data: dict) -> Record:
-    return Record(kind, f"{story}:{n}", content_hash(text), HAND, {"n": n, "text": text} | data)
-
-
-def after_status(records: list[Record], story: str, n: int, text: str) -> tuple[str, Record | None]:
-    subject, at = f"{story}:{n}", content_hash(text)
-    done = versions.held(records, AFTER_DONE, subject)
-    if done is not None and done.version == at:
-        return BY_HAND, done
-    left = versions.held(records, AFTER_PERSON, subject)
-    if left is None or left.version != at:
-        return OPEN, None
-    decided = versions.held(records, AFTER, subject)
-    if (
-        decided is not None
-        and decided.author.startswith(review.PERSON)
-        and decided.version == left.version
-        and decided.data.get("answer") == DONE
-    ):
-        return BY_PERSON, decided
-    return FOR_PERSON, left
-
-
-def _left(records: list[Record], story: str) -> list[tuple[int, str, Record]]:
-    found = []
-    for n, text in enumerate(after_items(records, story), start=1):
-        status, held = after_status(records, story, n, text)
-        if status == FOR_PERSON and held is not None:
-            found.append((n, text, held))
-    return found
-
-
-def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int, str, str]]:
-    return [(n, text, str(held.data.get("why", ""))) for n, text, held in _left(records, story)]
-
-
-def _left_elsewhere(store: Store, team: str, seen: set[str]) -> list[dict]:
-    projects: set[str] = set()
-    for issue in store.recorded(AFTER_PERSON):
-        if issue in seen or not _left(store.records(issue), issue):
-            continue
-        held = store.issue(issue)
-        if held is not None and held["project"] and held["team"] == team:
-            projects.add(held["project"])
-    found = [store.project(id) for id in sorted(projects)]
-    return [p for p in found if p is not None and features.is_feature(p)]
-
-
-def after_merge_queue(store: Store, team: str, me: str) -> list[tuple[dict, int, str, str, str]]:
-    held = features.open_features(store, team)
-    for project in _left_elsewhere(store, team, {s["id"] for feature in held for s in feature.stories}):
-        held.append(features.load(store, project))
-    found = []
-    for feature in held:
-        for story in feature.stories:
-            if story["assignee"] == me:
-                held = _left(feature.records.get(story["id"], []), story["id"])
-                found += [(story, n, text, str(left.data.get("why", "")), left.at) for n, text, left in held]
-    return found

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from deckhand import asks, features, queue, review, signoff, startable, versions
+from deckhand import asks, chores, features, queue, review, signoff, stalls, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
-ITEM_KINDS = {signoff.AFTER: "N", asks.EDIT: "ID"}
+ITEM_KINDS = {chores.AFTER: "N", asks.EDIT: "ID"}
 STORY_ARGUMENT = ("decision-item", asks.ANSWER)
 
 
@@ -89,6 +89,18 @@ def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -
     return Pin(story["id"], version, [story["id"]], f"head {head}", label, [label])
 
 
+def _tuicr_pin(store: Store, feature: features.Feature, ref: str, head: str) -> Pin:
+    story = features.story(store, feature, ref)
+    held = versions.held(feature.records.get(story["id"], []), signoff.TUICR, story["id"])
+    if held is None or held.data.get("head") != head:
+        raise Refusal(f"no tuicr review is built at {head} for {story['identifier']}")
+    if not held.data.get("sha"):
+        ref = story["identifier"]
+        raise Refusal(f"no hunk of {ref} is selected for review at {head}, so tuicr has nothing to show")
+    label = _label(story)
+    return Pin(story["id"], held.data["sha"], [story["id"]], f"head {head}", label, [label])
+
+
 def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
@@ -104,11 +116,11 @@ def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
 def _after_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
-    items = signoff.after_items(records, story["id"])
+    items = chores.after_items(records, story["id"])
     if n > len(items):
         raise Refusal(f"{story['identifier']} has no after-merge item {n}; it has {len(items)}")
-    status, held = signoff.after_status(records, story["id"], n, items[n - 1])
-    if status != signoff.FOR_PERSON or held is None:
+    status, held = chores.after_status(records, story["id"], n, items[n - 1])
+    if status != chores.FOR_PERSON or held is None:
         raise Refusal(f"item {n} of {story['identifier']} is not left for the person; it is {status}")
     label = _label(story)
     detail = f"item {n}, {items[n - 1]} ({held.data.get('why')})"
@@ -152,7 +164,7 @@ def _stalled_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
     start = queue.last_start(records, launch)
     if start is None:
         raise Refusal(f"{story['identifier']} has no hand started")
-    if queue.stall_answer(records, launch) is not None:
+    if stalls.stall_answer(records, launch) is not None:
         raise Refusal(f"the stop of {story['identifier']}'s hand since it last started is already settled")
     detail = "its hand stopped and has written nothing since it last started. Restart it"
     return Pin(story["id"], start.at, [story["id"]], detail, story["identifier"], [story["identifier"]])
@@ -185,19 +197,21 @@ def pin(
         if stage not in ("", "plan", "branch", "feature"):
             raise Refusal("--stage takes plan, branch or feature")
         return _cap_pin(store, feature, subject, stage or "plan")
+    if kind in (signoff.KIND, signoff.IN_TUICR) and not head:
+        raise Refusal(f"{kind} needs the head of the story's worktree")
     if kind == signoff.KIND:
-        if not head:
-            raise Refusal("sign-off needs the head of the story's worktree")
         return _signoff_pin(store, feature, subject, head)
+    if kind == signoff.IN_TUICR:
+        return _tuicr_pin(store, feature, subject, head)
     if kind == signoff.SECOND:
         return _second_pin(store, feature, subject)
-    if kind == signoff.AFTER:
+    if kind == chores.AFTER:
         return _after_pin(store, feature, subject, _number(item or ""))
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)
     if kind == asks.EDIT:
         return _edit_pin(store, feature, subject, item or "")
-    if kind == queue.STALLED:
+    if kind == stalls.STALLED:
         return _stalled_pin(store, feature, subject)
     if kind == asks.ANSWER:
         if len(stories) != 1:

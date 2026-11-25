@@ -98,3 +98,16 @@ def test_local_reads_the_config_dir_from_the_environment(tmp_path, monkeypatch):
 
     assert config.config_dir() == tmp_path
     assert config.local().team_key == "ACME"
+
+
+def test_config_reads_team_ids(tmp_path):
+    path = write_config(tmp_path, 'team_key = "ACME"\n\n[teams]\nACME = "team-1"\n')
+
+    assert LocalConfig.load(path).teams == {"ACME": "team-1"}
+
+
+def test_team_ids_must_be_strings(tmp_path):
+    path = write_config(tmp_path, "[teams]\nACME = 1\n")
+
+    with pytest.raises(Refusal, match="teams.ACME must be a team id string"):
+        LocalConfig.load(path)

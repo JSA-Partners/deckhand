@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deckhand import (
     answers,
     asks,
+    chores,
     features,
     fleet,
     gaps,
@@ -26,13 +27,14 @@ from deckhand.store import Store
 DRAFT = "story-draft"
 DRAFT_HAND, STORY_HAND = "draft", "story"
 TAKEN = "draft-taken"
+DROPPED_DRAFT = "draft-dropped"
+TAKEN_KINDS = (TAKEN, DROPPED_DRAFT)
 FEATURE_SKILL = "/deckhand:feature"
 READY = "the feature is ready for approval"
+REAPPROVE = "the plan changed since approval; approve it again"
 SIGNOFF_SKILL = "/deckhand:signoff"
 STAGES = ("plan", "branch")
-STALLED = "stalled"
 SPIKE = "spike"
-RESTART, LEAVE = "Restart", "Leave it stopped"
 POLICY = "policy"
 # Below every story's item, so a policy the person puts off never holds back work already in flight.
 POLICY_RANK = 5
@@ -131,25 +133,46 @@ def _findings(story: dict, records: list[Record]) -> list[Item]:
     return found
 
 
+def _feature_records(feature: Feature) -> list[Record]:
+    return [r for s in feature.live for r in feature.records.get(s["id"], [])]
+
+
+def _feature_proposals(feature: Feature) -> list[Record]:
+    records = _feature_records(feature)
+    return [p for p in asks.open_proposals(records) if _of_feature(records, p.subject)]
+
+
 def _feature_findings(feature: Feature) -> list[Item]:
-    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+    records = _feature_records(feature)
     project, name = feature.project["id"], feature.project["name"]
     found = []
-    for proposal in asks.open_proposals(records):
-        if _of_feature(records, proposal.subject):
-            lines = [name, *finding_lines(records, proposal.subject)]
-            next = [f"decide context finding {project} --finding {proposal.subject}"]
-            found.append(Item(review.DECISION, 1, name, name, proposal.at, 0, lines, next))
+    for proposal in _feature_proposals(feature):
+        lines = [name, *finding_lines(records, proposal.subject)]
+        next = [f"decide context finding {project} --finding {proposal.subject}"]
+        found.append(Item(review.DECISION, 1, name, name, proposal.at, 0, lines, next))
     return found
 
 
-def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
-    prefix = f"{story['id']}:{stage}"
+def _capped(records: list[Record], prefix: str) -> Record | None:
     held, _ = review.counted(records, prefix)
     latest = review.last(held)
-    excused = review.excused(records, prefix)
-    since = review.proceeded(records, prefix)
-    if latest is None or not review.at_cap(held, excused, since):
+    capped = review.at_cap(held, review.excused(records, prefix), review.proceeded(records, prefix))
+    return latest if capped else None
+
+
+def _feature_cap(feature: Feature) -> list[Item]:
+    project, name = feature.project["id"], feature.project["name"]
+    latest = _capped(_feature_records(feature), f"{project}:feature")
+    if latest is None:
+        return []
+    lines = ["three feature review rounds left a P1 open"]
+    next = [f"decide context review-cap {project} --stage feature"]
+    return [Item(review.DECISION, 1, name, name, latest.at, 0, lines, next)]
+
+
+def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
+    latest = _capped(records, f"{story['id']}:{stage}")
+    if latest is None:
         return []
     lines = [f"three {stage} review rounds left a P1 open"]
     next = [f"decide context review-cap {story['identifier']} --stage {stage}"]
@@ -206,102 +229,47 @@ def last_start(records: list[Record], launch: str | None = None) -> Record | Non
     return start if start is None or launch is None or start.data.get("kind") == launch else None
 
 
-def finished(story: dict, records: list[Record], start: Record) -> bool:
-    if start.data.get("kind") == DRAFT_HAND and any(r.kind == DRAFT and r.at >= start.at for r in records):
-        return True
-    if story["state"] != order.DONE:
-        return False
-    chores = signoff.after_items(records, story["id"])
-    statuses = [signoff.after_status(records, story["id"], n, text)[0] for n, text in enumerate(chores, start=1)]
-    return signoff.OPEN not in statuses
-
-
 def merged_at(story: dict) -> str:
     return (story.get("completed_at") or "") if story["state"] == order.DONE else ""
 
 
-def _waiting(story: dict, records: list[Record], second: bool) -> bool:
-    asked = _for_person(story, records, 2) or asks.open_proposals(records)
-    if second or asked or signoff.after_merge_for_person(records, story["id"]):
-        return True
-    return asks.wake_due(records, story["id"], merged_at(story)) is not None
-
-
-def stalled(
-    story: dict,
-    records: list[Record],
-    session: fleet.Session | None,
-    launch: str,
-    second: bool = False,
-    idle: bool = False,
-) -> bool:
-    start = last_start(records, launch)
-    if start is None or (session is not None and fleet.alive(session) and not idle):
-        return False
-    return not _waiting(story, records, second) and not finished(story, records, start)
-
-
-def _new_since_start(records: list[Record], launch: str) -> bool:
-    start = last_start(records, launch)
-    quiet = (asks.HAND_START, STALLED)
-    return start is not None and any(r.at > start.at and r.kind not in quiet for r in records)
-
-
-def auto_restart(records: list[Record], launch: str, restarts: int | None) -> bool:
-    return restarts == 0 or _new_since_start(records, launch)
-
-
-def stall_answer(records: list[Record], launch: str) -> str | None:
-    start = last_start(records, launch)
-    if start is None:
-        return None
-    found = [r for r in records if r.kind == STALLED and r.version == start.at]
-    return str(found[-1].data.get("answer")) if found else None
-
-
-def _stalled(
-    story: dict,
-    records: list[Record],
-    session: fleet.Session | None,
-    rank: int,
-    launch: str,
-    second: bool,
-    restarts: int | None,
-    idle: bool = False,
-) -> list[Item]:
-    if not stalled(story, records, session, launch, second, idle) or auto_restart(records, launch, restarts):
-        return []
-    start = last_start(records, launch)
-    if start is None or stall_answer(records, launch) is not None:
-        return []
-    state = "idle" if idle else session.state if session is not None else "gone"
-    lines = [f"its hand is {state}, and no record is new since it last started"]
-    next = [f"decide context {STALLED} {story['identifier']}"]
-    return [_story_item(STALLED, rank, story, start.at, lines, next)]
-
-
-def _after_merge(store: Store, team: str, me: str) -> list[Item]:
+def _after_merge(held: list[Feature], me: str) -> list[Item]:
     found = []
-    for story, n, text, why, at in signoff.after_merge_queue(store, team, me):
+    for story, n, text, why, at in chores.after_merge_queue(held, me):
         lines = [f"item {n}: {text}", f"left for the person: {why}"]
         next = [f"decide context after-merge {story['identifier']} --item {n}"]
-        found.append(_story_item(signoff.AFTER, 2, story, at, lines, next))
+        found.append(_story_item(chores.AFTER, 2, story, at, lines, next))
     return found
 
 
-def _day(date: str | None) -> str:
-    return f"{date}T00:00:00.000Z" if date else ""
-
-
-def _planning(store: Store, feature: Feature) -> list[Item]:
-    if features.phase(feature) is not Phase.PLANNING:
+def _planning(store: Store, feature: Feature, cap: list[Item]) -> list[Item]:
+    if not features.replanning(feature):
         return []
-    found = features.approval_gaps(store, feature) or [READY]
+    own = {p.subject for p in _feature_proposals(feature)}
+    typed = features.review_gap_list(store, feature)
+    shown = [g for g in typed if not (g.kind == review_gaps.P1_KIND and (cap or g.id in own))]
+    plain = features.plain_gaps(store, feature)
+    covered = len(shown) < len(typed)
+    found = [*plain, *(g.person for g in shown)] or (
+        [] if covered else [REAPPROVE if feature.reapproval_due else READY]
+    )
+    if not found:
+        return []
     name = feature.project["name"]
-    return [Item("planning", 3, name, name, _day(feature.project["start_date"]), 0, [found[0]], [FEATURE_SKILL])]
+    # A feature's start is a date with no time of day, so the planning item has no honest age to show.
+    return [Item("planning", 3, name, name, "", 0, [found[0]], [FEATURE_SKILL])]
 
 
-def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
+def _spikes(
+    store: Store,
+    feature: Feature,
+    read: fleet.Fleet,
+    restarts: Mapping[str, int],
+    idle: frozenset[str],
+    quiet: frozenset[str],
+) -> list[Item]:
+    from deckhand import stalls
+
     if feature.stories:
         return []
     project = feature.project["id"]
@@ -324,9 +292,11 @@ def _spikes(store: Store, feature: Feature, read: fleet.Fleet) -> list[Item]:
         if fleet.alive(session) and session.waiting_for:
             lines = [f"{session.name} waits on {session.waiting_for}"]
             found.append(Item("prompt", 4, key, session.name, session.started_at, 0, lines, next))
-        elif fleet.failed(session) and key not in answered:
-            lines = [f"{session.name} is {session.state} with no answer document"]
-            found.append(Item(STALLED, 4, key, session.name, session.started_at, 0, lines, next))
+        elif key in answered or key in quiet or restarts.get(key) == 0:
+            continue
+        elif fleet.failed(session) or key in idle:
+            lines = [f"{session.name} is {'idle' if key in idle else session.state} with no answer document"]
+            found.append(Item(stalls.STALLED, 4, key, session.name, session.started_at, 0, lines, next))
     return found
 
 
@@ -341,11 +311,24 @@ def items(
     quiet: frozenset[str] = frozenset(),
     restarts: Mapping[str, int] | None = None,
     idle: frozenset[str] = frozenset(),
+    elsewhere: Sequence[Feature] = (),
 ) -> list[Item]:
-    found = _after_merge(store, team, me)
+    found = _after_merge([*([feature] if feature is not None else []), *elsewhere], me)
     if feature is not None:
         found += _feature_items(store, feature, me, read, policy_for, quiet, restarts or {}, idle)
+    for chore in elsewhere:
+        found += _chore_items(chore, me, read)
     return ranked(found)
+
+
+# A chore hand in an older feature still asks the person, so its asks and prompts reach the queue.
+def _chore_items(feature: Feature, me: str, read: fleet.Fleet) -> list[Item]:
+    hands, found = fleet.hands(read.sessions), []
+    for story in (s for s in feature.live if s["state"] == order.DONE and s["assignee"] == me):
+        records = feature.records.get(story["id"], [])
+        found += _for_person(story, records, 2)
+        found += [] if read.note else _prompt(story, records, hands.get(story["identifier"]), 2)
+    return found
 
 
 def ranked(found: list[Item]) -> list[Item]:
@@ -362,6 +345,8 @@ def _feature_items(
     restarts: Mapping[str, int],
     idle: frozenset[str],
 ) -> list[Item]:
+    from deckhand import stalls
+
     building = features.phase(feature) is Phase.BUILDING
     rank = 2 if building else 4
     edges = order.edges(store, feature)
@@ -376,14 +361,17 @@ def _feature_items(
             if not read.note:
                 session = hands.get(story["identifier"])
                 second = second_due(story, records, policy_for) is not None
-                launch = STORY_HAND if building or story["state"] == order.DONE else DRAFT_HAND
+                drafting = not building and story["state"] != order.DONE or features.needs_draft(feature, story)
+                launch = DRAFT_HAND if drafting else STORY_HAND
                 found += _prompt(story, records, session, rank)
                 ref = story["identifier"]
                 if ref not in quiet:
-                    found += _stalled(story, records, session, rank, launch, second, restarts.get(ref), ref in idle)
+                    found += stalls.items(story, records, session, rank, launch, second, restarts.get(ref), ref in idle)
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
+    cap = _feature_cap(feature) if features.replanning(feature) else []
+    found += cap + _planning(store, feature, cap)
     if not building:
-        found += _planning(store, feature) + _spikes(store, feature, read)
+        found += _spikes(store, feature, read, restarts, idle, quiet)
     return found

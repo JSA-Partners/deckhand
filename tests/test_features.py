@@ -13,8 +13,10 @@ from deckhand.features import (
     current,
     is_feature,
     load,
+    needs_draft,
     open_feature,
     phase,
+    replanning,
     team_features,
 )
 from deckhand.ops import create_id
@@ -41,10 +43,49 @@ def test_phase_parked_planning_building_released():
     assert phase(Feature(project())) is Phase.PLANNING
     approved = {"a": [APPROVAL], "b": [APPROVAL]}
     assert phase(Feature(project(), [story("a"), story("b")], approved, "1")) is Phase.BUILDING
-    assert phase(Feature(project(), [story("a"), story("b")], approved, "2")) is Phase.PLANNING
-    assert phase(Feature(project(), [story("a"), story("b")], {"a": [APPROVAL]})) is Phase.PLANNING
+    assert phase(Feature(project(), [story("a"), story("b")], {"a": []})) is Phase.PLANNING
     done = [story("a", "Done"), story("b", "Canceled"), story("c", "Duplicate")]
     assert phase(Feature(project(), done)) is Phase.RELEASED
+
+
+def test_a_plan_changed_after_approval_keeps_building_and_waits_for_reapproval():
+    stories = [story("a"), story("b")]
+    approved = {"a": [APPROVAL], "b": [APPROVAL]}
+    current = Feature(project(), stories, approved, "1")
+    assert (phase(current), current.approved_once, current.reapproval_due, replanning(current)) == (
+        Phase.BUILDING,
+        True,
+        False,
+        False,
+    )
+    for changed in (Feature(project(), stories, approved, "2"), Feature(project(), stories, {"a": [APPROVAL]}, "1")):
+        assert (phase(changed), changed.approved_once, changed.reapproval_due, replanning(changed)) == (
+            Phase.BUILDING,
+            True,
+            True,
+            True,
+        )
+    never = Feature(project(), stories, {}, "1")
+    assert (phase(never), never.approved_once, never.reapproval_due, replanning(never)) == (
+        Phase.PLANNING,
+        False,
+        False,
+        True,
+    )
+    released = Feature(project(), [story("a", "Done")], {"a": [APPROVAL]})
+    assert (phase(released), replanning(released)) == (Phase.RELEASED, False)
+
+
+def test_only_an_unbuilt_undrafted_open_story_needs_a_draft_while_reapproval_is_due():
+    built = Record("hand-start", "b", "", "agent:hand", {"kind": "story"})
+    drafted = Record("draft-taken", "c", "d1", "agent:captain", {})
+    stories = [story("a"), story("b"), story("c"), story("d", "Done")]
+    records = {"a": [], "b": [APPROVAL, built], "c": [APPROVAL, drafted], "d": [APPROVAL]}
+    due = Feature(project(), stories, records, "1")
+    assert [s["id"] for s in stories if needs_draft(due, s)] == ["a"]
+    records = {"a": [APPROVAL], "b": [APPROVAL], "c": [APPROVAL], "d": [APPROVAL]}
+    current = Feature(project(), stories, records, "1")
+    assert [s["id"] for s in stories if needs_draft(current, s)] == []
 
 
 def test_open_feature_refuses_two():
@@ -74,19 +115,25 @@ def test_current_is_the_open_feature_else_the_newest_released():
     assert found is not None and (found.project["name"], phase(found)) == ("Gamma", Phase.PLANNING)
 
 
-def test_current_is_the_last_released_when_two_started_the_same_day():
+def test_current_is_the_released_feature_with_the_latest_target_date_then_the_last_merge():
     store = FakeStore()
-    for name in ("Later", "Earlier"):
+    dates = {
+        "Later": ("2026-11-02", "2026-11-20"),
+        "Same": ("2026-11-02", "2026-11-20"),
+        "Undated": ("2026-11-30", None),
+    }
+    for name, (start, target) in dates.items():
         id = create_id(f"ACME:{name}", "feature")
         store.create_project(id, "ACME", name, "", [FEATURE_LABEL])
-        store.set_project_dates(id, "2026-11-16", None)
+        store.set_project_dates(id, start, target)
         store.create_issue(f"s-{name}", "ACME", name, "", id, [])
-    for name in ("Earlier", "Later"):
         store.set_issue_state(f"s-{name}", "Done")
-    for _ in range(2):
-        found = current(store, "ACME")
-        assert found is not None and found.project["name"] == "Later"
-        store._projects = dict(reversed(store._projects.items()))
+    found = current(store, "ACME")
+    assert found is not None and found.project["name"] == "Same"
+    store.set_issue_state("s-Later", "Canceled")
+    store.set_issue_state("s-Later", "Done")
+    found = current(store, "ACME")
+    assert found is not None and found.project["name"] == "Later"
 
 
 def test_renamed_project_stays_a_feature():
@@ -159,15 +206,16 @@ def test_current_with_three_released_and_one_open_feature_reads_each_project_onc
     assert counting.calls["project_documents"] == 1
 
 
-def test_current_with_no_open_feature_loads_the_released_ones(
+def test_current_with_no_open_feature_loads_only_the_released_ones_on_the_latest_dates(
     counting_store: Callable[[FakeStore], CountingStore],
 ):
     fake = FakeStore()
-    for name in ("Alpha", "Beta"):
+    for name in ("Alpha", "Beta", "Gamma"):
         started_feature(fake, name, ["Done"])
+    fake.set_project_dates(create_id("ACME:Alpha", "feature"), "2026-11-09", None)
     counting = counting_store(fake)
     found = current(CachedStore(counting), "ACME")
-    assert found is not None and phase(found) is Phase.RELEASED
+    assert found is not None and found.project["name"] == "Gamma"
     assert counting.calls["project_issues"] == 2
 
 

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from deckhand import answers, asks, features, git, implplan, inputs, lenses, ops, review, spec, versions
 from deckhand.checks import passing
-from deckhand.features import Phase
 from deckhand.policy import STAGES, Policy
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -98,7 +97,7 @@ class Review(StoryStep):
         current = features.phase(feature)
         if parsed["words"]:
             raise Refusal(f"feature-review takes no story REF; {USAGE}")
-        if current is not Phase.PLANNING:
+        if not features.replanning(feature):
             raise Refusal(f"{features.describe(feature.project)} is {current.value}; the feature review is over")
         if not feature.live:
             raise Refusal(f"{features.describe(feature.project)} has no stories to review")

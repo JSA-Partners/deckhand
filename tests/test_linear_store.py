@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearError
 from deckhand.ops import ensure_relation
 from deckhand.records import Record
@@ -320,6 +321,9 @@ def page(nodes: list[dict], cursor: str | None = None) -> dict:
     return {"nodes": nodes, "pageInfo": info}
 
 
+NO_RELATIONS = {"relations": page([]), "inverseRelations": page([])}
+
+
 def test_issue_labels_past_one_page_are_read_in_full(records: LocalRecords) -> None:
     first = [{"id": f"l{n}", "name": f"label-{n}"} for n in range(20)]
     client = FakeClient(
@@ -542,6 +546,7 @@ def test_project_issues_maps_nodes_with_state(records: LocalRecords) -> None:
         "completedAt": "2026-11-20T09:30:00.000Z",
         "assignee": {"id": "user-1", "name": "Ada"},
         "labels": {"nodes": [{"name": "deckhand"}], "pageInfo": DONE},
+        **NO_RELATIONS,
     }
     client = FakeClient(ProjectIssues={"project": {"issues": {"nodes": [node], "pageInfo": DONE}}})
     assert LinearStore(client, records).project_issues("proj-1") == [
@@ -578,6 +583,7 @@ def issue_node(number: int, assignee: dict | None = None) -> dict:
         "completedAt": None,
         "assignee": assignee,
         "labels": {"nodes": [], "pageInfo": DONE},
+        **NO_RELATIONS,
     }
 
 
@@ -768,3 +774,199 @@ def test_recorded_reads_the_local_records(records: LocalRecords) -> None:
     client = FakeClient()
     assert LinearStore(client, records).recorded("approval") == [UUID]
     assert client.calls == []
+
+
+def test_linear_attach_sends_one_mutation(records: LocalRecords) -> None:
+    client = FakeClient(AttachmentCreate={"attachmentCreate": {"success": True}})
+    store = LinearStore(client, records)
+    url = "https://linear.app/acme/document/contract-1"
+    store.attach(UUID, url, "Plan approved", "since", {"version": "v1", "round": 2})
+    assert client.calls == [
+        (
+            "AttachmentCreate",
+            {
+                "input": {
+                    "issueId": UUID,
+                    "url": url,
+                    "title": "Plan approved",
+                    "subtitle": "since",
+                    "metadata": {"version": "v1", "round": 2},
+                }
+            },
+        )
+    ]
+
+
+def test_linear_attach_refuses_nested_metadata_before_any_request(records: LocalRecords) -> None:
+    client = FakeClient()
+    store = LinearStore(client, records)
+    with pytest.raises(ValueError):
+        store.attach(UUID, "https://linear.app/x", "T", "S", {"a": {"b": 1}})
+    assert client.calls == []
+
+
+def blocks(*ids: str) -> list[dict]:
+    return [{"type": "blocks", "relatedIssue": {"id": id}} for id in ids]
+
+
+def blocked_by(*ids: str) -> list[dict]:
+    return [{"type": "blocks", "issue": {"id": id}} for id in ids]
+
+
+def related(number: int, outward: dict, inward: dict) -> dict:
+    return {**issue_node(number), "relations": outward, "inverseRelations": inward}
+
+
+def test_relations_come_from_the_project_issues_read(records: LocalRecords) -> None:
+    nodes = [related(1, page(blocks("id-2")), page([])), related(2, page([]), page(blocked_by("id-1")))]
+    client = FakeClient(ProjectIssues={"project": {"issues": page(nodes)}})
+    store = LinearStore(client, records)
+    store.project_issues("proj-1")
+    assert store.relations("id-1") == [("id-1", "id-2")]
+    assert store.relations("id-2") == [("id-1", "id-2")]
+    assert client.names == ["ProjectIssues"]
+
+
+def test_the_project_read_keeps_its_nested_pages_small() -> None:
+    document = " ".join(queries.PROJECT_ISSUES.split())
+    pages = ["issues(first: 50,", "labels(first: 10)", "relations(first: 10)", "inverseRelations(first: 10)"]
+    assert [page in document for page in pages] == [True] * len(pages)
+    assert document.count("(first: ") == len(pages)
+
+
+def test_a_story_with_relations_past_one_page_keeps_them_all(records: LocalRecords) -> None:
+    outward = page(blocks(*(f"o{n}" for n in range(50))), "r1")
+    inward = page(blocked_by(*(f"i{n}" for n in range(50))), "v1")
+    client = FakeClient(
+        ProjectIssues={"project": {"issues": page([related(1, outward, inward)])}},
+        IssueRelationsPage={"issue": {"relations": page(blocks("o50"))}},
+        IssueInverseRelationsPage={"issue": {"inverseRelations": page(blocked_by("i50"))}},
+    )
+    store = LinearStore(client, records)
+    store.project_issues("proj-1")
+    found = store.relations("id-1")
+    assert len(found) == 102
+    assert {("id-1", "o50"), ("i50", "id-1")} <= set(found)
+    assert client.calls[1:] == [
+        ("IssueRelationsPage", {"id": "id-1", "after": "r1"}),
+        ("IssueInverseRelationsPage", {"id": "id-1", "after": "v1"}),
+    ]
+
+
+def test_relations_after_relate_show_the_new_edge(records: LocalRecords) -> None:
+    nodes = [{**related(n, page([]), page([])), "id": id} for n, id in ((1, UUID), (2, OTHER))]
+    client = FakeClient(
+        ProjectIssues={"project": {"issues": page(nodes)}},
+        IssueRelationCreate={"issueRelationCreate": {"success": True}},
+    )
+    store = LinearStore(client, records)
+    store.project_issues("proj-1")
+    store.relate(UUID, OTHER)
+    assert store.relations(UUID) == [(UUID, OTHER)]
+    assert store.relations(OTHER) == [(UUID, OTHER)]
+    assert client.names == ["ProjectIssues", "IssueRelationCreate"]
+
+
+def test_relations_of_a_created_issue_send_nothing(records: LocalRecords) -> None:
+    client = FakeClient(IssueCreate={"issueCreate": {"success": True, "issue": {"id": UUID}}})
+    store = LinearStore(client, records, {"ACME": TEAM_ID})
+    store.create_issue(UUID, "ACME", "One", "", None, [])
+    assert store.relations(UUID) == []
+    assert client.names == ["IssueCreate"]
+
+
+def test_relations_of_an_issue_outside_every_read_project_ask_linear(records: LocalRecords) -> None:
+    client = FakeClient(
+        ProjectIssues={"project": {"issues": page([related(1, page([]), page([]))])}},
+        IssueRelations={"issue": {"id": "m", **NO_RELATIONS}},
+    )
+    store = LinearStore(client, records)
+    store.project_issues("proj-1")
+    assert store.relations("m") == []
+    assert client.names == ["ProjectIssues", "IssueRelations"]
+
+
+def test_issues_reads_many_in_one_request_in_the_order_asked(records: LocalRecords) -> None:
+    nodes = [
+        {**ISSUE_NODE, "id": id, "state": {"name": "Done"}, "completedAt": "2026-11-20T09:30:00.000Z"}
+        for id in ("b", "a")
+    ]
+    client = FakeClient(Issues={"issues": page(nodes)})
+    found = LinearStore(client, records).issues(["a", "missing", "b"])
+    assert [(i["id"], i["state"], i["completed_at"], i["labels"]) for i in found] == [
+        ("a", "Done", "2026-11-20T09:30:00.000Z", ["deckhand"]),
+        ("b", "Done", "2026-11-20T09:30:00.000Z", ["deckhand"]),
+    ]
+    assert client.calls == [("Issues", {"ids": ["a", "missing", "b"]})]
+
+
+def test_issues_of_no_ids_sends_nothing(records: LocalRecords) -> None:
+    client = FakeClient()
+    assert LinearStore(client, records).issues([]) == []
+    assert client.calls == []
+
+
+def test_issues_ask_for_archived_issues_too(records: LocalRecords) -> None:
+    client = FakeClient(Issues={"issues": page([])})
+    LinearStore(client, records).issues(["a"])
+    assert "includeArchived: true" in client.documents[0]
+
+
+def test_more_than_fifty_ids_send_two_requests(records: LocalRecords) -> None:
+    ids = [f"i{n}" for n in range(51)]
+    nodes = [{**ISSUE_NODE, "id": id, "state": {"name": "Done"}, "completedAt": None} for id in ids]
+    client = FakeClient(Issues=[{"issues": page(nodes[:50])}, {"issues": page(nodes[50:])}])
+    found = LinearStore(client, records).issues(ids)
+    assert [i["id"] for i in found] == ids
+    assert client.calls == [("Issues", {"ids": ids[:50]}), ("Issues", {"ids": ids[50:]})]
+
+
+STALE = "stale-team-id"
+TEAM_GONE = LinearError("INPUT_ERROR", "Entity not found: Team")
+NO_PROJECTS = {"team": {"projects": page([])}}
+
+
+def test_a_stale_configured_team_id_is_looked_up_once_and_kept(records: LocalRecords) -> None:
+    client = FakeClient(
+        TeamProjects=[TEAM_GONE, NO_PROJECTS, NO_PROJECTS],
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+    )
+    teams = {"ACME": STALE}
+    store = LinearStore(client, records, teams)
+    assert store.team_projects("ACME") == []
+    assert store.team_projects("ACME") == []
+    assert [(name, variables.get("id", variables.get("key"))) for name, variables in client.calls] == [
+        ("TeamProjects", STALE),
+        ("TeamId", "ACME"),
+        ("TeamProjects", TEAM_ID),
+        ("TeamProjects", TEAM_ID),
+    ]
+    assert teams == {"ACME": TEAM_ID}
+
+
+def test_a_stale_team_id_for_labels_is_looked_up_too(records: LocalRecords) -> None:
+    client = FakeClient(
+        TeamLabels=[TEAM_GONE, {"team": {"labels": page([])}}],
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+    )
+    assert LinearStore(client, records, {"ACME": STALE}).repository_labels("ACME") == []
+    assert client.names == ["TeamLabels", "TeamId", "TeamLabels"]
+
+
+def test_a_stale_team_id_whose_key_is_gone_says_to_run_setup(records: LocalRecords) -> None:
+    client = FakeClient(TeamProjects=TEAM_GONE, TeamId={"teams": {"nodes": []}})
+    with pytest.raises(Refusal, match="no Linear team has the key ACME; run setup"):
+        LinearStore(client, records, {"ACME": STALE}).team_projects("ACME")
+
+
+def test_a_looked_up_team_id_that_is_missing_raises(records: LocalRecords) -> None:
+    client = FakeClient(TeamProjects=TEAM_GONE, TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}})
+    with pytest.raises(LinearError, match="Entity not found: Team"):
+        LinearStore(client, records).team_projects("ACME")
+    assert client.names == ["TeamId", "TeamProjects"]
+
+
+def test_linear_attach_resolves_an_identifier_to_its_uuid(records: LocalRecords) -> None:
+    client = FakeClient(Issue={"issue": ISSUE_NODE}, AttachmentCreate={"attachmentCreate": {"success": True}})
+    LinearStore(client, records).attach("ACME-5", "https://linear.app/acme/document/contract-1", "T", "S", {})
+    assert client.calls[-1][1]["input"]["issueId"] == UUID

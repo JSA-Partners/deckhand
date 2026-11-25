@@ -6,6 +6,7 @@ from datetime import datetime
 from deckhand import brief, fleet, standing
 from deckhand.brief import Glyphs
 from deckhand.standing import Entry, Hand
+from deckhand.status import chores_line
 
 FLEET_FAILED = "hands from the file, fleet read failed"
 NO_CAPTAIN = "no captain running"
@@ -151,7 +152,9 @@ def _facts(status: dict) -> tuple[str, ...]:
     budget = status.get("budget")
     used, days = _number(budget, "days_used"), _number(budget, "budget_days")
     day = f"day {used} of {days}" if used is not None and days is not None else ""
-    return tuple(part for part in (_clean(status, "feature"), day) if part)
+    chores = _number(status, "chores")
+    held = chores_line(chores) if chores else ""
+    return tuple(part for part in (_clean(status, "feature"), day, held) if part)
 
 
 def _stale(status: dict, since: float | None) -> str:

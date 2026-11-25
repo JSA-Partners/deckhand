@@ -9,7 +9,7 @@ from deckhand import status, watch
 from deckhand.step import Refusal, hand_may_apply
 from deckhand.steps.watch import POLL, Watch
 from deckhand.store.state import LocalState
-from tests.test_status import question, snapshot, write
+from tests.test_status import AT, ROW, question, snapshot, write
 
 
 @pytest.fixture
@@ -226,3 +226,67 @@ def test_a_restarted_held_watcher_does_not_ring_for_a_spike_already_answered(db:
     with pytest.raises(StopIteration):
         Watch(sleep=passes({2: again}, 4)).apply(["captain"])
     assert capsys.readouterr().out == ""
+
+
+def drafting(draft: str | None, name: str = "planning") -> dict:
+    found = snapshot([question("q1")])
+    rows = [ROW | {"ref": "ACME-2", "stage": {"name": name, "round": None, "since": None}, "draft": draft}]
+    return found | {"stories": rows}
+
+
+def test_a_held_captain_watcher_rings_once_when_a_draft_is_saved(db: Path, capsys):
+    write(db.parent, drafting(None, "drafting"))
+    with LocalState(db) as rows:
+        rows.put(watch.HOLD, {})
+
+    def saved() -> None:
+        write(db.parent, drafting("2026-11-20T09:50:00.000Z"))
+
+    def taken() -> None:
+        write(db.parent, drafting(None))
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: saved, 4: saved, 6: taken}, 8)).apply(["captain"])
+    assert capsys.readouterr().out == watch.DRAFT + "\n"
+
+
+def test_a_held_captain_watcher_rings_for_a_draft_hand_waiting_on_the_person(db: Path, capsys):
+    from deckhand.queue import Item
+
+    prompt = Item("prompt", 4, "ACME-2", "hand-ACME-2", AT, 0, [], ["claude attach id-y"])
+    write(db.parent, drafting(None, "drafting"))
+    with LocalState(db) as rows:
+        rows.put(watch.HOLD, {})
+
+    def stuck() -> None:
+        write(db.parent, drafting(None, "drafting") | {"items": snapshot([question("q1"), prompt])["items"]})
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: stuck}, 4)).apply(["captain"])
+    assert capsys.readouterr().out == f"{watch.DRAFT_STUCK}: claude attach id-y\n"
+
+
+def test_a_draft_saved_in_the_store_rings_a_held_watcher_through_the_snapshot(db: Path, capsys):
+    from deckhand import queue, status
+    from deckhand.fleet import Fleet
+    from deckhand.records import Record
+    from tests.test_queue import alpha
+    from tests.test_reading import read
+
+    store = alpha(planning=True)
+
+    def written() -> None:
+        found = read(store)
+        write(db.parent, status.snapshot(AT, "ACME", found.facts, found.waiting, Fleet([]).sessions))
+
+    written()
+    with LocalState(db) as rows:
+        rows.put(watch.HOLD, {})
+
+    def saved() -> None:
+        store.put_record("s1", Record(queue.DRAFT, "s1", "d1", "agent:draft", {}))
+        written()
+
+    with pytest.raises(StopIteration):
+        Watch(sleep=passes({2: saved, 4: written}, 6)).apply(["captain"])
+    assert capsys.readouterr().out == watch.DRAFT + "\n"

@@ -15,17 +15,21 @@ from deckhand.git import GitError
 from deckhand.records import HAND, Record, iso
 from deckhand.step import REGISTRY, Refusal
 from deckhand.steps import captain
+from deckhand.steps.after import After
 from deckhand.steps.captain import Captain
+from deckhand.steps.decide import Decide
 from deckhand.store import local
 from deckhand.store import open as store_open
 from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
 from deckhand.store.state import STALE_AFTER, LocalState
 from tests.shell import Shell, row
-from tests.test_feature_approval import setup
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import P1, TEAM, setup
 from tests.test_queue import asked
 from tests.test_status import write
 from tests.test_step_hand import ME, building, clone, state
+from tests.test_step_review import answer
 
 __all__ = ["clone", "state"]
 
@@ -198,6 +202,17 @@ def test_a_title_cannot_forge_a_heading(clone: Path, capsys: pytest.CaptureFixtu
     assert len([line for line in shown if line.startswith("##")]) == 1
 
 
+def test_a_feature_name_cannot_forge_a_heading_in_the_release_line(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    store._projects[P1]["name"] = "Alpha\n## ● ACME-9 needs you"
+    store.set_issue_state("s1", "Done")
+    store.set_issue_state("s2", "Done")
+    engine_wrote(store)
+    shown = output([], capsys).splitlines()
+    assert shown[-1] == "ready to release: Alpha ## ● ACME-9 needs you"
+    assert not [line for line in shown if line.startswith("##")]
+
+
 def test_ready_to_release(clone: Path, capsys: pytest.CaptureFixture[str]):
     store = owned()
     engine_wrote(store)
@@ -207,6 +222,38 @@ def test_ready_to_release(clone: Path, capsys: pytest.CaptureFixture[str]):
     engine_wrote(store)
     assert output([], capsys).splitlines()[-1] == "ready to release: Alpha"
     assert json.loads(output(["--json"], capsys))["release"] == "Alpha"
+
+
+def test_captain_context_holds_the_release_line_while_a_chore_is_open(
+    clone: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = released(["rotate the webhook secret"])
+    engine_wrote(store)
+    assert "ready to release" not in output([], capsys)
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    engine_wrote(store)
+    assert output([], capsys).splitlines()[-1] == "ready to release: Alpha"
+    store = released(["rotate the webhook secret"])
+    After(store).apply(["ACME-1", "person", "1", "--why", "the secret lives in the vault", *TEAM])
+    engine_wrote(store)
+    assert "ready to release" not in output([], capsys)
+    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "1"], "Done")
+    engine_wrote(store)
+    assert output([], capsys).splitlines()[-1] == "ready to release: Alpha"
+
+
+def test_an_open_chore_in_an_older_released_feature_holds_the_release_line(
+    clone: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = released(["rotate the webhook secret"])
+    gamma = opened_next(store)
+    store.set_project_dates(gamma, "2026-11-23", "2026-11-30")
+    store.set_issue_state("s3", "Done")
+    engine_wrote(store)
+    assert "ready to release" not in output([], capsys)
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    engine_wrote(store)
+    assert output([], capsys).splitlines()[-1] == "ready to release: Beta"
 
 
 def test_the_json_carries_the_brief_the_engine_and_the_top_item(clone: Path, capsys: pytest.CaptureFixture[str]):

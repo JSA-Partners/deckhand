@@ -6,6 +6,12 @@ from deckhand.records import Record
 from deckhand.ref import Ref
 
 
+def require_flat(metadata: dict[str, str | int]) -> None:
+    for key, value in metadata.items():
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            raise ValueError(f"attachment metadata {key!r} must be a string or an integer")
+
+
 class Store(Protocol):
     """Every id is a Linear UUID."""
 
@@ -23,6 +29,8 @@ class Store(Protocol):
 
     def issue_by_ref(self, ref: Ref) -> dict | None: ...
 
+    def issues(self, ids: list[str]) -> list[dict]: ...
+
     def set_labels(self, issue: str, labels: list[str]) -> None: ...
 
     def set_issue_text(self, issue: str, title: str, description: str) -> None: ...
@@ -34,6 +42,8 @@ class Store(Protocol):
     def document(self, id: str) -> dict | None: ...
 
     def put_record(self, issue: str, record: Record) -> None: ...
+
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None: ...
 
     def records(self, issue: str) -> list[Record]: ...
 

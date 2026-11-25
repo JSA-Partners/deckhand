@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, launch, queue
-from deckhand.actions import Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand import asks, chores, config, features, fleet, launch, mirror, queue, stalls
+from deckhand.actions import Adopt, Attach, Launch, Leave, Post, PutDocument, Remove, Resume, Stop
 from deckhand.acts import Acts, unheard
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
@@ -19,6 +19,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import LocalRecords
 from deckhand.store.state import LocalState
 from tests.shell import Shell, World, row
+from tests.test_mirror import CONTRACT, named
 from tests.test_reconcile import story
 from tests.test_step_hand import ME, building, clone, state
 
@@ -192,6 +193,15 @@ def test_a_post_writes_the_row_and_its_record_once(rows: LocalState, db: Path):
     assert kinds(db) == [asks.WAKE]
 
 
+def test_a_leave_writes_its_records_once_and_runs_nothing(rows: LocalState, db: Path):
+    data = {"n": 1, "text": "rotate", "why": "its hand stopped after the merge", "session": "sid-1"}
+    left = Record(chores.AFTER_PERSON, "s1:1", "v1", "agent:engine", data)
+    shell = Shell()
+    executor = acts(rows, db, shell)
+    assert executor.run(Leave(NAME, "s1", (left,))) is None and executor.run(Leave(NAME, "s1", (left,))) is None
+    assert kinds(db) == [chores.AFTER_PERSON] and shell.calls == []
+
+
 def test_a_restart_post_raises_the_count_once(rows: LocalState, db: Path):
     rows.want(NAME, "ACME-1", "s1", queue.STORY_HAND, "/w/acme-1")
     executor = acts(rows, db, Shell())
@@ -307,7 +317,7 @@ def test_a_restart_answer_whose_launch_fails_is_retried(clone: Path, rows: Local
     stopped_after_one_restart(loop)
     start = queue.last_start(loop.store.records("s1"))
     assert start is not None
-    loop.store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": queue.RESTART}))
+    loop.store.put_record("s1", Record(stalls.STALLED, "s1", start.at, "person:session-1", {"answer": stalls.RESTART}))
     loop.world.fail.add(("claude", "--bg"))
     assert loop.tick() != [None]
     loop.world.fail.clear()
@@ -391,3 +401,45 @@ def test_an_engine_launch_carries_the_hands_settings(
         assert f"Edit(//{str(form / '.git').lstrip('/')})" in deny
         assert f"Edit(//{str(form / '.claude/settings.json').lstrip('/')})" in deny
     assert str(worktree / ".git") in settings["sandbox"]["filesystem"]["denyWrite"]
+
+
+class Refusing(FakeStore):
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        raise LinearError("network", "Linear is unreachable")
+
+
+def mirrors(store: FakeStore) -> list[Attach | PutDocument]:
+    feature = features.current(named(store), "ACME")
+    assert feature is not None
+    return mirror.wanted(feature, CONTRACT)
+
+
+def test_an_attach_writes_through_the_app_store_then_its_digest(rows: LocalState, db: Path):
+    store = building()
+    first = mirrors(store)[0]
+    app = FakeStore()
+    runs = Acts(rows, LocalRecords(db), lambda: store, Shell(), app=lambda: app)
+    assert runs.run(first) is None
+    assert app.writes == [("attach", "s1", first.url)]
+    assert rows.keyed(mirror.PREFIX) == {first.key: {"digest": first.digest}}
+
+
+def test_a_put_document_writes_the_story_map_then_its_digest(rows: LocalState, db: Path):
+    app = FakeStore()
+    document = PutDocument("mirror:p1", "mirror:p1:story-map", "d1", "doc-1", "p1", "Story map", "## ACME-1\n")
+    runs = Acts(rows, LocalRecords(db), lambda: app, Shell(), app=lambda: app)
+    assert runs.run(document) is None
+    assert app.document("doc-1") == {"id": "doc-1", "parent": "p1", "title": "Story map", "body": "## ACME-1\n"}
+    assert rows.keyed(mirror.PREFIX) == {"mirror:p1:story-map": {"digest": "d1"}}
+
+
+def test_a_failed_attach_leaves_no_digest_and_is_due_next_read(rows: LocalState, db: Path):
+    store = building()
+    first = mirrors(store)[0]
+    runs = Acts(rows, LocalRecords(db), lambda: store, Shell(), app=Refusing)
+    assert runs.run(first) == "mirror:s1: network: Linear is unreachable"
+    assert rows.keyed(mirror.PREFIX) == {}
+    feature = features.current(store, "ACME")
+    assert feature is not None
+    done = {key: body["digest"] for key, body in rows.keyed(mirror.PREFIX).items()}
+    assert first in mirror.due(feature, CONTRACT, done)

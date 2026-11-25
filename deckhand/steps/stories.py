@@ -278,6 +278,7 @@ class Stories:
                 "new_here": entry["new_here"],
                 "decisions": entry.get("decisions", []),
                 "after_merge": entry.get("after_merge", []),
+                "description": _description(entry),
             }
             ops.ensure_record(store, id, Record("stub", entry["key"], "1", versions.MAP_AUTHOR, stub))
             for record in map_records(id, entry):
@@ -286,6 +287,6 @@ class Stories:
                 record = Record("discovered", entry["key"], "1", versions.MAP_AUTHOR, _discovery(entry))
                 ops.ensure_record(store, id, record)
         print(f"done: {len(entries)} stories in the map for {feature.project['name']}")
+        held = {issue["id"]: issue["identifier"] for issue in store.issues(list(ids.values()))}
         for entry in entries:
-            held = store.issue(ids[entry["key"]])
-            print(f"story: {held['identifier'] if held else ids[entry['key']]} {entry['key']}")
+            print(f"story: {held.get(ids[entry['key']], ids[entry['key']])} {entry['key']}")

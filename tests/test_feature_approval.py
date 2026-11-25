@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, approval, asks, features, ops, planning, queue, review, versions
+from deckhand import answers, approval, asks, features, ops, planning, queue, review, stalls, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
@@ -64,11 +64,18 @@ def reviewed(store: FakeStore) -> None:
         ops.ensure_record(store, story["id"], clean)
 
 
+def taken(store: FakeStore, story: str) -> None:
+    if not any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in store.records(story)):
+        ops.ensure_record(store, story, Record(queue.TAKEN, story, "d1", "agent:captain", {}))
+
+
 def approve_everything(store: FakeStore) -> None:
     reviewed(store)
     for story in ("s1", "s2"):
         if versions.held(store.records(story), "tier", story) is None:
             mapped(store, story)
+    for story in load(store).live:
+        taken(store, story["id"])
     assert features.approval_gaps(store, load(store)) == []
     reapprove(store)
 
@@ -116,9 +123,9 @@ def test_changed_contract_voids_feature_approval():
     assert features.phase(load(store)) is Phase.BUILDING
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     feature = load(store)
-    assert features.phase(feature) is Phase.PLANNING
+    assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
-        "the feature review has not reviewed the current contract and stories; run a feature round",
+        "the feature review has not reviewed the current contract and stories; a feature review is due",
     ]
 
 
@@ -127,9 +134,9 @@ def test_changed_story_voids_feature_approval():
     approve_everything(store)
     store.set_issue_text("s2", "Receipts by email", "Outcome: a receipt is sent.")
     feature = load(store)
-    assert features.phase(feature) is Phase.PLANNING
+    assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
-        "the feature review has not reviewed the current contract and stories; run a feature round",
+        "the feature review has not reviewed the current contract and stories; a feature review is due",
     ]
 
 
@@ -231,7 +238,7 @@ def test_an_invariants_edit_voids_the_approval_with_no_gap(capsys: pytest.Captur
     planning.save_section(store, load(store), "Invariants", "A total is zero or more.", False)
     Feature(store).context([*TEAM, "--json"])
     held = json.loads(capsys.readouterr().out)["open"][0]
-    assert (held["phase"], held["gaps"], held["approval_void"]) == ("planning", [], True)
+    assert (held["phase"], held["gaps"], held["approval_void"]) == ("building", [], True)
 
 
 def test_feature_context_tells_the_captain_how_to_propose_a_delivery_finding(capsys: pytest.CaptureFixture[str]):
@@ -257,7 +264,7 @@ def test_feature_context_says_a_frame_change_voided_the_approval(capsys: pytest.
     planning.save_section(store, load(store), "Frame", "Why orders matter.", False)
     Feature(store).context([*TEAM, "--json"])
     held = json.loads(capsys.readouterr().out)["open"][0]
-    assert (held["phase"], held["gaps"], held["approval_void"]) == ("planning", [], True)
+    assert (held["phase"], held["gaps"], held["approval_void"]) == ("building", [], True)
     Feature(store).context(TEAM)
     assert "approval: the feature changed after it was approved" in capsys.readouterr().out
 
@@ -316,7 +323,7 @@ def test_a_decision_item_added_after_approval_voids_it():
     assert features.phase(load(store)) is Phase.BUILDING
     expect(store, "s2", "receipts", "Send receipts by email", "Keep receipts a year")
     feature = load(store)
-    assert features.phase(feature) is Phase.PLANNING
+    assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert "ACME-2: decision item Keep receipts a year is not decided" in features.approval_gaps(store, feature)
 
 
@@ -327,7 +334,7 @@ def test_a_state_chart_edited_after_approval_voids_it():
     mapped(store, "s1", "multi_step", "placed -> paid")
     assert features.phase(load(store)) is Phase.BUILDING
     mapped(store, "s1", "multi_step", "placed -> paid -> shipped")
-    assert features.phase(load(store)) is Phase.PLANNING
+    assert features.phase(load(store)) is Phase.BUILDING and load(store).reapproval_due
 
 
 def test_a_tier_two_story_without_a_chart_is_a_gap():
@@ -350,7 +357,7 @@ def test_a_new_dependency_voids_the_approval():
     approve_everything(store)
     assert features.phase(load(store)) is Phase.BUILDING
     store.relate("s1", "s2")
-    assert features.phase(load(store)) is Phase.PLANNING
+    assert features.phase(load(store)) is Phase.BUILDING and load(store).reapproval_due
 
 
 def test_a_new_repository_leaves_the_approval_standing():
@@ -382,3 +389,17 @@ def test_a_draft_being_written_holds_the_approval():
     story = features.story(store, load(store), "ACME-2")
     store.put_record("s2", asks.hand_start(story, store.records("s2"), queue.DRAFT_HAND))
     assert features.approval_gaps(store, load(store)) == ["ACME-2: its draft is being written"]
+
+
+def test_a_dead_draft_hand_left_stopped_holds_no_gap():
+    store = setup()
+    reviewed(store)
+    mapped(store, "s1")
+    mapped(store, "s2")
+    story = features.story(store, load(store), "ACME-2")
+    store.put_record("s2", asks.hand_start(story, store.records("s2"), queue.DRAFT_HAND))
+    start = queue.last_start(store.records("s2"), queue.DRAFT_HAND)
+    assert start is not None
+    assert features.approval_gaps(store, load(store)) == ["ACME-2: its draft is being written"]
+    store.put_record("s2", Record(stalls.STALLED, "s2", start.at, "person:session-1", {"answer": stalls.LEAVE}))
+    assert features.approval_gaps(store, load(store)) == []

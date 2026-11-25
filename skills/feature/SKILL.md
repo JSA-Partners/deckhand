@@ -10,7 +10,7 @@ allowed-tools: Bash(deckhand *) Read Grep Glob Agent AskUserQuestion Skill(super
 !`deckhand feature context`
 
 Above: the feature, its phase, next step and input folder.
-Work one feature at a time. Keep the given option order; mark none recommended.
+Keep the given option order; mark none recommended.
 
 Open a feature with `deckhand feature apply new --name N --weeks 1|2 [--reference REF]`; pick or
 park one with `deckhand feature apply pick --project ID --weeks 1|2` or
@@ -33,11 +33,10 @@ Plan the stories from the fields `deckhand stories context` prints: a tier, a st
 `deckhand decide context decision-item ITEM --story REF`.
 
 For every decision, run `deckhand decide context KIND SUBJECT`, pass its JSON unchanged to the
-dialog, then `deckhand decide apply NONCE` once answered. feature-approval, finding and
-review-cap take the project id.
+dialog, then `deckhand decide apply NONCE` once answered. feature-approval takes the project id.
 
-Drafts wait for the Contract and their answered items. Take each finished Draft with
-`deckhand draft apply REF take`, unasked.
+Take each finished Draft, on `deckhand: a draft was saved`, with `deckhand draft apply REF take`,
+unasked. For a Change dropping a draft, run `deckhand draft apply REF drop`.
 
 Settle each gap `deckhand feature context` names. For the feature review, pass the
 lens and target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence

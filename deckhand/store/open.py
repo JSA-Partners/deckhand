@@ -15,8 +15,11 @@ METERS = {"app": Meter(), "person": Meter()}
 
 
 def open_store(role: str, teams: dict[str, str] | None = None) -> Store:
+    known = teams if teams is not None else {}
+    for key, id in config.local().teams.items():
+        known.setdefault(key, id)
     client = connect(Credentials.load(config.config_dir()), role, meter=METERS[role])
-    return CachedStore(LinearStore(client, LocalRecords(default_path()), teams))
+    return CachedStore(LinearStore(client, LocalRecords(default_path()), known))
 
 
 # A meter that cannot be kept never changes what the command printed or how it exited.

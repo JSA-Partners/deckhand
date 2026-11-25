@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from deckhand import budget, config, fleet, policy, reading
-from deckhand.linear.client import LinearError
+from deckhand import budget, config, fleet, mirror, planning, policy, reading
+from deckhand.linear.client import LinearError, default_transport
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.step import Refusal
@@ -29,6 +29,8 @@ class Linked:
     problems: tuple[str, ...] = ()
     labels: Mapping[str, list[str]] = field(default_factory=dict)
     broken: Mapping[Path, str] = field(default_factory=dict)
+    contract: str = ""
+    configured: bool = True
 
 
 @dataclass
@@ -42,12 +44,14 @@ class Kept:
             self.teams, self.labels, self.at = {}, {}, now
 
 
-def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy], dict[Path, str]]:
+def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy], dict[Path, str], bool]:
     try:
-        local = config.local()
+        local, loaded = config.local(), True
     except Refusal as error:
         problems.append(error.rule)
-        local = config.LocalConfig()
+        local, loaded = config.LocalConfig(), False
+    if loaded and not local.clones:
+        problems.append(f"no clone is configured in {config.config_dir() / config.FILE}; run setup")
     policies: dict[Path, Policy] = {}
     broken: dict[Path, str] = {}
     for label, clone in local.clones.items():
@@ -56,7 +60,8 @@ def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Pol
         except Refusal as error:
             broken[clone] = policy.described(error.rule, clone, label)
             problems.append(f"{broken[clone]}; its stories do not start")
-    return local, policies, broken
+    # A missing or empty config would read as "no clone of any repository" and hand every chore over.
+    return local, policies, broken, loaded and bool(local.clones)
 
 
 def link(
@@ -70,7 +75,7 @@ def link(
     at, problems = clock(), []
     kept = kept if kept is not None else Kept()
     kept.refresh(at)
-    local, policies, broken = _configured(problems)
+    local, policies, broken, loaded = _configured(problems)
     held = stores() if stores is not None else Stores(teams=kept.teams)
     read = fleet_now() or fleet.Fleet([], NO_FLEET)
     try:
@@ -80,9 +85,16 @@ def link(
             if name not in kept.labels:
                 kept.labels[name] = held("app").repository_labels(name)
         labels = {name: kept.labels[name] for name in teams}
+        # Reads the Contract here, so the engine's mirrors never make a Linear read of their own.
+        held_contract = None
+        if found.feature is not None and mirror.needs_contract(found.feature):
+            held_contract = planning.document(held("app"), found.feature, "Contract")
     except (LinearError, Refusal) as error:
-        return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)
-    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken)
+        return Linked(
+            None, None, at, problem(error), local, policies, tuple(problems), broken=broken, configured=loaded
+        )
+    contract = held_contract["url"] if held_contract else ""
+    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken, contract, loaded)
 
 
 # The poller calls this on its timer, on a poke and on a wake alike, so the budget gates all three.
@@ -96,6 +108,7 @@ class Linker:
         last = self._last
         if last is not None and not budget.due(budget.current(), self._clock(), last.at):
             return last
+        default_transport.revive()
         try:
             self._last = link(self._team, self._fleet_now, self._clock, kept=self._kept)
         finally:

@@ -26,14 +26,13 @@ is decided with `deckhand decide context review-cap REF --stage branch`, or
 `--stage plan`. When the context above shows no change summary, the hand is not done: stop here.
 
 Then show screens 1 to 4 in one reply, each from `deckhand signoff context REF --screen N`:
-what changed, evidence, findings, what to check. Tuicr stays a separate step, waiting for the
-person.
+what changed, evidence, findings, what to check. Then go on to tuicr in the same turn.
 
-For the tuicr screen, run `deckhand signoff apply REF review`. Give the person its lines as a plain
-message: the hunks and head, the tuicr command, each file's reason. Then ask a plain dialog, not a
-deckhand question: "Done in tuicr?" with Done and Later. On Later, record nothing and stop. On Done,
-read `deckhand signoff context REF --screen 5`. Ask about each comment whether it is work for the
-hand; if one is, say so before the sign-off question.
+For the tuicr screen, run `deckhand signoff apply REF review`. When it selects no hunk, go to the
+sign-off question. Otherwise show the person its lines, then decide `deckhand decide context tuicr
+REF`, even when the person says it is done; unless Done is recorded, stop. On Done, read
+`deckhand signoff context REF --screen 5`. Ask about each comment whether it is work for the hand;
+if one is, say so before the sign-off question.
 
 Last, decide `deckhand decide context sign-off REF`. While anything is missing it offers
 "Not yet" and "Back"; "Back" records nothing. Run it early for hand work. The answer to this question is final: never ask

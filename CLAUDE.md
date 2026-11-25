@@ -30,15 +30,18 @@
   for a story and how a hand's context fits its injection, `status.py` the snapshot kept in
   deckhand's local SQLite file, `standing.py` how the snapshot and the fleet sort into needs you,
   working, stopped, queued, team and done today, `brief.py` the brief and the status line segment,
-  `board.py` the board's sections and rows; `watch.py` when a session's watcher rings and when the
-  captain's has gone silent
+  `board.py` the board's sections and rows, `chores.py` the after-merge chores of a merged story
+  and their answers, `stalls.py` a hand that stopped before its work was done;
+  `watch.py` when a session's watcher rings and when the captain's has gone silent
 - The engine: `reconcile.py` turns the fleet, the local rows and the last Linear read into the
   actions of `actions.py` and writes nothing, `idle.py` which live hands sit idle past their turn,
   `acts.py` carries one action out and builds every hand's launch, `worker.py` runs them in order on
   one thread, `poller.py` reads the fleet and Linear on their own threads, `linker.py` the Linear
   read the engine takes from that thread, `lines.py` the failures the engine shows, `shown.py` the
   snapshot the engine writes and the stories, slots and resuming hands it holds, and `engine.py` is
-  the loop, its lock and its heartbeat
+  the loop, its lock and its heartbeat; `delivery.py` which message goes to which hand and when a
+  hand is resumed for it, `mirror.py` what Linear shows of an approval, a sign-off and the story
+  map, written and never read
 - `monitors/monitors.json` registers `watch.sh`, the watcher every session runs; in a session that
   is neither captain nor hand it parks rather than exits, since an exit costs a model turn
 - `frame.py` lays the board out to a width and `tui.py` draws it full screen, row by row in plain
@@ -85,7 +88,8 @@ claude --plugin-dir .        # then /reload-plugins after edits
 - Agents hand deckhand JSON in the shape its context prints; markdown is for people
 - Every question deckhand builds fits the dialog: two to four options in a fixed order, a short
   header, none marked recommended
-- Python: `from __future__ import annotations`, type hints on public functions, no module over 400 lines
+- Python: `from __future__ import annotations`, type hints on public functions, no module over 400
+  lines
 - Tests: one module per module under test, fakes for Linear, git and `gh` passed in, `acme/widgets`
   in the fixtures; an apply asserts the exact recorded calls, a refusal asserts no write
 - Skills: short bodies, judgment over directive stacks, no capitalized emphasis, one injection line,
@@ -138,13 +142,14 @@ install reaches them when the next fix or feature does.
   `.claude/deckhand/lenses/`, and any other change becomes a queue item through `ask apply --edit`
 - `checks apply` runs a hand's tests and check commands with deckhand's access, a gap the README
   names
-- Records live in deckhand's local SQLite file; Linear holds only what a teammate reads, and documents
-  hold only text a person reads
+- Records live in deckhand's local SQLite file; Linear holds only what a teammate reads, and
+  documents hold only text a person reads
 - Never parse prose to decide; read typed records, and print prose only for people
-- Every skill calls the bare `deckhand`, its injection line included, which the plugin puts on the
-  path, so each call matches the sandbox's exempt `deckhand *` pattern; a chained, piped or
+- Every skill calls the bare `deckhand`, its injection line included, which the plugin puts on
+  the path, so each call matches the sandbox's exempt `deckhand *` pattern; a chained, piped or
   prefixed call runs sandboxed and fails, and hooks keep the full plugin path
-- Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no secret
+- Never print a credential or the text of an unexpected exception; a `Refusal` rule carries no
+  secret
 - Do not hardcode organization, team, or repository values in code or tests; only the plugin
   manifests and the install commands carry them
 - The build happens in the story's worktree; a branch is never checked out by hand, and the clone
@@ -160,6 +165,6 @@ install reaches them when the next fix or feature does.
 - Sign-off, the change summary and the checks are pinned to one head; merging is pinned to
   the signed head, never auto-merge, and a moved head or a failed check voids the sign-off
 - Several agents may share one checkout's index: commit with an explicit pathspec
-  (`git commit -- <files>`), never `git add -A`, `git commit -a`, or a bare `git stash`, and let only
-  the orchestrator commit. pre-commit stashes unstaged edits, so run it only when no other agent is
-  editing
+  (`git commit -- <files>`), never `git add -A`, `git commit -a`, or a bare `git stash`, and let
+  only the orchestrator commit. pre-commit stashes unstaged edits, so run it only when no other
+  agent is editing

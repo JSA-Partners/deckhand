@@ -9,7 +9,7 @@ from typing import Protocol
 from deckhand import fleet, git
 from deckhand.actions import Action
 from deckhand.acts import Acts
-from deckhand.linear.client import LinearError
+from deckhand.linear.client import LinearError, default_transport
 from deckhand.step import Refusal
 from deckhand.store.local import LocalRecords, default_path
 from deckhand.store.open import Stores
@@ -31,7 +31,7 @@ def opened_acts(runner: git.Runner = git.run) -> Iterator[Runs]:
     path = default_path()
     with LocalState(path) as state:
         stores = Stores()
-        yield Acts(state, LocalRecords(path), lambda: stores("person"), runner)
+        yield Acts(state, LocalRecords(path), lambda: stores("person"), runner, lambda: stores("app"))
 
 
 class Worker:
@@ -56,6 +56,7 @@ class Worker:
                         self._done_with(action, f"{fleet.ref_of(action.name)}: {problem(error)}")
                         continue
                 self._current = action
+                default_transport.revive()
                 try:
                     line = acts.run(action)
                 finally:

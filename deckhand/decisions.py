@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from deckhand import answers, asks, ops, queue, review, signoff
+from deckhand import answers, asks, chores, ops, review, signoff, stalls
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -22,10 +23,11 @@ KINDS = (
     review.CAP_DECISION,
     signoff.KIND,
     signoff.SECOND,
-    signoff.AFTER,
+    signoff.IN_TUICR,
+    chores.AFTER,
     asks.ANSWER,
     asks.EDIT,
-    queue.STALLED,
+    stalls.STALLED,
 )
 
 _PIN_OPTIONS = (asks.ANSWER, signoff.KIND)
@@ -38,9 +40,10 @@ _OPTIONS = {
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
     signoff.KIND: [signoff.SIGN, signoff.NOT_YET],
     signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
-    signoff.AFTER: [signoff.DONE, signoff.NOT_YET],
+    signoff.IN_TUICR: [signoff.DONE, signoff.LATER],
+    chores.AFTER: [signoff.DONE, chores.DROP, chores.MAKE_STORY],
     asks.EDIT: asks.EDIT_OPTIONS,
-    queue.STALLED: [queue.RESTART, queue.LEAVE],
+    stalls.STALLED: [stalls.RESTART, stalls.LEAVE],
 }
 
 _SIGN_OFF = {
@@ -58,9 +61,14 @@ _DESCRIPTIONS = {
         "the hand reworks it and the rounds count again",
     ],
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
-    signoff.AFTER: ["the item is done", "the item stays in your queue"],
+    signoff.IN_TUICR: ["your tuicr comments are read now", "nothing is recorded; you are asked again"],
+    chores.AFTER: [
+        "the item is done",
+        "type why instead of picking this; the item is dropped with your words",
+        "the item becomes its own parked feature, planned later",
+    ],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
-    queue.STALLED: ["the hand starts again", "the hand stays stopped"],
+    stalls.STALLED: ["the hand starts again", "the hand stays stopped"],
 }
 _FEATURE_DESCRIPTIONS = {
     "finding": ["the finding stays unfixed", "the captain fixes the finding"],
@@ -77,10 +85,11 @@ _ASKS = {
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
     signoff.KIND: "Sign off",
     signoff.SECOND: "Second sign-off on",
-    signoff.AFTER: "Is this after-merge item done for",
+    signoff.IN_TUICR: "Done in tuicr with",
+    chores.AFTER: "What happens to this after-merge item of",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
-    queue.STALLED: "",
+    stalls.STALLED: "",
 }
 _STAGE_CAP = {
     "branch": "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for",
@@ -91,27 +100,29 @@ _RECORDED = (
     review.CAP_DECISION,
     signoff.KIND,
     signoff.SECOND,
+    chores.AFTER,
     asks.ANSWER,
     asks.EDIT,
-    queue.STALLED,
+    stalls.STALLED,
 )
 _CHOSEN = (
     "finding",
     review.CAP_DECISION,
     signoff.KIND,
     signoff.SECOND,
-    signoff.AFTER,
+    chores.AFTER,
     asks.EDIT,
-    queue.STALLED,
+    stalls.STALLED,
 )
 
-_OWN_WORDS = (signoff.KIND, signoff.SECOND)
+_OWN_WORDS = {signoff.KIND: signoff.NOT_YET, signoff.SECOND: signoff.NOT_YET, chores.AFTER: chores.DROP}
+_MIRRORED = ("feature-approval", signoff.KIND)
 _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 
 _POSITIVE = {
     "feature-approval": "Approve",
     "lean": "Prove it in Lean",
-    signoff.AFTER: signoff.DONE,
+    signoff.IN_TUICR: signoff.DONE,
 }
 
 PENDING = "pending"
@@ -132,6 +143,7 @@ class Pending:
     story_labels: list[str] = field(default_factory=list)
     draft: str = ""
     stage: str = ""
+    repo: str = ""
 
 
 @dataclass(frozen=True)
@@ -174,7 +186,7 @@ def question_text(kind: str, pin: Pin) -> str:
     return f"{shown.rstrip('?')}? [{check}]"
 
 
-def save_pending(question: Question, pin: Pin, state: Path) -> None:
+def save_pending(question: Question, pin: Pin, state: Path, repo: str = "") -> None:
     descriptions = [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
     pending = Pending(
         question.nonce,
@@ -190,6 +202,7 @@ def save_pending(question: Question, pin: Pin, state: Path) -> None:
         pin.story_labels,
         pin.draft,
         pin.stage,
+        repo,
     )
     folder = state / PENDING
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -213,7 +226,9 @@ def load_pending(nonce: str, state: Path) -> Pending:
         raise Refusal(f"the pending question for {nonce} is unreadable") from None
 
 
-def _creates_record(pending: Pending, answer: str) -> bool:
+def _creates_record(pending: Pending, answer: str, note: str | None) -> bool:
+    if pending.kind == chores.AFTER and answer == chores.DROP:
+        return note is not None
     if pending.kind == ITEM:
         return bool(answer.strip()) and answer != "Change"
     if pending.kind == signoff.KIND and answer == signoff.BACK:
@@ -234,7 +249,7 @@ def _saw_the_options(pending: Pending, found: Answer) -> bool:
 def in_own_words(pending: Pending, answer: str) -> bool:
     if pending.kind not in _OWN_WORDS or not answer.strip() or answer in pending.options:
         return False
-    return not answers.only_labels(answer, _SIGN_OFF_LABELS)
+    return not answers.only_labels(answer, [*_SIGN_OFF_LABELS, *pending.options])
 
 
 def check(pending: Pending, state: Path) -> Answer:
@@ -286,11 +301,14 @@ def _another_signs(store: Store, pending: Pending, by: str) -> None:
         )
 
 
-def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
+# made runs once the answer is valid and before the record, and returns data the record carries.
+def decide(
+    store: Store, pending: Pending, state: Path, by: str, name: str = "", made: Callable[[str], dict] | None = None
+) -> bool:
     found = check(pending, state)
     note = found.answer if in_own_words(pending, found.answer) else None
-    answer = signoff.NOT_YET if note is not None else found.answer
-    if not _creates_record(pending, answer):
+    answer = _OWN_WORDS[pending.kind] if note is not None else found.answer
+    if not _creates_record(pending, answer, note):
         return False
     if pending.kind == ITEM and answer == "Yes":
         answer = pending.draft
@@ -305,7 +323,10 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         f"person:{found.session_id}",
         {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"note": note} if note is not None else {})
-        | ({"item": pending.detail} if pending.kind == ITEM else {}),
+        | ({"item": pending.detail} if pending.kind == ITEM else {})
+        | ({"name": name} if name and pending.kind in _MIRRORED else {})
+        | ({"repo": pending.repo} if pending.repo and pending.kind == signoff.KIND else {})
+        | (made(answer) if made is not None else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

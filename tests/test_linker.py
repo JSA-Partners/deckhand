@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
-from deckhand import budget, linker
+from deckhand import budget, config, linker
 from deckhand.fleet import Fleet
+from deckhand.step import Refusal
 from deckhand.store import open as store_open
 from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
 from deckhand.store.open import Stores
-from tests.conftest import CountingStore
+from tests.conftest import CountingStore, Wire
 
 DAY = date(2026, 11, 17)
 T = 1_763_546_400.0
@@ -27,6 +29,28 @@ def test_a_link_within_ten_minutes_reuses_the_repository_labels() -> None:
     assert store.calls["repository_labels"] == 1
     linked(store, T + linker.REFRESH, kept)
     assert store.calls["repository_labels"] == 2
+
+
+def test_a_config_that_does_not_load_marks_the_link_not_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store, kept = CountingStore(FakeStore()), linker.Kept()
+    monkeypatch.setattr(linker.config, "local", lambda: config.LocalConfig(clones={"widgets": tmp_path}))
+    assert linked(store, T, kept).configured
+
+    def broken() -> config.LocalConfig:
+        raise Refusal("config.toml: unknown key bogus")
+
+    monkeypatch.setattr(linker.config, "local", broken)
+    found = linked(store, T, kept)
+    assert not found.configured and "config.toml: unknown key bogus" in found.problems
+
+
+def test_a_config_with_no_clones_marks_the_link_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(linker.config, "local", config.LocalConfig)
+    found = linked(CountingStore(FakeStore()), T, linker.Kept())
+    assert not found.configured
+    assert any(line.startswith("no clone is configured in ") and line.endswith("run setup") for line in found.problems)
 
 
 def test_links_share_one_memo_of_team_ids_until_it_is_refreshed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,3 +116,17 @@ def test_a_link_keeps_what_the_meters_heard(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(store_open, "flush", lambda: flushed.append(True))
     linked_now()
     assert flushed == [True]
+
+
+def test_a_link_after_a_network_error_reads_again(monkeypatch: pytest.MonkeyPatch, wire: Wire) -> None:
+    def link(team, fleet_now, clock, stores=None, today=None, kept=None) -> linker.Linked:
+        return linker.Linked(None, None, clock(), "" if wire.send() else "network")
+
+    now = [T]
+    monkeypatch.setattr(linker, "link", link)
+    monkeypatch.setattr(budget, "current", lambda: budget.Budget(limit=100, remaining=90))
+    linked_now = linker.Linker("ACME", Fleet, lambda: now[0])
+    assert linked_now().error == "network"
+    wire.up, now[0] = True, T + 1
+    assert linked_now().error == ""
+    assert wire.sent == 2

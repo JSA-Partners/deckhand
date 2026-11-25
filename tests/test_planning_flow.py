@@ -155,6 +155,9 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
 
     assert session.facts()["gaps"] == ["the feature review has not run"]
+    for ref in ("ACME-1", "ACME-2", "ACME-3"):
+        session.run("draft", "apply", ref, *TEAM, "--file", session.write("draft.md", f"Outcome of {ref}."))
+        session.run("draft", "apply", ref, "take", *TEAM)
     session.review_feature(session.run)
     assert session.facts()["gaps"] == []
     session.decide("feature-approval", alpha, "Approve")
@@ -163,11 +166,12 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
 
     session.save("Contract", "POST /orders, changed.")
     held = session.facts()
-    assert held["phase"] == "planning"
+    assert held["phase"] == "building"
     assert held["approval_void"] is True
     stale = "the feature review has not reviewed the current contract and stories; run a feature round"
     assert held["gaps"] == [stale]
-    assert features.phase(features.open_feature(store, "ACME")) is Phase.PLANNING
+    reopened = features.open_feature(store, "ACME")
+    assert reopened is not None and reopened.reapproval_due
 
     store.writes.clear()
     refusal = session.refuse("feature", "apply", "new", *TEAM, "--name", "Beta", "--weeks", "1")

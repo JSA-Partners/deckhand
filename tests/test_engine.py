@@ -10,14 +10,15 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, status, watch
-from deckhand.actions import Action, Launch, Post, Remove, Resume, Stop
+from deckhand import acts, answers, asks, budget, chores, engine, fleet, linker, queue, spikes, stalls, status, watch
+from deckhand.actions import Action, Attach, Launch, Leave, Post, PutDocument, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
 from deckhand.linker import Linked
 from deckhand.reconcile import RETRY_AFTER
-from deckhand.records import iso
+from deckhand.records import Record, iso
 from deckhand.step import Refusal
+from deckhand.steps.after import After
 from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
@@ -25,8 +26,13 @@ from deckhand.store.open import Stores
 from deckhand.store.state import LocalState
 from deckhand.worker import Worker
 from tests.shell import Shell, row
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import P1, TEAM
+from tests.test_mirror import mapped_stub, named
 from tests.test_queue import asked, started
+from tests.test_step_after import CHORES
 from tests.test_step_hand import building, clone, configure, state
+from tests.test_step_stories import setup as empty_feature
 
 __all__ = ["clone", "state"]
 
@@ -447,18 +453,18 @@ def test_a_fresh_launch_shows_no_stalled_item_before_the_next_fleet_read(rig: Ri
     started(rig.store, "s1")
     rig.ready()
     rig.step()
-    assert queue.STALLED in rig.kinds() and NAME not in {a.name for a in rig.worker.submitted}
+    assert stalls.STALLED in rig.kinds() and NAME not in {a.name for a in rig.worker.submitted}
     rig.worker.finish(Launch(NAME, "ACME-1", queue.STORY_HAND, clone, None, "viewer-1"))
     rig.step()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     rig.step()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     rig.sessions(row("ACME-1", "working", "busy"))
     rig.step()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     rig.sessions()
     rig.step()
-    assert queue.STALLED in rig.kinds()
+    assert stalls.STALLED in rig.kinds()
 
 
 def test_a_hand_stopped_as_unheard_shows_no_stalled_item_while_its_mail_waits(clone: Path):
@@ -471,7 +477,7 @@ def test_a_hand_stopped_as_unheard_shows_no_stalled_item_while_its_mail_waits(cl
     [message] = rig.state.pending()
     rig.state.put(acts.UNHEARD, {"seqs": [message.seq]})
     rig.ready()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     assert [(type(a), a.seqs) for a in rig.worker.submitted] == [(Resume, (message.seq,))]
 
 
@@ -663,6 +669,26 @@ def test_a_record_reaches_reconcile_when_the_read_fails(rig: Rig, monkeypatch: p
     feature = seen[-1].feature
     assert asks.QUESTION in [r.kind for r in feature.records["s1"]]
     assert rig.engine.note() == "cannot read: network: Linear is unreachable"
+
+
+def test_a_chore_record_reaches_reconcile_when_the_read_fails(clone: Path, monkeypatch: pytest.MonkeyPatch):
+    configure(clone, 1)
+    store = released(["rotate the webhook secret"])
+    opened_next(store)
+    rig = Rig(store)
+    rig.ready()
+    seen = []
+    real = engine.reconcile
+    monkeypatch.setattr(engine, "reconcile", lambda facts, store: seen.append(facts.reading) or real(facts, store))
+
+    def down(*args: Any, **kwargs: Any) -> Any:
+        raise LinearError("network", "Linear is unreachable")
+
+    monkeypatch.setattr(engine.reading, "read", down)
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    rig.step()
+    [alpha] = seen[-1].chores
+    assert chores.AFTER_DONE in [r.kind for r in alpha.records["s1"]]
 
 
 def test_a_later_post_keeps_a_failed_launch_backing_off(clone: Path):
@@ -914,3 +940,131 @@ def test_a_sibling_merge_posts_its_sync_once_and_keeps_the_snapshot_still(clone:
         slots.append(rig.shown()["slots"])
     assert slots == [slots[0]] * 4
     assert [a.key for a in rig.worker.submitted if isinstance(a, Post)] == ["sync:s1:hand-ACME-2"]
+
+
+def test_a_mirror_result_pokes_no_fleet_read_and_a_failing_one_backs_off(clone: Path):
+    configure(clone, 1)
+    rig = Rig(named(building()))
+    rig.ready()
+    attaches = [a for a in rig.worker.submitted if isinstance(a, Attach)]
+    assert [a.name for a in attaches] == ["mirror:s1", "mirror:s2"]
+    pokes = rig.fleets.pokes
+    for action in attaches:
+        rig.worker.finish(action, f"{action.name}: network: Linear is unreachable")
+    rig.step()
+    assert rig.fleets.pokes == pokes
+    notes = fail_every_submitted(rig, 300, "mirror: network: Linear is unreachable", "mirror:s1")
+    tries = [a for a in rig.worker.submitted if a.name == "mirror:s1"]
+    assert 2 <= len(tries) <= 4
+    assert notes[-1].endswith("network: Linear is unreachable")
+
+
+def test_a_leave_result_pokes_no_fleet_read(clone: Path):
+    configure(clone, 1)
+    store = released(CHORES[:1])
+    started(store, "s1")
+    rig = Rig(store, row("ACME-1", "stopped"))
+    rig.ready()
+    [leave] = [a for a in rig.worker.submitted if isinstance(a, Leave)]
+    pokes = rig.fleets.pokes
+    rig.worker.finish(leave)
+    rig.step()
+    assert rig.fleets.pokes == pokes
+
+
+def test_a_released_feature_mirrors_with_no_linear_read_between_links(clone: Path):
+    configure(clone, 1)
+    store = named(building())
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    rig = Rig(store)
+    rig.link()
+    calls = rig.down.calls
+    rig.clock.t += 0.5
+    rig.landed()
+    rig.engine.tick()
+    for _ in range(5):
+        rig.landed()
+        rig.step()
+    assert rig.down.calls == calls
+    assert [a.name for a in rig.worker.submitted if isinstance(a, Attach)] == ["mirror:s1", "mirror:s2"]
+
+
+def released_link_calls(clone: Path, store: FakeStore) -> int:
+    configure(clone, 1)
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    rig = Rig(store)
+    rig.link()
+    return rig.down.calls
+
+
+def test_a_link_reads_the_contract_only_for_a_named_approval(clone: Path):
+    assert released_link_calls(clone, building()) + 1 == released_link_calls(clone, named(building()))
+
+
+def test_an_approval_named_between_links_waits_for_the_next_link_without_a_read(clone: Path):
+    configure(clone, 1)
+    store = building()
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    rig = Rig(store)
+    rig.ready()
+    named(store)
+    calls = rig.down.calls
+    for _ in range(3):
+        rig.landed()
+        rig.step()
+    assert rig.down.calls == calls
+    assert not [a for a in rig.worker.submitted if isinstance(a, Attach)]
+    rig.clock.t += 0.5
+    rig.link()
+    rig.landed()
+    rig.step()
+    assert [a.name for a in rig.worker.submitted if isinstance(a, Attach)] == ["mirror:s1", "mirror:s2"]
+
+
+def test_reconcile_hears_only_the_spikes_asked_in_this_feature(clone: Path, monkeypatch: pytest.MonkeyPatch):
+    configure(clone, 1)
+    rig = Rig(empty_feature())
+    here, elsewhere = spikes.key(P1, "Does it keep order?"), spikes.key("p-other", "Does it keep order?")
+    for key in (here, elsewhere):
+        path = spikes.question_path(answers.state_dir(), key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Does it keep order?")
+    seen = []
+    real = engine.reconcile
+    monkeypatch.setattr(engine, "reconcile", lambda facts, store: seen.append(facts.asked) or real(facts, store))
+    rig.ready()
+    rig.step()
+    assert seen and seen[-1] == frozenset({here})
+
+
+def test_the_answer_that_settles_an_older_features_last_chore_reaches_its_story_map(clone: Path):
+    configure(clone, 1)
+    store = released()
+    for story in ("s1", "s2"):
+        mapped_stub(store, story, [], [])
+    store.put_record("s1", chores.after_record(chores.AFTER_DONE, "s1", 1, CHORES[0], {"note": "ran"}))
+    left = chores.after_record(chores.AFTER_PERSON, "s1", 2, CHORES[1], {"why": "its hand stopped"})
+    store.put_record("s1", left)
+    opened_next(store)
+    rig = Rig(store)
+    rig.ready()
+    [shown] = [a for a in rig.worker.submitted if isinstance(a, PutDocument)]
+    assert f"{CHORES[1]} (left for the person)" in shown.body
+    rig.state.put(shown.key, {"digest": shown.digest})
+    rig.worker.finish(shown)
+    answer = {"answer": chores.MAKE_STORY, "by": "me"}
+    store.put_record("s1", Record(chores.AFTER, "s1:2", left.version, "person:sess", answer))
+    assert not rig.link().reading.chores
+    rig.wait(30)
+    [*_, settled] = [a for a in rig.worker.submitted if isinstance(a, PutDocument)]
+    assert f"{CHORES[1]} (made into a story)" in settled.body
+    rig.state.put(settled.key, {"digest": settled.digest})
+    rig.worker.finish(settled)
+    rig.link()
+    rig.wait(30)
+    store.put_record("s1", Record(chores.AFTER, "s1:2", left.version, "person:sess", {"answer": chores.DROP}))
+    rig.wait(30)
+    assert [a for a in rig.worker.submitted if isinstance(a, PutDocument)][-1] is settled

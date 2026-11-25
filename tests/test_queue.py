@@ -5,7 +5,21 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, planning, policy, queue, review, signoff, spikes
+from deckhand import (
+    asks,
+    chores,
+    features,
+    fleet,
+    gaps,
+    implplan,
+    planning,
+    policy,
+    queue,
+    review,
+    review_gaps,
+    signoff,
+    spikes,
+)
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
@@ -13,8 +27,10 @@ from deckhand.policy import Policy
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.summary import ChangeSummary, ToCheck
+from tests.test_chores import opened_next, released
 from tests.test_feature_approval import approve_everything, reapprove, setup
 from tests.test_implplan import manifest
+from tests.test_step_after import CHORES
 from tests.test_step_build import repo, state
 from tests.test_step_review import raw
 from tests.test_step_signoff import ready, sign
@@ -73,7 +89,7 @@ def started(store: FakeStore, story: str, launch: str = "story") -> None:
 
 def chore(store: FakeStore, story: str) -> None:
     store.put_record(story, Record(implplan.PURPOSE, story, "p1", "agent:implplan", manifest(after_merge=["rotate"])))
-    store.put_record(story, signoff.after_record(signoff.AFTER_PERSON, story, 1, "rotate", {"why": "the vault"}))
+    store.put_record(story, chores.after_record(chores.AFTER_PERSON, story, 1, "rotate", {"why": "the vault"}))
     store.set_issue_state(story, "Done")
 
 
@@ -158,14 +174,15 @@ def test_planning_items_shown_to_everyone():
     [item] = waiting(store, me=OTHER)
     assert item.next == ["/deckhand:feature"]
     assert item.lines == ["ACME-1: the story map gives no tier; save the map again"]
-    assert item.at == "2026-11-16T00:00:00.000Z"
+    assert item.at == ""
 
 
-def test_a_voided_approval_with_no_gap_is_still_a_planning_item():
+def test_a_voided_approval_with_no_gap_asks_for_the_approval_again():
     store = alpha()
     planning.save_section(store, features.open_feature(store, "ACME"), "Invariants", "Totals are positive.", False)
     [item] = [i for i in waiting(store) if i.kind == "planning"]
-    assert (item.lines, item.next) == (["the feature is ready for approval"], ["/deckhand:feature"])
+    lines = ["the plan changed since approval; approve it again"]
+    assert (item.rank, item.lines, item.next) == (3, lines, ["/deckhand:feature"])
 
 
 def test_a_released_feature_raises_no_planning_item():
@@ -204,38 +221,6 @@ def test_void_is_not_a_signoff_item_until_new_summary():
     assert [(i.kind, i.lines[1]) for i in waiting(store)] == [("sign-off", "ready to sign off at c3")]
 
 
-def test_failed_hand_is_stalled_item():
-    store = alpha()
-    started(store, "s1")
-    [start] = [r for r in store.records("s1") if r.kind == asks.HAND_START]
-    for session in (hand("ACME-1", "failed", None), hand("ACME-1", "stopped", None)):
-        [item] = waiting(store, sessions=(session,))
-        assert (item.kind, item.rank, item.at, item.next) == ("stalled", 2, start.at, ["decide context stalled ACME-1"])
-    assert waiting(store, sessions=(hand("ACME-1", "working", "busy"),)) == []
-    assert waiting(store, sessions=(hand("ACME-1", "failed", None),), note="the fleet read failed") == []
-    store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
-    assert waiting(store, sessions=(hand("ACME-1", "failed", None),)) == []
-    story = store.issue("s1") | {"state": "In Progress"}
-    records = store.records("s1")
-    assert queue.stalled(story, records, None, "story") and queue.auto_restart(records, "story", None)
-    started(store, "s1")
-    records = store.records("s1")
-    assert not (queue.stalled(story, records, None, "story") and queue.auto_restart(records, "story", None))
-
-
-def stalled_items(store: FakeStore, restarts: dict[str, int] | None = None) -> list[queue.Item]:
-    feature = features.open_feature(store, "ACME")
-    gone = Fleet([hand("ACME-1", "failed", None)])
-    found = queue.items(store, "ACME", feature, ME, gone, lambda story: Policy("widgets"), restarts=restarts)
-    return [i for i in found if i.kind == queue.STALLED]
-
-
-def stop_answered(store: FakeStore, answer: str) -> None:
-    start = queue.last_start(store.records("s1"), "story")
-    assert start is not None
-    store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
-
-
 def test_a_sandbox_request_on_a_hand_is_an_item_with_the_attach_command():
     store = alpha()
     store.put_record("s1", gaps.record("s1", "PermissionRequest", "Bash", "npm ci", "not allowed"))
@@ -256,95 +241,6 @@ def test_input_needed_on_a_spike_is_an_item_too(state: Path):
     assert [(i.ref, i.lines, i.next) for i in found] == [
         (key, [f"{fleet.spike_name(key)} waits on input needed"], ["claude attach id-s"])
     ]
-
-
-def test_an_idle_hand_on_its_own_prompt_is_a_prompt_and_never_stalled():
-    store = alpha()
-    started(store, "s1")
-    idle = hand("ACME-1", "idle", "idle", "input needed", iso(1795000000500))
-    assert kinds(waiting(store, sessions=(idle,))) == [("prompt", 2, "ACME-1")]
-    assert not queue.stalled(store.issue("s1") | {"state": "In Progress"}, store.records("s1"), idle, "story")
-
-
-def test_a_first_stop_restarts_automatically_and_asks_nothing():
-    store = alpha()
-    started(store, "s1")
-    story, records = store.issue("s1") | {"state": "In Progress"}, store.records("s1")
-    assert queue.stalled(story, records, None, "story") and queue.auto_restart(records, "story", 0)
-    assert stalled_items(store, {"ACME-1": 0}) == []
-
-
-def test_a_second_stop_without_progress_asks():
-    store = alpha()
-    started(store, "s1")
-    assert not queue.auto_restart(store.records("s1"), "story", 1)
-    [item] = stalled_items(store, {"ACME-1": 1})
-    assert item.next == ["decide context stalled ACME-1"]
-
-
-def test_a_stop_after_progress_restarts_automatically_again():
-    store = alpha()
-    started(store, "s1")
-    store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
-    assert queue.auto_restart(store.records("s1"), "story", 1)
-    assert stalled_items(store, {"ACME-1": 1}) == []
-
-
-def test_a_hand_with_no_row_restarts_only_after_a_new_record():
-    store = alpha()
-    started(store, "s1")
-    assert not queue.auto_restart(store.records("s1"), "story", None)
-    assert [i.ref for i in stalled_items(store)] == ["ACME-1"]
-    assert [i.ref for i in stalled_items(store, {"ACME-2": 0})] == ["ACME-1"]
-    store.put_record("s1", Record("checks", "s1", "c2", HAND, {"passed": False}))
-    assert queue.auto_restart(store.records("s1"), "story", None)
-    assert stalled_items(store) == []
-
-
-def test_an_answered_stop_clears_the_item_and_is_no_progress():
-    for answer in (queue.RESTART, queue.LEAVE):
-        store = alpha()
-        started(store, "s1")
-        stop_answered(store, answer)
-        assert stalled_items(store, {"ACME-1": 1}) == []
-        assert not queue.auto_restart(store.records("s1"), "story", 1)
-        assert queue.stall_answer(store.records("s1"), "story") == answer
-
-
-def test_a_later_start_that_stalls_again_asks_again():
-    store = alpha()
-    started(store, "s1")
-    stop_answered(store, queue.RESTART)
-    assert stalled_items(store, {"ACME-1": 1}) == []
-    started(store, "s1")
-    assert queue.stall_answer(store.records("s1"), "story") is None
-    [item] = stalled_items(store, {"ACME-1": 1})
-    start = queue.last_start(store.records("s1"), "story")
-    assert start is not None and item.at == start.at
-
-
-def test_finished_hand_is_not_stalled():
-    store = alpha(planning=True)
-    started(store, "s1", "draft")
-    records = store.records("s1")
-    assert queue.stalled(store.issue("s1") | {"state": "Backlog"}, records, None, "draft")
-    store.put_record("s1", Record(queue.DRAFT, "s1", "d1", HAND, {}))
-    assert not queue.stalled(store.issue("s1") | {"state": "Backlog"}, store.records("s1"), None, "draft")
-    done = alpha()
-    started(done, "s2")
-    assert not queue.stalled(done.issue("s2") | {"state": "Done"}, done.records("s2"), None, "story")
-    asked(done, "s2")
-    assert not queue.stalled(done.issue("s2") | {"state": "Backlog"}, done.records("s2"), None, "story")
-
-
-def test_a_draft_start_is_no_start_of_a_build_hand():
-    store = alpha()
-    started(store, "s1", "draft")
-    store.put_record("s1", Record(queue.DRAFT, "s1", "d1", HAND, {}))
-    story = store.issue("s1") | {"state": "Backlog"}
-    assert queue.last_start(store.records("s1"), "story") is None
-    assert not queue.stalled(story, store.records("s1"), None, "story")
-    assert waiting(store, sessions=(hand("ACME-1", "done", None),)) == []
 
 
 QUESTION = "Does the queue keep order?"
@@ -398,6 +294,34 @@ def test_failed_spike_hand_is_stalled(state: Path):
     assert [i.kind for i in waiting(store, sessions=(gone,))] == ["planning", "spike"]
 
 
+def spike_items(store: FakeStore, session: Session, restarts: int, idle: frozenset[str] = frozenset(), **rest) -> list:
+    feature, policy = features.open_feature(store, "ACME"), Policy("widgets")
+    restarted = {fleet.ref_of(session.name): restarts}
+    found = queue.items(
+        store, "ACME", feature, OTHER, Fleet([session]), lambda _: policy, restarts=restarted, idle=idle, **rest
+    )
+    return [(i.kind, i.ref, i.lines) for i in found if i.kind == "stalled"]
+
+
+def test_its_second_stop_gives_a_stalled_item(state: Path):
+    store, project, key = spiked(state)
+    gone = Session("id-s", fleet.spike_name(key), "sid", "/w", iso(1795000000000), "failed", None, None)
+    assert spike_items(store, gone, 0) == []
+    assert spike_items(store, gone, 1) == [("stalled", key, [f"{gone.name} is failed with no answer document"])]
+    assert spike_items(store, gone, 1, quiet=frozenset({key})) == []
+
+
+def test_a_blocked_idle_spike_after_its_nudge_gives_a_stalled_item(state: Path):
+    store, project, key = spiked(state)
+    blocked = Session("id-s", fleet.spike_name(key), "sid", "/w", iso(1795000000000), "blocked", "idle", None)
+    assert spike_items(store, blocked, 1) == []
+    assert spike_items(store, blocked, 0, frozenset({key})) == []
+    found = [("stalled", key, [f"{blocked.name} is idle with no answer document"])]
+    assert spike_items(store, blocked, 1, frozenset({key})) == found
+    answer(store, project, key)
+    assert spike_items(store, blocked, 1, frozenset({key})) == []
+
+
 def test_spike_of_another_feature_never_shows(state: Path):
     store, project, key = spiked(state)
     earlier = spikes.key(create_id("ACME:Alpha", "feature"), QUESTION)
@@ -430,32 +354,30 @@ def test_prompt_ranks_with_blocked_hands_in_planning():
     assert kinds(waiting(store, sessions=(blocked,))) == [("prompt", 2, "ACME-1")]
 
 
-def test_second_signoff_due_is_waiting_not_stalled(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys)
-    sign(store, repo, state, capsys)
-    store.put_record("s1", Record(asks.WAKE, "s1", "w1", HAND, {}))
-    started(store, "s1")
-    failed = (hand("ACME-1", "failed", None),)
-    assert [i.kind for i in waiting(store, sessions=failed, second=True)] == []
-    assert [i.kind for i in waiting(store, sessions=failed)] == ["stalled"]
-    story, records = store.issue("s1") | {"state": "In Review"}, store.records("s1")
-    store.put_record("s1", Record("checks", "s1", "x", "agent:checks", {"head": "x", "passed": False}))
-    later = store.records("s1")
-    assert not queue.stalled(story, records, None, "story", second=True)
-    assert not (queue.stalled(story, later, None, "story", second=True) and queue.auto_restart(later, "story", None))
-    assert queue.stalled(story, later, None, "story") and queue.auto_restart(later, "story", None)
-
-
 def test_released_feature_chore_stays_in_the_queue():
     store = alpha()
     chore(store, "s1")
     store.set_issue_state("s2", "Done")
     assert features.open_feature(store, "ACME") is None
-    found = queue.items(store, "ACME", None, ME, Fleet(), lambda story: Policy("widgets"))
+    current = features.current(store, "ACME")
+    found = queue.items(store, "ACME", current, ME, Fleet(), lambda story: Policy("widgets"))
     assert [(i.kind, i.ref, i.next) for i in found] == [
         ("after-merge", "ACME-1", ["decide context after-merge ACME-1 --item 1"])
+    ]
+
+
+def test_a_chore_hand_of_an_older_feature_reaches_the_person():
+    store = released(CHORES[:1])
+    asked(store, "s1")
+    opened_next(store)
+    current = features.current(store, "ACME")
+    assert current is not None
+    older = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
+    blocked = hand("ACME-1", "blocked", "waiting", fleet.PERMISSION, iso(1795000000500))
+    found = queue.items(store, "ACME", current, ME, Fleet([blocked], ""), lambda s: Policy("w"), elsewhere=older)
+    assert sorted((i.kind, i.ref) for i in found if i.ref == "ACME-1") == [
+        ("prompt", "ACME-1"),
+        (asks.ANSWER, "ACME-1"),
     ]
 
 
@@ -608,31 +530,6 @@ def test_a_broken_clone_ranks_below_every_item_of_a_story_in_flight(tmp_path: Pa
     assert [i.kind for i in found].count(queue.POLICY) == 1
 
 
-def idle_items(store: FakeStore, idle: frozenset[str], restarts: dict[str, int]) -> list[queue.Item]:
-    feature = features.open_feature(store, "ACME")
-    blocked = Fleet([hand("ACME-1", "blocked", "busy", None, iso(1795000000500))])
-    found = queue.items(
-        store, "ACME", feature, ME, blocked, lambda story: Policy("widgets"), restarts=restarts, idle=idle
-    )
-    return [i for i in found if i.kind == queue.STALLED]
-
-
-def test_an_idle_hand_past_its_one_restart_is_a_stalled_item():
-    store = alpha()
-    started(store, "s1")
-    [item] = idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1})
-    assert item.lines[1:] == ["its hand is idle, and no record is new since it last started"]
-    assert idle_items(store, frozenset(), {"ACME-1": 1}) == []
-    assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 0}) == []
-
-
-def test_an_idle_hand_waiting_on_the_person_is_not_stalled():
-    store = alpha()
-    started(store, "s1")
-    asked(store, "s1")
-    assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1}) == []
-
-
 def test_one_feature_finding_makes_one_queue_item_across_stories():
     store = alpha(planning=True)
     feature = features.open_feature(store, "ACME")
@@ -658,3 +555,78 @@ def test_a_spike_item_drops_once_facts_is_saved_after_the_answer(state: Path):
     assert [i.ref for i in waiting(store, me=OTHER) if i.kind == "spike"] == [key]
     planning.save_section(store, feature, "Facts", "Folded in.", False)
     assert [i for i in waiting(store, me=OTHER) if i.kind == "spike"] == []
+
+
+def capped_rounds(store: FakeStore) -> list[Record]:
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    p1 = review.parse_findings(json.dumps([raw(severity="P1")]))
+    current = features.content_hash(features.review_text(store, feature))
+    rounds = []
+    for n in (1, 2, 3):
+        plan = review.RoundPlan(n, n > 1, f"h{n - 1}" if n > 1 else "")
+        rounds.append(review.round_record(project, "feature", plan, current if n == 3 else f"h{n}", p1))
+    for round in rounds:
+        for story in ("s1", "s2"):
+            store.put_record(story, round)
+    return rounds
+
+
+def voided() -> FakeStore:
+    store = alpha()
+    planning.save_section(store, features.open_feature(store, "ACME"), "Invariants", "Totals are positive.", False)
+    return store
+
+
+def test_three_capped_feature_rounds_make_a_cap_item():
+    store = voided()
+    capped_rounds(store)
+    project = features.open_feature(store, "ACME").project["id"]
+    [item] = [i for i in waiting(store) if i.kind == review.DECISION]
+    assert (item.rank, item.ref, item.lines) == (1, "Alpha", ["three feature review rounds left a P1 open"])
+    assert item.next == [f"decide context review-cap {project} --stage feature"]
+
+
+def test_proceed_clears_it():
+    store = voided()
+    rounds = capped_rounds(store)
+    answer = Record(
+        review.CAP_DECISION,
+        review.cap_subject(rounds[-1]),
+        review.cap_version(rounds[-1]),
+        "person:pat",
+        {"answer": review.PROCEED},
+    )
+    store.put_record("s1", answer)
+    assert [i for i in waiting(store) if i.kind == review.DECISION] == []
+
+
+def test_a_capped_feature_leaves_no_planning_line():
+    store = voided()
+    capped_rounds(store)
+    assert [i for i in waiting(store) if i.kind == "planning"] == []
+
+
+def proposed_p1(store: FakeStore) -> None:
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    current = features.content_hash(features.review_text(store, feature))
+    p1 = review.parse_findings(json.dumps([raw(severity="P1", changes_delivery=True)]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), current, p1)
+    for story in ("s1", "s2"):
+        store.put_record(story, round)
+        store.put_record(story, asks.proposal_record(round.data["findings"][0]["id"], round.version, "out of scope"))
+
+
+def test_a_feature_finding_is_not_also_the_planning_line():
+    store = voided()
+    proposed_p1(store)
+    found = waiting(store)
+    assert [i.kind for i in found] == [review.DECISION]
+
+
+def test_rewording_the_person_text_does_not_change_which_gap_is_dropped(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(review_gaps, "OPEN_P1", "the feature review is stuck on")
+    store = voided()
+    proposed_p1(store)
+    assert [i.kind for i in waiting(store)] == [review.DECISION]

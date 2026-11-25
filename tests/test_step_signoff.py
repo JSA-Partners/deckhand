@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, implplan, review, signoff, versions, wakes
+from deckhand import asks, features, implplan, mirror, review, signoff, versions, wakes
+from deckhand.actions import Attach
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.checks import Checks
@@ -522,7 +523,7 @@ def test_the_persons_tuicr_comments_are_shown_apart_from_the_seeded_reasons(
     store = ready(tmp_path, repo, state, capsys, tuicr=False)
     shell = Diffing(sessions=[{"slug": SLUG}], comments=[said("seed1", "contract site"), said("p1", "Rename this.")])
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
-    capsys.readouterr()
+    in_tuicr(store, shell, repo, state, capsys, "Done")
     Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5", "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert shown["comments"] == [said("p1", "Rename this.")]
@@ -859,17 +860,6 @@ def test_signoff_review_returns_without_polling(
         Signoff(store, shell, repo).apply(["s1", "review", "--watch", *TEAM])
 
 
-def test_comments_read_on_demand_after_done(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = ready(tmp_path, repo, state, capsys, tuicr=False)
-    shell = Diffing(sessions=[{"slug": SLUG}], comments=[said("p1", "Rename this.")])
-    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
-    assert shell.ran("tuicr", "review", "comments") == []
-    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5"])
-    assert capsys.readouterr().out.splitlines()[-2:] == ["your comments:", "- src/a.py:1: Rename this."]
-
-
 def test_a_review_commit_built_for_an_older_summary_counts_as_not_built(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -1007,3 +997,121 @@ def test_a_hand_is_told_the_tuicr_review_waits_for_the_person(
     [gap] = [g for g in signoff.gaps(store.records("s1"), "s1", "c2", "ACME-1") if g.id == "tuicr"]
     assert gap.hand == "no tuicr review is built at c2; it waits for the person's tuicr review"
     assert "signoff apply" not in gap.hand
+
+
+def test_a_sign_off_record_carries_the_repository_and_the_signers_name(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    store.writes.clear()
+    sign(store, repo, state, capsys)
+    assert store.writes == [("put_record", "s1", signoff.KIND, "s1")]
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert (held.data["repo"], held.data["name"], held.data["by"]) == ("acme/widgets", "viewer-1", "viewer-1")
+
+
+class NoRepo(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:3] == ["gh", "repo", "view"]:
+            return subprocess.CompletedProcess(argv, 1, "", "error connecting to api.github.com\n")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_a_sign_off_gh_cannot_name_still_records_and_is_not_mirrored(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    answer(state, Decide(store, runner=NoRepo(), repo=repo), capsys, ["sign-off", "ACME-1"], signoff.SIGN)
+    [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
+    assert held.data["answer"] == signoff.SIGN and "repo" not in held.data
+    feature = features.current(store, "ACME")
+    assert feature is not None
+    assert not [a for a in mirror.wanted(feature, "") if isinstance(a, Attach) and "github.com" in a.url]
+
+
+WAITING = "waiting for the person to say Done in tuicr"
+
+
+def in_tuicr(store: FakeStore, shell: Shell, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], choice: str):
+    answer(state, Decide(store, runner=shell, repo=repo), capsys, ["tuicr", "ACME-1"], choice)
+    return capsys.readouterr().out
+
+
+def screen_five(store: FakeStore, shell: Shell, repo: Path, capsys: pytest.CaptureFixture[str]) -> dict:
+    capsys.readouterr()
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5", "--json"])
+    return json.loads(capsys.readouterr().out)
+
+
+def reviewing(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    shell = Diffing(sessions=[{"slug": SLUG}], comments=[said("p1", "Rename this.")])
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    return store, shell
+
+
+def test_screen_five_waits_until_tuicr_is_answered_done(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store, shell = reviewing(tmp_path, repo, state, capsys)
+    shown = screen_five(store, shell, repo, capsys)
+    assert shown["comments"] == [] and shown["lines"][-1] == WAITING
+    assert shell.ran("tuicr", "review", "comments") == []
+    assert overview(store, repo, capsys)["screens"]["tuicr"] == "built, waiting for Done"
+
+
+def test_screen_five_reads_comments_after_done_at_this_head(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store, shell = reviewing(tmp_path, repo, state, capsys)
+    in_tuicr(store, shell, repo, state, capsys, "Done")
+    shown = screen_five(store, shell, repo, capsys)
+    assert shown["comments"] == [said("p1", "Rename this.")]
+    assert shown["lines"][-2:] == ["your comments:", "- src/a.py:1: Rename this."]
+
+
+def test_a_new_head_waits_again(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = reviewing(tmp_path, repo, state, capsys)
+    in_tuicr(store, shell, repo, state, capsys, "Done")
+    rebuilt = tuicr_held(store).data | {"head": "c3", "sha": "r3"}
+    store.put_record("s1", Record(signoff.TUICR, "s1", "c3", "agent:signoff", rebuilt))
+    shell.head = "c3"
+    shown = screen_five(store, shell, repo, capsys)
+    assert shown["comments"] == [] and shown["lines"][-1] == WAITING
+
+
+def test_later_records_nothing(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
+    store, shell = reviewing(tmp_path, repo, state, capsys)
+    assert in_tuicr(store, shell, repo, state, capsys, "Later").splitlines()[-1] == (
+        "done: answered Later, no tuicr recorded"
+    )
+    assert [r for r in store.records("s1") if r.kind == "tuicr"] == []
+    assert screen_five(store, shell, repo, capsys)["lines"][-1] == WAITING
+
+
+class Rebuilding(Diffing):
+    def __init__(self, *shas: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.shas = list(shas)
+
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:2] == ["git", "rev-parse"] and cwd is not None and Path(cwd).name.startswith("deckhand-"):
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, f"{self.shas.pop(0)}\n", "")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_a_revised_summary_at_the_same_head_waits_for_done_again(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    sessions = [{"slug": f"acme/widgets@acme-1-orders/commits/c1..{sha}"} for sha in ("r1", "r2")]
+    shell = Rebuilding("r1", "r2", sessions=sessions, comments=[said("p1", "Rename this.")])
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    in_tuicr(store, shell, repo, state, capsys, "Done")
+    summarize(store, tmp_path, repo, summary(where="src/a.py:1"), ONE_HUNK)
+    Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
+    assert versions.held(store.records("s1"), signoff.TUICR, "s1").data["sha"] == "r2"
+    shown = screen_five(store, shell, repo, capsys)
+    assert shown["comments"] == [] and shown["lines"][-1] == WAITING
+    assert shell.ran("tuicr", "review", "comments") == []

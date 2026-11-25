@@ -50,7 +50,7 @@ def test_feature_gaps_need_the_current_target_at_any_count():
     assert review_gaps.feature_gaps("p1", [feature(1, "h1")], "h1", "p1") == []
     capped = [feature(n, f"h{n}") for n in (1, 2, 3)]
     [gap] = review_gaps.feature_gaps("p1", capped, "h4", "p1")
-    assert gap.person == "the feature review has not reviewed the current contract and stories; run a feature round"
+    assert gap.hand == "the feature review has not reviewed the current contract and stories; run a feature round"
 
 
 def test_a_left_open_p3_is_the_hands_to_resolve():
@@ -127,3 +127,10 @@ def test_a_feature_p1_the_person_kept_is_only_fixed():
     kept = Record(review.DECISION, finding, "h1", "person:pat", {"answer": review.ACCEPT})
     [gap] = review_gaps.feature_gaps("p1", [*records, proposal, kept], "h1", "p1")
     assert gap.hand == f"{gap.person}; fix it and review again"
+
+
+def test_feature_gap_person_text_names_no_action_for_the_person():
+    old = review.round_record("p1", "feature", RoundPlan(1, False, ""), "h0", [])
+    [gap] = review_gaps.feature_gaps("p1", [old], "h1", "p1")
+    assert gap.person == "the feature review has not reviewed the current contract and stories; a feature review is due"
+    assert gap.hand.endswith("run a feature round")

@@ -4,8 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckhand import asks, fleet, order, queue, startable, wakes
-from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand import asks, chores, delivery, fleet, mirror, order, queue, spikes, stalls, startable, wakes
+from deckhand.actions import Action, Adopt, Launch, Leave, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
 from deckhand.policy import Policy
@@ -14,8 +14,9 @@ from deckhand.records import HAND, Record, epoch
 from deckhand.store import Store
 from deckhand.store.state import HandRow, Message
 
-UNHEARD, RETRY_AFTER, RETRY_CAP = 120.0, 60.0, 900.0
-IN_PROGRESS, WORKING = "In Progress", "working"
+RETRY_AFTER, RETRY_CAP = 60.0, 900.0
+LAUNCH_GRACE = 60.0
+IN_PROGRESS = "In Progress"
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class Facts:
     reading: Reading | None
     cap: int
     busy: frozenset[str] = frozenset()
+    holds: frozenset[str] = frozenset()
     failed: Mapping[str, tuple[int, float]] = field(default_factory=dict)
     clones: Mapping[str, Path] = field(default_factory=dict)
     policies: Mapping[Path, Policy] = field(default_factory=dict)
@@ -36,6 +38,10 @@ class Facts:
     idle: frozenset[str] = frozenset()
     readable: bool = True
     posted: frozenset[str] = frozenset()
+    mirrored: Mapping[str, str] = field(default_factory=dict)
+    asked: frozenset[str] = frozenset()
+    contract: str = ""
+    configured: bool = True
 
 
 @dataclass
@@ -95,12 +101,25 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         tick = _Tick(facts, sessions, reading.me, used(facts), set(facts.busy), set(reserved(facts)))
         feature = reading.feature
         if feature is not None:
-            found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature)
-            found += _sync(tick, feature) + _deliver(tick, feature) + _start(tick, store, feature)
-        else:
-            found += _deliver(tick, None)
-        found += _spikes(tick)
+            found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature) + _sync(tick, feature)
+        for chore in reading.chores:
+            found += _finished(tick, chore) + _answers(tick, chore) + _idle(tick, chore)
+        found += delivery.deliver(tick, reading.held)
+        if feature is not None:
+            found += _start(tick, feature, startable.startable(store, feature, tick.me, facts.clones))
+        for chore in reading.chores:
+            found += _start(tick, chore, startable.after_merge(chore, tick.me, facts.clones))
+        for held in reading.held if facts.configured else []:
+            found += _cloneless(tick, held)
+        found += _mirrors(facts, reading) if facts.readable else []
+        found += _spikes(tick) + _stalled_spikes(tick, store, feature)
     return [action for action in found if action.name not in facts.busy]
+
+
+# The link reads only the current feature's Contract, so an older feature's approvals are not resent.
+def _mirrors(facts: Facts, reading: Reading) -> list[Action]:
+    held = [(f, facts.contract if f is reading.feature else "") for f in reading.held]
+    return [action for feature, contract in held for action in mirror.due(feature, contract, facts.mirrored)]
 
 
 def _holding(facts: Facts) -> set[str]:
@@ -122,17 +141,16 @@ def _resumable(facts: Facts, name: str) -> bool:
     session = row.session if row is not None else newest.session_id if newest is not None else None
     if not session or not any(s.session_id == session for s in facts.read.sessions):
         return False
-    feature = facts.reading.feature if facts.reading is not None else None
-    story = _story_of(feature, name)
+    feature, story = delivery.story_of(facts.reading.held if facts.reading is not None else [], name)
     if feature is None or story is None:
         return True
     records = _records(feature, story)
     start = queue.last_start(records)
-    return start is None or not queue.finished(story, records, start)
+    return start is None or not chores.finished(story, records, start)
 
 
 def used(facts: Facts) -> int:
-    return fleet.slots_used(facts.read.sessions) + len(facts.busy - _holding(facts)) + len(reserved(facts))
+    return fleet.slots_used(facts.read.sessions) + len(facts.holds - _holding(facts)) + len(reserved(facts))
 
 
 def _copies(facts: Facts) -> tuple[list[Remove], list[fleet.Session]]:
@@ -158,7 +176,9 @@ def _stopped_copies(facts: Facts) -> list[Remove]:
     for row in sorted(facts.hands.values(), key=lambda held: held.name):
         if not row.session or row.session not in listed:
             continue
-        stale = [s for s in facts.read.sessions if s.name == row.name and s.session_id != row.session]
+        stale = [
+            s for s in facts.read.sessions if s.name == row.name and s.id != row.short and s.session_id != row.session
+        ]
         found += [Remove(row.name, s.id, stop=False) for s in stale if not fleet.alive(s)]
     return found
 
@@ -193,9 +213,9 @@ def _finished(tick: _Tick, feature: Feature) -> list[Action]:
         session, start = tick.alive(name), queue.last_start(records)
         if session is None or start is None:
             continue
-        if session.state == WORKING and start.data.get("kind") != queue.DRAFT_HAND:
+        if session.state == fleet.WORKING and start.data.get("kind") != queue.DRAFT_HAND:
             continue
-        if queue.finished(story, records, start):
+        if chores.finished(story, records, start):
             found.append(tick.take(Stop(name, session.id, "finished"), slot=False))
     return found
 
@@ -214,7 +234,7 @@ def _answers(tick: _Tick, feature: Feature) -> list[Action]:
     return found
 
 
-# An idle hand's nudge is its one automatic restart; past it, the stalled item waits for the person.
+# An idle hand's nudge is its one automatic restart; past it, a chore hand stops and any other waits for the person.
 def _idle(tick: _Tick, feature: Feature) -> list[Action]:
     found: list[Action] = []
     for story in feature.live if tick.facts.readable else []:
@@ -225,13 +245,13 @@ def _idle(tick: _Tick, feature: Feature) -> list[Action]:
         launch = startable.launch_of(startable.kind(feature, story))
         known = startable.clone_of(story, tick.facts.clones) in tick.facts.policies
         second = known and queue.second_due(story, records, tick.policy_for) is not None
-        if story["assignee"] != tick.me or not queue.stalled(story, records, session, launch, second, idle=True):
+        if story["assignee"] != tick.me or not stalls.stalled(story, records, session, launch, second, idle=True):
             continue
-        if queue.auto_restart(records, launch, row.restarts):
+        if stalls.auto_restart(records, launch, row.restarts):
             start = asks.hand_start(story, records, launch)
             key = f"nudge:{story['id']}:{row.turn_ended}"
             found.append(Post(name, key, wakes.NUDGE, wakes.nudge_body(), story["id"], start, restart=True))
-        elif queue.stall_answer(records, launch) is not None:
+        elif story["state"] == order.DONE or stalls.stall_answer(records, launch) is not None:
             found.append(tick.take(Stop(name, session.id, "idle"), slot=False))
     return found
 
@@ -258,32 +278,67 @@ def _held_elsewhere(story: dict, records: list[Record], me: str) -> bool:
     return story["state"] == IN_PROGRESS and story["assignee"] == me and queue.last_start(records) is None
 
 
-def _start(tick: _Tick, store: Store, feature: Feature) -> list[Action]:
+def _since_merge(story: dict, records: list[Record]) -> bool:
+    start, merged = queue.last_start(records), queue.merged_at(story)
+    return start is not None and (not merged or epoch(start.at) > epoch(merged))
+
+
+# A launched session lists with no status until it attaches, so a hand not yet adopted counts as starting.
+def _starting(tick: _Tick, row: HandRow | None, records: list[Record]) -> bool:
+    start = queue.last_start(records)
+    if row is None or not row.short or start is None or tick.facts.now - epoch(start.at) >= LAUNCH_GRACE:
+        return False
+    listed = [s for s in tick.facts.read.sessions if s.id == row.short]
+    return all(s.session_id != row.session and s.state == fleet.WORKING for s in listed)
+
+
+def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[Action]:
     hands = fleet.hands(tick.sessions)
     found: list[Action] = []
-    for work in startable.startable(store, feature, tick.me, tick.facts.clones):
-        if not tick.free():
-            break
-        if work.clone not in tick.facts.policies:
-            continue
+    for work in works:
         story, records = work.story, _records(feature, work.story)
         name = fleet.hand_name(story["identifier"])
         row = tick.facts.hands.get(name)
         if name in tick.acted or tick.alive(name) is not None or _held_elsewhere(story, records, tick.me):
             continue
-        if not startable.due(work, feature, hands, tick.policy_for, row.restarts if row is not None else None):
+        chore = story["state"] == order.DONE
+        if chore and stalls.waiting(story, records, False):
+            continue
+        # A chore hand starts fresh once after the merge; once that hand is gone, its items go to the person.
+        if chore and _since_merge(story, records):
+            if _starting(tick, row, records):
+                continue
+            tick.acted.add(name)
+            found.append(Leave(name, story["id"], chores.hand_over(story, records, row.session if row else "")))
+            continue
+        if not tick.free() or work.clone not in tick.facts.policies:
+            continue
+        restarts = row.restarts if row is not None else None
+        if not chore and not startable.due(work, feature, hands, tick.policy_for, restarts):
             continue
         launch = startable.launch_of(work.kind)
         restart = queue.last_start(records, launch) is not None
         if tick.backing_off(name):
             continue
-        if row is not None and row.session and row.kind == launch and tick.listed(row.session):
+        if not chore and row is not None and row.session and row.kind == launch and tick.listed(row.session):
             start = asks.hand_start(story, records, launch)
             nudge = Resume(name, row.session, row.cwd, wakes.nudge_body(), (), start, restart)
             found.append(tick.take(nudge, slot=True))
         else:
             ref = story["identifier"]
             found.append(tick.take(Launch(name, ref, launch, work.clone, story, tick.me, restart), slot=True))
+    return found
+
+
+# No hand can start without a clone, so the chore goes to the person rather than holding the release.
+def _cloneless(tick: _Tick, feature: Feature) -> list[Action]:
+    found: list[Action] = []
+    for story in startable.cloneless(feature, tick.me, tick.facts.clones):
+        name, records = fleet.hand_name(story["identifier"]), _records(feature, story)
+        if name in tick.acted or tick.alive(name) is not None or stalls.waiting(story, records, False):
+            continue
+        tick.acted.add(name)
+        found.append(Leave(name, story["id"], chores.hand_over(story, records, "", chores.NO_CLONE_WHY)))
     return found
 
 
@@ -300,60 +355,29 @@ def _spikes(tick: _Tick) -> list[Action]:
     return found
 
 
-def _deliver(tick: _Tick, feature: Feature | None) -> list[Action]:
-    waiting: dict[str, list[Message]] = {}
-    for message in tick.facts.pending:
-        waiting.setdefault(message.hand, []).append(message)
-    found = []
-    for name, messages in sorted(waiting.items()):
-        if name in tick.acted:
+# A spike that died or idles with no answer gets one restart; past it, the stalled item waits for the person.
+def _stalled_spikes(tick: _Tick, store: Store, feature: Feature | None) -> list[Action]:
+    asked = tick.facts.asked
+    rows = [r for r in tick.facts.hands.values() if r.kind == SPIKE and r.short and not r.restarts and r.ref in asked]
+    if feature is None or feature.stories or not tick.facts.readable or not rows:
+        return []
+    project = feature.project["id"]
+    answered = {spikes.key_of(project, document) for document in spikes.answered(store, feature)}
+    found: list[Action] = []
+    for row in sorted(rows, key=lambda held: held.name):
+        if row.ref in answered or row.name in tick.acted:
             continue
-        unheard = [m for m in messages if m.delivered is None and m.seq not in tick.facts.unheard]
-        session = tick.alive(name)
-        if session is None:
-            resume = _resume(tick, feature, name, messages)
-            if resume is not None:
-                found.append(tick.take(resume, slot=True))
-        elif unheard and session.state != WORKING and not session.waiting_for and _deaf(tick, name, unheard):
-            if tick.free():
-                stop = Stop(name, session.id, "unheard", tuple(m.seq for m in unheard))
-                found.append(tick.take(stop, slot=not fleet.holds_slot(session)))
+        session = tick.alive(row.name)
+        if session is not None and row.name in tick.facts.idle and row.turn_ended:
+            key = f"nudge:{row.ref}:{row.turn_ended}"
+            found.append(Post(row.name, key, wakes.NUDGE, wakes.nudge_body(), row.issue, None, restart=True))
+        elif session is None and tick.free() and not tick.backing_off(row.name):
+            found += [tick.take(action, slot=True) for action in _restarted_spike(tick, row)]
     return found
 
 
-def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Message]) -> Resume | None:
-    row = tick.facts.hands.get(name)
-    last = max((s for s in tick.sessions if s.name == name), key=_started, default=None)
-    if row is not None:
-        session, cwd = row.session, row.cwd
-    else:
-        session, cwd = (last.session_id, last.cwd) if last is not None else (None, "")
-    if session is None or not tick.listed(session) or not tick.room(name) or tick.backing_off(name):
-        return None
-    story = _story_of(feature, name)
-    records = _records(feature, story) if feature is not None and story is not None else []
-    start = queue.last_start(records)
-    if story is not None and start is not None and queue.finished(story, records, start):
-        return None
-    text, seqs = wakes.prompt(messages), tuple(m.seq for m in messages)
-    if any(m.seq in tick.facts.unheard and m.delivered is None for m in messages):
-        return Resume(name, session, cwd, text, seqs)
-    launch = row.kind if row is not None else str(start.data.get("kind")) if start is not None else queue.STORY_HAND
-    restarts = row.restarts if row is not None else None
-    if not queue.auto_restart(records, launch, restarts) and queue.stall_answer(records, launch) != queue.RESTART:
-        return None
-    fresh = asks.hand_start(story, records, launch) if story is not None else None
-    return Resume(name, session, cwd, text, seqs, fresh, restart=True)
-
-
-def _story_of(feature: Feature | None, name: str) -> dict | None:
-    if feature is None or not name.startswith(fleet.HAND):
-        return None
-    return next((s for s in feature.live if fleet.hand_name(s["identifier"]) == name), None)
-
-
-def _deaf(tick: _Tick, name: str, messages: list[Message]) -> bool:
-    row = tick.facts.hands.get(name)
-    ended = epoch(row.turn_ended) if row is not None and row.turn_ended else 0.0
-    oldest = min(epoch(m.written) for m in messages)
-    return tick.facts.now - max(oldest, ended, tick.facts.woke) > UNHEARD
+def _restarted_spike(tick: _Tick, row: HandRow) -> list[Launch | Resume]:
+    if row.session and tick.listed(row.session):
+        return [Resume(row.name, row.session, row.cwd, wakes.nudge_body(), (), None, restart=True)]
+    parents = Path(row.cwd).parents
+    return [Launch(row.name, row.ref, SPIKE, parents[1], None, tick.me, restart=True)] if len(parents) > 1 else []

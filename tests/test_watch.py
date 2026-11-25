@@ -210,3 +210,26 @@ def test_an_unreadable_snapshot_while_held_keeps_the_spikes_heard():
     assert (seen.spikes, lines) == (("s1",), [])
     _, lines = watch.captain(seen, "k1", True, T + 2, T + 2, spikes=ANSWER)
     assert lines == []
+
+
+SAVED = (("ACME-1@t1", watch.DRAFT),)
+
+
+def test_a_held_queue_rings_once_for_each_new_draft():
+    seen, lines = watch.captain(Seen("k1", True, 0, T), "k1", True, T, T + 1)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k1", True, T + 1, T + 2, drafts=SAVED)
+    assert lines == [watch.DRAFT]
+    seen, lines = watch.captain(seen, "k1", True, T + 2, T + 3, drafts=SAVED)
+    assert lines == []
+    seen, lines = watch.captain(seen, "k1", True, T + 3, T + 4, drafts=(*SAVED, ("ACME-2@t2", watch.DRAFT)))
+    assert lines == [watch.DRAFT]
+    _, lines = watch.captain(seen, "k1", True, T + 4, T + 5, drafts=(("ACME-1@t9", watch.DRAFT),))
+    assert lines == [watch.DRAFT]
+
+
+def test_a_draft_saved_before_the_hold_does_not_ring_on_hold():
+    seen, lines = watch.captain(Seen("k1", True, 0, T), "k1", False, T, T + 1, drafts=SAVED)
+    assert lines == []
+    _, lines = watch.captain(seen, "k1", True, T + 1, T + 2, drafts=SAVED)
+    assert lines == []

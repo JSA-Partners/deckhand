@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
-from deckhand import reading
+from deckhand import implplan, reading, signoff
 from deckhand.config import LocalConfig
+from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet
 from deckhand.linear.client import LinearError
+from deckhand.ops import create_id
+from deckhand.records import Record
 from deckhand.step import Refusal
+from deckhand.steps.after import After
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import approve_everything, setup
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import TEAM, approve_everything, setup
+from tests.test_implplan import manifest
 from tests.test_queue import ME, Clock, alpha, hand, started
+from tests.test_step_build import state
+
+__all__ = ["state"]
 
 DAY = date(2026, 11, 17)
 LOCAL = LocalConfig(slot_cap=1)
@@ -38,7 +48,7 @@ def read(
 def story(ref: str, title: str, since: str) -> dict:
     stage = {"name": "planning", "round": None, "since": since}
     found = {"ref": ref, "title": title, "state": "Backlog", "owner": None, "mine": True, "blocked_by": []}
-    return found | {"stage": stage, "completed_at": None}
+    return found | {"stage": stage, "completed_at": None, "draft": None}
 
 
 def test_read_returns_the_building_facts():
@@ -53,11 +63,12 @@ def test_read_returns_the_building_facts():
         "feature": "Alpha",
         "budget": {"feature": "Alpha", "days_used": 1, "budget_days": 7, "planning_note": False},
         "order": [
-            story("ACME-1", "Orders", "2026-11-18T11:06:54.000Z"),
-            story("ACME-2", "Receipts", "2026-11-18T11:06:55.000Z"),
+            story("ACME-1", "Orders", "2026-11-18T11:06:56.000Z"),
+            story("ACME-2", "Receipts", "2026-11-18T11:06:57.000Z"),
         ],
         "cycle": [],
         "release": False,
+        "chores": 0,
     }
 
 
@@ -102,3 +113,46 @@ def test_missing_clone_degrades_to_a_note():
     policy = reading.policy_for(notes)({"labels": ["widgets"]})
     assert policy.second_signoff is False
     assert [n.startswith("no clone for widgets in ") for n in notes] == [True]
+
+
+def test_two_open_features_load_no_chore_feature_from_their_signed_stories():
+    store = setup()
+    plan = manifest(after_merge=["rotate the webhook secret"])
+    store.put_record("s1", Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", plan))
+    store.put_record("s1", Record(signoff.KIND, "s1", "c1:digest", "person:sess", {"answer": "Sign off"}))
+    opened_next(store)
+    found = read(store)
+    assert found.feature is None and found.notes[0].startswith("more than one feature is open")
+    assert (found.chores, found.facts["chores"]) == ([], 0)
+
+
+@pytest.mark.parametrize("name", ["Older", "Zeta"])
+def test_the_feature_merged_last_stays_current_over_one_released_on_the_same_dates(name: str, state: Path):
+    clock = Clock()
+    store = released(store=FakeStore(now=clock))
+    merged, clock.ms = clock.ms, clock.ms - 3_600_000
+    older = create_id(f"ACME:{name}", "feature")
+    store.create_project(older, "ACME", name, "", [FEATURE_LABEL])
+    store.set_project_dates(older, "2026-11-16", "2026-11-23")
+    store.create_issue("s9", "ACME", "Nine", "Outcome.", older, [])
+    store.set_issue_state("s9", "Done")
+    clock.ms = merged
+    found = read(store)
+    assert (found.facts["feature"], found.facts["release"]) == ("Alpha", False)
+    assert [row["ref"] for row in found.facts["order"]] == ["ACME-1", "ACME-2"]
+    for n in ("1", "2"):
+        After(store).apply(["ACME-1", "done", n, "--note", "ran it", *TEAM])
+    found = read(store)
+    assert (found.facts["feature"], found.facts["release"]) == ("Alpha", True)
+
+
+def test_a_story_row_carries_its_draft_until_it_is_taken():
+    from deckhand import queue
+
+    store = alpha(planning=True)
+    store.put_record("s1", Record(queue.DRAFT, "s1", "d1", "agent:draft", {}))
+    [saved] = [r for r in store.records("s1") if r.kind == queue.DRAFT]
+    rows = {row["ref"]: row["draft"] for row in read(store).facts["order"]}
+    assert rows == {"ACME-1": saved.at, "ACME-2": None}
+    store.put_record("s1", Record(queue.TAKEN, "s1", "d1", "agent:captain", {}))
+    assert [row["draft"] for row in read(store).facts["order"]] == [None, None]

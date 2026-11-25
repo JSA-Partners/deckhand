@@ -4,6 +4,8 @@ import http.client
 import io
 import json
 import ssl
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -387,6 +389,41 @@ def test_reset_brings_a_down_transport_back() -> None:
         client(transport).query("q", {})
     transport.reset()
     assert client(transport).query("q", {}) == {"x": 1}
+
+
+def test_revive_clears_the_latch_and_keeps_the_connection() -> None:
+    connections = Connections([ConnectionRefusedError()], [Response(200, ok({"n": 0})), Response(200, ok({"n": 1}))])
+    transport = KeepAliveTransport(connections)
+    with pytest.raises(LinearError):
+        client(transport).query("q", {})
+    transport.revive()
+    assert client(transport).query("q", {}) == {"n": 0}
+    transport.revive()
+    assert client(transport).query("q", {}) == {"n": 1}
+    assert len(connections.made) == 2 and not connections.made[1].closed
+
+
+def test_two_threads_never_share_the_connection_mid_request() -> None:
+    events: list[str] = []
+
+    class Slow(Connection):
+        def request(self, method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> None:
+            events.append("enter")
+            time.sleep(0.02)
+            super().request(method, url, body, headers)
+
+        def getresponse(self) -> Response:
+            events.append("exit")
+            return super().getresponse()
+
+    connections = Connections([Response(200, ok({})) for _ in range(6)], kind=Slow)
+    linear = client(KeepAliveTransport(connections))
+    threads = [threading.Thread(target=lambda: [linear.query("q", {}) for _ in range(3)]) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert events == ["enter", "exit"] * 6
 
 
 def test_requests_name_deckhand_as_the_user_agent() -> None:

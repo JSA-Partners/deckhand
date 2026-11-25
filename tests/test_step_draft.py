@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import features, launch, ops, planning, queue, spec
+from deckhand import features, launch, ops, planning, queue, spec, versions
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.draft import Draft
 from tests.test_feature_approval import DRAFT as ITEM_DRAFT
@@ -13,6 +14,7 @@ from tests.test_feature_approval import approve_everything, decided, expect, set
 
 TEAM = ["--team-key", "ACME"]
 DRAFT = "Outcome: an order is placed.\n\nExamples:\n- a paid order ships.\n"
+MAP_TEXT = "Outcome: an order is placed.\n\nUnknowns:\n- which carrier"
 
 
 def draft_file(tmp_path: Path, text: str = DRAFT) -> str:
@@ -99,6 +101,63 @@ def test_take_refuses_without_a_draft():
     assert store.writes == written
 
 
+def test_drop_keeps_the_map_description_and_clears_the_gap(tmp_path: Path):
+    store = setup()
+    step = Draft(store, me=lambda: "viewer-1")
+    step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
+    assert "ACME-1: its draft is not taken" in features.approval_gaps(store, features.open_feature(store, "ACME"))
+    before = len(store.writes)
+    step.apply(["ACME-1", "drop", *TEAM])
+    assert store.writes[before:] == [("put_record", "s1", queue.DROPPED_DRAFT, "s1")]
+    [dropped] = [r for r in store.records("s1") if r.kind == queue.DROPPED_DRAFT]
+    assert dropped.author == "agent:captain"
+    assert store.issue("s1")["description"] == "Outcome: an order is placed."
+    gaps = features.approval_gaps(store, features.open_feature(store, "ACME"))
+    assert not [gap for gap in gaps if gap.startswith("ACME-1: its draft")]
+    written = list(store.writes)
+    step.apply(["ACME-1", "drop", *TEAM])
+    assert store.writes == written
+    with pytest.raises(Refusal, match="ACME-1 took or dropped its draft already"):
+        step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
+    with pytest.raises(Refusal, match="ACME-1 dropped its draft"):
+        step.apply(["ACME-1", "take", *TEAM])
+    assert store.writes == written
+
+
+def test_drop_after_a_take_restores_the_maps_text(tmp_path: Path):
+    store = setup()
+    stub = {"unknowns": [], "new_here": [], "decisions": [], "after_merge": [], "description": MAP_TEXT}
+    store.put_record("s1", Record("stub", "orders", "1", versions.MAP_AUTHOR, stub))
+    step = Draft(store, me=lambda: "viewer-1")
+    step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
+    step.apply(["ACME-1", "take", *TEAM])
+    assert store.issue("s1")["description"] == DRAFT
+    before = len(store.writes)
+    step.apply(["ACME-1", "drop", *TEAM])
+    assert store.writes[before:] == [
+        ("set_issue_text", "s1", "Orders", MAP_TEXT),
+        ("put_record", "s1", queue.DROPPED_DRAFT, "s1"),
+    ]
+    assert store.issue("s1")["description"] == MAP_TEXT
+    gaps = features.approval_gaps(store, features.open_feature(store, "ACME"))
+    assert not [gap for gap in gaps if gap.startswith("ACME-1: its draft")]
+    written = list(store.writes)
+    step.apply(["ACME-1", "drop", *TEAM])
+    with pytest.raises(Refusal, match="ACME-1 took or dropped its draft already"):
+        step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
+    with pytest.raises(Refusal, match="ACME-1 dropped its draft"):
+        step.apply(["ACME-1", "take", *TEAM])
+    assert store.writes == written
+
+
+def test_drop_refuses_a_story_with_no_saved_draft():
+    store = setup()
+    written = list(store.writes)
+    with pytest.raises(Refusal, match="ACME-1 has no saved draft to drop"):
+        Draft(store, me=lambda: "viewer-1").apply(["ACME-1", "drop", *TEAM])
+    assert store.writes == written
+
+
 def test_context_prints_the_stub_the_contract_and_the_shape(capsys: pytest.CaptureFixture[str]):
     store = setup()
     Draft(store, me=lambda: "viewer-1").context(["ACME-1", *TEAM])
@@ -116,7 +175,7 @@ def test_draft_refused_once_the_draft_is_taken(tmp_path: Path):
     step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
     step.apply(["ACME-1", "take", *TEAM])
     written = list(store.writes)
-    with pytest.raises(Refusal, match="ACME-1 took its draft already"):
+    with pytest.raises(Refusal, match="ACME-1 took or dropped its draft already"):
         step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
     assert store.writes == written
 

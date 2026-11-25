@@ -61,4 +61,35 @@ class Adopt:
     session: str
 
 
-Action = Launch | Resume | Post | Stop | Remove | Adopt
+@dataclass(frozen=True)
+class Leave:
+    name: str
+    issue: str
+    records: tuple[Record, ...]
+
+
+@dataclass(frozen=True)
+class Attach:
+    name: str
+    key: str
+    digest: str
+    issue: str
+    url: str
+    title: str
+    subtitle: str
+    metadata: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class PutDocument:
+    name: str
+    key: str
+    digest: str
+    id: str
+    parent: str
+    title: str
+    body: str
+
+
+Mirror = Attach | PutDocument
+Action = Launch | Resume | Post | Stop | Remove | Adopt | Leave | Attach | PutDocument

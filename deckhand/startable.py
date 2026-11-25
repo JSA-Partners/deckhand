@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import asks, config, features, fleet, order, planning, queue, signoff
+from deckhand import asks, chores, config, features, fleet, order, planning, queue, stalls
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -24,11 +24,6 @@ def clone_of(story: dict, clones: Mapping[str, Path]) -> Path | None:
     return next((clones[label] for label in story["labels"] if label in clones), None)
 
 
-def _open_chores(story: dict, records: list[Record]) -> bool:
-    chores = enumerate(signoff.after_items(records, story["id"]), start=1)
-    return any(signoff.after_status(records, story["id"], n, text)[0] == signoff.OPEN for n, text in chores)
-
-
 def _blocked_by(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict]) -> list[str]:
     blockers = [by_id[blocker] for blocker, blocked in edges if blocked == story["id"] and blocker in by_id]
     return [s["identifier"] for s in blockers if s["state"] != order.DONE]
@@ -37,11 +32,11 @@ def _blocked_by(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict
 def kind(feature: Feature, story: dict) -> str:
     if story["state"] == order.DONE:
         return AFTER
-    return DRAFT if features.phase(feature) is Phase.PLANNING else BUILD
+    return DRAFT if features.phase(feature) is Phase.PLANNING or features.needs_draft(feature, story) else BUILD
 
 
 def why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
-    if any(r.kind in (queue.DRAFT, queue.TAKEN) for r in feature.records.get(story["id"], [])):
+    if any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in feature.records.get(story["id"], [])):
         return f"{story['identifier']} is already drafted"
     if planning.section(store, feature, "Contract") is None:
         return f"the Contract of {features.describe(feature.project)} is not saved, so no story is drafted yet"
@@ -61,14 +56,16 @@ def why_not(
     if story["state"] == order.DONE:
         if story["assignee"] != me:
             return f"{ref} is Done and not yours"
-        if not _open_chores(story, feature.records.get(story["id"], [])):
+        if not chores.open_chores(story, feature.records.get(story["id"], [])):
             return f"{ref} is Done with no open after-merge item"
-    elif features.phase(feature) is Phase.PLANNING:
+    elif features.phase(feature) is Phase.PLANNING or features.needs_draft(feature, story):
         drafted = why_not_drafted(store, feature, story)
         if drafted is not None:
             return drafted
     elif features.phase(feature) is not Phase.BUILDING:
         return f"{features.describe(feature.project)} is {features.phase(feature).value}, not building"
+    elif feature.reapproval_due and queue.last_start(feature.records.get(story["id"], []), queue.STORY_HAND) is None:
+        return f"{ref} waits for the changed plan's approval"
     else:
         waiting = _blocked_by(story, edges, {s["id"]: s for s in feature.live})
         if waiting:
@@ -86,6 +83,20 @@ def startable(store: Store, feature: Feature, me: str, clones: Mapping[str, Path
     build = [Work(s, kind(feature, s), clone_of(s, clones)) for s in found if s["state"] != order.DONE]
     after = [Work(s, AFTER, clone_of(s, clones)) for s in found if s["state"] == order.DONE]
     return [w for w in build + after if w.clone is not None]
+
+
+def _chores(feature: Feature, me: str) -> list[dict]:
+    done = [s for s in feature.live if s["state"] == order.DONE]
+    return [s for s in done if s["assignee"] == me and chores.open_chores(s, feature.records.get(s["id"], []))]
+
+
+# A released feature only ever starts a hand for its own after-merge items, so its build order is never read.
+def after_merge(feature: Feature, me: str, clones: Mapping[str, Path]) -> list[Work]:
+    return [Work(s, AFTER, clone) for s in _chores(feature, me) if (clone := clone_of(s, clones)) is not None]
+
+
+def cloneless(feature: Feature, me: str, clones: Mapping[str, Path]) -> list[dict]:
+    return [s for s in _chores(feature, me) if clone_of(s, clones) is None]
 
 
 def launch_of(kind: str) -> str:
@@ -108,9 +119,9 @@ def due(
     if queue.last_start(records, launch) is None:
         return True
     second = queue.second_due(story, records, policy_for) is not None
-    if not queue.stalled(story, records, session, launch, second):
+    if not stalls.stalled(story, records, session, launch, second):
         return False
-    return queue.auto_restart(records, launch, restarts) or queue.stall_answer(records, launch) == queue.RESTART
+    return stalls.auto_restart(records, launch, restarts) or stalls.stall_answer(records, launch) == stalls.RESTART
 
 
 def wake_due(feature: Feature, story: dict) -> Record | None:
@@ -119,6 +130,6 @@ def wake_due(feature: Feature, story: dict) -> Record | None:
     launch = launch_of(kind(feature, story))
     if due is None or queue.last_start(records, launch) is None:
         return None
-    if launch == queue.DRAFT_HAND and any(r.kind in (queue.DRAFT, queue.TAKEN) for r in records):
+    if launch == queue.DRAFT_HAND and any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in records):
         return None
     return due

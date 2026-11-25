@@ -5,22 +5,36 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, queue, wakes
-from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand import asks, chores, config, features, fleet, implplan, mirror, planning, queue, spikes, stalls, wakes
+from deckhand.actions import Action, Adopt, Launch, Leave, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import Facts, reconcile, reserved
-from deckhand.records import HAND, Record, iso
+from deckhand.reconcile import IN_PROGRESS, LAUNCH_GRACE, Facts, reconcile, reserved
+from deckhand.records import HAND, Record, content_hash, epoch, iso
+from deckhand.steps.after import After
+from deckhand.steps.build import Build
+from deckhand.steps.decide import Decide
+from deckhand.steps.draft import Draft
+from deckhand.steps.plan import Plan
+from deckhand.steps.review import FeatureReview
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
-from tests.test_feature_approval import P1, approve_everything, reapprove, setup
-from tests.test_queue import asked
+from tests.test_chores import opened_next, released
+from tests.test_feature_approval import P1, TEAM, approve_everything, mapped, reapprove, setup
+from tests.test_implplan import manifest, repo
+from tests.test_mirror import CONTRACT, mapped_stub, named, signed
+from tests.test_queue import asked, waiting
+from tests.test_step_after import CHORES
+from tests.test_step_build import Shell as GitShell
+from tests.test_step_draft import draft_file
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
+from tests.test_step_review import answer as answered
+from tests.test_step_review import record_round
 from tests.test_step_stories import setup as empty_feature
 
-__all__ = ["clone", "state"]
+__all__ = ["clone", "repo", "state"]
 
 T = 1795000000.0
 BEFORE, AFTER = "2000-01-01T00:00:00.000Z", "2999-01-01T00:00:00.000Z"
@@ -69,7 +83,12 @@ def facts(
     me: str | None = ME,
     **rest: object,
 ) -> Facts:
-    reading = Reading("ACME", features.current(store, "ACME"), me, [], {}, [])
+    read = fleet.sessions(Shell(*sessions))
+    current = features.current(store, "ACME")
+    seen = {s["id"] for s in current.stories} if current is not None else set()
+    alive = frozenset(s.name for s in read.sessions if fleet.alive(s))
+    reading = Reading("ACME", current, me, [], {}, [], chores.elsewhere(store, "ACME", seen, alive))
+    rest.setdefault("asked", frozenset(h.ref for h in hands if h.kind == "spike"))
     if "labels" not in rest:
         rest["labels"] = {"ACME": store.repository_labels("ACME")}
     if "clones" not in rest:
@@ -78,7 +97,7 @@ def facts(
     return Facts(
         now=now,
         woke=woke,
-        read=fleet.sessions(Shell(*sessions)),
+        read=read,
         hands={h.name: h for h in hands},
         pending=list(pending),
         reading=reading,
@@ -111,6 +130,154 @@ def test_a_failed_fleet_read_does_nothing(clone: Path):
     assert reconcile(broken, store) == []
 
 
+def test_a_chore_on_a_released_feature_gets_a_hand_after_the_next_feature_opens(clone: Path):
+    store = released(CHORES[:1])
+    opened_next(store)
+    alpha = next(s for s in store.project_issues(P1) if s["id"] == "s1")
+    found = reconcile(facts(store), store)
+    assert found == [Launch("hand-ACME-1", "ACME-1", queue.STORY_HAND, clone, alpha, ME, True)]
+    After(store).apply(["ACME-1", "done", "1", "--note", "x", *TEAM])
+    idle = row("ACME-1", "idle", "idle")
+    assert reconcile(facts(store, idle, hands=(held(),)), store) == [Stop("hand-ACME-1", "id-ACME-1", "finished")]
+    store = released(CHORES[:1])
+    opened_next(store)
+    store.assign("s1", "someone-else")
+    assert reconcile(facts(store), store) == []
+
+
+def test_a_done_story_with_an_open_chore_gets_a_fresh_launch_not_a_resume(clone: Path):
+    store = released(CHORES[:1])
+    alpha = next(s for s in store.project_issues(P1) if s["id"] == "s1")
+    stopped = row("ACME-1", "stopped")
+    found = reconcile(facts(store, stopped, hands=(held(),)), store)
+    assert found == [Launch("hand-ACME-1", "ACME-1", queue.STORY_HAND, clone, alpha, ME, True)]
+
+
+def test_when_the_chore_hand_stops_the_items_go_to_the_person(clone: Path):
+    store = released()
+    beta = opened_next(store)
+    started(store)
+    sessions = (row("ACME-1", "stopped"), row("ACME-9", "working", "busy"))
+    why = {"why": "its hand stopped after the merge", "session": "sid-ACME-1"}
+    left = tuple(
+        Record(chores.AFTER_PERSON, f"s1:{n}", content_hash(text), "agent:engine", {"n": n, "text": text} | why)
+        for n, text in enumerate(CHORES, start=1)
+    )
+    assert reconcile(facts(store, *sessions, hands=(held(),)), store) == [Leave("hand-ACME-1", "s1", left)]
+    for record in left:
+        store.put_record("s1", record)
+    assert reconcile(facts(store, *sessions, hands=(held(),), cap=2), store) == []
+    current = features.current(store, "ACME")
+    assert current is not None and current.project["id"] == beta
+    elsewhere = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
+    queued = queue.items(store, "ACME", current, ME, fleet.Fleet([], ""), lambda s: Policy("w"), elsewhere=elsewhere)
+    assert [(i.kind, i.ref) for i in queued if i.kind == chores.AFTER] == [(chores.AFTER, "ACME-1")] * 2
+
+
+def test_a_fresh_chore_hand_listed_before_it_attaches_is_neither_handed_over_nor_removed(clone: Path):
+    store = released()
+    started(store)
+    start = queue.last_start(store.records("s1"))
+    assert start is not None
+    launched = epoch(start.at)
+    old = row("ACME-1", "stopped")
+    attaching = row("ACME-1", "working") | {"id": "id-new", "sessionId": "sid-new"}
+    fresh = held(short="id-new")
+    assert reconcile(facts(store, old, attaching, hands=(fresh,), now=launched + 1), store) == []
+    assert reconcile(facts(store, old, hands=(fresh,), now=launched + 1), store) == []
+    late = reconcile(facts(store, old, attaching, hands=(fresh,), now=launched + LAUNCH_GRACE + 1), store)
+    assert [type(action).__name__ for action in late] == ["Leave"]
+
+
+def test_an_idle_chore_hand_past_its_nudge_is_stopped(clone: Path):
+    store = released(CHORES[:1])
+    started(store)
+    idle, name = row("ACME-1", "idle", "idle"), frozenset({"hand-ACME-1"})
+    first = held(turn_ended=at(T - 200))
+    [nudge] = reconcile(facts(store, idle, hands=(first,), idle=name), store)
+    assert isinstance(nudge, Post) and nudge.kind == wakes.NUDGE
+    nudged = held(turn_ended=at(T - 200), restarts=1)
+    found = reconcile(facts(store, idle, hands=(nudged,), idle=name), store)
+    assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
+
+
+def test_a_chore_hand_waiting_on_an_answer_is_held_then_woken(clone: Path):
+    stopped = row("ACME-1", "stopped")
+    for since_merge in (False, True):
+        store = released(CHORES[:1])
+        if since_merge:
+            started(store)
+        asked(store, "s1")
+        assert reconcile(facts(store, stopped, hands=(held(),)), store) == []
+    qid = asks.question_id("Which queue?")
+    data = {"answer": "Redis", "nonce": "n1", "by": ME}
+    store.put_record("s1", Record(asks.ANSWER, qid, "v1", "person:session-1", data))
+    found = reconcile(facts(store, stopped, hands=(held(),)), store)
+    assert [(type(a).__name__, a.kind) for a in found if isinstance(a, Post)] == [("Post", asks.ANSWER)]
+    assert len(found) == 1
+    woken = reconcile(facts(store, stopped, hands=(held(),), pending=(mail(),)), store)
+    assert [type(a).__name__ for a in woken if not isinstance(a, Post)] == ["Resume"]
+
+
+def test_a_chore_hand_that_left_one_item_and_idles_past_its_nudge_is_stopped(clone: Path):
+    store = released()
+    left = chores.after_record(chores.AFTER_PERSON, "s1", 1, CHORES[0], {"why": "it needs the vault"})
+    store.put_record("s1", left)
+    started(store)
+    idle = row("ACME-1", "idle", "idle")
+    nudged = held(turn_ended=at(T - 200), restarts=1)
+    found = reconcile(facts(store, idle, hands=(nudged,), idle=frozenset({"hand-ACME-1"})), store)
+    assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
+
+
+def test_a_chore_hand_of_an_older_feature_is_woken_by_its_answer(clone: Path):
+    store = released(CHORES[:1])
+    asked(store, "s1")
+    opened_next(store)
+    stopped = row("ACME-1", "stopped")
+    assert reconcile(facts(store, stopped, hands=(held(),)), store) == []
+    data = {"answer": "Redis", "nonce": "n1", "by": ME}
+    store.put_record("s1", Record(asks.ANSWER, asks.question_id("Which queue?"), "v1", "person:session-1", data))
+    found = reconcile(facts(store, stopped, hands=(held(),)), store)
+    assert [(a.name, a.kind) for a in found if isinstance(a, Post)] == [("hand-ACME-1", asks.ANSWER)]
+
+
+def test_an_older_feature_keeps_its_story_map_and_sign_offs_mirrored(clone: Path):
+    store = named(released(CHORES[:1]))
+    signed(store)
+    for story in ("s1", "s2"):
+        mapped_stub(store, story, [], [])
+    opened_next(store)
+    current = features.current(store, "ACME")
+    assert current is not None
+    [alpha] = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
+    wanted = mirror.wanted(alpha, "")
+    assert {type(a).__name__ for a in wanted} == {"Attach", "PutDocument"}
+    assert reconcile(facts(store, cap=0, contract=CONTRACT), store) == wanted
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, readable=False), store) == []
+
+
+def test_a_chore_with_no_clone_here_goes_to_the_person(clone: Path):
+    why = {"why": "no clone of its repository on this machine", "session": ""}
+    left = tuple(
+        Record(chores.AFTER_PERSON, f"s1:{n}", content_hash(text), "agent:engine", {"n": n, "text": text} | why)
+        for n, text in enumerate(CHORES, start=1)
+    )
+    for opened in (False, True):
+        store = released()
+        if opened:
+            opened_next(store)
+        assert reconcile(facts(store, clones={}, policies={}), store) == [Leave("hand-ACME-1", "s1", left)]
+        assert reconcile(facts(store, clones={}, policies={}, configured=False), store) == []
+
+
+def test_a_name_busy_with_no_launch_resume_or_stop_takes_no_slot(clone: Path):
+    store = building()
+    leaving = frozenset({"hand-ACME-9"})
+    assert reconcile(facts(store, busy=leaving), store) == [launch(store, clone)]
+    assert reconcile(facts(store, busy=leaving, holds=leaving), store) == []
+
+
 def test_a_free_slot_launches_the_next_story_in_build_order(clone: Path):
     store = building()
     assert reconcile(facts(store), store) == [launch(store, clone)]
@@ -133,9 +300,10 @@ def test_a_story_in_progress_with_no_local_start_is_held_elsewhere(clone: Path):
 
 def test_a_busy_name_gets_no_action(clone: Path):
     store = building()
-    assert reconcile(facts(store, busy=frozenset({"hand-ACME-1"})), store) == []
+    busy = frozenset({"hand-ACME-1"})
+    assert reconcile(facts(store, busy=busy, holds=busy), store) == []
     copies = (row("ACME-1", "working", "busy", at=1), row("ACME-1", "working", "busy") | {"id": "id-new"})
-    assert reconcile(facts(store, *copies, busy=frozenset({"hand-ACME-1"})), store) == []
+    assert reconcile(facts(store, *copies, busy=busy, holds=busy), store) == []
 
 
 def test_a_wanted_row_with_a_live_session_is_adopted_not_launched(clone: Path):
@@ -205,65 +373,6 @@ def test_a_hand_started_after_the_merge_gets_no_sync(clone: Path):
     assert reconcile(facts(store, *sessions, hands=hands, cap=2), store) == []
 
 
-def test_a_stopped_hand_with_mail_is_resumed_with_the_text(clone: Path):
-    store = alone()
-    m = mail()
-    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(m,)), store)
-    assert found == [resume(store, [m])]
-
-
-def test_a_stopped_hand_with_mail_waits_for_a_slot(clone: Path):
-    store = alone()
-    sessions = (row("ACME-1", "stopped"), row("ACME-9", "working", "busy"))
-    assert reconcile(facts(store, *sessions, hands=(held(),), pending=(mail(),)), store) == []
-
-
-def test_an_alive_hand_with_fresh_mail_is_left_to_its_watcher(clone: Path):
-    store = alone()
-    idle = row("ACME-1", "idle", "idle")
-    assert reconcile(facts(store, idle, hands=(held(),), pending=(mail(),), now=T + 10), store) == []
-
-
-def test_an_idle_alive_hand_deaf_for_two_minutes_is_stopped(clone: Path):
-    store = alone()
-    idle = row("ACME-1", "idle", "idle")
-    found = reconcile(facts(store, idle, hands=(held(),), pending=(mail(),), now=T + 121), store)
-    assert found == [Stop("hand-ACME-1", "id-ACME-1", "unheard", (1,))]
-    seen = mail(delivered=at(T + 5))
-    assert reconcile(facts(store, idle, hands=(held(),), pending=(seen,), now=T + 121), store) == []
-
-
-def test_a_working_hand_or_one_at_a_native_prompt_is_never_stopped_as_deaf(clone: Path):
-    store = alone()
-    for session in (row("ACME-1", "working", "busy"), row("ACME-1", "idle", "idle") | {"waitingFor": "input needed"}):
-        assert reconcile(facts(store, session, hands=(held(),), pending=(mail(),), now=T + 600), store) == []
-
-
-def test_a_due_story_with_unacknowledged_mail_is_not_nudged(clone: Path):
-    store = alone()
-    started(store)
-    seen = mail(delivered=at(T))
-    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(seen,)), store)
-    assert [type(action) for action in found] == [Resume]
-
-
-def test_a_resume_carries_mail_delivered_but_not_acknowledged(clone: Path):
-    store = alone()
-    started(store)
-    seen, fresh = mail(1, delivered=at(T)), mail(2)
-    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(seen, fresh)), store)
-    assert found == [resume(store, [seen, fresh])]
-
-
-def test_mail_for_a_stopped_hand_wins_the_last_slot_over_a_new_story(clone: Path):
-    store = building()
-    m = mail()
-    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(m,), cap=1), store)
-    assert found == [resume(store, [m])]
-    found = reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(m,), cap=2), store)
-    assert found == [resume(store, [m]), launch(store, clone, "ACME-2")]
-
-
 def test_reconcile_works_from_facts_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def unread(*_: object) -> None:
         raise AssertionError("reconcile read a file")
@@ -283,13 +392,6 @@ def test_a_session_the_fleet_no_longer_lists_is_launched_anew(clone: Path):
     started(store)
     found = reconcile(facts(store, hands=(held(session="sid-gone"),)), store)
     assert found == [launch(store, clone, restart=True)]
-
-
-def test_a_wake_from_sleep_restarts_the_deaf_clock(clone: Path):
-    store = alone()
-    idle = row("ACME-1", "idle", "idle")
-    woken = facts(store, idle, hands=(held(),), pending=(mail(),), woke=T + 3600, now=T + 3610)
-    assert reconcile(woken, store) == []
 
 
 def fresh_start(store: FakeStore) -> Record:
@@ -317,7 +419,7 @@ def test_a_first_stop_with_unacknowledged_mail_is_resumed_once_as_its_restart(cl
     feature = features.current(store, "ACME")
     read = fleet.sessions(Shell(stopped))
     waiting = queue.items(store, "ACME", feature, ME, read, lambda _: Policy("widgets"), restarts={"ACME-1": 1})
-    assert [(item.kind, item.ref) for item in waiting] == [(queue.STALLED, "ACME-1")]
+    assert [(item.kind, item.ref) for item in waiting] == [(stalls.STALLED, "ACME-1")]
 
 
 def nudge(store: FakeStore) -> Resume:
@@ -352,7 +454,7 @@ def test_a_first_stop_resumes_once_across_ticks_then_asks(clone: Path):
     assert hand.restarts == 1
     assert reconcile(facts(store, working, hands=(hand,)), store) == []
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == []
-    assert stalled_items(store, stopped, hand.restarts) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, hand.restarts) == [(stalls.STALLED, "ACME-1")]
 
 
 def test_a_restart_answer_resumes_once_across_ticks_then_asks_again(clone: Path):
@@ -362,17 +464,17 @@ def test_a_restart_answer_resumes_once_across_ticks_then_asks_again(clone: Path)
     stopped, working = row("ACME-1", "stopped"), row("ACME-1", "working", "busy")
     hand = held(restarts=1)
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == []
-    assert stalled_items(store, stopped, 1) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, 1) == [(stalls.STALLED, "ACME-1")]
     start = queue.last_start(store.records("s1"))
     assert start is not None
-    store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": queue.RESTART}))
+    store.put_record("s1", Record(stalls.STALLED, "s1", start.at, "person:session-1", {"answer": stalls.RESTART}))
     assert stalled_items(store, stopped, 1) == []
     [again] = reconcile(facts(store, stopped, hands=(hand,)), store)
     assert again == nudge(store)
     hand = acted(store, again, hand)
     assert reconcile(facts(store, working, hands=(hand,)), store) == []
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == []
-    assert stalled_items(store, stopped, hand.restarts) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, hand.restarts) == [(stalls.STALLED, "ACME-1")]
 
 
 def test_a_relaunched_session_is_adopted_over_the_recorded_one(clone: Path):
@@ -383,30 +485,6 @@ def test_a_relaunched_session_is_adopted_over_the_recorded_one(clone: Path):
     assert found == [Adopt("hand-ACME-1", "id-new", "sid-new")]
 
 
-def test_a_draft_session_is_never_lent_to_a_story_hand_with_mail(clone: Path):
-    store = alone()
-    started(store, kind=queue.DRAFT_HAND)
-    found = reconcile(facts(store, row("ACME-1", "done"), hands=(hand_row(),), pending=(mail(),)), store)
-    assert found == [launch(store, clone)]
-
-
-def test_a_finished_hand_with_mail_is_never_resumed(clone: Path):
-    store = alone()
-    store.assign("s1", ME)
-    started(store)
-    store.set_issue_state("s1", "Done")
-    assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(held(),), pending=(mail(),)), store) == []
-
-
-def test_a_written_draft_with_mail_is_never_resumed(clone: Path):
-    store = setup()
-    store.assign("s2", "someone-else")
-    started(store, kind=queue.DRAFT_HAND)
-    store.put_record("s1", Record(queue.DRAFT, "s1", "v1", HAND, {}))
-    hand = held(kind=queue.DRAFT_HAND)
-    assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(hand,), pending=(mail(),)), store) == []
-
-
 def test_a_busy_hand_holds_its_slot_until_the_fleet_shows_it(clone: Path):
     store = building()
     started(store)
@@ -414,31 +492,9 @@ def test_a_busy_hand_holds_its_slot_until_the_fleet_shows_it(clone: Path):
     stopped, working = row("ACME-1", "stopped"), row("ACME-1", "working", "busy")
     hand = held(restarts=1)
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == [launch(store, clone, "ACME-2")]
-    assert reconcile(facts(store, stopped, hands=(hand,), busy=busy), store) == []
-    found = reconcile(facts(store, working, hands=(hand,), busy=busy, cap=2), store)
+    assert reconcile(facts(store, stopped, hands=(hand,), busy=busy, holds=busy), store) == []
+    found = reconcile(facts(store, working, hands=(hand,), busy=busy, holds=busy, cap=2), store)
     assert found == [launch(store, clone, "ACME-2")]
-
-
-def test_an_unheard_stop_and_its_resume_are_not_the_stops_restart(clone: Path):
-    store = alone()
-    started(store)
-    sync = Message(1, "sync:s2:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-2 merged.", at(T), None, None)
-    hand, heard = held(restarts=1), frozenset({1})
-    idle, stopped = row("ACME-1", "idle", "idle"), row("ACME-1", "stopped")
-    found = reconcile(facts(store, idle, hands=(hand,), pending=(sync,), now=T + 121), store)
-    assert found == [Stop("hand-ACME-1", "id-ACME-1", "unheard", (1,))]
-    found = reconcile(facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 130, unheard=heard), store)
-    assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([sync]), (1,))]
-    assert reconcile(facts(store, idle, hands=(hand,), pending=(sync,), now=T + 600, unheard=heard), store) == []
-
-
-def test_the_deaf_clock_runs_from_the_last_turn_end(clone: Path):
-    store = alone()
-    idle = row("ACME-1", "idle", "idle")
-    hand = held(turn_ended=at(T + 100))
-    assert reconcile(facts(store, idle, hands=(hand,), pending=(mail(),), now=T + 150), store) == []
-    found = reconcile(facts(store, idle, hands=(hand,), pending=(mail(),), now=T + 221), store)
-    assert found == [Stop("hand-ACME-1", "id-ACME-1", "unheard", (1,))]
 
 
 def test_a_spike_row_with_a_shallow_cwd_is_skipped(clone: Path):
@@ -541,6 +597,60 @@ def test_a_wanted_spike_with_a_stopped_session_restarts(clone: Path):
     assert found == [Launch(name, key, "spike", clone, None, ME, restart=True)]
 
 
+QUESTION = "Does the queue keep order?"
+
+
+def spike_hand(clone: Path, **changes: object) -> HandRow:
+    key = spikes.key(P1, QUESTION)
+    name = fleet.spike_name(key)
+    found = HandRow(name, key, "", "spike", str(clone / ".worktrees" / name), BEFORE, "id-x", "sid-x", None, 0)
+    return replace(found, **changes)
+
+
+def spike_answered(store: FakeStore) -> None:
+    key = spikes.key(P1, QUESTION)
+    store.put_document(spikes.answer_id(P1, key), P1, spikes.TITLE + QUESTION, "Yes.")
+
+
+def test_a_started_spike_that_died_is_resumed_once(clone: Path):
+    store, dead = empty_feature(), spike_hand(clone)
+    stopped = spike_row(dead.ref, "stopped")
+    expected = [Resume(dead.name, "sid-x", dead.cwd, wakes.nudge_body(), (), None, restart=True)]
+    assert reconcile(facts(store, stopped, hands=(dead,)), store) == expected
+    assert reconcile(facts(store, stopped, hands=(replace(dead, restarts=1),)), store) == []
+    assert reconcile(facts(store, stopped, hands=(dead,), readable=False), store) == []
+    unadopted = replace(dead, session=None)
+    relaunch = Launch(dead.name, dead.ref, "spike", clone, None, ME, restart=True)
+    assert reconcile(facts(store, stopped, hands=(unadopted,)), store) == [relaunch]
+    spike_answered(store)
+    assert reconcile(facts(store, stopped, hands=(dead,)), store) == []
+
+
+def test_a_dead_spike_of_another_feature_is_not_restarted(clone: Path):
+    store, dead = empty_feature(), spike_hand(clone)
+    stopped = spike_row(dead.ref, "stopped")
+    assert reconcile(facts(store, stopped, hands=(dead,), asked=frozenset()), store) == []
+    assert reconcile(facts(store, stopped, hands=(dead,), asked=frozenset({dead.ref})), store) != []
+
+
+def test_a_spike_of_a_mapped_feature_is_not_restarted(clone: Path):
+    store, dead = empty_feature(), spike_hand(clone)
+    store.create_issue("s9", "ACME", "Orders", "Outcome.", P1, [])
+    assert reconcile(facts(store, spike_row(dead.ref, "stopped"), hands=(dead,)), store) == []
+
+
+def test_an_idle_hand_after_a_killed_turn_gets_its_nudge(clone: Path):
+    store, idle = empty_feature(), spike_hand(clone, turn_ended=at(T - 200))
+    blocked, quiet = spike_row(idle.ref, "blocked", "idle"), frozenset({idle.name})
+    key = f"nudge:{idle.ref}:{idle.turn_ended}"
+    expected = [Post(idle.name, key, wakes.NUDGE, wakes.nudge_body(), "", None, restart=True)]
+    assert reconcile(facts(store, blocked, hands=(idle,), idle=quiet), store) == expected
+    assert reconcile(facts(store, blocked, hands=(idle,)), store) == []
+    assert reconcile(facts(store, blocked, hands=(replace(idle, restarts=1),), idle=quiet), store) == []
+    spike_answered(store)
+    assert reconcile(facts(store, blocked, hands=(idle,), idle=quiet), store) == []
+
+
 def test_a_first_stop_is_restarted_once_with_the_restart_flag(clone: Path):
     store = alone()
     started(store)
@@ -589,7 +699,7 @@ def test_a_hand_stopped_as_unheard_keeps_its_slot_until_its_resume(clone: Path):
     assert found == [Stop("hand-ACME-1", "id-ACME-1", "unheard", (1,))]
     found = reconcile(facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 125, unheard=heard), store)
     assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([sync]), (1,))]
-    assert stalled_items(store, stopped, 1) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, 1) == [(stalls.STALLED, "ACME-1")]
     failed = {"hand-ACME-1": (1, T + 125)}
     waits = facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 130, unheard=heard, failed=failed)
     assert reconcile(waits, store) == []
@@ -598,14 +708,6 @@ def test_a_hand_stopped_as_unheard_keeps_its_slot_until_its_resume(clone: Path):
     quiet = frozenset({"ACME-1"})
     waiting = queue.items(store, "ACME", feature, ME, read, policy, quiet=quiet, restarts={"ACME-1": 1})
     assert waiting == []
-
-
-def test_an_unheard_stop_waits_for_a_slot_to_resume_into(clone: Path):
-    store = alone()
-    started(store)
-    sync = Message(1, "sync:s3:hand-ACME-1", "hand-ACME-1", wakes.SYNC, "ACME-3 merged.", at(T), None, None)
-    sessions = (row("ACME-1", "idle", "idle"), row("ACME-9", "working", "busy"))
-    assert reconcile(facts(store, *sessions, hands=(held(),), pending=(sync,), now=T + 121), store) == []
 
 
 def unheard_hand() -> tuple[FakeStore, Message, HandRow]:
@@ -710,13 +812,13 @@ def test_an_idle_hand_past_its_restart_waits_for_the_person(clone: Path):
 
 
 def test_an_answered_idle_hand_is_stopped_for_the_restart_or_to_stay_stopped(clone: Path):
-    for answer in (queue.RESTART, queue.LEAVE):
+    for answer in (stalls.RESTART, stalls.LEAVE):
         store = alone()
         store.assign("s1", ME)
         started(store)
         start = queue.last_start(store.records("s1"), queue.STORY_HAND)
         assert start is not None
-        store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
+        store.put_record("s1", Record(stalls.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
         found = reconcile(idle_facts(store, held(turn_ended=ENDED, restarts=1)), store)
         assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
 
@@ -727,3 +829,97 @@ def test_an_idle_hand_waiting_on_the_person_is_left_alone(clone: Path):
     started(store)
     asked(store, "s1")
     assert reconcile(idle_facts(store, held(turn_ended=ENDED)), store) == []
+
+
+def test_a_mirror_in_flight_leaves_the_slot_free(clone: Path):
+    store = building()
+    assert reconcile(facts(store, busy=frozenset({"mirror:s1"})), store) == [launch(store, clone)]
+
+
+def test_reconcile_wants_each_mirror_not_yet_written_and_none_when_unreadable(clone: Path):
+    store = named(building())
+    feature = features.current(store, "ACME")
+    assert feature is not None
+    wanted = mirror.wanted(feature, CONTRACT)
+    assert reconcile(facts(store, cap=0, contract=CONTRACT), store) == wanted
+    written = {a.key: a.digest for a in wanted}
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, mirrored=written), store) == []
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, readable=False), store) == []
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, busy=frozenset({"mirror:s1"})), store) == wanted[1:]
+
+
+def replanned(section: str = "Invariants") -> FakeStore:
+    store = setup()
+    store.create_issue("s3", "ACME", "Refunds", "Outcome: a refund is paid.", P1, ["widgets"])
+    mapped(store, "s3")
+    approve_everything(store)
+    for issue in ("s1", "s2", "s3"):
+        store.assign(issue, ME)
+    store.set_issue_state("s1", IN_PROGRESS)
+    started(store)
+    store.put_record("s3", Record(implplan.PURPOSE, "s3", "p1", "agent:implplan", manifest(after_merge=CHORES)))
+    store.set_issue_state("s3", "Done")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    planning.save_section(store, feature, section, "Totals are positive.", False)
+    return store
+
+
+def chore(store: FakeStore, clone: Path) -> Launch:
+    return Launch("hand-ACME-3", "ACME-3", queue.STORY_HAND, clone, story(store, "ACME-3"), ME, False)
+
+
+def test_an_edited_section_mid_build_keeps_building_and_starts_nothing_new(
+    clone: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = replanned()
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert (features.phase(feature), feature.reapproval_due) == (features.Phase.BUILDING, True)
+    found = reconcile(facts(store, hands=(held(),), cap=3), store)
+    assert found == [launch(store, clone, restart=True), chore(store, clone)]
+    capsys.readouterr()
+    Build(store, GitShell(), repo).context(["s1", *TEAM])
+    assert "# Contract" in capsys.readouterr().out
+    [item] = [i for i in waiting(store) if i.kind == "planning"]
+    assert (item.rank, item.lines, item.next) == (3, [queue.REAPPROVE], ["/deckhand:feature"])
+
+
+def test_approving_again_starts_the_waiting_story(
+    clone: Path, tmp_path: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = replanned("Contract")
+    assert all(not isinstance(a, Launch) or a.ref != "ACME-2" for a in reconcile(facts(store, cap=3), store))
+    record_round(FeatureReview(store), tmp_path)
+    capsys.readouterr()
+    Plan(store).context(["approval", *TEAM])
+    assert "Totals are positive." in capsys.readouterr().out
+    answered(state, Decide(store), capsys, ["feature-approval", P1], "Approve")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None and not feature.reapproval_due
+    assert launch(store, clone, "ACME-2") in reconcile(facts(store, cap=3), store)
+
+
+def test_a_story_added_mid_build_is_drafted_before_the_approval(clone: Path, tmp_path: Path):
+    store = building()
+    for issue in ("s1", "s2"):
+        store.assign(issue, ME)
+    started(store, "s1")
+    store.create_issue("s3", "ACME", "Refunds", "Outcome: a refund is paid.", P1, ["widgets"])
+    store.assign("s3", ME)
+    mapped(store, "s3")
+    working = row("ACME-1", "working", "busy")
+    launched = [a for a in reconcile(facts(store, working, cap=3), store) if isinstance(a, Launch)]
+    added = Launch("hand-ACME-3", "ACME-3", queue.DRAFT_HAND, clone, story(store, "ACME-3"), ME, False)
+    assert launched == [added]
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert "ACME-3: it has no draft yet" in features.approval_gaps(store, feature)
+    step = Draft(store, me=lambda: ME)
+    step.apply(["ACME-3", "--file", draft_file(tmp_path), *TEAM])
+    assert "ACME-3: its draft is not taken" in features.approval_gaps(store, features.open_feature(store, "ACME"))
+    step.apply(["ACME-3", "take", *TEAM])
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None and feature.reapproval_due
+    assert not [gap for gap in features.approval_gaps(store, feature) if gap.startswith("ACME-3")]
+    assert [a for a in reconcile(facts(store, working, cap=3), store) if isinstance(a, Launch)] == []

@@ -297,6 +297,8 @@ def worktree_branch(story: dict, records: list[Record]) -> str:
     branch = branch_of(records, story) or story["branch_name"]
     if not branch:
         raise Refusal(f"{story['identifier']} has no branch name in Linear")
+    if branch == "planning":
+        raise Refusal(f"{story['identifier']} has the branch name planning, which is the planning worktree")
     return branch
 
 

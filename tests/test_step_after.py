@@ -2,21 +2,16 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from deckhand import implplan, signoff
-from deckhand.features import FEATURE_LABEL
-from deckhand.ops import create_id
+from deckhand import chores, implplan
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.after import After
 from deckhand.steps.decide import Decide
-from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
-from tests.conftest import CountingStore
 from tests.test_feature_approval import TEAM, approve_everything, setup
 from tests.test_implplan import manifest, repo
 from tests.test_step_build import BRANCH, Shell, labeled
@@ -68,7 +63,7 @@ def test_hand_ticks_an_item(capsys: pytest.CaptureFixture[str]):
     store = chored()
     store.set_issue_state("s1", "Done")
     After(store).apply(["ACME-1", "done", "1", "--note", "dropped in migration 12", *TEAM])
-    [record] = [r for r in store.records("s1") if r.kind == signoff.AFTER_DONE]
+    [record] = [r for r in store.records("s1") if r.kind == chores.AFTER_DONE]
     assert (record.subject, record.data["note"]) == ("s1:1", "dropped in migration 12")
     assert statuses(store, capsys) == ["done by the hand", "open"]
     written = list(store.writes)
@@ -94,17 +89,38 @@ def test_item_left_for_person_is_asked(state: Path, capsys: pytest.CaptureFixtur
     store.set_issue_state("s2", "Done")
     After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
     records = store.records("s1")
-    assert signoff.after_merge_for_person(records, "s1") == [(2, CHORES[1], "the secret lives in the vault")]
+    assert chores.after_merge_for_person(records, "s1") == [(2, CHORES[1], "the secret lives in the vault")]
     assert statuses(store, capsys) == ["open", "left for the person"]
-    question = answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Not yet")
-    assert [o["label"] for o in question["options"]] == ["Done", "Not yet"]
+    question = answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Drop")
+    assert [o["label"] for o in question["options"]] == ["Done", "Drop", "Make it a story"]
     assert CHORES[1] in question["question"]
-    assert signoff.after_merge_for_person(store.records("s1"), "s1") != []
+    assert capsys.readouterr().out == "done: answered Drop, no after-merge recorded\n"
+    assert chores.after_merge_for_person(store.records("s1"), "s1") != []
     answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Done")
-    [decided] = [r for r in store.records("s1") if r.kind == signoff.AFTER]
+    [decided] = [r for r in store.records("s1") if r.kind == chores.AFTER]
     assert (decided.subject, decided.data["answer"]) == ("s1:2", "Done")
-    assert signoff.after_merge_for_person(store.records("s1"), "s1") == []
+    assert chores.after_merge_for_person(store.records("s1"), "s1") == []
     assert statuses(store, capsys) == ["open", "done by the person"]
+
+
+def test_after_context_shows_dropped_and_made_into_a_story(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = chored()
+    store.set_issue_state("s1", "Done")
+    store.assign("s1", store.viewer()["id"])
+    for item in ("1", "2"):
+        After(store).apply(["ACME-1", "person", item, "--why", "it needs main", *TEAM])
+    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "1"], "nobody reads that table")
+    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Make it a story")
+    found = listing(store, capsys)["items"]
+    assert [(i["status"], i.get("note")) for i in found] == [
+        ("dropped", "nobody reads that table"),
+        ("made into a story", None),
+    ]
+    capsys.readouterr()
+    After(store).context(["ACME-1", *TEAM])
+    shown = capsys.readouterr().out.splitlines()
+    assert shown[1] == f"1 {CHORES[0]}: dropped (nobody reads that table)"
+    assert shown[2].startswith(f"2 {CHORES[1]}: made into a story (Chore: {CHORES[1]}")
 
 
 def test_after_merge_decision_refused_for_hand_item(capsys: pytest.CaptureFixture[str]):
@@ -116,33 +132,6 @@ def test_after_merge_decision_refused_for_hand_item(capsys: pytest.CaptureFixtur
         with pytest.raises(Refusal, match=f"item {item} of ACME-1 is not left for the person"):
             Decide(store).context(["after-merge", "ACME-1", "--item", item, *TEAM])
     assert store.writes == written
-
-
-def test_released_items_stay_after_the_next_feature_opens(state: Path, capsys: pytest.CaptureFixture[str]):
-    store = chored()
-    me = store.viewer()["id"]
-    store.assign("s1", me)
-    for story in ("s1", "s2"):
-        store.set_issue_state(story, "Done")
-    After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
-    beta = create_id("ACME:Beta", "feature")
-    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
-    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
-    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
-    waiting = signoff.after_merge_queue(store, "ACME", me)
-    [left] = [r for r in store.records("s1") if r.kind == signoff.AFTER_PERSON]
-    assert [(s["identifier"], n, text, why, at) for s, n, text, why, at in waiting] == [
-        ("ACME-1", 2, CHORES[1], "the secret lives in the vault", left.at)
-    ]
-    assert signoff.after_merge_queue(store, "ACME", "someone-else") == []
-    store.assign("s1", None)
-    assert signoff.after_merge_queue(store, "ACME", me) == []
-    store.assign("s1", me)
-    assert statuses(store, capsys) == ["open", "left for the person"]
-    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Done")
-    After(store).apply(["ACME-1", "done", "1", "--note", "dropped", *TEAM])
-    assert statuses(store, capsys) == ["done by the hand", "done by the person"]
-    assert signoff.after_merge_queue(store, "ACME", me) == []
 
 
 SYNCED = [
@@ -206,30 +195,3 @@ def test_an_after_merge_sync_conflict_leaves_the_item_to_the_person(tmp_path: Pa
     assert refused.value.rule.endswith(LEAVE)
     assert shell.ran("git", "merge") == [["git", "merge", "--no-edit", "origin/HEAD"], ["git", "merge", "--abort"]]
     assert "build apply" not in refused.value.rule
-
-
-def test_the_after_merge_queue_loads_a_released_feature_only_for_an_item_left_in_the_records(
-    counting_store: Callable[[FakeStore], CountingStore],
-):
-    store = chored()
-    me = store.viewer()["id"]
-    store.assign("s1", me)
-    for story in ("s1", "s2"):
-        store.set_issue_state(story, "Done")
-    beta = create_id("ACME:Beta", "feature")
-    store.create_project(beta, "ACME", "Beta", "", [FEATURE_LABEL])
-    store.set_project_dates(beta, "2026-11-23", "2026-11-30")
-    store.create_issue("s3", "ACME", "Three", "Outcome.", beta, [])
-    gamma = create_id("ACME:Gamma", "feature")
-    store.create_project(gamma, "ACME", "Gamma", "", [FEATURE_LABEL])
-    store.set_project_dates(gamma, "2026-11-02", "2026-11-09")
-    store.create_issue("s4", "ACME", "Four", "Outcome.", gamma, [])
-    store.set_issue_state("s4", "Done")
-    alpha = store.issue("s1")["project"]
-    counting = counting_store(store)
-    assert signoff.after_merge_queue(CachedStore(counting), "ACME", me) == []
-    assert [call[1] for call in counting.log if call[0] == "project_issues"] == [(beta,)]
-    After(store).apply(["ACME-1", "person", "2", "--why", "the secret lives in the vault", *TEAM])
-    counting.log.clear()
-    assert len(signoff.after_merge_queue(CachedStore(counting), "ACME", me)) == 1
-    assert sorted(call[1] for call in counting.log if call[0] == "project_issues") == sorted([(beta,), (alpha,)])

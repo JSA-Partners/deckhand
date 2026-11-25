@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from deckhand import claims, config, features, fleet, order, queue, stage
+from deckhand import chores, claims, config, features, fleet, order, queue, stage
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
@@ -20,6 +21,11 @@ class Reading:
     waiting: list[queue.Item]
     facts: dict
     notes: list[str]
+    chores: list[Feature] = field(default_factory=list)
+
+    @property
+    def held(self) -> list[Feature]:
+        return [*([self.feature] if self.feature is not None else []), *self.chores]
 
 
 def read(
@@ -37,10 +43,11 @@ def read(
     if notes is None:
         notes = [fleet_read.note] if fleet_read.note else []
     feature = _current(store, team, notes)
+    elsewhere = _elsewhere(store, team, feature, fleet_read, notes)
     me = _me(person, notes)
-    waiting = _waiting(store, team, feature, me, fleet_read, local, notes, quiet, restarts, idle)
-    facts = _facts(store, feature, waiting, fleet_read, me, local, today, notes)
-    return Reading(team, feature, me, waiting, facts, notes)
+    waiting = _waiting(store, team, feature, elsewhere, me, fleet_read, local, notes, quiet, restarts, idle)
+    facts = _facts(store, feature, elsewhere, waiting, fleet_read, me, local, today, notes)
+    return Reading(team, feature, me, waiting, facts, notes, elsewhere)
 
 
 def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
@@ -49,6 +56,16 @@ def _current(store: Store, team: str, notes: list[str]) -> Feature | None:
     except Refusal as error:
         notes.append(str(error))
     return None
+
+
+def _elsewhere(store: Store, team: str, feature: Feature | None, read: fleet.Fleet, notes: list[str]) -> list[Feature]:
+    alive = frozenset(s.name for s in read.sessions if fleet.alive(s))
+    try:
+        held = [feature] if feature is not None else features.open_features(store, team)
+        return chores.elsewhere(store, team, {s["id"] for f in held for s in f.stories}, alive)
+    except Refusal as error:
+        notes.append(str(error))
+    return []
 
 
 def _me(person: Callable[[], Store], notes: list[str]) -> str | None:
@@ -77,6 +94,11 @@ def _blockers(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict])
     return sorted(s["identifier"] for s in held if s["state"] != order.DONE)
 
 
+def _draft_at(records: list[Record]) -> str | None:
+    draft = features.untaken_draft(records)
+    return draft.at if draft is not None else None
+
+
 def _build_order(store: Store, feature: Feature, me: str | None) -> tuple[list[dict], list[str]]:
     edges = order.edges(store, feature)
     by_id = {s["id"]: s for s in feature.live}
@@ -91,6 +113,7 @@ def _build_order(store: Store, feature: Feature, me: str | None) -> tuple[list[d
             "blocked_by": _blockers(s, edges, by_id),
             "stage": stage.as_data(stage.of(s, feature.records.get(s["id"], []))),
             "completed_at": s.get("completed_at"),
+            "draft": _draft_at(feature.records.get(s["id"], [])),
         }
         for s in placed
     ]
@@ -118,6 +141,7 @@ def _waiting(
     store: Store,
     team: str,
     feature: Feature | None,
+    elsewhere: list[Feature],
     me: str | None,
     read: fleet.Fleet,
     local: config.LocalConfig,
@@ -129,12 +153,15 @@ def _waiting(
     if me is None:
         return []
     policy = policy_for(notes, local.clones)
-    return queue.items(store, team, feature, me, read, policy, quiet=quiet, restarts=restarts, idle=idle)
+    return queue.items(
+        store, team, feature, me, read, policy, quiet=quiet, restarts=restarts, idle=idle, elsewhere=elsewhere
+    )
 
 
 def _facts(
     store: Store,
     feature: Feature | None,
+    elsewhere: list[Feature],
     waiting: list[queue.Item],
     read: fleet.Fleet,
     me: str | None,
@@ -143,10 +170,12 @@ def _facts(
     notes: list[str],
 ) -> dict:
     top = waiting[0] if waiting else None
+    released = feature is not None and features.phase(feature) is Phase.RELEASED
     facts = empty(notes, read, local) | {
         "top": {"lines": top.lines, "next": top.next} if top else None,
         "feature": feature.project["name"] if feature is not None else None,
-        "release": feature is not None and features.phase(feature) is Phase.RELEASED,
+        "release": released and not any(chores.open_in(f) for f in [feature, *elsewhere]),
+        "chores": sum(chores.unsettled(f) for f in elsewhere),
     }
     if feature is not None:
         facts["budget"] = _budget(feature, today)
@@ -165,4 +194,5 @@ def empty(notes: list[str], read: fleet.Fleet, local: config.LocalConfig) -> dic
         "order": [],
         "cycle": [],
         "release": False,
+        "chores": 0,
     }

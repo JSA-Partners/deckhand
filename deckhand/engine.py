@@ -9,11 +9,27 @@ from datetime import date
 from pathlib import Path
 from typing import IO, Protocol
 
-from deckhand import acts, budget, config, features, fleet, git, idle, reading, shown, status, watch
-from deckhand.actions import Action, Adopt, Launch, Post, Resume, Stop
+from deckhand import (
+    acts,
+    answers,
+    budget,
+    config,
+    features,
+    fleet,
+    git,
+    idle,
+    mirror,
+    reading,
+    shown,
+    spikes,
+    status,
+    watch,
+)
+from deckhand.actions import Action, Adopt, Attach, Launch, Leave, Post, PutDocument, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
+from deckhand.reading import Reading
 from deckhand.reconcile import Facts, reconcile
 from deckhand.records import Record, epoch, iso
 from deckhand.step import Refusal
@@ -148,13 +164,12 @@ class Engine:
         if due and began is not None and began > self._woke and linked_since and self._reading is not None:
             self._reconciled = now
             self._reconcile(good, now_facts)
-        settled = {name for name, (_, holds) in self._settling.items() if holds}
-        quiet, slots, resuming = shown.held(now_facts, frozenset(self._holding | settled))
+        quiet, slots, resuming = shown.held(now_facts, frozenset(self._holding | self._settled()))
         if changed or linked or fresh is not None or self._shown.moved(read, quiet, self._idle, slots):
             stale = self._iso(now) if self._newest is not None and self._newest.error else None
             found = self._shown.read(good, read, hands, self._idle, quiet, (slots, resuming), self._limit(now), stale)
             if found is not None:
-                self._reading = found
+                self._reading = self._held(found, good)
 
     def _heartbeat(self, now: float) -> None:
         try:
@@ -171,7 +186,7 @@ class Engine:
             return False
         self._newest = newest
         if not newest.error:
-            self._good, self._reading = newest, newest.reading
+            self._good, self._reading = newest, self._held(newest.reading, newest)
             return True
         self._shown.stale(self._iso(now))
         return False
@@ -194,12 +209,15 @@ class Engine:
             if isinstance(action, HOLDS):
                 self._holding.discard(action.name)
             self._lines.heard(action, line, now)
-            if not isinstance(action, Post | Adopt):
+            if not isinstance(action, Post | Adopt | Leave | Attach | PutDocument):
                 self._settling[action.name] = (now, isinstance(action, HOLDS))
                 self._fleets.poke()
         began = self._fleets.began()
         self._settling = {n: kept for n, kept in self._settling.items() if began is None or began <= kept[0]}
         return busy | frozenset(self._settling)
+
+    def _settled(self) -> set[str]:
+        return {name for name, (_, holds) in self._settling.items() if holds}
 
     def _facts(self, now: float, read: fleet.Fleet, hands: dict[str, HandRow], busy: frozenset[str]) -> Facts:
         good = self._good
@@ -213,31 +231,53 @@ class Engine:
             reading=self._reading,
             cap=local.slot_cap,
             busy=busy,
+            holds=frozenset(self._holding | self._settled()),
             failed=self._lines.failed(),
             clones=local.clones,
             policies=good.policies if good is not None else {},
             unheard=acts.unheard(self._state),
             labels=good.labels if good is not None else {},
+            contract=good.contract if good is not None else "",
+            configured=good is not None and good.configured,
             idle=self._idle,
             readable=self._newest is not None and not self._newest.error and not self._budget.limited(now),
             posted=self._state.posted(),
+            mirrored=self._mirrored(),
+            asked=_asked(self._reading),
         )
 
+    def _mirrored(self) -> dict[str, str]:
+        return {key: str(body.get("digest")) for key, body in self._state.keyed(mirror.PREFIX).items()}
+
+    def _held(self, found: Reading | None, good: Linked) -> Reading | None:
+        before = self._reading
+        if found is None or before is None or good.stores is None:
+            return found
+        try:
+            kept = mirror.leaving(before.held, found.held, good.stores("app").records, self._mirrored())
+        except Refusal:
+            return found
+        return replace(found, chores=[*found.chores, *kept]) if kept else found
+
     def _fresh_records(self, good: Linked) -> dict[str, list[Record]] | None:
-        feature = self._reading.feature if self._reading is not None else None
-        if feature is None or good.stores is None:
+        held = self._reading.held if self._reading is not None else []
+        stories = [s for feature in held for s in feature.stories]
+        if not stories or good.stores is None:
             return None
         try:
-            fresh = {s["id"]: good.stores("app").records(s["id"]) for s in feature.stories}
+            fresh = {s["id"]: good.stores("app").records(s["id"]) for s in stories}
         except Refusal:
             return None
-        return None if fresh == {s["id"]: feature.records.get(s["id"], []) for s in feature.stories} else fresh
+        kept = {s["id"]: feature.records.get(s["id"], []) for feature in held for s in feature.stories}
+        return None if fresh == kept else fresh
 
     # A read that misses the memo while Linear is down still hands reconcile the records written since.
     def _keep_records(self, fresh: dict[str, list[Record]]) -> None:
         held = self._reading
-        if held is not None and held.feature is not None:
-            self._reading = replace(held, feature=replace(held.feature, records=fresh))
+        if held is None:
+            return
+        feature = replace(held.feature, records=fresh) if held.feature is not None else None
+        self._reading = replace(held, feature=feature, chores=[replace(f, records=fresh) for f in held.chores])
 
     def _reconcile(self, good: Linked, facts: Facts) -> None:
         assert good.stores is not None
@@ -328,3 +368,11 @@ class Engine:
 
     def _iso(self, at: float) -> str:
         return iso(int(at * 1000))
+
+
+# Hand rows outlive their feature, so only a spike asked in the feature being planned may be restarted.
+def _asked(held: Reading | None) -> frozenset[str]:
+    feature = held.feature if held is not None else None
+    if feature is None or feature.stories:
+        return frozenset()
+    return frozenset(spikes.keys(answers.state_dir(), feature.project["id"]))

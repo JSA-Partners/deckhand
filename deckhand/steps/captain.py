@@ -139,12 +139,12 @@ def _print(facts: dict) -> None:
         print(UNREAD)
     if facts["top"] is not None:
         for line in facts["top"]["lines"]:
-            print(line)
+            print(brief.clean(line))
         for command in facts["top"]["next"]:
             print(f"next: {command}")
     if facts["cycle"]:
         print(status.cycle_line(facts["cycle"]))
     if facts["release"]:
-        print(f"ready to release: {facts['release']}")
+        print(f"ready to release: {brief.clean(facts['release'])}")
     if facts["settings"]:
         print(facts["settings"])

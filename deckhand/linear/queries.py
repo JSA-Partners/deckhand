@@ -9,6 +9,7 @@ DOCUMENT_PAGE = 50
 ISSUE_LABEL_PAGE = 20
 NESTED_LABEL_PAGE = 10
 RELATION_PAGE = 50
+NESTED_RELATION_PAGE = 10
 TEAM_PROJECT_PAGE = 50
 TEAM_LABEL_PAGE = 100
 PROJECT_LABEL_LIMIT = 10
@@ -34,19 +35,28 @@ query LabelIds($names: [String!]!, $teamId: ID!) {
 }
 """
 
+ISSUE_FIELDS = (
+    "id identifier number branchName title description team { key } project { id } assignee { id name } "
+    f"labels(first: {ISSUE_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}"
+)
+RELATIONS = f"relations(first: {RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}"
+INVERSE_RELATIONS = f"inverseRelations(first: {RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}"
+# Linear refuses a query past its complexity limit, and nested pages multiply by the issue page.
+NESTED_RELATIONS = f"relations(first: {NESTED_RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}"
+NESTED_INVERSE_RELATIONS = (
+    f"inverseRelations(first: {NESTED_RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}"
+)
+
 ISSUE = f"""
 query Issue($id: String!) {{
-  issue(id: $id) {{
-    id
-    identifier
-    number
-    branchName
-    title
-    description
-    team {{ key }}
-    project {{ id }}
-    assignee {{ id name }}
-    labels(first: {ISSUE_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
+  issue(id: $id) {{ {ISSUE_FIELDS} }}
+}}
+"""
+
+ISSUES = f"""
+query Issues($ids: [ID!]!) {{
+  issues(first: {ISSUE_PAGE}, includeArchived: true, filter: {{ id: {{ in: $ids }} }}) {{
+    nodes {{ {ISSUE_FIELDS} state {{ name }} completedAt }}
   }}
 }}
 """
@@ -108,6 +118,8 @@ query ProjectIssues($id: String!, $after: String) {{
         completedAt
         assignee {{ id name }}
         labels(first: {NESTED_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
+        {NESTED_RELATIONS}
+        {NESTED_INVERSE_RELATIONS}
       }}
       {CURSOR}
     }}
@@ -143,11 +155,7 @@ query Viewer {
 
 ISSUE_RELATIONS = f"""
 query IssueRelations($id: String!) {{
-  issue(id: $id) {{
-    id
-    relations(first: {RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}
-    inverseRelations(first: {RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}
-  }}
+  issue(id: $id) {{ id {RELATIONS} {INVERSE_RELATIONS} }}
 }}
 """
 
@@ -194,6 +202,26 @@ mutation DocumentCreate($input: DocumentCreateInput!) {
 DOCUMENT_UPDATE = """
 mutation DocumentUpdate($id: String!, $input: DocumentUpdateInput!) {
   documentUpdate(id: $id, input: $input) { success }
+}
+"""
+
+ATTACHMENT_CREATE = """
+mutation AttachmentCreate($input: AttachmentCreateInput!) {
+  attachmentCreate(input: $input) { success }
+}
+"""
+
+LEGACY_ATTACHMENTS = f"""
+query LegacyAttachments($after: String) {{
+  attachments(first: {PAGE_SIZE}, after: $after, filter: {{ url: {{ startsWith: "https://deckhand.invalid/" }} }}) {{
+    nodes {{ id url issue {{ team {{ id }} }} }} {CURSOR}
+  }}
+}}
+"""
+
+ATTACHMENT_DELETE = """
+mutation AttachmentDelete($id: String!) {
+  attachmentDelete(id: $id) { success }
 }
 """
 

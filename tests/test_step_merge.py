@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import signoff
+from deckhand import features, planning, signoff
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
 from deckhand.store.fake import FakeStore
+from tests.test_feature_approval import load
 from tests.test_step_build import Shell, repo, state
 from tests.test_step_review import TEAM, answer, checked, raw
 from tests.test_step_signoff import (
@@ -50,6 +51,19 @@ def test_merge_pins_signed_head(tmp_path: Path, repo: Path, state: Path, capsys:
     assert gh.ran("gh", "pr", "ready") == [["gh", "pr", "ready", "7", "--repo", "acme/widgets"]]
     assert "--auto" not in merged and clock.slept == [15]
     assert voids(store) == []
+
+
+def test_a_signed_story_merges_while_reapproval_is_due(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    sign(store, repo, state, capsys)
+    planning.save_section(store, load(store), "Invariants", "Totals are positive.", False)
+    assert load(store).reapproval_due and features.phase(load(store)) is features.Phase.BUILDING
+    gh = Gh(buckets=[["pass"]])
+    merge(store, repo, gh)
+    merged = ["gh", "pr", "merge", "7", "--repo", "acme/widgets", "--squash", "--match-head-commit", "c2"]
+    assert gh.ran("gh", "pr", "merge") == [merged]
 
 
 def test_merge_refuses_when_head_moved(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):

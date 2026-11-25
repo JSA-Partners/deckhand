@@ -324,3 +324,12 @@ def test_a_heartbeat_that_is_not_a_table_reads_as_none(tmp_path: Path) -> None:
         for body in ([1, 2], "x", 7):
             rows.put("heartbeat", body)  # type: ignore[arg-type]
             assert rows.heartbeat() is None
+
+
+def test_keyed_returns_every_engine_row_under_a_prefix_and_no_other(tmp_path: Path) -> None:
+    rows = state(tmp_path)
+    rows.put("mirror:s1:https://a", {"digest": "d1"})
+    rows.put("mirror:p1:story-map", {"digest": "d2"})
+    rows.put("mirrors", {"digest": "x"})
+    rows.put("m%rror:s2", {"digest": "y"})
+    assert rows.keyed("mirror:") == {"mirror:p1:story-map": {"digest": "d2"}, "mirror:s1:https://a": {"digest": "d1"}}

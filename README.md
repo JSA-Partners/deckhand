@@ -50,11 +50,11 @@ flowchart TB
 | --- | --- | --- |
 | Frame | Shapes the problem with you, then lists the facts it rests on and spikes the unverified ones | Write the frame, or take a draft |
 | Story map | Proposes one-line stories with their tiers, state charts, after-merge chores and drafted answers to the open decisions | Confirm each answer, or give your own |
-| Approval | Shows the contract, the examples, the invariants and the story map on one screen, and reviews the stories against each other | Approve or change |
+| Approval | Shows the contract, the examples, the invariants and the story map on one screen, and reviews the stories against each other | Approve or change. A plan changed during the build keeps building, and the stories not yet started wait for your approval again |
 | Hand | Writes the implementation plan and builds it with tests | Answer its questions |
 | Review | Reviews the plan and the branch in rounds, ordered by confidence | Decide what a hand cannot |
-| Sign-off | Shows what changed, the evidence and the riskiest lines with why each matters, then your pass in tuicr | Say when tuicr is done, then sign off |
-| Merge | Merges pinned to the commit you signed, then does the after-merge chores it can | Do the ones it leaves you |
+| Sign-off | Shows what changed, the evidence and the riskiest lines with why each matters, then your pass in tuicr | Answer whether tuicr is done, then sign off |
+| Merge | Merges pinned to the commit you signed, then hands each after-merge chore to the hand once | Answer each chore: Done, Drop with a note, or Make it a story |
 
 You talk only to the captain. The engine, in a terminal tab of its own, starts, resumes and stops
 every hand up to your slot cap, and carries each of your answers to the hand that waits on it.
@@ -62,7 +62,17 @@ While nothing needs you, the captain stays quiet. When something new waits, the 
 its bell, and the captain asks you the top item in a dialog, which rings the bell again. Every
 answer is saved as it is given, so you can stop after any item.
 
-Hands run in Claude Code's sandbox. A hand cannot read credentials (deckhand's config, `gh`, ssh,
+Every feature is searched for after-merge chores, and its release waits while any is open. A
+draft you no longer want can be dropped.
+
+Linear shows your plan approval on each story as a link to the Contract document, and your sign-off
+on the story as a link to the signed commit. A Story map document in the project holds the story
+map for teammates. deckhand writes these and never reads them back. Each command reads Linear fewer
+than ten times, except saving the story map, plus one read for each older feature with an open
+chore.
+
+Hands run in Claude Code's sandbox. The captain's Bash hook fails closed, so a command it cannot
+read is refused. A hand cannot read credentials (deckhand's config, `gh`, ssh,
 git), cannot push or write to GitHub except through deckhand, cannot forge your answers, cannot
 write `.git` or Claude Code's settings, and runs without MCP tools, messages or notifications. A
 change it wants to Claude Code's own config reaches you as a queue item. One gap is deliberate:
@@ -116,7 +126,7 @@ These are slash commands, typed in a Claude Code session in one of your reposito
 
 | Command | What it does |
 | --- | --- |
-| `/deckhand:setup` | Fits a Linear team to the process, names its repositories and clones, offers the status line, and prints the captain's launch line |
+| `/deckhand:setup` | Fits a Linear team to the process, names its repositories and clones, removes the attachments an older version left on the team, offers the status line, and prints the captain's launch line |
 | `/deckhand:captain` | Brings you the queue one item at a time, and gives you the command that starts the engine |
 | `/deckhand:feature` | Opens, picks or parks a feature, and plans it with you a screen at a time |
 | `/deckhand:signoff REF` | Walks you through story REF's sign-off, one screen at a time |

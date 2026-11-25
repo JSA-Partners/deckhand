@@ -4,6 +4,7 @@ import http.client
 import io
 import json
 import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -63,23 +64,31 @@ class KeepAliveTransport:
         self._connect = connect
         self._connection: http.client.HTTPSConnection | None = None
         self._down: OSError | http.client.HTTPException | None = None
+        self._lock = threading.Lock()
 
     def reset(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
-        self._connection = None
-        self._down = None
+        with self._lock:
+            if self._connection is not None:
+                self._connection.close()
+            self._connection = None
+            self._down = None
+
+    # The linker and the worker share this transport across threads, so a revive never closes the connection.
+    def revive(self) -> None:
+        with self._lock:
+            self._down = None
 
     def __call__(self, request: urllib.request.Request) -> bytes:
-        if self._down is not None:
-            raise self._down
-        try:
-            return self._send(request)
-        except urllib.error.HTTPError:
-            raise
-        except (OSError, http.client.HTTPException) as error:
-            self._down = error
-            raise
+        with self._lock:
+            if self._down is not None:
+                raise self._down
+            try:
+                return self._send(request)
+            except urllib.error.HTTPError:
+                raise
+            except (OSError, http.client.HTTPException) as error:
+                self._down = error
+                raise
 
     def _send(self, request: urllib.request.Request) -> bytes:
         reused = self._connection is not None

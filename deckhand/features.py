@@ -41,6 +41,14 @@ class Feature:
     def approval_current(self, story: dict) -> bool:
         return any(r.kind == APPROVAL and r.version == self.version for r in self.records.get(story["id"], []))
 
+    @property
+    def approved_once(self) -> bool:
+        return any(self.approved(s) for s in self.live)
+
+    @property
+    def reapproval_due(self) -> bool:
+        return self.approved_once and not all(self.approval_current(s) for s in self.live)
+
 
 def phase(feature: Feature) -> Phase:
     if not feature.project["start_date"]:
@@ -48,10 +56,12 @@ def phase(feature: Feature) -> Phase:
     stories = feature.stories
     if stories and all(s["state"] in FINISHED for s in stories):
         return Phase.RELEASED
-    live = feature.live
-    if live and all(feature.approval_current(s) for s in live):
-        return Phase.BUILDING
-    return Phase.PLANNING
+    return Phase.BUILDING if feature.approved_once else Phase.PLANNING
+
+
+def replanning(feature: Feature) -> bool:
+    current = phase(feature)
+    return current is Phase.PLANNING or (current is Phase.BUILDING and feature.reapproval_due)
 
 
 def undecided(feature: Feature, story: dict) -> list[str]:
@@ -64,15 +74,35 @@ def undecided(feature: Feature, story: dict) -> list[str]:
     return found
 
 
-def _draft_gaps(records: list[Record], ref: str) -> list[str]:
+def needs_draft(feature: Feature, story: dict) -> bool:
+    from deckhand import asks, queue
+
+    records = feature.records.get(story["id"], [])
+    built = any(r.kind == asks.HAND_START and r.data.get("kind") == queue.STORY_HAND for r in records)
+    drafted = any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in records)
+    return feature.reapproval_due and story["state"] not in FINISHED and not built and not drafted
+
+
+def untaken_draft(records: list[Record]) -> Record | None:
     from deckhand import queue
 
-    kinds = {r.kind for r in records}
-    if queue.TAKEN in kinds:
-        return []
-    if queue.DRAFT in kinds:
+    if any(r.kind in queue.TAKEN_KINDS for r in records):
+        return None
+    return next((r for r in records if r.kind == queue.DRAFT), None)
+
+
+def _draft_gaps(records: list[Record], ref: str, due: bool = False) -> list[str]:
+    from deckhand import queue, stalls
+
+    if untaken_draft(records) is not None:
         return [f"{ref}: its draft is not taken"]
-    return [f"{ref}: its draft is being written"] if queue.last_start(records, queue.DRAFT_HAND) else []
+    if any(r.kind in queue.TAKEN_KINDS for r in records):
+        return []
+    if stalls.stall_answer(records, queue.DRAFT_HAND) == stalls.LEAVE:
+        return []
+    if queue.last_start(records, queue.DRAFT_HAND):
+        return [f"{ref}: its draft is being written"]
+    return [f"{ref}: it has no draft yet"] if due else []
 
 
 def _map_gaps(feature: Feature, story: dict) -> list[str]:
@@ -84,10 +114,15 @@ def _map_gaps(feature: Feature, story: dict) -> list[str]:
         found = [f"{ref}: tier {level.level} needs a state chart in the story map"]
     else:
         found = []
-    return found + _draft_gaps(records, ref)
+    return found + _draft_gaps(records, ref, needs_draft(feature, story))
 
 
 def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list[str]:
+    review = [gap.hand if captain else gap.person for gap in review_gap_list(store, feature)]
+    return [*plain_gaps(store, feature), *review]
+
+
+def plain_gaps(store: Store, feature: Feature) -> list[str]:
     gaps = [
         f"the {name} section is not saved"
         for name in planning.SECTIONS
@@ -96,7 +131,6 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
     live = feature.live
     if not live:
         return [*gaps, "the feature has no stories"]
-    project = feature.project["id"]
     for story in live:
         gaps += _map_gaps(feature, story)
         gaps += [f"{story['identifier']}: decision item {item} is not decided" for item in undecided(feature, story)]
@@ -112,11 +146,16 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
             drafted = drafts.get(record.subject)
             if story in live and (drafted is None or versions.settles(record, *drafted)):
                 settled.add(record.subject)
-    gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
-    held = [record for story in live for record in feature.records.get(story["id"], [])]
+    return gaps + [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
+
+
+def review_gap_list(store: Store, feature: Feature) -> list[review_gaps.Gap]:
+    if not feature.live:
+        return []
+    project = feature.project["id"]
+    held = [record for story in feature.live for record in feature.records.get(story["id"], [])]
     text = review_text(store, feature)
-    found = review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "", project)
-    return gaps + [gap.hand if captain else gap.person for gap in found]
+    return review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "", project)
 
 
 def review_text(store: Store, feature: Feature) -> str | None:
@@ -179,10 +218,6 @@ def _started(store: Store, team: str, finished: bool) -> list[Feature]:
     return [load(store, p) for p in held]
 
 
-def released(store: Store, team: str) -> list[Feature]:
-    return _started(store, team, finished=True)
-
-
 def _one_open(found: list[Feature]) -> Feature | None:
     held = [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
     if len(held) > 1:
@@ -202,12 +237,19 @@ def current(store: Store, team: str) -> Feature | None:
     found = open_feature(store, team)
     if found is not None:
         return found
-    return max(released(store, team), key=_released_at, default=None)
+    held = [p for p in team_features(store, team) if p["start_date"] and p["finished"]]
+    latest = max((_dates(p) for p in held), default=None)
+    # Features released on the same dates are told apart by their last merge, so only those are loaded.
+    tied = [load(store, p) for p in held if _dates(p) == latest]
+    return max(tied, key=_last_merge, default=None)
 
 
-def _released_at(feature: Feature) -> tuple[str, str, str]:
-    finished = max((s.get("completed_at") or "" for s in feature.stories), default="")
-    return finished, feature.project["start_date"], feature.project["id"]
+def _dates(project: dict) -> tuple[str, str]:
+    return project["target_date"] or "", project["start_date"]
+
+
+def _last_merge(feature: Feature) -> tuple[str, str]:
+    return max((s.get("completed_at") or "" for s in feature.stories), default=""), feature.project["id"]
 
 
 def parked(store: Store, team: str) -> list[dict]:

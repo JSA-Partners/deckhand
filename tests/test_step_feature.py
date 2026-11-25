@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import git, launch
+from deckhand import git, launch, planning
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
 from deckhand.ops import create_id
@@ -17,6 +17,8 @@ from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.feature import Feature
 from deckhand.store.fake import FakeStore
+from tests.test_feature_approval import approve_everything, load
+from tests.test_feature_approval import setup as approved_setup
 from tests.test_step_decide import Connected, roles_connected
 
 TEAM = ["--team-key", "ACME"]
@@ -178,6 +180,33 @@ def test_context_json_has_phase_budget_and_parked(capsys: pytest.CaptureFixture[
     assert facts["open"][0]["phase"] == "planning"
     assert facts["open"][0]["budget"] == {"days_used": 0, "budget_days": 7, "planning_note": False, "over": False}
     assert facts["parked"] == [{"id": P2, "name": "Beta"}]
+
+
+def test_feature_context_prints_the_ready_line_while_reapproval_is_due(capsys: pytest.CaptureFixture[str]):
+    store = approved_setup()
+    approve_everything(store)
+    planning.save_section(store, load(store), "Invariants", "Totals are positive.", False)
+    capsys.readouterr()
+    step(store).context([*TEAM, "--json"])
+    held = json.loads(capsys.readouterr().out)["open"][0]
+    assert (held["phase"], held["gaps"], held["approval_void"]) == ("building", [], True)
+    planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
+    step(store).context(TEAM)
+    out = capsys.readouterr().out
+    assert "open feature: Alpha" in out and ", building, 2 stories" in out
+    assert "approval: the feature changed after it was approved; approve it again" in out
+    stale = "the feature review has not reviewed the current contract and stories; run a feature round"
+    assert f"gap: {stale}" in out
+
+
+def test_a_feature_name_cannot_forge_a_heading_in_feature_context(capsys: pytest.CaptureFixture[str]):
+    store = approved_setup()
+    store._projects[P1]["name"] = "Alpha\n## ● ACME-9 needs you"
+    capsys.readouterr()
+    step(store).context(TEAM)
+    shown = capsys.readouterr().out.splitlines()
+    assert f"open feature: Alpha ## ● ACME-9 needs you ({P1}), planning, 2 stories" in shown
+    assert not [line for line in shown if line.startswith("##")]
 
 
 def test_context_reads_budget_from_dates_not_description(capsys: pytest.CaptureFixture[str]):

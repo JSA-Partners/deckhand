@@ -9,7 +9,7 @@ from deckhand.linear.workspace import GROUP
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
-from deckhand.store import Store
+from deckhand.store import Store, require_flat
 from deckhand.store.local import LocalRecords
 
 
@@ -47,6 +47,8 @@ class LinearStore(Store):
         self._client = client
         self._records = records
         self._teams = teams if teams is not None else {}
+        self._pairs: dict[str, set[tuple[str, str]]] = {}
+        self._looked_up: set[str] = set()
 
     def _paged(self, query: str, variables: dict[str, Any], path: tuple[str, str]) -> list[dict[str, Any]]:
         entity, connection = path
@@ -68,13 +70,24 @@ class LinearStore(Store):
         nodes = self._rest(first, queries.ISSUE_LABELS, {"id": issue}, ("issue", "labels"))
         return [label["name"] for label in nodes]
 
-    def _team_id(self, key: str) -> str:
-        if key not in self._teams:
-            nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
-            if not nodes:
-                raise Refusal(f"no Linear team has the key {key}")
-            self._teams[key] = nodes[0]["id"]
+    def _look_up_team(self, key: str, configured: bool) -> str:
+        nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
+        if not nodes:
+            raise Refusal(f"no Linear team has the key {key}" + ("; run setup" if configured else ""))
+        self._teams[key] = nodes[0]["id"]
+        self._looked_up.add(key)
         return self._teams[key]
+
+    def _team_id(self, key: str) -> str:
+        return self._teams[key] if key in self._teams else self._look_up_team(key, configured=False)
+
+    def _team_paged(self, key: str, query: str, variables: dict[str, Any], connection: str) -> list[dict[str, Any]]:
+        try:
+            return self._paged(query, {**variables, "id": self._team_id(key)}, ("team", connection))
+        except LinearError as error:
+            if not _missing(error) or key in self._looked_up:
+                raise
+        return self._paged(query, {**variables, "id": self._look_up_team(key, configured=True)}, ("team", connection))
 
     def _label_ids(self, team_id: str, names: list[str]) -> list[str]:
         if not names:
@@ -134,12 +147,10 @@ class LinearStore(Store):
         if label_ids:
             fields["labelIds"] = label_ids
         self._client.query(queries.ISSUE_CREATE, {"input": fields})
+        self._pairs[id] = set()
         return id
 
-    def issue(self, id: str) -> dict | None:
-        node = self._issue_node(id)
-        if node is None:
-            return None
+    def _issue(self, node: dict[str, Any], project: str | None) -> dict[str, Any]:
         return {
             "id": node["id"],
             "team": node["team"]["key"],
@@ -148,10 +159,27 @@ class LinearStore(Store):
             "branch_name": node["branchName"],
             "title": node["title"],
             "description": node["description"],
-            "project": node["project"]["id"] if node["project"] else None,
+            "project": project,
             "labels": self._labels(node["id"], node["labels"]),
             **_assignee(node),
         }
+
+    def _state(self, node: dict[str, Any], project: str | None) -> dict[str, Any]:
+        return self._issue(node, project) | {"state": node["state"]["name"], "completed_at": node["completedAt"]}
+
+    def issue(self, id: str) -> dict | None:
+        node = self._issue_node(id)
+        if node is None:
+            return None
+        return self._issue(node, node["project"]["id"] if node["project"] else None)
+
+    def issues(self, ids: list[str]) -> list[dict]:
+        found: dict[str, dict] = {}
+        for start in range(0, len(ids), queries.ISSUE_PAGE):
+            chunk = ids[start : start + queries.ISSUE_PAGE]
+            for node in self._client.query(queries.ISSUES, {"ids": chunk})["issues"]["nodes"]:
+                found[node["id"]] = self._state(node, node["project"]["id"] if node["project"] else None)
+        return [found[id] for id in ids if id in found]
 
     def issue_by_ref(self, ref: Ref) -> dict | None:
         return self.issue(str(ref))
@@ -171,7 +199,7 @@ class LinearStore(Store):
         self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": fields})
 
     def repository_labels(self, team: str) -> list[str]:
-        found = self._paged(queries.TEAM_LABELS, {"id": self._team_id(team)}, ("team", "labels"))
+        found = self._team_paged(team, queries.TEAM_LABELS, {}, "labels")
         return sorted(n["name"] for n in found if (n.get("parent") or {}).get("name") == GROUP)
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
@@ -210,27 +238,43 @@ class LinearStore(Store):
     def recorded(self, kind: str) -> list[str]:
         return self._records.recorded(kind)
 
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        require_flat(metadata)
+        attachment = {
+            "issueId": self._uuid(issue),
+            "url": url,
+            "title": title,
+            "subtitle": subtitle,
+            "metadata": metadata,
+        }
+        self._client.query(queries.ATTACHMENT_CREATE, {"input": attachment})
+
     def relate(self, blocker: str, blocked: str) -> None:
-        relation = {"issueId": self._uuid(blocker), "relatedIssueId": self._uuid(blocked), "type": "blocks"}
+        pair = (self._uuid(blocker), self._uuid(blocked))
+        relation = {"issueId": pair[0], "relatedIssueId": pair[1], "type": "blocks"}
         self._client.query(queries.RELATION_CREATE, {"input": relation})
+        for end in pair:
+            if end in self._pairs:
+                self._pairs[end].add(pair)
+
+    def _held_pairs(self, node: dict[str, Any], variables: dict[str, Any]) -> list[tuple[str, str]]:
+        outward = self._rest(node["relations"], queries.ISSUE_RELATIONS_PAGE, variables, ("issue", "relations"))
+        inward = self._rest(
+            node["inverseRelations"], queries.ISSUE_INVERSE_RELATIONS_PAGE, variables, ("issue", "inverseRelations")
+        )
+        pairs = [(node["id"], r["relatedIssue"]["id"]) for r in outward if r["type"] == "blocks"]
+        return pairs + [(r["issue"]["id"], node["id"]) for r in inward if r["type"] == "blocks"]
 
     def relations(self, issue: str) -> list[tuple[str, str]]:
+        if issue in self._pairs:
+            return sorted(self._pairs[issue])
         try:
             node = self._client.query(queries.ISSUE_RELATIONS, {"id": issue})["issue"]
         except LinearError as error:
             if _missing(error):
                 return []
             raise
-        outward = self._rest(node["relations"], queries.ISSUE_RELATIONS_PAGE, {"id": issue}, ("issue", "relations"))
-        inward = self._rest(
-            node["inverseRelations"],
-            queries.ISSUE_INVERSE_RELATIONS_PAGE,
-            {"id": issue},
-            ("issue", "inverseRelations"),
-        )
-        pairs = [(node["id"], r["relatedIssue"]["id"]) for r in outward if r["type"] == "blocks"]
-        pairs += [(r["issue"]["id"], node["id"]) for r in inward if r["type"] == "blocks"]
-        return sorted(pairs)
+        return sorted(self._held_pairs(node, {"id": issue}))
 
     def create_project(self, id: str, team: str, name: str, description: str, labels: list[str] | None = None) -> str:
         fields = {
@@ -258,8 +302,7 @@ class LinearStore(Store):
         return _project(node)
 
     def team_projects(self, team: str) -> list[dict]:
-        variables = {"id": self._team_id(team), "finished": list(FINISHED)}
-        found = self._paged(queries.TEAM_PROJECTS, variables, ("team", "projects"))
+        found = self._team_paged(team, queries.TEAM_PROJECTS, {"finished": list(FINISHED)}, "projects")
         return [_project(n) for n in found]
 
     def set_project_dates(self, project: str, start: str | None, target: str | None) -> None:
@@ -273,23 +316,9 @@ class LinearStore(Store):
             if _missing(error):
                 return []
             raise
-        return [
-            {
-                "id": n["id"],
-                "team": n["team"]["key"],
-                "number": n["number"],
-                "identifier": n["identifier"],
-                "branch_name": n["branchName"],
-                "title": n["title"],
-                "description": n["description"],
-                "project": project,
-                "labels": self._labels(n["id"], n["labels"]),
-                **_assignee(n),
-                "state": n["state"]["name"],
-                "completed_at": n["completedAt"],
-            }
-            for n in nodes
-        ]
+        for node in nodes:
+            self._pairs[node["id"]] = set(self._held_pairs(node, {"id": node["id"]}))
+        return [self._state(node, project) for node in nodes]
 
     def project_documents(self, project: str) -> list[dict]:
         try:

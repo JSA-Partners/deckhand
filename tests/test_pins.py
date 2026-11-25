@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
-from deckhand import asks, features, pins, review
+from deckhand import asks, chores, decisions, features, implplan, pins, review
 from deckhand.records import Record
 from deckhand.step import Refusal
+from tests.test_implplan import manifest
 from tests.test_step_decide import feature_store
 
 
@@ -181,3 +183,45 @@ def test_a_feature_finding_proposal_is_the_captains():
     feature = features.open_feature(store, "ACME")
     held = pins.pin(store, feature, review.DECISION, project, [], finding=finding["id"])
     assert held.detail.endswith("; the captain proposes to decline it: noise")
+
+
+def test_an_item_the_engine_handed_over_is_asked_with_three_choices():
+    store = feature_store()
+    plan = manifest(after_merge=["rotate the key"])
+    store.put_record("s1", Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", plan))
+    store.set_issue_state("s1", "Done")
+    why = {"why": "its hand stopped after the merge", "session": "sid-1"}
+    left = chores.after_record(chores.AFTER_PERSON, "s1", 1, "rotate the key", why)
+    store.put_record("s1", replace(left, author="agent:engine"))
+    feature = features.owning(store, "ACME", "ACME-1")
+    shown = pins.pin(store, feature, chores.AFTER, "ACME-1", [], item="1")
+    assert shown.detail == "item 1, rotate the key (its hand stopped after the merge)"
+    question = decisions.make_question(chores.AFTER, shown)
+    assert question.text.startswith("What happens to this after-merge item of ACME-1 One: item 1, rotate the key")
+    assert question.options == ["Done", "Drop", "Make it a story"]
+
+
+def test_tuicr_pin_holds_the_review_commit_the_person_was_shown():
+    store = feature_store()
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    with pytest.raises(Refusal, match="no tuicr review is built at c2"):
+        pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")
+    data = {"head": "c2", "base": "c1", "sha": "r1", "hunks": [], "summary": None}
+    store.put_record("s1", Record("tuicr-review", "s1", "c2", "agent:signoff", data))
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    held = pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")
+    assert (held.subject, held.version, held.stories) == ("s1", "r1", ["s1"])
+    with pytest.raises(Refusal, match="no tuicr review is built at c3"):
+        pins.pin(store, feature, "tuicr", "ACME-1", [], head="c3")
+
+
+def test_tuicr_pin_with_no_hunk_selected_says_so():
+    store = feature_store()
+    data = {"head": "c2", "base": "c1", "sha": None, "hunks": [], "summary": None}
+    store.put_record("s1", Record("tuicr-review", "s1", "c2", "agent:signoff", data))
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    with pytest.raises(Refusal, match="^no hunk of ACME-1 is selected for review at c2, so tuicr has nothing to show$"):
+        pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")

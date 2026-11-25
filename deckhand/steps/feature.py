@@ -5,7 +5,7 @@ from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 
-from deckhand import config, features, git, launch, ops, planning
+from deckhand import brief, config, features, git, launch, ops, planning
 from deckhand.features import Phase
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, fetch_origin
@@ -64,6 +64,7 @@ class Feature:
         for feature in found:
             budget = features.budget_of(feature.project, today)
             current = features.phase(feature)
+            replanning = features.replanning(feature)
             facts["open"].append(
                 {
                     "id": feature.project["id"],
@@ -71,8 +72,8 @@ class Feature:
                     "phase": current.value,
                     "stories": len(feature.stories),
                     "next_planning_step": planning.next_section(store, feature),
-                    "gaps": features.approval_gaps(store, feature, captain=True) if current is Phase.PLANNING else [],
-                    "approval_void": current is Phase.PLANNING and any(feature.approved(s) for s in feature.live),
+                    "gaps": features.approval_gaps(store, feature, captain=True) if replanning else [],
+                    "approval_void": feature.reapproval_due,
                     "story_hint": None
                     if budget is None
                     else {
@@ -111,9 +112,10 @@ class Feature:
         if not facts["open"]:
             print("no feature is open")
         if "anomaly" in facts:
-            print(f"anomaly: {facts['anomaly']}")
+            print(f"anomaly: {brief.clean(facts['anomaly'])}")
         for held in facts["open"]:
-            print(f"open feature: {held['name']} ({held['id']}), {held['phase']}, {held['stories']} stories")
+            name = brief.clean(held["name"])
+            print(f"open feature: {name} ({held['id']}), {held['phase']}, {held['stories']} stories")
             if held["next_planning_step"]:
                 print(f"next planning step: {held['next_planning_step']}")
             if held["approval_void"]:
@@ -133,7 +135,7 @@ class Feature:
             if budget["planning_note"]:
                 print("planning has passed half of one week")
         for row in facts["parked"]:
-            print(f"parked: {row['name']} ({row['id']})")
+            print(f"parked: {brief.clean(row['name'])} ({row['id']})")
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)

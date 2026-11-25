@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, review, signoff
+from deckhand import answers, chores, decisions, review, signoff
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -408,3 +408,39 @@ def test_the_stage_of_a_pin_survives_the_pending_round_trip(tmp_path: Path):
     decisions.save_pending(question, shown, tmp_path)
     answered(tmp_path, question, review.ACCEPT)
     assert decisions.check(decisions.load_pending(question.nonce, tmp_path), tmp_path).answer == review.ACCEPT
+
+
+def ask_after(tmp_path: Path):
+    shown = decisions.Pin("s1:2", "v1", ["s1"], "item 2, rotate the key (the vault)", "ACME-1 One", ["ACME-1 One"])
+    question = decisions.make_question(chores.AFTER, shown)
+    decisions.save_pending(question, shown, tmp_path)
+    return question, decisions.load_pending(question.nonce, tmp_path)
+
+
+def test_typed_words_drop_the_item_with_that_note(tmp_path: Path):
+    question, pending = ask_after(tmp_path)
+    assert question.options == ["Done", "Drop", "Make it a story"]
+    answered(tmp_path, question, "the vault is gone, nothing to rotate")
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
+    [record] = store.records("s1")
+    assert (record.kind, record.subject, record.version) == (chores.AFTER, "s1:2", "v1")
+    assert (record.data["answer"], record.data["note"]) == ("Drop", "the vault is gone, nothing to rotate")
+
+
+def test_a_bare_drop_records_nothing(tmp_path: Path):
+    question, pending = ask_after(tmp_path)
+    answered(tmp_path, question, "Drop")
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is False
+    assert store.writes == []
+
+
+@pytest.mark.parametrize("said,written", [("Done", True), ("Later", False), ("finished in tuicr", False)])
+def test_only_done_in_tuicr_is_recorded(tmp_path: Path, said: str, written: bool):
+    question, pending = ask(tmp_path, "tuicr")
+    assert question.options == ["Done", "Later"]
+    answered(tmp_path, question, said)
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "u1") is written
+    assert [r.kind for r in store.records("s1")] == (["tuicr"] if written else [])

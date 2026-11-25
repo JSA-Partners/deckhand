@@ -166,6 +166,12 @@ class LocalState:
         rows = self._read("SELECT body FROM engine WHERE key = ?", (key,))
         return json.loads(rows[0][0]) if rows else None
 
+    def keyed(self, prefix: str) -> dict[str, dict]:
+        rows = self._read(
+            "SELECT key, body FROM engine WHERE substr(key, 1, ?) = ? ORDER BY key", (len(prefix), prefix)
+        )
+        return {key: json.loads(body) for key, body in rows}
+
     def drop(self, key: str) -> None:
         self._update("DELETE FROM engine WHERE key = ?", (key,))
 

@@ -4,10 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import budget
+from deckhand import budget, config
 from deckhand.records import Record
 from deckhand.store import open as store_open
 from deckhand.store.state import LocalState
+from tests.fake_graphql import FakeGraphQL, team_id
+from tests.test_step_stories import setup as feature_store
 
 
 def test_open_store_keeps_records_in_the_state_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,3 +60,38 @@ def test_flush_into_a_broken_state_stays_quiet(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(store_open, "METERS", {"app": store_open.Meter(), "person": store_open.Meter()})
     store_open.METERS["app"].heard("Viewer", {"X-Complexity": "1"}, False)
     store_open.flush()
+
+
+def test_a_configured_team_id_saves_the_team_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = config.config_dir()
+    directory.mkdir(parents=True)
+    (directory / config.FILE).write_text(f'team_key = "ACME"\n\n[teams]\nACME = "{team_id("ACME")}"\n')
+    client = FakeGraphQL(feature_store())
+    monkeypatch.setattr(store_open.Credentials, "load", staticmethod(lambda folder: "credentials"))
+    monkeypatch.setattr(store_open, "connect", lambda credentials, role, meter: client)
+    [found] = store_open.open_store("app").team_projects("ACME")
+    assert found["name"] == "Alpha"
+    assert client.names == ["TeamProjects"]
+
+
+def test_a_passed_team_dict_learns_the_configured_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = config.config_dir()
+    directory.mkdir(parents=True)
+    (directory / config.FILE).write_text('[teams]\nACME = "team-ACME"\n')
+    monkeypatch.setattr(store_open.Credentials, "load", staticmethod(lambda folder: "credentials"))
+    monkeypatch.setattr(store_open, "connect", lambda credentials, role, meter: object())
+    kept = {"OTHER": "team-OTHER"}
+    store_open.open_store("app", kept)
+    assert kept == {"OTHER": "team-OTHER", "ACME": "team-ACME"}
+
+
+def test_a_stale_configured_team_id_still_reads_the_team(monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = config.config_dir()
+    directory.mkdir(parents=True)
+    (directory / config.FILE).write_text('team_key = "ACME"\n\n[teams]\nACME = "stale-team-id"\n')
+    client = FakeGraphQL(feature_store())
+    monkeypatch.setattr(store_open.Credentials, "load", staticmethod(lambda folder: "credentials"))
+    monkeypatch.setattr(store_open, "connect", lambda credentials, role, meter: client)
+    [found] = store_open.open_store("app").team_projects("ACME")
+    assert found["name"] == "Alpha"
+    assert client.names == ["TeamProjects", "TeamId", "TeamProjects"]
