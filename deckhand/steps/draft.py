@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from deckhand import claims, features, inputs, ops, queue, spec
+from deckhand import claims, features, inputs, ops, queue, spec, versions
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
@@ -49,8 +49,11 @@ class Draft(StoryStep):
         def items(name: str) -> list[str]:
             return [f"{name}: {item}" for item in (stub.data.get(name, []) if stub else [])]
 
+        def decisions() -> list[str]:
+            return [f"decisions: {item}: {draft}" for item, draft in versions.drafts([stub] if stub else []).items()]
+
         first = [f"story: {ref} {story['title']}", spec.planning_text(store, feature, ("Contract",))]
-        first += [*items("decisions"), spec.planning_text(store, feature, ("Frame", "Shape", "Examples"))]
+        first += [*decisions(), spec.planning_text(store, feature, ("Frame", "Shape", "Examples"))]
         rest = [story["description"] or "no description", *items("unknowns"), *items("new_here")]
         rest += ["the draft holds, in this order:", *(f"- {part}" for part in SHAPE)]
         print(spec.fitted(f"{ref}-draft", "\n".join(first) + "\n", "\n".join(rest) + "\n"), end="")

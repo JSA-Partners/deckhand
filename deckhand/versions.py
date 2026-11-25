@@ -68,6 +68,16 @@ def expected_items(records: list[Record]) -> object:
     return _stub(records).get("decisions", [])
 
 
+def item_version(item: str, draft: str) -> str:
+    return content_hash(item + "\0" + draft)
+
+
+def drafts(records: list[Record]) -> dict[str, str]:
+    expected = expected_items(records)
+    entries = [e for e in expected if isinstance(e, dict)] if isinstance(expected, list) else []
+    return {str(e.get("item", "")): str(e.get("draft", "")) for e in entries}
+
+
 def after_merge(records: list[Record]) -> list[str]:
     items = _stub(records).get("after_merge", [])
     return [item for item in items if isinstance(item, str)] if isinstance(items, list) else []
@@ -95,8 +105,6 @@ def version_for(store: Store, feature: Feature, kind: str, subject: str) -> str:
         return _hash(planning.section(store, feature, SECTION_OF[kind]) or "")
     if kind == "feature-approval":
         return feature_version(store, feature)
-    if kind == "decision-item":
-        return content_hash(subject)
     if kind not in STORY_KINDS:
         raise Refusal(f"no version is defined for the decision kind {kind!r}")
     story = story_of(feature, subject)
@@ -104,6 +112,4 @@ def version_for(store: Store, feature: Feature, kind: str, subject: str) -> str:
 
 
 def current(store: Store, feature: Feature, record: Record) -> bool:
-    if record.kind == "decision-item":
-        return True
     return record.version == version_for(store, feature, record.kind, record.subject)

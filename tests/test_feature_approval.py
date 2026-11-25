@@ -38,11 +38,16 @@ def load(store: FakeStore) -> features.Feature:
     return found
 
 
+DRAFT = "Yes"
+
+
 def decided(store: FakeStore, kind: str, subject: str, answer: str, stories: list[str]) -> None:
-    version = versions.version_for(store, load(store), kind, subject)
     data: dict = {"answer": answer}
     if kind == "decision-item":
+        version = versions.item_version(subject, DRAFT)
         subject, data = versions.item_subject(subject), {**data, "item": subject}
+    else:
+        version = versions.version_for(store, load(store), kind, subject)
     for story in stories:
         ops.ensure_record(store, story, Record(kind, subject, version, "person:s", data))
 
@@ -145,11 +150,11 @@ def test_canceled_story_needs_no_approval():
 
 
 def expect(store: FakeStore, story: str, key: str, *items: str) -> None:
-    data = {"unknowns": [], "new_here": [], "decisions": list(items)}
+    data = {"unknowns": [], "new_here": [], "decisions": [{"item": i, "draft": DRAFT} for i in items]}
     store.put_record(story, Record("stub", key, "1", "agent:stories", data))
 
 
-@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
+@pytest.mark.parametrize("answer", ["Yes", "Salut"])
 def test_expected_decision_item_blocks_approval_until_answered(answer: str):
     store = setup()
     approve_everything(store)
@@ -166,7 +171,7 @@ def test_expected_decision_item_answered_on_another_story_still_blocks():
     assert "ACME-2: decision item Send receipts by email is not decided" in features.approval_gaps(store, load(store))
 
 
-@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
+@pytest.mark.parametrize("answer", ["Yes", "Salut"])
 def test_any_answer_settles_a_decision_item(answer: str):
     store = setup()
     decided(store, "decision-item", "Keep orders in one table", answer, ["s1"])
@@ -287,6 +292,16 @@ def test_feature_approval_through_the_dialog_reaches_building(state: Path, capsy
     )
     step.apply([shown["nonce"], *TEAM])
     assert features.phase(load(store)) is Phase.BUILDING
+
+
+def test_a_changed_draft_is_asked_again():
+    store = setup()
+    expect(store, "s2", "receipts", "Send receipts by email")
+    decided(store, "decision-item", "Send receipts by email", "Yes", ["s2"])
+    assert not any("is not decided" in gap for gap in features.approval_gaps(store, load(store)))
+    data = {"unknowns": [], "new_here": [], "decisions": [{"item": "Send receipts by email", "draft": "By post"}]}
+    store.put_record("s2", Record("stub", "receipts", "1", "agent:stories", data))
+    assert "ACME-2: decision item Send receipts by email is not decided" in features.approval_gaps(store, load(store))
 
 
 def test_a_decision_item_added_after_approval_voids_it():

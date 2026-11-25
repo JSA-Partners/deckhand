@@ -21,6 +21,7 @@ from tests.test_skills import named_commands, split
 TEAM: list[str] = []
 TODAY = date(2026, 11, 20)
 ITEM = "Keep orders in one table"
+DECISION = {"item": ITEM, "draft": "Yes"}
 
 
 class Session:
@@ -115,7 +116,7 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
             "tier": "concurrency",
             "state_chart": "queued -> sent",
             "after_merge": ["drain the old queue"],
-            "decisions": [ITEM],
+            "decisions": [DECISION],
         },
         {
             "key": "page",
@@ -152,7 +153,7 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     ]
     session.decide("contract", alpha, "Approve")
     session.decide("invariants", alpha, "Approve")
-    session.decide("decision-item", ITEM, "Keep", "--story", "ACME-1")
+    session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
 
     assert session.facts()["gaps"] == ["the feature review has not run"]
     session.review_feature(session.run)
@@ -242,7 +243,7 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
     ]
     for entry in stories:
         entry.update(unknowns=[], new_here=[], tier="data_rule")
-    stories[0].update(decisions=[ITEM], tier="multi_step", state_chart="placed -> queued")
+    stories[0].update(decisions=[DECISION], tier="multi_step", state_chart="placed -> queued")
     saved = session.skill("stories", "apply", *TEAM, "--file", session.write("map.json", json.dumps(stories)))
     assert [line for line in saved.splitlines() if line.startswith("story: ")] == [
         "story: ACME-1 queue",
@@ -254,7 +255,7 @@ def test_the_feature_skill_alone_reaches_building(tmp_path: Path, monkeypatch: p
 
     [gap] = [found for found in session.gaps() if ": decision item " in found]
     ref, _, rest = gap.partition(": decision item ")
-    session.ask("decision-item", rest.removesuffix(" is not decided"), "Keep", "--story", ref)
+    session.ask("decision-item", rest.removesuffix(" is not decided"), "Yes", "--story", ref)
     assert session.gaps() == ["the feature review has not run"]
     session.review_feature(session.skill)
     assert session.gaps() == []

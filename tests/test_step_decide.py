@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, decisions, features, planning, queue, review, versions
+from deckhand import answers, asks, decisions, features, planning, queue, review, spec, versions
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
-from deckhand.records import HAND, Record, content_hash
+from deckhand.records import HAND, Record
 from deckhand.step import Refusal
 from deckhand.steps.decide import Decide
 from deckhand.store import open as store_open
@@ -107,18 +107,80 @@ def test_story_decision_pins_the_story_by_reference(state: Path, capsys):
     assert store.records("s1") == []
 
 
-def test_decision_item_shows_its_text_and_records_an_open_answer(state: Path, capsys):
-    store = feature_store()
-    text = "Keep orders in one table"
-    Decide(store).context(["decision-item", text, "--story", "ACME-1", *TEAM, "--json"])
+def mapped_item(store: FakeStore, draft: str = "'Bonjour'", stories: tuple[str, ...] = ("s1",)) -> None:
+    data = {"unknowns": [], "new_here": [], "decisions": [{"item": "Greeting wording", "draft": draft}]}
+    for story in stories:
+        store.put_record(story, Record("stub", "greeting", "1", versions.MAP_AUTHOR, data))
+
+
+def ask_item(store: FakeStore, capsys, answer: str, state: Path) -> None:
+    Decide(store).context(["decision-item", "Greeting wording", "--story", "ACME-1", *TEAM, "--json"])
     shown = json.loads(capsys.readouterr().out)
     asked = shown["tool_input"]["questions"][0]
-    assert text in asked["question"]
-    record_answer(state, asked, "Change")
+    assert asked["question"].startswith("Greeting wording: 'Bonjour'? [")
+    assert [o["label"] for o in asked["options"]] == ["Yes", "Change"]
+    record_answer(state, asked, answer)
     Decide(store).apply([shown["nonce"], *TEAM])
-    [record] = store.records("s1")
-    assert (record.subject, record.version) == (versions.item_subject(text), content_hash(text))
-    assert (record.data["answer"], record.data["item"]) == ("Change", text)
+
+
+def test_yes_records_the_draft_with_a_version_that_covers_it(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "Yes", state)
+    [record] = [r for r in store.records("s1") if r.kind == "decision-item"]
+    assert (record.subject, record.version) == (
+        versions.item_subject("Greeting wording"),
+        versions.item_version("Greeting wording", "'Bonjour'"),
+    )
+    assert (record.data["answer"], record.data["item"]) == ("'Bonjour'", "Greeting wording")
+
+
+def test_own_words_are_what_the_hand_receives(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "'Salut'", state)
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    found = spec.gather(store, feature, features.story(store, feature, "ACME-1"))
+    assert found.decisions == [{"item": "Greeting wording", "answer": "'Salut'", "note": None}]
+    assert "- Greeting wording: 'Salut'" in spec.text(found)
+    assert "Change" not in spec.text(found)
+
+
+def test_a_bare_change_records_nothing_and_the_item_is_asked_again(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    store.writes.clear()
+    ask_item(store, capsys, "Change", state)
+    assert store.writes == []
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert features.approval_gaps(store, feature)[-1:] != []
+    assert "ACME-1: decision item Greeting wording is not decided" in features.approval_gaps(store, feature)
+
+
+def test_a_changed_draft_is_asked_again(state: Path, capsys):
+    store = feature_store()
+    mapped_item(store)
+    ask_item(store, capsys, "Yes", state)
+    gap = "ACME-1: decision item Greeting wording is not decided"
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert gap not in features.approval_gaps(store, feature)
+    mapped_item(store, "'Salut'")
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert gap in features.approval_gaps(store, feature)
+
+
+def test_an_item_outside_the_map_or_with_two_drafts_is_refused(state: Path):
+    store = feature_store()
+    mapped_item(store)
+    with pytest.raises(Refusal, match="not a decision item of the story map"):
+        Decide(store).context(["decision-item", "Other", "--story", "ACME-1", *TEAM])
+    mapped_item(store, "'Salut'", ("s2",))
+    with pytest.raises(Refusal, match="one draft for every --story"):
+        Decide(store).context(["decision-item", "Greeting wording", "--story", "ACME-1", "--story", "ACME-2", *TEAM])
 
 
 @pytest.mark.parametrize(

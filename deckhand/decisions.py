@@ -12,10 +12,12 @@ from deckhand.records import Record, content_hash
 from deckhand.step import Refusal
 from deckhand.store import Store
 
+ITEM = "decision-item"
+
 KINDS = (
     "contract",
     "invariants",
-    "decision-item",
+    ITEM,
     "lean",
     "feature-approval",
     "finding",
@@ -34,7 +36,7 @@ _OPTIONS = {
     "contract": ["Approve", "Not yet"],
     "invariants": ["Approve", "Not yet"],
     "feature-approval": ["Approve", "Not yet"],
-    "decision-item": ["Keep", "Change", "Discuss"],
+    ITEM: ["Yes", "Change"],
     "lean": ["Prove it in Lean", "Not needed"],
     "finding": [review.DECLINE, review.ACCEPT],
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
@@ -52,7 +54,7 @@ _SIGN_OFF = {
 }
 
 _DESCRIPTIONS = {
-    "decision-item": ["the item stands as written", "say what changes", "talk it through first"],
+    ITEM: ["the draft is the answer", "type the answer in your own words"],
     "finding": ["the finding stays unfixed", "the hand fixes the finding"],
     review.CAP_DECISION: [
         "carry on with those P1s open; every later change is still reviewed",
@@ -68,7 +70,6 @@ _ASKS = {
     "contract": "Approve the contract for",
     "invariants": "Approve the invariants for",
     "feature-approval": "Approve the feature",
-    "decision-item": "Keep the decision item",
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
@@ -84,7 +85,6 @@ _STAGE_CAP = {
     "feature": "Three review rounds left a P1 open. Proceed to approval or rework the feature",
 }
 _RECORDED = (
-    "decision-item",
     "finding",
     review.CAP_DECISION,
     signoff.KIND,
@@ -130,6 +130,7 @@ class Pending:
     detail: str = ""
     label: str = ""
     story_labels: list[str] = field(default_factory=list)
+    draft: str = ""
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class Pin:
     label: str = ""
     story_labels: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
+    draft: str = ""
 
 
 def make_question(kind: str, pin: Pin) -> Question:
@@ -156,6 +158,8 @@ def make_question(kind: str, pin: Pin) -> Question:
 def question_text(kind: str, pin: Pin) -> str:
     fields = {"kind": kind, **asdict(pin)}
     check = content_hash(json.dumps(fields, sort_keys=True))[:12]
+    if kind == ITEM:
+        return f"{pin.detail}: {pin.draft}? [{check}]"
     stage = review.cap_prefix(pin.subject).rpartition(":")[2] if kind == review.CAP_DECISION else ""
     ask = _STAGE_CAP.get(stage, _ASKS[kind])
     shown = " ".join(part for part in (ask, pin.label) if part)
@@ -181,6 +185,7 @@ def save_pending(question: Question, pin: Pin, state: Path) -> None:
         pin.detail,
         pin.label,
         pin.story_labels,
+        pin.draft,
     )
     folder = state / PENDING
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -205,6 +210,8 @@ def load_pending(nonce: str, state: Path) -> Pending:
 
 
 def _creates_record(pending: Pending, answer: str) -> bool:
+    if pending.kind == ITEM:
+        return bool(answer.strip()) and answer != "Change"
     if pending.kind == signoff.KIND and answer == signoff.BACK:
         return False
     if pending.kind in _RECORDED:
@@ -232,7 +239,14 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"no recorded answer for {pending.nonce} in {state / answers.FILE}")
     options = pending.options if pending.kind in _PIN_OPTIONS and pending.options != _OPTIONS.get(pending.kind) else []
     pin = Pin(
-        pending.subject, pending.version, pending.stories, pending.detail, pending.label, pending.story_labels, options
+        pending.subject,
+        pending.version,
+        pending.stories,
+        pending.detail,
+        pending.label,
+        pending.story_labels,
+        options,
+        pending.draft,
     )
     asked = question_text(pending.kind, pin)
     if pending.question != asked:
@@ -269,6 +283,8 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
     found = check(pending, state)
     note = found.answer if in_own_words(pending, found.answer) else None
     answer = signoff.NOT_YET if note is not None else found.answer
+    if pending.kind == ITEM and answer == "Yes":
+        answer = pending.draft
     if not _creates_record(pending, answer):
         return False
     if pending.kind == signoff.KIND:
@@ -282,7 +298,7 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         f"person:{found.session_id}",
         {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"note": note} if note is not None else {})
-        | ({"item": pending.detail} if pending.kind == "decision-item" else {}),
+        | ({"item": pending.detail} if pending.kind == ITEM else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)

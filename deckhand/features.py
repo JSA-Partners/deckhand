@@ -69,14 +69,11 @@ def _gap(feature: Feature, story: dict, kind: str, subject: str, version: str, w
 
 def _undecided(store: Store, feature: Feature, story: dict) -> list[str]:
     records = feature.records.get(story["id"], [])
-    expected = versions.expected_items(records)
-    if not isinstance(expected, list):
-        return []
     found = []
-    for item in expected:
-        held = versions.held(records, "decision-item", versions.item_subject(str(item)))
-        if held is None or not versions.current(store, feature, held):
-            found.append(str(item))
+    for item, draft in versions.drafts(records).items():
+        held = versions.held(records, "decision-item", versions.item_subject(item))
+        if held is None or held.version != versions.item_version(item, draft):
+            found.append(item)
     return found
 
 
@@ -115,11 +112,13 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
     items: dict[str, str] = {}
     settled: set[str] = set()
     for story in sorted(feature.stories, key=lambda s: s["id"]):
-        for record in feature.records.get(story["id"], []):
+        records = feature.records.get(story["id"], [])
+        fresh = {versions.item_subject(i): versions.item_version(i, d) for i, d in versions.drafts(records).items()}
+        for record in records:
             if record.kind != "decision-item":
                 continue
             items.setdefault(record.subject, str(record.data.get("item", record.subject)))
-            if story in live and versions.current(store, feature, record):
+            if story in live and fresh.get(record.subject, record.version) == record.version:
                 settled.add(record.subject)
     gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
     held = [record for story in live for record in feature.records.get(story["id"], [])]

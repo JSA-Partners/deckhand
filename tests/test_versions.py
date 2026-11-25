@@ -63,11 +63,17 @@ def test_contract_version_follows_only_its_section():
     assert versions.version_for(store, load(store), "contract", P1) != before
 
 
-def test_decision_item_version_is_its_text_hash():
-    store = setup()
+def test_decision_item_version_covers_its_draft():
     text = "Keep orders in one table"
-    assert versions.version_for(store, load(store), "decision-item", text) == content_hash(text)
+    assert versions.item_version(text, "Yes") == content_hash(text + "\0Yes")
+    assert versions.item_version(text, "Yes") != versions.item_version(text, "No")
     assert versions.item_subject(text) == content_hash(text)[:12]
+
+
+def test_expected_drafts_read_the_stub_objects():
+    stub = {"decisions": [{"item": "Greeting", "draft": "Bonjour"}, "stray"]}
+    records = [Record("stub", "k", "1", versions.MAP_AUTHOR, stub)]
+    assert versions.drafts(records) == {"Greeting": "Bonjour"}
 
 
 def test_the_same_map_saved_again_keeps_the_lean_decision():

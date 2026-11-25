@@ -26,8 +26,9 @@ file: `deckhand hand apply spike --repository LABEL --file QUESTION.md`. Keep dr
 not rest on it, then end the turn. On `deckhand: a spike was answered`, read it with
 `deckhand plan context spike KEY` and fold it into Facts.
 
-Turn the settled plan into stories: `deckhand stories context` prints the map's fields. Give each
-story its tier, a state chart at tier 2 or 3, and its after-merge chores. Save it with
+Turn the plan into stories: `deckhand stories context` prints the map's fields. Give each
+story its tier, a state chart at tier 2 or 3, its after-merge chores, and each decision item with
+your drafted answer. Save it with
 `deckhand stories apply --file MAP.json`, which names each REF.
 
 For every decision, run `deckhand decide context KIND SUBJECT`, pass its JSON unchanged to the
@@ -36,9 +37,9 @@ feature-approval, finding and review-cap take the project id.
 
 Decide the contract and invariants first; the contract gates the drafts. When a story's hand left a
 Draft document, offer `deckhand draft apply REF take`. Ask each expected item with
-`deckhand decide context decision-item ITEM --story REF`, ITEM its map text.
+`deckhand decide context decision-item ITEM --story REF`.
 
-Settle each gap `deckhand feature context` names as it says. For the feature review, pass the
+Settle each gap `deckhand feature context` names. For the feature review, pass the
 lens and target `deckhand feature-review context` prints to deckhand:reviewer, deckhand:confidence
 scores the list; save it with `deckhand feature-review apply round --findings FILE --target HASH`,
 HASH the target_hash line. Decide a proposed finding with

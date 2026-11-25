@@ -205,9 +205,13 @@ def pin(
         if not stories:
             raise Refusal("decision-item needs at least one --story")
         held = [features.story(store, feature, ref) for ref in stories]
-        version = versions.version_for(store, feature, kind, subject)
+        found = {versions.drafts(feature.records.get(s["id"], [])).get(subject) for s in held}
+        if len(found) != 1 or None in found:
+            raise Refusal(f"{subject!r} is not a decision item of the story map with one draft for every --story")
+        draft = found.pop() or ""
         ids, labels = [s["id"] for s in held], [_label(s) for s in held]
-        return Pin(versions.item_subject(subject), version, ids, subject, "", labels)
+        version = versions.item_version(subject, draft)
+        return Pin(versions.item_subject(subject), version, ids, subject, "", labels, draft=draft)
     if kind in versions.STORY_KINDS:
         story = features.story(store, feature, subject)
         version = versions.version_for(store, feature, kind, story["id"])

@@ -19,9 +19,14 @@ def pin(stories: list[str] | None = None, version: str = "v1") -> decisions.Pin:
     return decisions.Pin("Checkout", version, stories, label="Checkout", story_labels=[f"ACME-{s}" for s in stories])
 
 
+def item_pin(draft: str = "'Bonjour'") -> decisions.Pin:
+    return decisions.Pin("abc", "v1", ["s1"], "Greeting wording", "", ["ACME-1"], draft=draft)
+
+
 def ask(tmp_path: Path, kind: str = "contract", stories: list[str] | None = None):
-    question = decisions.make_question(kind, pin(stories))
-    decisions.save_pending(question, pin(stories), tmp_path)
+    shown = item_pin() if kind == "decision-item" else pin(stories)
+    question = decisions.make_question(kind, shown)
+    decisions.save_pending(question, shown, tmp_path)
     return question, decisions.load_pending(question.nonce, tmp_path)
 
 
@@ -209,14 +214,41 @@ def test_answer_marked_copied_refuses(tmp_path: Path):
     assert store.writes == []
 
 
-@pytest.mark.parametrize("answer", ["Keep", "Change", "Discuss"])
-def test_every_decision_item_answer_is_recorded(tmp_path: Path, answer: str):
+def test_a_decision_item_is_asked_with_its_draft(tmp_path: Path):
+    question, _ = ask(tmp_path, "decision-item")
+    [asked] = as_tool_input(question)["questions"]
+    assert re.fullmatch(r"Greeting wording: 'Bonjour'\? \[[0-9a-f]{12}\]", asked["question"])
+    assert [o["label"] for o in asked["options"]] == ["Yes", "Change"]
+    assert not any("recommended" in o["label"] + o["description"] for o in asked["options"])
+    assert "type" in asked["options"][1]["description"]
+
+
+def test_yes_records_the_draft_as_the_answer(tmp_path: Path):
     question, pending = ask(tmp_path, "decision-item")
-    answered(tmp_path, question, answer)
+    answered(tmp_path, question, "Yes")
     store = store_with("s1")
     assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
     [record] = store.records("s1")
-    assert record.data["answer"] == answer
+    assert (record.data["answer"], record.data["item"]) == ("'Bonjour'", "Greeting wording")
+    assert "note" not in record.data
+
+
+def test_own_words_are_recorded_as_the_answer(tmp_path: Path):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, "'Salut'")
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is True
+    [record] = store.records("s1")
+    assert record.data["answer"] == "'Salut'"
+    assert "note" not in record.data
+
+
+def test_a_bare_change_records_nothing(tmp_path: Path):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, "Change")
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is False
+    assert store.writes == []
 
 
 def test_load_pending_refuses_a_nonce_outside_the_pending_folder(tmp_path: Path):

@@ -83,20 +83,30 @@ def test_map_creates_stubs_with_labels_and_blockers(tmp_path: Path):
 
 def test_map_keeps_expected_decisions_in_the_stub_and_reruns_write_nothing(tmp_path: Path):
     store = setup()
-    entries = [entry("api", decisions=["Keep orders in one table"])]
+    entries = [entry("api", decisions=[{"item": "Keep orders in one table", "draft": "Yes"}])]
     run(store, tmp_path, entries)
     [stub] = [r for r in store.records(story_id("api")) if r.kind == "stub"]
-    assert stub.data["decisions"] == ["Keep orders in one table"]
+    assert stub.data["decisions"] == [{"item": "Keep orders in one table", "draft": "Yes"}]
     store.writes.clear()
     run(store, tmp_path, entries)
     assert store.writes == []
 
 
-@pytest.mark.parametrize("bad", ["Keep it", ["Keep it", 3]])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "Keep it",
+        ["Keep it"],
+        [{"item": "Keep it"}],
+        [{"item": "Keep it", "draft": " "}],
+        [{"item": "Keep it", "draft": "Yes", "why": "x"}],
+        [{"item": "Keep it", "draft": 3}],
+    ],
+)
 def test_map_refuses_a_malformed_decisions_field(tmp_path: Path, bad: object):
     store = setup()
     store.writes.clear()
-    with pytest.raises(Refusal, match="entry 1 field decisions must be a list of strings"):
+    with pytest.raises(Refusal, match=r"entry 1 .*decisions? .*\{\"item\": text, \"draft\": text\}"):
         run(store, tmp_path, [entry("api"), entry("ui", decisions=bad)])
     assert store.writes == []
 

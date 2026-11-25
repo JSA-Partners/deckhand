@@ -26,7 +26,7 @@ SHAPE = {
     "tier": f"the highest that applies, one of {_TIERS}",
     "state_chart": "the story's states and the moves between them, required at tiers 2 and 3, empty otherwise",
     "after_merge": "optional, the chores to do once the story merges, a list of strings",
-    "decisions": "optional, the decision items this story expects, a list of strings",
+    "decisions": 'optional, the decision items, a list of objects {"item": text, "draft": your answer}',
     "missed_by": f"after approval, the planning step that missed this story, one of {', '.join(MISSED_BY)}",
     "cuts": "after approval, the key of a story this one replaces",
     "spends_budget": "after approval, true when the story spends budget instead of cutting one",
@@ -72,10 +72,10 @@ def _check_entry(index: int, entry: object) -> None:
         value = entry.get(name)
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
             raise Refusal(f"entry {index} field {name} must be a list of strings")
-    for name in ("decisions", "after_merge"):
-        value = entry.get(name, [])
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            raise Refusal(f"entry {index} field {name} must be a list of strings")
+    value = entry.get("after_merge", [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise Refusal(f"entry {index} field after_merge must be a list of strings")
+    _check_decisions(index, entry.get("decisions", []))
     if any(not item.strip() for item in entry.get("after_merge", [])):
         raise Refusal(f"entry {index} field after_merge holds an empty item")
     _check_tier(index, entry)
@@ -84,6 +84,17 @@ def _check_entry(index: int, entry: object) -> None:
             raise Refusal(f"entry {index} field {name} must be a string")
     if "spends_budget" in entry and not isinstance(entry["spends_budget"], bool):
         raise Refusal(f"entry {index} field spends_budget must be true or false")
+
+
+def _check_decisions(index: int, value: object) -> None:
+    shape = 'each decision is an object {"item": text, "draft": text}'
+    if not isinstance(value, list):
+        raise Refusal(f"entry {index} field decisions must be a list; {shape}")
+    for number, decision in enumerate(value):
+        if not isinstance(decision, dict) or set(decision) != {"item", "draft"}:
+            raise Refusal(f"entry {index} decision {number} is not an object with item and draft; {shape}")
+        if not all(isinstance(text, str) and text.strip() for text in decision.values()):
+            raise Refusal(f"entry {index} decision {number} needs a non-empty item and draft; {shape}")
 
 
 def _check_tier(index: int, entry: dict) -> None:

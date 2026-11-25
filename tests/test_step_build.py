@@ -317,7 +317,7 @@ def test_a_long_examples_section_leaves_the_contract_and_decisions_inline(
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     store = setup()
-    decided(store, "decision-item", "Ids are UUIDs", "Keep", ["s1"])
+    decided(store, "decision-item", "Ids are UUIDs", "Yes", ["s1"])
     approve_everything(store)
     submit(store, tmp_path, repo)
     store.set_labels("s1", ["widgets"])
@@ -332,7 +332,7 @@ def test_a_long_examples_section_leaves_the_contract_and_decisions_inline(
     Build(store, Shell(), repo).context(["s1", *TEAM])
     out = capsys.readouterr().out
     assert len(out.encode("utf-8")) < spec.LIMIT
-    assert "The Contract of Alpha." in out and "- Ids are UUIDs: Keep" in out and "# Scope" not in out
+    assert "The Contract of Alpha." in out and "- Ids are UUIDs: Yes" in out and "# Scope" not in out
 
 
 def test_a_renamed_story_keeps_its_worktree(tmp_path: Path, repo: Path):
