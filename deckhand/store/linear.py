@@ -9,7 +9,7 @@ from deckhand.linear.workspace import GROUP
 from deckhand.records import Record
 from deckhand.ref import Ref
 from deckhand.step import Refusal
-from deckhand.store import Store
+from deckhand.store import Store, require_flat
 from deckhand.store.local import LocalRecords
 
 
@@ -209,6 +209,11 @@ class LinearStore(Store):
 
     def recorded(self, kind: str) -> list[str]:
         return self._records.recorded(kind)
+
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        require_flat(metadata)
+        attachment = {"issueId": issue, "url": url, "title": title, "subtitle": subtitle, "metadata": metadata}
+        self._client.query(queries.ATTACHMENT_CREATE, {"input": attachment})
 
     def relate(self, blocker: str, blocked: str) -> None:
         relation = {"issueId": self._uuid(blocker), "relatedIssueId": self._uuid(blocked), "type": "blocks"}

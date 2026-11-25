@@ -12,7 +12,7 @@ from deckhand.features import FINISHED
 from deckhand.linear.client import CONFLICT_PREFIX, DuplicateId
 from deckhand.records import Clock, Record
 from deckhand.ref import Ref
-from deckhand.store import Store
+from deckhand.store import Store, require_flat
 from deckhand.store.local import require_id
 
 
@@ -35,6 +35,7 @@ class FakeStore(Store):
         self._issues: dict[str, dict[str, Any]] = {}
         self._projects: dict[str, dict[str, Any]] = {}
         self._documents: dict[str, dict[str, Any]] = {}
+        self._records: dict[str, list[Record]] = {}
         self._attachments: dict[str, dict[str, dict[str, Any]]] = {}
         self._relations: list[list[str]] = []
         self._numbers: dict[str, int] = {}
@@ -49,6 +50,10 @@ class FakeStore(Store):
         store._issues = data["issues"]
         store._projects = data["projects"]
         store._documents = data["documents"]
+        store._records = {
+            issue: [replace(Record.from_json(held["record"]), at=held["at"]) for held in found]
+            for issue, found in data["records"].items()
+        }
         store._attachments = data["attachments"]
         store._relations = data["relations"]
         store._numbers = data["numbers"]
@@ -60,6 +65,10 @@ class FakeStore(Store):
                 "issues": self._issues,
                 "projects": self._projects,
                 "documents": self._documents,
+                "records": {
+                    issue: [{"record": r.to_json(), "at": r.at} for r in found]
+                    for issue, found in self._records.items()
+                },
                 "attachments": self._attachments,
                 "relations": sorted(self._relations),
                 "numbers": self._numbers,
@@ -157,24 +166,27 @@ class FakeStore(Store):
 
     def put_record(self, issue: str, record: Record) -> None:
         require_id(issue)
-        url = f"https://deckhand.invalid/record/{record.kind}/{record.subject}"
-        now = self._now()
-        held = self._attachments.setdefault(issue, {})
-        created = held[url]["updatedAt"] if url in held else now
-        held[url] = {"url": url, "metadata": {"record": record.to_json(), "written": now}, "updatedAt": created}
+        held = self._records.setdefault(issue, [])
+        held[:] = [r for r in held if (r.kind, r.subject) != (record.kind, record.subject)]
+        held.append(replace(record, at=self._now()))
+        held.sort(key=lambda r: (r.kind, r.subject))
         self._wrote("put_record", issue, record.kind, record.subject)
 
     def records(self, issue: str) -> list[Record]:
         require_id(issue)
-        held = self._attachments.get(issue, {})
-        found = []
-        for url in sorted(held):
-            meta = held[url]["metadata"]
-            found.append(replace(Record.from_json(meta["record"]), at=meta.get("written", held[url]["updatedAt"])))
-        return found
+        return list(self._records.get(issue, []))
 
     def recorded(self, kind: str) -> list[str]:
-        return sorted(issue for issue in self._attachments if any(r.kind == kind for r in self.records(issue)))
+        return sorted(issue for issue, found in self._records.items() if any(r.kind == kind for r in found))
+
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        require_flat(metadata)
+        entry = {"url": url, "title": title, "subtitle": subtitle, "metadata": dict(metadata)}
+        self._attachments.setdefault(issue, {})[url] = entry
+        self._wrote("attach", issue, url)
+
+    def attachments(self, issue: str) -> dict[str, dict]:
+        return copy.deepcopy(self._attachments.get(issue, {}))
 
     def assign(self, issue: str, user: str) -> None:
         self._issues[issue]["assignee"] = user

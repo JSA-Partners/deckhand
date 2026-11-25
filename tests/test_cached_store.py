@@ -74,3 +74,13 @@ def test_a_cached_result_cannot_be_changed_by_the_caller() -> None:
     got["title"] = "Changed"
     again: Any = cached.issue(ISSUE)
     assert again["title"] == "Title"
+
+
+def test_cached_store_never_memoizes_attach() -> None:
+    inner, cached = seeded()
+    cached.issue(ISSUE)
+    cached.attach(ISSUE, "https://linear.app/x", "T", "S", {"v": 1})
+    cached.attach(ISSUE, "https://linear.app/x", "T", "S", {"v": 2})
+    assert inner.attachments(ISSUE)["https://linear.app/x"]["metadata"] == {"v": 2}
+    cached.issue(ISSUE)
+    assert inner.calls == ["issue", "issue"]

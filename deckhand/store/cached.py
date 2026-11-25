@@ -32,6 +32,7 @@ WRITES = frozenset(
         "set_project_labels",
         "set_project_dates",
         "assign",
+        "attach",
     }
 )
 
@@ -91,6 +92,9 @@ class CachedStore(Store):
 
     def recorded(self, kind: str) -> list[str]:
         return self._inner.recorded(kind)
+
+    def attach(self, issue: str, url: str, title: str, subtitle: str, metadata: dict[str, str | int]) -> None:
+        self._write("attach", issue, url, title, subtitle, metadata)
 
     def relate(self, blocker: str, blocked: str) -> None:
         self._write("relate", blocker, blocked)

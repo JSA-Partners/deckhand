@@ -197,6 +197,12 @@ mutation DocumentUpdate($id: String!, $input: DocumentUpdateInput!) {
 }
 """
 
+ATTACHMENT_CREATE = """
+mutation AttachmentCreate($input: AttachmentCreateInput!) {
+  attachmentCreate(input: $input) { success }
+}
+"""
+
 RELATION_CREATE = """
 mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
   issueRelationCreate(input: $input) { success }

@@ -768,3 +768,32 @@ def test_recorded_reads_the_local_records(records: LocalRecords) -> None:
     client = FakeClient()
     assert LinearStore(client, records).recorded("approval") == [UUID]
     assert client.calls == []
+
+
+def test_linear_attach_sends_one_mutation(records: LocalRecords) -> None:
+    client = FakeClient(AttachmentCreate={"attachmentCreate": {"success": True}})
+    store = LinearStore(client, records)
+    url = "https://linear.app/acme/document/contract-1"
+    store.attach(UUID, url, "Plan approved", "since", {"version": "v1", "round": 2})
+    assert client.calls == [
+        (
+            "AttachmentCreate",
+            {
+                "input": {
+                    "issueId": UUID,
+                    "url": url,
+                    "title": "Plan approved",
+                    "subtitle": "since",
+                    "metadata": {"version": "v1", "round": 2},
+                }
+            },
+        )
+    ]
+
+
+def test_linear_attach_refuses_nested_metadata_before_any_request(records: LocalRecords) -> None:
+    client = FakeClient()
+    store = LinearStore(client, records)
+    with pytest.raises(ValueError):
+        store.attach(UUID, "https://linear.app/x", "T", "S", {"a": {"b": 1}})
+    assert client.calls == []

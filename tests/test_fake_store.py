@@ -239,9 +239,7 @@ def test_a_record_put_again_reports_the_later_write_time() -> None:
     store.put_record("i1", approval("1"))
     store.put_record("i1", Record("approval", "plan", "1", "captain", {"ok": False}))
     assert store.records("i1")[0].at == "2026-11-19T10:05:00.000Z"
-    assert store._attachments["i1"]["https://deckhand.invalid/record/approval/plan"]["updatedAt"] == (
-        "2026-11-19T10:00:00.000Z"
-    )
+    assert store.records("i1") == [Record("approval", "plan", "1", "captain", {"ok": False})]
 
 
 def test_the_default_clock_writes_linears_form() -> None:
@@ -345,3 +343,43 @@ def test_recorded_lists_the_issues_holding_a_kind() -> None:
     store.put_record("s1", Record("sign-off-void", "s1", "v1", "person", {}))
     assert store.recorded("tier") == ["s1", "s2"]
     assert store.recorded("sign-off") == []
+
+
+def test_fake_records_round_trip_without_a_url(tmp_path: Path) -> None:
+    store = FakeStore()
+    make_issue(store)
+    store.put_record("i1", approval("1"))
+    assert store.records("i1") == [approval("1")]
+    assert "deckhand.invalid" not in json.dumps(store.snapshot())
+    path = tmp_path / "snapshot.json"
+    path.write_text(json.dumps(store.snapshot()))
+    loaded = FakeStore.from_snapshot(path)
+    assert loaded.records("i1") == [approval("1")]
+    assert loaded.records("i1")[0].at == store.records("i1")[0].at
+    assert loaded.snapshot() == store.snapshot()
+
+
+def test_attach_upserts_per_url() -> None:
+    store = FakeStore()
+    make_issue(store)
+    url = "https://linear.app/acme/document/contract-1"
+    store.attach("i1", url, "Plan approved", "first", {"version": "v1"})
+    store.attach("i1", url, "Plan approved", "second", {"version": "v2", "round": 2})
+    assert store.attachments("i1") == {
+        url: {
+            "url": url,
+            "title": "Plan approved",
+            "subtitle": "second",
+            "metadata": {"version": "v2", "round": 2},
+        }
+    }
+    assert store.records("i1") == []
+
+
+def test_attach_refuses_nested_metadata() -> None:
+    store = FakeStore()
+    make_issue(store)
+    with pytest.raises(ValueError):
+        store.attach("i1", "https://linear.app/x", "T", "S", {"a": {"b": 1}})
+    assert store.attachments("i1") == {}
+    assert [name for name, *_ in store.writes] == ["create_issue"]
