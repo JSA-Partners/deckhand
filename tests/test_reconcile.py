@@ -10,8 +10,8 @@ from deckhand.actions import Action, Adopt, Launch, Leave, Post, Remove, Resume,
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
 from deckhand.reading import Reading
-from deckhand.reconcile import IN_PROGRESS, Facts, reconcile, reserved
-from deckhand.records import HAND, Record, content_hash, iso
+from deckhand.reconcile import IN_PROGRESS, LAUNCH_GRACE, Facts, reconcile, reserved
+from deckhand.records import HAND, Record, content_hash, epoch, iso
 from deckhand.steps.after import After
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
@@ -172,6 +172,21 @@ def test_when_the_chore_hand_stops_the_items_go_to_the_person(clone: Path):
     elsewhere = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
     queued = queue.items(store, "ACME", current, ME, fleet.Fleet([], ""), lambda s: Policy("w"), elsewhere=elsewhere)
     assert [(i.kind, i.ref) for i in queued if i.kind == chores.AFTER] == [(chores.AFTER, "ACME-1")] * 2
+
+
+def test_a_fresh_chore_hand_listed_before_it_attaches_is_neither_handed_over_nor_removed(clone: Path):
+    store = released()
+    started(store)
+    start = queue.last_start(store.records("s1"))
+    assert start is not None
+    launched = epoch(start.at)
+    old = row("ACME-1", "stopped")
+    attaching = row("ACME-1", "working") | {"id": "id-new", "sessionId": "sid-new"}
+    fresh = held(short="id-new")
+    assert reconcile(facts(store, old, attaching, hands=(fresh,), now=launched + 1), store) == []
+    assert reconcile(facts(store, old, hands=(fresh,), now=launched + 1), store) == []
+    late = reconcile(facts(store, old, attaching, hands=(fresh,), now=launched + LAUNCH_GRACE + 1), store)
+    assert [type(action).__name__ for action in late] == ["Leave"]
 
 
 def test_an_idle_chore_hand_past_its_nudge_is_stopped(clone: Path):

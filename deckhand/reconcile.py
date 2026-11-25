@@ -15,6 +15,7 @@ from deckhand.store import Store
 from deckhand.store.state import HandRow, Message
 
 RETRY_AFTER, RETRY_CAP = 60.0, 900.0
+LAUNCH_GRACE = 60.0
 IN_PROGRESS = "In Progress"
 
 
@@ -175,7 +176,9 @@ def _stopped_copies(facts: Facts) -> list[Remove]:
     for row in sorted(facts.hands.values(), key=lambda held: held.name):
         if not row.session or row.session not in listed:
             continue
-        stale = [s for s in facts.read.sessions if s.name == row.name and s.session_id != row.session]
+        stale = [
+            s for s in facts.read.sessions if s.name == row.name and s.id != row.short and s.session_id != row.session
+        ]
         found += [Remove(row.name, s.id, stop=False) for s in stale if not fleet.alive(s)]
     return found
 
@@ -280,6 +283,15 @@ def _since_merge(story: dict, records: list[Record]) -> bool:
     return start is not None and (not merged or epoch(start.at) > epoch(merged))
 
 
+# A launched session lists with no status until it attaches, so a hand not yet adopted counts as starting.
+def _starting(tick: _Tick, row: HandRow | None, records: list[Record]) -> bool:
+    start = queue.last_start(records)
+    if row is None or not row.short or start is None or tick.facts.now - epoch(start.at) >= LAUNCH_GRACE:
+        return False
+    listed = [s for s in tick.facts.read.sessions if s.id == row.short]
+    return all(s.session_id != row.session and s.state == fleet.WORKING for s in listed)
+
+
 def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[Action]:
     hands = fleet.hands(tick.sessions)
     found: list[Action] = []
@@ -294,6 +306,8 @@ def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[A
             continue
         # A chore hand starts fresh once after the merge; once that hand is gone, its items go to the person.
         if chore and _since_merge(story, records):
+            if _starting(tick, row, records):
+                continue
             tick.acted.add(name)
             found.append(Leave(name, story["id"], chores.hand_over(story, records, row.session if row else "")))
             continue
