@@ -5,18 +5,33 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, decisions, features, planning, review, spec, stalls, versions, watch
+from deckhand import (
+    answers,
+    asks,
+    chores,
+    decisions,
+    features,
+    implplan,
+    planning,
+    review,
+    spec,
+    stalls,
+    versions,
+    watch,
+)
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
 from deckhand.records import HAND, Record
 from deckhand.step import Refusal
+from deckhand.steps.after import After
 from deckhand.steps.decide import Decide
 from deckhand.store import open as store_open
-from deckhand.store.fake import FakeStore
+from deckhand.store.fake import FakeStore, WriteFailed
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
-from tests.test_feature_approval import mapped, reviewed, setup
+from tests.test_feature_approval import approve_everything, mapped, reviewed, setup
+from tests.test_implplan import manifest
 from tests.test_queue import alpha, started
 
 P1 = create_id("ACME:Alpha", "feature")
@@ -386,3 +401,39 @@ def test_decide_apply_makes_no_linear_write_for_a_mirror(state: Path, capsys):
     for story in ("s1", "s2"):
         [record] = [r for r in store.records(story) if r.kind == "feature-approval"]
         assert (record.data["by"], record.data["name"]) == ("viewer-1", "viewer-1")
+
+
+def test_make_it_a_story_opens_a_parked_feature_named_for_the_chore(state: Path, capsys):
+    text = "Run every test under tests/ on main"
+    store = setup()
+    approve_everything(store)
+    store.put_record("s1", Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", manifest(after_merge=[text])))
+    store.set_issue_state("s1", "Done")
+    store.assign("s1", store.viewer()["id"])
+    After(store).apply(["ACME-1", "person", "1", "--why", "it needs main", *TEAM])
+    before = features.open_feature(store, "ACME")
+    assert before is not None
+    version = versions.feature_version(store, before)
+    capsys.readouterr()
+    Decide(store).context(["after-merge", "ACME-1", "--item", "1", *TEAM, "--json"])
+    asked = json.loads(capsys.readouterr().out)
+    question = asked["tool_input"]["questions"][0]
+    assert question["question"].startswith("What happens to this after-merge item of ACME-1 Orders")
+    record_answer(state, question, "Make it a story")
+    store.fail_after_write(len(store.writes) + 1)
+    with pytest.raises(WriteFailed):
+        Decide(store).apply([asked["nonce"], *TEAM])
+    Decide(store).apply([asked["nonce"], *TEAM])
+    id = create_id("ACME:chore:s1:1", features.PURPOSE)
+    assert store.writes.count(("create_project", id)) == 1
+    made = store.project(id)
+    assert made is not None
+    assert (made["name"], made["start_date"], made["target_date"]) == (f"Chore: {text}", None, None)
+    assert made["labels"] == [FEATURE_LABEL]
+    assert all(part in made["description"] for part in (text, "ACME-1", "it needs main"))
+    [decided] = [r for r in store.records("s1") if r.kind == chores.AFTER]
+    assert (decided.data["answer"], decided.data["project"]) == ("Make it a story", id)
+    after = features.open_feature(store, "ACME")
+    assert after is not None and after.project["id"] == P1
+    assert versions.feature_version(store, after) == version
+    assert [p["id"] for p in features.parked(store, "ACME")] == [id]

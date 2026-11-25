@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from deckhand import answers, asks, claims, config, fleet, git, launch, ops, queue
-from deckhand.actions import Action, Adopt, Attach, Launch, Post, PutDocument, Remove, Resume, Stop
+from deckhand.actions import Action, Adopt, Attach, Launch, Leave, Post, PutDocument, Remove, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
 from deckhand.step import Refusal
@@ -86,6 +86,9 @@ class Acts:
             self._claude("rm", action.short)
         elif isinstance(action, Adopt):
             self._state.adopt(action.name, action.short, action.session)
+        elif isinstance(action, Leave):
+            for record in action.records:
+                ops.ensure_record(self._records, action.issue, record)
         elif isinstance(action, Attach):
             self._app().attach(action.issue, action.url, action.title, action.subtitle, dict(action.metadata))
             self._state.put(action.key, {"digest": action.digest})

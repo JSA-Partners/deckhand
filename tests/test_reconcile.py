@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 from deckhand import asks, chores, config, features, fleet, implplan, mirror, planning, queue, spikes, stalls, wakes
-from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand.actions import Action, Adopt, Launch, Leave, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.reconcile import IN_PROGRESS, Facts, reconcile, reserved
-from deckhand.records import HAND, Record, iso
+from deckhand.records import HAND, Record, content_hash, iso
 from deckhand.steps.after import After
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
@@ -143,6 +143,47 @@ def test_a_chore_on_a_released_feature_gets_a_hand_after_the_next_feature_opens(
     opened_next(store)
     store.assign("s1", "someone-else")
     assert reconcile(facts(store), store) == []
+
+
+def test_a_done_story_with_an_open_chore_gets_a_fresh_launch_not_a_resume(clone: Path):
+    store = released(CHORES[:1])
+    alpha = next(s for s in store.project_issues(P1) if s["id"] == "s1")
+    stopped = row("ACME-1", "stopped")
+    found = reconcile(facts(store, stopped, hands=(held(),)), store)
+    assert found == [Launch("hand-ACME-1", "ACME-1", queue.STORY_HAND, clone, alpha, ME, True)]
+
+
+def test_when_the_chore_hand_stops_the_items_go_to_the_person(clone: Path):
+    store = released()
+    beta = opened_next(store)
+    started(store)
+    sessions = (row("ACME-1", "stopped"), row("ACME-9", "working", "busy"))
+    why = {"why": "its hand stopped after the merge", "session": "sid-ACME-1"}
+    left = tuple(
+        Record(chores.AFTER_PERSON, f"s1:{n}", content_hash(text), "agent:engine", {"n": n, "text": text} | why)
+        for n, text in enumerate(CHORES, start=1)
+    )
+    assert reconcile(facts(store, *sessions, hands=(held(),)), store) == [Leave("hand-ACME-1", "s1", left)]
+    for record in left:
+        store.put_record("s1", record)
+    assert reconcile(facts(store, *sessions, hands=(held(),), cap=2), store) == []
+    current = features.current(store, "ACME")
+    assert current is not None and current.project["id"] == beta
+    elsewhere = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
+    queued = queue.items(store, "ACME", current, ME, fleet.Fleet([], ""), lambda s: Policy("w"), elsewhere=elsewhere)
+    assert [(i.kind, i.ref) for i in queued if i.kind == chores.AFTER] == [(chores.AFTER, "ACME-1")] * 2
+
+
+def test_an_idle_chore_hand_past_its_nudge_is_stopped(clone: Path):
+    store = released(CHORES[:1])
+    started(store)
+    idle, name = row("ACME-1", "idle", "idle"), frozenset({"hand-ACME-1"})
+    first = held(turn_ended=at(T - 200))
+    [nudge] = reconcile(facts(store, idle, hands=(first,), idle=name), store)
+    assert isinstance(nudge, Post) and nudge.kind == wakes.NUDGE
+    nudged = held(turn_ended=at(T - 200), restarts=1)
+    found = reconcile(facts(store, idle, hands=(nudged,), idle=name), store)
+    assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
 
 
 def test_a_free_slot_launches_the_next_story_in_build_order(clone: Path):

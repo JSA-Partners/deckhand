@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, launch, mirror, queue, stalls
-from deckhand.actions import Adopt, Attach, Launch, Post, PutDocument, Remove, Resume, Stop
+from deckhand import asks, chores, config, features, fleet, launch, mirror, queue, stalls
+from deckhand.actions import Adopt, Attach, Launch, Leave, Post, PutDocument, Remove, Resume, Stop
 from deckhand.acts import Acts, unheard
 from deckhand.linear.client import LinearError
 from deckhand.policy import Policy
@@ -191,6 +191,15 @@ def test_a_post_writes_the_row_and_its_record_once(rows: LocalState, db: Path):
     assert executor.run(wake()) is None and executor.run(wake()) is None
     assert [m.key for m in rows.pending()] == ["wake:s1:n1"]
     assert kinds(db) == [asks.WAKE]
+
+
+def test_a_leave_writes_its_records_once_and_runs_nothing(rows: LocalState, db: Path):
+    data = {"n": 1, "text": "rotate", "why": "its hand stopped after the merge", "session": "sid-1"}
+    left = Record(chores.AFTER_PERSON, "s1:1", "v1", "agent:engine", data)
+    shell = Shell()
+    executor = acts(rows, db, shell)
+    assert executor.run(Leave(NAME, "s1", (left,))) is None and executor.run(Leave(NAME, "s1", (left,))) is None
+    assert kinds(db) == [chores.AFTER_PERSON] and shell.calls == []
 
 
 def test_a_restart_post_raises_the_count_once(rows: LocalState, db: Path):

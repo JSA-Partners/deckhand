@@ -55,6 +55,8 @@ class After(StoryStep):
         for n, text in enumerate(chores.after_items(records, sid), start=1):
             status, held = chores.after_status(records, sid, n, text)
             noted = {key: held.data[key] for key in ("note", "why") if held is not None and key in held.data}
+            if status == chores.STORY:
+                noted = {"feature": chores.story_name(text)}
             items.append({"n": n, "text": text, "status": status if done else WAITS} | noted)
         if parsed["json"]:
             print(json.dumps({"story": story["identifier"], "done": done, "items": items}, indent=2))
@@ -64,7 +66,7 @@ class After(StoryStep):
         if not items:
             print("no after-merge items")
         for item in items:
-            extra = item.get("note") or item.get("why")
+            extra = item.get("note") or item.get("why") or item.get("feature")
             print(f"{item['n']} {item['text']}: {item['status']}" + (f" ({extra})" if extra else ""))
 
     def apply(self, args: list[str]) -> None:

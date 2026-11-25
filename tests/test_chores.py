@@ -98,3 +98,14 @@ def test_elsewhere_loads_only_a_signed_feature_with_an_item_not_settled(
     assert chores.elsewhere(CachedStore(counting), "ACME", {"s3"}) == []
     assert {call[0] for call in counting.log} <= {"recorded", "records", "team_projects"}
     assert [f.project["id"] for f in chores.elsewhere(store, "ACME", {"s3"}, frozenset({"hand-ACME-1"}))] == [alpha]
+
+
+def test_a_long_chore_name_is_cut_at_a_word():
+    store = released()
+    text = "Rotate the webhook signing secret in the vault and update every consumer that reads it now"
+    assert len(text) == 90
+    story = store.issue("s1")
+    id = chores.make_story(store, "ACME", story, 1, text, "the secret lives in the vault")
+    name = store.project(id)["name"]
+    assert len(name) <= 64 and name.endswith("...")
+    assert name == "Chore: Rotate the webhook signing secret in the vault and..."

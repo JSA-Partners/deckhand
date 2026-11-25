@@ -25,7 +25,7 @@ from deckhand import (
     status,
     watch,
 )
-from deckhand.actions import Action, Adopt, Attach, Launch, Post, PutDocument, Resume, Stop
+from deckhand.actions import Action, Adopt, Attach, Launch, Leave, Post, PutDocument, Resume, Stop
 from deckhand.linear.client import LinearError
 from deckhand.lines import Lines, Stories
 from deckhand.linker import Linked
@@ -210,7 +210,7 @@ class Engine:
             if isinstance(action, HOLDS):
                 self._holding.discard(action.name)
             self._lines.heard(action, line, now)
-            if not isinstance(action, Post | Adopt | Attach | PutDocument):
+            if not isinstance(action, Post | Adopt | Leave | Attach | PutDocument):
                 self._settling[action.name] = (now, isinstance(action, HOLDS))
                 self._fleets.poke()
         began = self._fleets.began()

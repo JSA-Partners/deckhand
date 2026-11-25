@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import asks, chores, fleet, queue
+from deckhand import asks, chores, fleet, order, queue
 from deckhand.records import Record
 
 STALLED = "stalled"
@@ -56,7 +56,9 @@ def items(
     restarts: int | None,
     idle: bool = False,
 ) -> list[queue.Item]:
-    if not stalled(story, records, session, launch, second, idle) or auto_restart(records, launch, restarts):
+    if story["state"] == order.DONE or not stalled(story, records, session, launch, second, idle):
+        return []
+    if auto_restart(records, launch, restarts):
         return []
     start = queue.last_start(records, launch)
     if start is None or stall_answer(records, launch) is not None:

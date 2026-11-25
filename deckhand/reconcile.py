@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from deckhand import asks, chores, delivery, fleet, mirror, order, queue, spikes, stalls, startable, wakes
-from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand.actions import Action, Adopt, Launch, Leave, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
 from deckhand.policy import Policy
@@ -222,7 +222,7 @@ def _answers(tick: _Tick, feature: Feature) -> list[Action]:
     return found
 
 
-# An idle hand's nudge is its one automatic restart; past it, the stalled item waits for the person.
+# An idle hand's nudge is its one automatic restart; past it, a chore hand stops and any other waits for the person.
 def _idle(tick: _Tick, feature: Feature) -> list[Action]:
     found: list[Action] = []
     for story in feature.live if tick.facts.readable else []:
@@ -239,7 +239,7 @@ def _idle(tick: _Tick, feature: Feature) -> list[Action]:
             start = asks.hand_start(story, records, launch)
             key = f"nudge:{story['id']}:{row.turn_ended}"
             found.append(Post(name, key, wakes.NUDGE, wakes.nudge_body(), story["id"], start, restart=True))
-        elif stalls.stall_answer(records, launch) is not None:
+        elif story["state"] == order.DONE or stalls.stall_answer(records, launch) is not None:
             found.append(tick.take(Stop(name, session.id, "idle"), slot=False))
     return found
 
@@ -266,26 +266,36 @@ def _held_elsewhere(story: dict, records: list[Record], me: str) -> bool:
     return story["state"] == IN_PROGRESS and story["assignee"] == me and queue.last_start(records) is None
 
 
+def _since_merge(story: dict, records: list[Record]) -> bool:
+    start, merged = queue.last_start(records), queue.merged_at(story)
+    return start is not None and (not merged or epoch(start.at) > epoch(merged))
+
+
 def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[Action]:
     hands = fleet.hands(tick.sessions)
     found: list[Action] = []
     for work in works:
-        if not tick.free():
-            break
-        if work.clone not in tick.facts.policies:
-            continue
         story, records = work.story, _records(feature, work.story)
         name = fleet.hand_name(story["identifier"])
         row = tick.facts.hands.get(name)
         if name in tick.acted or tick.alive(name) is not None or _held_elsewhere(story, records, tick.me):
             continue
-        if not startable.due(work, feature, hands, tick.policy_for, row.restarts if row is not None else None):
+        chore = story["state"] == order.DONE
+        # A chore hand starts fresh once after the merge; once that hand is gone, its items go to the person.
+        if chore and _since_merge(story, records):
+            tick.acted.add(name)
+            found.append(Leave(name, story["id"], chores.hand_over(story, records, row.session if row else "")))
+            continue
+        if not tick.free() or work.clone not in tick.facts.policies:
+            continue
+        restarts = row.restarts if row is not None else None
+        if not chore and not startable.due(work, feature, hands, tick.policy_for, restarts):
             continue
         launch = startable.launch_of(work.kind)
         restart = queue.last_start(records, launch) is not None
         if tick.backing_off(name):
             continue
-        if row is not None and row.session and row.kind == launch and tick.listed(row.session):
+        if not chore and row is not None and row.session and row.kind == launch and tick.listed(row.session):
             start = asks.hand_start(story, records, launch)
             nudge = Resume(name, row.session, row.cwd, wakes.nudge_body(), (), start, restart)
             found.append(tick.take(nudge, slot=True))

@@ -4,11 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, queue, stalls
+from deckhand import asks, features, implplan, queue, stalls
 from deckhand.fleet import Fleet
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
+from tests.test_implplan import manifest
 from tests.test_queue import ME, alpha, asked, hand, kinds, started, waiting
 from tests.test_step_build import repo, state
 from tests.test_step_signoff import ready, sign
@@ -178,3 +179,13 @@ def test_an_idle_hand_waiting_on_the_person_is_not_stalled():
     started(store, "s1")
     asked(store, "s1")
     assert idle_items(store, frozenset({"ACME-1"}), {"ACME-1": 1}) == []
+
+
+def test_a_done_story_never_gets_a_stalled_item():
+    store = alpha()
+    plan = Record(implplan.PURPOSE, "s1", "p1", "agent:implplan", manifest(after_merge=["rotate"]))
+    store.put_record("s1", plan)
+    started(store, "s1")
+    assert [i.ref for i in stalled_items(store, {"ACME-1": 1})] == ["ACME-1"]
+    store.set_issue_state("s1", "Done")
+    assert stalled_items(store, {"ACME-1": 1}) == []

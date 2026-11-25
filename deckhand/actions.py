@@ -62,6 +62,13 @@ class Adopt:
 
 
 @dataclass(frozen=True)
+class Leave:
+    name: str
+    issue: str
+    records: tuple[Record, ...]
+
+
+@dataclass(frozen=True)
 class Attach:
     name: str
     key: str
@@ -85,4 +92,4 @@ class PutDocument:
 
 
 Mirror = Attach | PutDocument
-Action = Launch | Resume | Post | Stop | Remove | Adopt | Attach | PutDocument
+Action = Launch | Resume | Post | Stop | Remove | Adopt | Leave | Attach | PutDocument

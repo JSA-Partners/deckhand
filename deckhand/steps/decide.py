@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from functools import partial
 
 from deckhand import answers, asks, chores, decisions, features, gh, pins, signoff, stalls, watch
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import StoryStep
+from deckhand.store import Store
 from deckhand.store.local import default_path
 from deckhand.store.state import LocalState
 
@@ -38,6 +40,17 @@ def _parse(args: list[str]) -> dict:
         else:
             found["words"].append(arg)
     return found
+
+
+def _made(store: Store, pending: decisions.Pending, team: str, answer: str) -> dict:
+    if pending.kind != chores.AFTER or answer != chores.MAKE_STORY:
+        return {}
+    story = store.issue(pending.stories[0])
+    records, n = store.records(story["id"]), int(pending.subject.rpartition(":")[2])
+    text = chores.after_items(records, story["id"])[n - 1]
+    _, left = chores.after_status(records, story["id"], n, text)
+    why = str(left.data.get("why", "")) if left is not None else ""
+    return {"project": chores.make_story(store, team, story, n, text, why)}
 
 
 @register("decide")
@@ -104,7 +117,8 @@ class Decide(StoryStep):
         state = answers.state_dir()
         pending = decisions.load_pending(nonce, state)
         store = self._store_for_run()
-        if decisions.decide(store, pending, state, *self._viewer()):
+        made = partial(_made, store, pending, team_key(parsed))
+        if decisions.decide(store, pending, state, *self._viewer(), made=made):
             decisions.pending_path(nonce, state).unlink(missing_ok=True)
             if pending.kind == features.APPROVAL:
                 with LocalState(default_path()) as rows:

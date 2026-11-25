@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from deckhand import acts, answers, asks, budget, chores, engine, fleet, linker, queue, spikes, stalls, status, watch
-from deckhand.actions import Action, Attach, Launch, Post, Remove, Resume, Stop
+from deckhand.actions import Action, Attach, Launch, Leave, Post, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
 from deckhand.linker import Linked
@@ -30,6 +30,7 @@ from tests.test_chores import opened_next, released
 from tests.test_feature_approval import P1, TEAM
 from tests.test_mirror import named
 from tests.test_queue import asked, started
+from tests.test_step_after import CHORES
 from tests.test_step_hand import building, clone, configure, state
 from tests.test_step_stories import setup as empty_feature
 
@@ -956,6 +957,19 @@ def test_a_mirror_result_pokes_no_fleet_read_and_a_failing_one_backs_off(clone: 
     tries = [a for a in rig.worker.submitted if a.name == "mirror:s1"]
     assert 2 <= len(tries) <= 4
     assert notes[-1].endswith("network: Linear is unreachable")
+
+
+def test_a_leave_result_pokes_no_fleet_read(clone: Path):
+    configure(clone, 1)
+    store = released(CHORES[:1])
+    started(store, "s1")
+    rig = Rig(store, row("ACME-1", "stopped"))
+    rig.ready()
+    [leave] = [a for a in rig.worker.submitted if isinstance(a, Leave)]
+    pokes = rig.fleets.pokes
+    rig.worker.finish(leave)
+    rig.step()
+    assert rig.fleets.pokes == pokes
 
 
 def test_a_released_feature_mirrors_with_no_linear_read_between_links(clone: Path):

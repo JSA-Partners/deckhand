@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from deckhand import asks, features, implplan, order, review, signoff, versions
+from dataclasses import replace
+
+from deckhand import asks, features, implplan, ops, order, review, signoff, versions
 from deckhand.records import HAND, Record, content_hash
 from deckhand.store import Store
 
@@ -8,6 +10,12 @@ AFTER = "after-merge"
 AFTER_DONE = "after-merge-done"
 AFTER_PERSON = "after-merge-person"
 OPEN, BY_HAND, FOR_PERSON, BY_PERSON = "open", "done by the hand", "left for the person", "done by the person"
+DROPPED, STORY = "dropped", "made into a story"
+DROP, MAKE_STORY = "Drop", "Make it a story"
+ENGINE = "agent:engine"
+STOPPED_WHY = "its hand stopped after the merge"
+NAME_CAP = 64
+_DECIDED = {signoff.DONE: BY_PERSON, DROP: DROPPED, MAKE_STORY: STORY}
 
 
 def after_items(records: list[Record], story: str) -> list[str]:
@@ -28,13 +36,10 @@ def after_status(records: list[Record], story: str, n: int, text: str) -> tuple[
     if left is None or left.version != at:
         return OPEN, None
     decided = versions.held(records, AFTER, subject)
-    if (
-        decided is not None
-        and decided.author.startswith(review.PERSON)
-        and decided.version == left.version
-        and decided.data.get("answer") == signoff.DONE
-    ):
-        return BY_PERSON, decided
+    if decided is not None and decided.author.startswith(review.PERSON) and decided.version == left.version:
+        status = _DECIDED.get(str(decided.data.get("answer")))
+        if status is not None:
+            return status, decided
     return FOR_PERSON, left
 
 
@@ -52,7 +57,7 @@ def after_merge_for_person(records: list[Record], story: str) -> list[tuple[int,
 
 
 def settled(status: str) -> bool:
-    return status in (BY_HAND, BY_PERSON)
+    return status in (BY_HAND, BY_PERSON, DROPPED, STORY)
 
 
 def _unsettled(records: list[Record], story: str) -> int:
@@ -109,3 +114,30 @@ def finished(story: dict, records: list[Record], start: Record) -> bool:
 def open_chores(story: dict, records: list[Record]) -> bool:
     items = enumerate(after_items(records, story["id"]), start=1)
     return any(after_status(records, story["id"], n, text)[0] == OPEN for n, text in items)
+
+
+def hand_over(story: dict, records: list[Record], session: str) -> tuple[Record, ...]:
+    found = []
+    for n, text in enumerate(after_items(records, story["id"]), start=1):
+        if after_status(records, story["id"], n, text)[0] == OPEN:
+            left = after_record(AFTER_PERSON, story["id"], n, text, {"why": STOPPED_WHY, "session": session})
+            found.append(replace(left, author=ENGINE))
+    return tuple(found)
+
+
+def story_name(text: str) -> str:
+    name = f"Chore: {text.strip().splitlines()[0] if text.strip() else ''}"
+    if len(name) <= NAME_CAP:
+        return name
+    room = NAME_CAP - len("...")
+    head, space, _ = name[: room + 1].rpartition(" ")
+    return (head if space and len(head) > len("Chore:") else name[:room]) + "..."
+
+
+def make_story(store: Store, team: str, story: dict, n: int, text: str, why: str) -> str:
+    ref = f"{story['identifier']} {story['title']}"
+    description = f"{text}\n\nAfter-merge item {n} of {ref}, left to the person: {why}"
+    key = f"{team}:chore:{story['id']}:{n}"
+    return ops.ensure_project(
+        store, key, features.PURPOSE, team, story_name(text), description, [features.FEATURE_LABEL]
+    )

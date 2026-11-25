@@ -91,15 +91,36 @@ def test_item_left_for_person_is_asked(state: Path, capsys: pytest.CaptureFixtur
     records = store.records("s1")
     assert chores.after_merge_for_person(records, "s1") == [(2, CHORES[1], "the secret lives in the vault")]
     assert statuses(store, capsys) == ["open", "left for the person"]
-    question = answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Not yet")
-    assert [o["label"] for o in question["options"]] == ["Done", "Not yet"]
+    question = answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Drop")
+    assert [o["label"] for o in question["options"]] == ["Done", "Drop", "Make it a story"]
     assert CHORES[1] in question["question"]
+    assert capsys.readouterr().out == "done: answered Drop, no after-merge recorded\n"
     assert chores.after_merge_for_person(store.records("s1"), "s1") != []
     answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Done")
     [decided] = [r for r in store.records("s1") if r.kind == chores.AFTER]
     assert (decided.subject, decided.data["answer"]) == ("s1:2", "Done")
     assert chores.after_merge_for_person(store.records("s1"), "s1") == []
     assert statuses(store, capsys) == ["open", "done by the person"]
+
+
+def test_after_context_shows_dropped_and_made_into_a_story(state: Path, capsys: pytest.CaptureFixture[str]):
+    store = chored()
+    store.set_issue_state("s1", "Done")
+    store.assign("s1", store.viewer()["id"])
+    for item in ("1", "2"):
+        After(store).apply(["ACME-1", "person", item, "--why", "it needs main", *TEAM])
+    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "1"], "nobody reads that table")
+    answer(state, Decide(store), capsys, ["after-merge", "ACME-1", "--item", "2"], "Make it a story")
+    found = listing(store, capsys)["items"]
+    assert [(i["status"], i.get("note")) for i in found] == [
+        ("dropped", "nobody reads that table"),
+        ("made into a story", None),
+    ]
+    capsys.readouterr()
+    After(store).context(["ACME-1", *TEAM])
+    shown = capsys.readouterr().out.splitlines()
+    assert shown[1] == f"1 {CHORES[0]}: dropped (nobody reads that table)"
+    assert shown[2].startswith(f"2 {CHORES[1]}: made into a story (Chore: {CHORES[1]}")
 
 
 def test_after_merge_decision_refused_for_hand_item(capsys: pytest.CaptureFixture[str]):
