@@ -26,7 +26,9 @@ def _feature_records(feature: features.Feature) -> list[Record]:
 
 def _feature_pin(feature: features.Feature, subject: str, version: str, detail: str) -> Pin:
     labels = [_label(s) for s in feature.live]
-    return Pin(subject, version, [s["id"] for s in feature.live], detail, feature.project["name"], labels)
+    return Pin(
+        subject, version, [s["id"] for s in feature.live], detail, feature.project["name"], labels, stage="feature"
+    )
 
 
 def _finding_pin(store: Store, feature: features.Feature, ref: str, finding: str) -> Pin:

@@ -165,3 +165,19 @@ def test_finding_pin_takes_the_project_for_a_feature_finding():
     feature = features.open_feature(store, "ACME")
     held = pins.pin(store, feature, review.DECISION, project, [], finding=finding["id"])
     assert (held.subject, held.stories, held.label) == (finding["id"], [s["id"] for s in feature.live], "Alpha")
+    assert held.stage == "feature"
+
+
+def test_a_feature_finding_proposal_is_the_captains():
+    store, _ = asked()
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    found = review.parse_findings(json.dumps([P2]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), "hash1", found)
+    [finding] = round.data["findings"]
+    for story in feature.live:
+        store.put_record(story["id"], round)
+        store.put_record(story["id"], asks.proposal_record(finding["id"], round.version, "noise"))
+    feature = features.open_feature(store, "ACME")
+    held = pins.pin(store, feature, review.DECISION, project, [], finding=finding["id"])
+    assert held.detail.endswith("; the captain proposes to decline it: noise")

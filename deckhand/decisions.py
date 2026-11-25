@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from deckhand import answers, asks, ops, queue, review, signoff
@@ -61,6 +61,13 @@ _DESCRIPTIONS = {
     signoff.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
     queue.STALLED: ["the hand starts again", "the hand stays stopped"],
+}
+_FEATURE_DESCRIPTIONS = {
+    "finding": ["the finding stays unfixed", "the captain fixes the finding"],
+    review.CAP_DECISION: [
+        "carry on with those P1s open; every later change is still reviewed",
+        "the captain reworks the feature and the rounds count again",
+    ],
 }
 
 _ASKS = {
@@ -124,6 +131,7 @@ class Pending:
     label: str = ""
     story_labels: list[str] = field(default_factory=list)
     draft: str = ""
+    stage: str = ""
 
 
 @dataclass(frozen=True)
@@ -136,6 +144,7 @@ class Pin:
     story_labels: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
     draft: str = ""
+    stage: str = ""
 
 
 def make_question(kind: str, pin: Pin) -> Question:
@@ -144,7 +153,8 @@ def make_question(kind: str, pin: Pin) -> Question:
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
     options = (pin.options or _OPTIONS.get(kind, [])) if kind in _PIN_OPTIONS else _OPTIONS[kind]
-    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else _DESCRIPTIONS.get(kind)
+    held = _FEATURE_DESCRIPTIONS if pin.stage == "feature" else _DESCRIPTIONS
+    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else held.get(kind)
     return build(kind, pin.label or pin.subject, question_text(kind, pin), options, descriptions)
 
 
@@ -179,6 +189,7 @@ def save_pending(question: Question, pin: Pin, state: Path) -> None:
         pin.label,
         pin.story_labels,
         pin.draft,
+        pin.stage,
     )
     folder = state / PENDING
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -240,6 +251,7 @@ def check(pending: Pending, state: Path) -> Answer:
         pending.story_labels,
         options,
         pending.draft,
+        pending.stage,
     )
     asked = question_text(pending.kind, pin)
     if pending.question != asked:
@@ -248,6 +260,8 @@ def check(pending: Pending, state: Path) -> Answer:
         raise Refusal(f"the options the person saw for {pending.nonce} differ from the pending question")
     if found.copied:
         raise Refusal(f"the answer for {pending.nonce} is copied from recent agent output")
+    said = found.answer.strip().casefold()
+    found = replace(found, answer=next((o for o in pending.options if o.casefold() == said), found.answer))
     if pending.kind in _CHOSEN and found.answer not in pending.options and not in_own_words(pending, found.answer):
         raise Refusal(f"the answer for {pending.nonce} is not one of {', '.join(pending.options)}")
     if found.answer in pending.descriptions:

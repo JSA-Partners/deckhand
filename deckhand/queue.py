@@ -110,7 +110,7 @@ def finding_lines(records: list[Record], finding: str) -> list[str]:
     found = review.locate(records, finding)
     lines = [line] + ([review_gaps.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
     proposal = asks.proposed(records, finding)
-    return lines + ([asks.proposal_line(proposal)] if proposal else [])
+    return lines + ([asks.proposal_line(proposal, _of_feature(records, finding))] if proposal else [])
 
 
 def _of_feature(records: list[Record], finding: str) -> bool:

@@ -103,9 +103,10 @@ def proposed(records: list[Record], finding: str) -> Record | None:
     return next((r for r in open_proposals(records) if r.subject == finding), None)
 
 
-def proposal_line(proposal: Record) -> str:
+def proposal_line(proposal: Record, feature: bool = False) -> str:
     verb = "accept" if proposed_answer(proposal) == review.ACCEPT else "decline"
-    return f"the hand proposes to {verb} it: {proposal.data.get('reason', '')}"
+    who = "the captain" if feature else "the hand"
+    return f"{who} proposes to {verb} it: {proposal.data.get('reason', '')}"
 
 
 def _holding(records: list[Record], prefix: str, finding: str) -> Record:

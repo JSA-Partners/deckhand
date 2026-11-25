@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, decisions, signoff
+from deckhand import answers, decisions, review, signoff
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -379,3 +379,31 @@ def test_yes_settles_a_draft_that_reads_change(tmp_path: Path):
     assert decisions.decide(store, decisions.load_pending(question.nonce, tmp_path), tmp_path, "viewer-1") is True
     [record] = store.records("s1")
     assert record.data["answer"] == "Change"
+
+
+@pytest.mark.parametrize("said,recorded", [("yes", "'Bonjour'"), ("YES", "'Bonjour'"), ("change", None)])
+def test_an_option_typed_in_another_case_is_that_option(tmp_path: Path, said: str, recorded: str | None):
+    question, pending = ask(tmp_path, "decision-item")
+    answered(tmp_path, question, said)
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "viewer-1") is (recorded is not None)
+    assert [r.data["answer"] for r in store.records("s1")] == ([recorded] if recorded else [])
+
+
+def test_a_feature_question_names_the_captain_in_its_options():
+    def shown(kind: str) -> list[str]:
+        question = decisions.make_question(kind, replace(pin(), subject="p1:feature:3", stage="feature"))
+        return [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
+
+    assert shown("finding") == ["the finding stays unfixed", "the captain fixes the finding"]
+    assert shown(review.CAP_DECISION)[1] == "the captain reworks the feature and the rounds count again"
+    for kind in ("finding", review.CAP_DECISION):
+        assert not any("hand" in text for text in shown(kind))
+
+
+def test_the_stage_of_a_pin_survives_the_pending_round_trip(tmp_path: Path):
+    shown = replace(pin(), stage="feature")
+    question = decisions.make_question("finding", shown)
+    decisions.save_pending(question, shown, tmp_path)
+    answered(tmp_path, question, review.ACCEPT)
+    assert decisions.check(decisions.load_pending(question.nonce, tmp_path), tmp_path).answer == review.ACCEPT
