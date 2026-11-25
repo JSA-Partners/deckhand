@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import launch
+from deckhand import git, launch
 from deckhand.features import FEATURE_LABEL
 from deckhand.linear.client import LinearError
 from deckhand.ops import create_id
@@ -54,16 +54,18 @@ def step(store: FakeStore, runner=None) -> Feature:
 
 def refreshed(clone: Path, add: bool) -> list[tuple[list[str], Path | None]]:
     planning = clone / ".worktrees" / "planning"
-    move = (
-        (["git", "worktree", "add", "--detach", str(planning), "origin/HEAD"], clone)
-        if add
-        else (["git", "checkout", "--detach", "origin/HEAD"], planning)
-    )
+    added = [
+        (["git", "worktree", "prune"], clone),
+        (["git", "worktree", "add", "--detach", str(planning), "origin/HEAD"], clone),
+    ]
+    moved = [
+        (["git", "worktree", "list", "--porcelain"], clone),
+        (["git", "checkout", "--detach", "origin/HEAD"], planning),
+    ]
     return [
         (["git", "fetch", "origin", "--prune"], clone),
         (["git", "rev-parse", "--verify", "--quiet", "origin/HEAD"], clone),
-        (["git", "worktree", "list", "--porcelain"], clone),
-        move,
+        *(added if add else moved),
         (["git", "rev-parse", "HEAD"], planning),
     ]
 
@@ -343,6 +345,10 @@ def test_feature_context_names_the_planning_worktree_and_sha_without_fetching(ca
     unlisted = Git()
     step(FakeStore(), unlisted).context(TEAM)
     assert missing in capsys.readouterr().out
+    assert unlisted.calls == []
+    (planning / ".git").write_text("gitdir: elsewhere\n")
+    step(FakeStore(), unlisted).context(TEAM)
+    assert missing in capsys.readouterr().out
     assert unlisted.calls == [(["git", "worktree", "list", "--porcelain"], clone)]
     runner = Git(planning)
     step(FakeStore(), runner).context(TEAM)
@@ -355,3 +361,21 @@ def test_feature_context_names_the_planning_worktree_and_sha_without_fetching(ca
     assert json.loads(capsys.readouterr().out)["planning"] == [
         {"label": "widgets", "path": str(planning), "sha": "abc123"}
     ]
+
+
+def test_a_worktree_that_lost_its_git_file_never_moves_or_names_the_clone(capsys: pytest.CaptureFixture[str]):
+    clone = configured()
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(clone)], check=True)
+    subprocess.run(commit, cwd=clone, check=True)
+    planning = git.worktree_path(clone, "planning")
+    git.worktree_detached(clone, "planning", "main")
+    (planning / ".git").unlink()
+    Feature(FakeStore(), lambda: TODAY).context(TEAM)
+    out = capsys.readouterr().out
+    assert "read the code in: no planning worktree for widgets yet; fetch one" in out
+    assert git.head(clone) not in out
+    git.refresh_detached(clone, planning, "main")
+    branch = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], cwd=clone, capture_output=True, text=True)
+    assert branch.stdout.strip() == "main"
+    assert git.is_worktree(clone, planning)

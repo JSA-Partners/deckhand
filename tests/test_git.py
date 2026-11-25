@@ -594,3 +594,22 @@ def test_refresh_detached_never_moves_the_clone_through_a_plain_directory(tmp_pa
     assert branch.stdout.strip() == "main"
     assert git.is_worktree(clone, path)
     assert sha == git.head(clone) == git.head(path)
+
+
+def test_refresh_detached_never_moves_the_clone_through_a_worktree_without_its_git_file(tmp_path: Path) -> None:
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=clone, check=True)
+    subprocess.run(commit, cwd=clone, check=True)
+    path = git.worktree_detached(clone, "planning", "main")
+    (path / "kept.txt").write_text("x")
+    (path / ".git").unlink()
+    assert not git.is_worktree(clone, path)
+    with pytest.raises(Refusal, match="not a worktree"):
+        git.refresh_detached(clone, path, "main")
+    (path / "kept.txt").unlink()
+    sha = git.refresh_detached(clone, path, "main")
+    branch = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], cwd=clone, capture_output=True, text=True)
+    assert branch.stdout.strip() == "main"
+    assert sha == git.head(path)
