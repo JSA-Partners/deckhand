@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, features, ops, planning, queue, review, versions
+from deckhand import answers, approval, asks, features, ops, planning, queue, review, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
@@ -339,13 +339,14 @@ def test_a_new_dependency_voids_the_approval():
     assert features.phase(load(store)) is Phase.PLANNING
 
 
-def test_a_new_repository_voids_the_approval():
+def test_a_new_repository_leaves_the_approval_standing():
     store = setup()
     store.add_repository_label("ACME", "widgets")
     store.add_repository_label("ACME", "gadgets")
     approve_everything(store)
     store.set_labels("s1", ["gadgets"])
-    assert features.phase(load(store)) is Phase.PLANNING
+    assert features.phase(load(store)) is Phase.BUILDING
+    assert "repository: gadgets" in approval.screen(store, load(store))
 
 
 def test_an_untaken_draft_holds_the_approval():

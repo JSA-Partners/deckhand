@@ -21,8 +21,9 @@ def _listed(name: str, lines: list[str]) -> str:
 
 def _story(store: Store, feature: Feature, story: dict) -> str:
     records = feature.records.get(story["id"], [])
-    ids, repositories = versions.placement(store, feature, story)
+    ids = versions.blockers(store, feature, story)
     blockers = [s["identifier"] for s in feature.live if s["id"] in ids]
+    repositories = versions.repositories(store, story)
     level = versions.tier(records, story["id"])
     items = [f"- {item}: {_answer(records, item, draft)}" for item, draft in versions.drafts(records).items()]
     chart = versions.chart(records, story["id"]).strip()

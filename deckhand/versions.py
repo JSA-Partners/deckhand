@@ -82,11 +82,14 @@ def after_merge(records: list[Record]) -> list[str]:
     return [item for item in items if isinstance(item, str)] if isinstance(items, list) else []
 
 
-def placement(store: Store, feature: Feature, story: dict) -> tuple[list[str], list[str]]:
+def blockers(store: Store, feature: Feature, story: dict) -> list[str]:
     live = {s["id"] for s in feature.live}
-    blockers = sorted({a for a, b in store.relations(story["id"]) if b == story["id"] and a in live})
+    return sorted({a for a, b in store.relations(story["id"]) if b == story["id"] and a in live})
+
+
+def repositories(store: Store, story: dict) -> list[str]:
     labels = sorted(set(story["labels"]) & set(store.repository_labels(story["team"])))
-    return blockers, labels or sorted(story["labels"])
+    return labels or sorted(story["labels"])
 
 
 def feature_version(store: Store, feature: Feature) -> str:
@@ -94,7 +97,7 @@ def feature_version(store: Store, feature: Feature) -> str:
     for story in sorted(feature.live, key=lambda s: s["id"]):
         records = feature.records.get(story["id"], [])
         chart = mapped(records, "state-chart", story["id"])
-        items = [expected_items(records), after_merge(records), *placement(store, feature, story)]
+        items = [expected_items(records), after_merge(records), blockers(store, feature, story)]
         parts += [story["id"], story_version(story, records), json.dumps(items, sort_keys=True)]
         parts.append(chart.version if chart else "")
     return _hash(*parts)
