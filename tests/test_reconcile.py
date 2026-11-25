@@ -8,7 +8,6 @@ import pytest
 from deckhand import asks, config, features, fleet, queue, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
-from deckhand.idle import idle as idle_hands
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.reconcile import Facts, reconcile, reserved
@@ -485,13 +484,11 @@ def test_a_written_draft_stops_its_hand_reported_working_then_the_story_hand_sta
     store.put_record("s1", Record(queue.DRAFT, "s1", "v1", HAND, {}))
     hand = held(kind=queue.DRAFT_HAND, turn_ended=at(T + 30))
     working, now = row("ACME-1", "working", "busy"), T + 30 + IDLE_AFTER + 1
-    quiet = idle_hands(fleet.sessions(Shell(working)), {hand.name: hand}, [], now, 0.0, {})
-    assert quiet == {hand.name}
     stop = Stop("hand-ACME-1", "id-ACME-1", "finished")
-    assert reconcile(facts(store, working, hands=(hand,), now=now, idle=quiet), store) == [stop]
+    assert reconcile(facts(store, working, hands=(hand,), now=now), store) == [stop]
     store.put_record("s1", Record(queue.TAKEN, "s1", "v1", "agent:captain", {}))
     approve_everything(store)
-    assert reconcile(facts(store, working, hands=(hand,), now=now, idle=quiet), store) == [stop]
+    assert reconcile(facts(store, working, hands=(hand,), now=now), store) == [stop]
     assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(hand,), now=now), store) == [launch(store, clone)]
 
 

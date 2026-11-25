@@ -137,7 +137,7 @@ class Engine:
         if read is None or good is None or good.stores is None:
             return
         due = now - self._reconciled >= RECONCILE_EVERY
-        self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke, self._state.heard())
+        self._idle = idle.idle(read, hands, self._state.pending(), now, self._woke)
         fresh = self._fresh_records(good) if due else None
         if fresh is not None:
             self._keep_records(fresh)

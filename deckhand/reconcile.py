@@ -193,8 +193,7 @@ def _finished(tick: _Tick, feature: Feature) -> list[Action]:
         session, start = tick.alive(name), queue.last_start(records)
         if session is None or start is None:
             continue
-        busy = session.state == WORKING and name not in tick.facts.idle
-        if busy and start.data.get("kind") != queue.DRAFT_HAND:
+        if session.state == WORKING and start.data.get("kind") != queue.DRAFT_HAND:
             continue
         if queue.finished(story, records, start):
             found.append(tick.take(Stop(name, session.id, "finished"), slot=False))
