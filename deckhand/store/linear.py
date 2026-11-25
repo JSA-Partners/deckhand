@@ -48,6 +48,7 @@ class LinearStore(Store):
         self._records = records
         self._teams = teams if teams is not None else {}
         self._pairs: dict[str, set[tuple[str, str]]] = {}
+        self._looked_up: set[str] = set()
 
     def _paged(self, query: str, variables: dict[str, Any], path: tuple[str, str]) -> list[dict[str, Any]]:
         entity, connection = path
@@ -69,13 +70,24 @@ class LinearStore(Store):
         nodes = self._rest(first, queries.ISSUE_LABELS, {"id": issue}, ("issue", "labels"))
         return [label["name"] for label in nodes]
 
-    def _team_id(self, key: str) -> str:
-        if key not in self._teams:
-            nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
-            if not nodes:
-                raise Refusal(f"no Linear team has the key {key}")
-            self._teams[key] = nodes[0]["id"]
+    def _look_up_team(self, key: str, configured: bool) -> str:
+        nodes = self._client.query(queries.TEAM_ID, {"key": key})["teams"]["nodes"]
+        if not nodes:
+            raise Refusal(f"no Linear team has the key {key}" + ("; run setup" if configured else ""))
+        self._teams[key] = nodes[0]["id"]
+        self._looked_up.add(key)
         return self._teams[key]
+
+    def _team_id(self, key: str) -> str:
+        return self._teams[key] if key in self._teams else self._look_up_team(key, configured=False)
+
+    def _team_paged(self, key: str, query: str, variables: dict[str, Any], connection: str) -> list[dict[str, Any]]:
+        try:
+            return self._paged(query, {**variables, "id": self._team_id(key)}, ("team", connection))
+        except LinearError as error:
+            if not _missing(error) or key in self._looked_up:
+                raise
+        return self._paged(query, {**variables, "id": self._look_up_team(key, configured=True)}, ("team", connection))
 
     def _label_ids(self, team_id: str, names: list[str]) -> list[str]:
         if not names:
@@ -187,7 +199,7 @@ class LinearStore(Store):
         self._client.query(queries.ISSUE_UPDATE, {"id": self._uuid(issue), "input": fields})
 
     def repository_labels(self, team: str) -> list[str]:
-        found = self._paged(queries.TEAM_LABELS, {"id": self._team_id(team)}, ("team", "labels"))
+        found = self._team_paged(team, queries.TEAM_LABELS, {}, "labels")
         return sorted(n["name"] for n in found if (n.get("parent") or {}).get("name") == GROUP)
 
     def put_document(self, id: str, parent: str, title: str, body: str) -> None:
@@ -284,8 +296,7 @@ class LinearStore(Store):
         return _project(node)
 
     def team_projects(self, team: str) -> list[dict]:
-        variables = {"id": self._team_id(team), "finished": list(FINISHED)}
-        found = self._paged(queries.TEAM_PROJECTS, variables, ("team", "projects"))
+        found = self._team_paged(team, queries.TEAM_PROJECTS, {"finished": list(FINISHED)}, "projects")
         return [_project(n) for n in found]
 
     def set_project_dates(self, project: str, start: str | None, target: str | None) -> None:

@@ -28,8 +28,9 @@ def _missing(entity: str) -> LinearError:
 
 
 class FakeGraphQL:
-    def __init__(self, store: FakeStore) -> None:
+    def __init__(self, store: FakeStore, teams: tuple[str, ...] = ("ACME",)) -> None:
         self.store = store
+        self.teams = teams
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     @property
@@ -92,10 +93,14 @@ class FakeGraphQL:
         }
 
     def _key(self, id: str) -> str:
-        return id.removeprefix("team-")
+        key = next((key for key in self.teams if team_id(key) == id), None)
+        if key is None:
+            raise _missing("Team")
+        return key
 
     def _TeamId(self, variables: dict[str, Any]) -> dict[str, Any]:
-        return {"teams": {"nodes": [{"id": team_id(variables["key"])}]}}
+        key = variables["key"]
+        return {"teams": {"nodes": [{"id": team_id(key)}] if key in self.teams else []}}
 
     def _LabelIds(self, variables: dict[str, Any]) -> dict[str, Any]:
         return {"issueLabels": {"nodes": [{"id": name, "name": name} for name in variables["names"]]}}

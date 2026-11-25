@@ -897,3 +897,63 @@ def test_issues_of_no_ids_sends_nothing(records: LocalRecords) -> None:
     client = FakeClient()
     assert LinearStore(client, records).issues([]) == []
     assert client.calls == []
+
+
+def test_issues_ask_for_archived_issues_too(records: LocalRecords) -> None:
+    client = FakeClient(Issues={"issues": page([])})
+    LinearStore(client, records).issues(["a"])
+    assert "includeArchived: true" in client.documents[0]
+
+
+def test_more_than_fifty_ids_send_two_requests(records: LocalRecords) -> None:
+    ids = [f"i{n}" for n in range(51)]
+    nodes = [{**ISSUE_NODE, "id": id, "state": {"name": "Done"}, "completedAt": None} for id in ids]
+    client = FakeClient(Issues=[{"issues": page(nodes[:50])}, {"issues": page(nodes[50:])}])
+    found = LinearStore(client, records).issues(ids)
+    assert [i["id"] for i in found] == ids
+    assert client.calls == [("Issues", {"ids": ids[:50]}), ("Issues", {"ids": ids[50:]})]
+
+
+STALE = "stale-team-id"
+TEAM_GONE = LinearError("INPUT_ERROR", "Entity not found: Team")
+NO_PROJECTS = {"team": {"projects": page([])}}
+
+
+def test_a_stale_configured_team_id_is_looked_up_once_and_kept(records: LocalRecords) -> None:
+    client = FakeClient(
+        TeamProjects=[TEAM_GONE, NO_PROJECTS, NO_PROJECTS],
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+    )
+    teams = {"ACME": STALE}
+    store = LinearStore(client, records, teams)
+    assert store.team_projects("ACME") == []
+    assert store.team_projects("ACME") == []
+    assert [(name, variables.get("id", variables.get("key"))) for name, variables in client.calls] == [
+        ("TeamProjects", STALE),
+        ("TeamId", "ACME"),
+        ("TeamProjects", TEAM_ID),
+        ("TeamProjects", TEAM_ID),
+    ]
+    assert teams == {"ACME": TEAM_ID}
+
+
+def test_a_stale_team_id_for_labels_is_looked_up_too(records: LocalRecords) -> None:
+    client = FakeClient(
+        TeamLabels=[TEAM_GONE, {"team": {"labels": page([])}}],
+        TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}},
+    )
+    assert LinearStore(client, records, {"ACME": STALE}).repository_labels("ACME") == []
+    assert client.names == ["TeamLabels", "TeamId", "TeamLabels"]
+
+
+def test_a_stale_team_id_whose_key_is_gone_says_to_run_setup(records: LocalRecords) -> None:
+    client = FakeClient(TeamProjects=TEAM_GONE, TeamId={"teams": {"nodes": []}})
+    with pytest.raises(Refusal, match="no Linear team has the key ACME; run setup"):
+        LinearStore(client, records, {"ACME": STALE}).team_projects("ACME")
+
+
+def test_a_looked_up_team_id_that_is_missing_raises(records: LocalRecords) -> None:
+    client = FakeClient(TeamProjects=TEAM_GONE, TeamId={"teams": {"nodes": [{"id": TEAM_ID}]}})
+    with pytest.raises(LinearError, match="Entity not found: Team"):
+        LinearStore(client, records).team_projects("ACME")
+    assert client.names == ["TeamId", "TeamProjects"]

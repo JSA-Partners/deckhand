@@ -83,6 +83,9 @@ class CachedStore(Store):
         key = ("issues", tuple(ids))
         if key not in self._memo:
             self._memo[key] = self._inner.issues(list(ids))
+            for found in self._memo[key]:
+                held = {name: value for name, value in found.items() if name not in ("state", "completed_at")}
+                self._memo["issue", found["id"]] = self._memo["issue", found["identifier"]] = held
         return copy.deepcopy(self._memo[key])
 
     def set_labels(self, issue: str, labels: list[str]) -> None:

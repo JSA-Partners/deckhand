@@ -83,3 +83,15 @@ def test_a_passed_team_dict_learns_the_configured_ids(monkeypatch: pytest.Monkey
     kept = {"OTHER": "team-OTHER"}
     store_open.open_store("app", kept)
     assert kept == {"OTHER": "team-OTHER", "ACME": "team-ACME"}
+
+
+def test_a_stale_configured_team_id_still_reads_the_team(monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = config.config_dir()
+    directory.mkdir(parents=True)
+    (directory / config.FILE).write_text('team_key = "ACME"\n\n[teams]\nACME = "stale-team-id"\n')
+    client = FakeGraphQL(feature_store())
+    monkeypatch.setattr(store_open.Credentials, "load", staticmethod(lambda folder: "credentials"))
+    monkeypatch.setattr(store_open, "connect", lambda credentials, role, meter: client)
+    [found] = store_open.open_store("app").team_projects("ACME")
+    assert found["name"] == "Alpha"
+    assert client.names == ["TeamProjects", "TeamId", "TeamProjects"]

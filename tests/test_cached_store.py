@@ -101,3 +101,12 @@ def test_issue_and_issue_by_ref_share_one_read() -> None:
     assert by_ref is not None and cached.issue(by_ref["id"]) == by_ref
     assert cached.issue_by_ref(Ref(TEAM, 1)) == by_ref
     assert inner.calls == ["issue_by_ref"]
+
+
+def test_issues_seed_the_issue_read() -> None:
+    inner, cached = seeded()
+    [found] = cached.issues([ISSUE])
+    held = cached.issue(ISSUE)
+    assert held == {k: v for k, v in found.items() if k not in ("state", "completed_at")}
+    assert cached.issue_by_ref(Ref(TEAM, 1)) == held
+    assert inner.calls == ["issues"]

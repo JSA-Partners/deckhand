@@ -49,7 +49,7 @@ query Issue($id: String!) {{
 
 ISSUES = f"""
 query Issues($ids: [ID!]!) {{
-  issues(first: {ISSUE_PAGE}, filter: {{ id: {{ in: $ids }} }}) {{
+  issues(first: {ISSUE_PAGE}, includeArchived: true, filter: {{ id: {{ in: $ids }} }}) {{
     nodes {{ {ISSUE_FIELDS} state {{ name }} completedAt }}
   }}
 }}
