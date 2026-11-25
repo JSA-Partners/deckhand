@@ -62,13 +62,14 @@ While nothing needs you, the captain stays quiet. When something new waits, the 
 its bell, and the captain asks you the top item in a dialog, which rings the bell again. Every
 answer is saved as it is given, so you can stop after any item.
 
-Every feature is searched for after-merge chores, and its release waits while any is open. A draft you no
-longer want can be dropped.
+Every feature is searched for after-merge chores, and its release waits while any is open. A
+draft you no longer want can be dropped.
 
-Linear shows your plan approval as an attachment on the Contract document and your sign-off as an
-attachment on the commit. A Story map document in the project holds the story map for teammates.
-deckhand writes both and never reads them back. Each command reads Linear fewer than ten times,
-except a story's apply.
+Linear shows your plan approval on each story as a link to the Contract document, and your sign-off
+on the story as a link to the signed commit. A Story map document in the project holds the story
+map for teammates. deckhand writes these and never reads them back. Each command reads Linear fewer
+than ten times, except saving the story map, plus one read for each older feature with an open
+chore.
 
 Hands run in Claude Code's sandbox. The captain's Bash hook fails closed, so a command it cannot
 read is refused. A hand cannot read credentials (deckhand's config, `gh`, ssh,
