@@ -71,9 +71,14 @@ def item_version(item: str, draft: str) -> str:
     return content_hash(item + "\0" + draft)
 
 
+# An answer the map has since taken as its draft still decides the item, though the draft's version moved.
+def settles(record: Record, item: str, draft: str) -> bool:
+    return record.version == item_version(item, draft) or record.data.get("answer") == draft
+
+
 def answer(records: list[Record], item: str, draft: str) -> str | None:
     found = held(records, "decision-item", item_subject(item))
-    if found is None or found.version != item_version(item, draft) or not found.data.get("answer"):
+    if found is None or not settles(found, item, draft) or not found.data.get("answer"):
         return None
     return str(found.data["answer"])
 

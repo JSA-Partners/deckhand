@@ -69,6 +69,18 @@ def test_decision_item_version_covers_its_draft():
     assert versions.item_subject(text) == content_hash(text)[:12]
 
 
+def test_an_item_is_decided_by_its_version_or_by_an_answer_that_is_the_current_draft():
+    item, own = "Support line wording", "Ask the owner for help."
+    version = versions.item_version(item, "Open an issue.")
+    answered = Record("decision-item", versions.item_subject(item), version, "person:s", {"answer": own})
+    stub = Record("stub", "k", "1", versions.MAP_AUTHOR, {"decisions": [{"item": item, "draft": own}]})
+    assert versions.settles(answered, item, "Open an issue.")
+    assert versions.settles(answered, item, own)
+    assert not versions.settles(answered, item, "Mail the owner.")
+    assert versions.answer([stub, answered], item, own) == own
+    assert versions.answer([stub, answered], item, "Mail the owner.") is None
+
+
 def test_expected_drafts_read_the_stub_objects():
     stub = {"decisions": [{"item": "Greeting", "draft": "Bonjour"}, "stray"]}
     records = [Record("stub", "k", "1", versions.MAP_AUTHOR, stub)]

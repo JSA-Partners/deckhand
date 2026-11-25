@@ -158,6 +158,20 @@ def test_expected_decision_item_blocks_approval_until_answered(answer: str):
     assert features.approval_gaps(store, load(store)) == []
 
 
+def test_an_answer_in_own_words_stays_decided_once_the_map_takes_it_as_the_draft():
+    store = setup()
+    approve_everything(store)
+    expect(store, "s2", "receipts", "Send receipts by email")
+    decided(store, "decision-item", "Send receipts by email", "Only on request", ["s2"])
+    rewritten = {"decisions": [{"item": "Send receipts by email", "draft": "Only on request"}]}
+    store.put_record("s2", Record("stub", "receipts", "1", "agent:stories", rewritten))
+    assert features.undecided(load(store), load(store).live[1]) == []
+    assert features.approval_gaps(store, load(store)) == []
+    other = {"decisions": [{"item": "Send receipts by email", "draft": "Always"}]}
+    store.put_record("s2", Record("stub", "receipts", "1", "agent:stories", other))
+    assert features.undecided(load(store), load(store).live[1]) == ["Send receipts by email"]
+
+
 def test_expected_decision_item_answered_on_another_story_still_blocks():
     store = setup()
     expect(store, "s2", "receipts", "Send receipts by email")
