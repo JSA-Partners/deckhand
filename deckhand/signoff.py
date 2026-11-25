@@ -11,10 +11,11 @@ from deckhand.step import Refusal, hand_role
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
 KIND = "sign-off"
-SIGN, NOT_YET, DONE, BACK = "Sign off", "Not yet", "Done", "Back"
+SIGN, NOT_YET, DONE, BACK, LATER = "Sign off", "Not yet", "Done", "Back", "Later"
 SUMMARY = "change-summary"
 VOID = "sign-off-void"
 TUICR = "tuicr-review"
+IN_TUICR = "tuicr"
 SECOND = "second-sign-off"
 
 
@@ -80,6 +81,11 @@ def _tuicr_gap(records: list[Record], story: str, head: str) -> list[Gap]:
         text = f"no tuicr review is built at {head}"
         return [Gap("tuicr", f"{text}; it waits for the person's tuicr review", text)]
     return []
+
+
+def done_in_tuicr(records: list[Record], story: str, head: str | None) -> bool:
+    held = versions.held(records, IN_TUICR, story)
+    return held is not None and held.version == head and held.author.startswith(review.PERSON)
 
 
 def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:

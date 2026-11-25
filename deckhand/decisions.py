@@ -23,6 +23,7 @@ KINDS = (
     review.CAP_DECISION,
     signoff.KIND,
     signoff.SECOND,
+    signoff.IN_TUICR,
     chores.AFTER,
     asks.ANSWER,
     asks.EDIT,
@@ -39,6 +40,7 @@ _OPTIONS = {
     review.CAP_DECISION: [review.PROCEED, review.REWORK],
     signoff.KIND: [signoff.SIGN, signoff.NOT_YET],
     signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
+    signoff.IN_TUICR: [signoff.DONE, signoff.LATER],
     chores.AFTER: [signoff.DONE, chores.DROP, chores.MAKE_STORY],
     asks.EDIT: asks.EDIT_OPTIONS,
     stalls.STALLED: [stalls.RESTART, stalls.LEAVE],
@@ -59,6 +61,7 @@ _DESCRIPTIONS = {
         "the hand reworks it and the rounds count again",
     ],
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
+    signoff.IN_TUICR: ["your tuicr comments are read now", "nothing is recorded; you are asked again"],
     chores.AFTER: [
         "the item is done",
         "type why instead of picking this; the item is dropped with your words",
@@ -82,6 +85,7 @@ _ASKS = {
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
     signoff.KIND: "Sign off",
     signoff.SECOND: "Second sign-off on",
+    signoff.IN_TUICR: "Done in tuicr with",
     chores.AFTER: "What happens to this after-merge item of",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
@@ -118,6 +122,7 @@ _SIGN_OFF_LABELS = [signoff.SIGN, signoff.NOT_YET, signoff.BACK]
 _POSITIVE = {
     "feature-approval": "Approve",
     "lean": "Prove it in Lean",
+    signoff.IN_TUICR: signoff.DONE,
 }
 
 PENDING = "pending"

@@ -89,6 +89,15 @@ def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -
     return Pin(story["id"], version, [story["id"]], f"head {head}", label, [label])
 
 
+def _tuicr_pin(store: Store, feature: features.Feature, ref: str, head: str) -> Pin:
+    story = features.story(store, feature, ref)
+    held = versions.held(feature.records.get(story["id"], []), signoff.TUICR, story["id"])
+    if held is None or held.data.get("head") != head or not held.data.get("sha"):
+        raise Refusal(f"no tuicr review is built at {head} for {story['identifier']}")
+    label = _label(story)
+    return Pin(story["id"], head, [story["id"]], f"head {head}", label, [label])
+
+
 def _second_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
@@ -185,10 +194,12 @@ def pin(
         if stage not in ("", "plan", "branch", "feature"):
             raise Refusal("--stage takes plan, branch or feature")
         return _cap_pin(store, feature, subject, stage or "plan")
+    if kind in (signoff.KIND, signoff.IN_TUICR) and not head:
+        raise Refusal(f"{kind} needs the head of the story's worktree")
     if kind == signoff.KIND:
-        if not head:
-            raise Refusal("sign-off needs the head of the story's worktree")
         return _signoff_pin(store, feature, subject, head)
+    if kind == signoff.IN_TUICR:
+        return _tuicr_pin(store, feature, subject, head)
     if kind == signoff.SECOND:
         return _second_pin(store, feature, subject)
     if kind == chores.AFTER:

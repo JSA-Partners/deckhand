@@ -434,3 +434,13 @@ def test_a_bare_drop_records_nothing(tmp_path: Path):
     store = store_with("s1")
     assert decisions.decide(store, pending, tmp_path, "viewer-1") is False
     assert store.writes == []
+
+
+@pytest.mark.parametrize("said,written", [("Done", True), ("Later", False), ("finished in tuicr", False)])
+def test_only_done_in_tuicr_is_recorded(tmp_path: Path, said: str, written: bool):
+    question, pending = ask(tmp_path, "tuicr")
+    assert question.options == ["Done", "Later"]
+    answered(tmp_path, question, said)
+    store = store_with("s1")
+    assert decisions.decide(store, pending, tmp_path, "u1") is written
+    assert [r.kind for r in store.records("s1")] == (["tuicr"] if written else [])

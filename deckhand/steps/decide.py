@@ -18,7 +18,7 @@ USAGE = (
     " after-merge takes a story and --item N, question takes its id and one --story,"
     " config-edit takes a story and --item ID, stalled takes a story,"
     " review-cap takes a story and --stage plan|branch, or the feature id and --stage feature,"
-    " sign-off and second-sign-off take a story;"
+    " sign-off, second-sign-off and tuicr take a story;"
     " apply NONCE"
 )
 
@@ -73,7 +73,8 @@ class Decide(StoryStep):
             feature = features.open_feature(store, team_key(parsed))
         if feature is None:
             raise Refusal("no feature is open")
-        head, repo = self._head(subject, team_key(parsed)) if kind == signoff.KIND else ("", "")
+        at_head = kind in (signoff.KIND, signoff.IN_TUICR)
+        head, repo = self._head(subject, team_key(parsed), kind == signoff.KIND) if at_head else ("", "")
         pin = pins.pin(
             store,
             feature,
@@ -95,10 +96,12 @@ class Decide(StoryStep):
         print(json.dumps(tool_input, indent=2))
 
     # A repository gh cannot name leaves the sign-off unmirrored rather than unsigned.
-    def _head(self, ref: str, team_key: str) -> tuple[str, str]:
+    def _head(self, ref: str, team_key: str, named: bool) -> tuple[str, str]:
         at = self.locate(ref, team_key)
         if at.head is None:
             raise Refusal(f"{at.story['identifier']} has no worktree on this machine to sign off")
+        if not named:
+            return at.head, ""
         try:
             repo = gh.repo_name(at.clone, self._runner)
         except (gh.GhError, ValueError, KeyError):

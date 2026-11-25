@@ -30,8 +30,8 @@ what changed, evidence, findings, what to check. Tuicr stays a separate step, wa
 person.
 
 For the tuicr screen, run `deckhand signoff apply REF review`. Give the person its lines as a plain
-message: the hunks and head, the tuicr command, each file's reason. Then ask a plain dialog, not a
-deckhand question: "Done in tuicr?" with Done and Later. On Later, record nothing and stop. On Done,
+message: the hunks and head, the tuicr command, each file's reason. Then decide
+`deckhand decide context tuicr REF`, even when the person says it is done; on Later, stop. On Done,
 read `deckhand signoff context REF --screen 5`. Ask about each comment whether it is work for the
 hand; if one is, say so before the sign-off question.
 

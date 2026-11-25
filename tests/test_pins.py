@@ -199,3 +199,19 @@ def test_an_item_the_engine_handed_over_is_asked_with_three_choices():
     question = decisions.make_question(chores.AFTER, shown)
     assert question.text.startswith("What happens to this after-merge item of ACME-1 One: item 1, rotate the key")
     assert question.options == ["Done", "Drop", "Make it a story"]
+
+
+def test_tuicr_pin_holds_the_head_its_review_commit_was_built_at():
+    store = feature_store()
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    with pytest.raises(Refusal, match="no tuicr review is built at c2"):
+        pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")
+    data = {"head": "c2", "base": "c1", "sha": "r1", "hunks": [], "summary": None}
+    store.put_record("s1", Record("tuicr-review", "s1", "c2", "agent:signoff", data))
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    held = pins.pin(store, feature, "tuicr", "ACME-1", [], head="c2")
+    assert (held.subject, held.version, held.stories) == ("s1", "c2", ["s1"])
+    with pytest.raises(Refusal, match="no tuicr review is built at c3"):
+        pins.pin(store, feature, "tuicr", "ACME-1", [], head="c3")

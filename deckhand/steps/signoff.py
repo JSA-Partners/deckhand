@@ -156,6 +156,8 @@ class Signoff(StoryStep):
         built = _built(at)
         if built is None or not built.get("sha") or at.path is None:
             return []
+        if not signoff.done_in_tuicr(at.records, at.story["id"], at.head):
+            return []
         try:
             session = tuicr.session_for(at.path, built["sha"], self._runner)
             found = tuicr.comments(at.path, session["slug"], self._runner) if session else []
@@ -307,7 +309,8 @@ def _tuicr(at: Located, comments: list[dict]) -> list[str]:
         return ["no hunk is selected for review"]
     lines = _tuicr_lines(at.path, data)
     lines += ["your comments:", *(f"- {c.get('location')}: {c.get('content')}" for c in comments)] if comments else []
-    return lines
+    done = signoff.done_in_tuicr(at.records, at.story["id"], at.head)
+    return lines + ([] if done else ["waiting for the person to say Done in tuicr"])
 
 
 def _what_changed(at: Located) -> list[str]:
