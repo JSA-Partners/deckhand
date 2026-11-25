@@ -7,7 +7,7 @@ from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
 from deckhand.store import Store
 
-USAGE = "draft takes REF and [--team-key KEY] on both verbs, and on apply --file DRAFT.md or take"
+USAGE = "draft takes REF and [--team-key KEY] on both verbs, and on apply --file DRAFT.md, take or drop"
 PURPOSE = "draft"
 TITLE = "Draft"
 SHAPE = (
@@ -29,8 +29,8 @@ def _parse(args: list[str]) -> dict:
         else:
             found["words"].append(arg)
     words = found["words"]
-    if not words or len(words) > 2 or (len(words) == 2 and words[1] != "take"):
-        raise Refusal(f"draft takes a story REF, then take; {USAGE}")
+    if not words or len(words) > 2 or (len(words) == 2 and words[1] not in ("take", "drop")):
+        raise Refusal(f"draft takes a story REF, then take or drop; {USAGE}")
     return found
 
 
@@ -60,7 +60,7 @@ class Draft(StoryStep):
 
     def apply(self, args: list[str]) -> None:
         parsed = _parse(args)
-        ref, taking = parsed["words"][0], parsed["words"][1:] == ["take"]
+        ref, verb = parsed["words"][0], parsed["words"][1:]
         store = self._store_for_run()
         feature = features.owning(store, team_key(parsed), ref)
         story = features.story(store, feature, ref)
@@ -68,8 +68,10 @@ class Draft(StoryStep):
         if phase is not Phase.PLANNING:
             raise Refusal(f"{features.describe(feature.project)} is {phase.value}, not planning")
         claims.owned(story, self.viewer())
-        if taking:
-            self._take(store, story)
+        if verb == ["take"]:
+            self._take(store, feature, story)
+        elif verb == ["drop"]:
+            self._drop(store, feature, story)
         else:
             self._save(store, feature, story, parsed.get("file", ""))
 
@@ -79,18 +81,33 @@ class Draft(StoryStep):
             raise Refusal("the Contract is not saved; a draft waits for it")
         if not text.strip():
             raise Refusal("the draft is empty")
-        if any(r.kind == queue.TAKEN for r in feature.records.get(story["id"], [])):
-            raise Refusal(f"{story['identifier']} took its draft already; a new draft would not reach its description")
+        if any(r.kind in queue.TAKEN_KINDS for r in feature.records.get(story["id"], [])):
+            ref = story["identifier"]
+            raise Refusal(f"{ref} took or dropped its draft already; a new draft would not reach its description")
         ops.ensure_document(store, story["id"], PURPOSE, story["id"], TITLE, text)
         record = Record(queue.DRAFT, story["id"], content_hash(text), "agent:draft", {})
         ops.ensure_record(store, story["id"], record)
         print(f"done: saved the draft for {story['identifier']}")
 
-    def _take(self, store: Store, story: dict) -> None:
+    def _take(self, store: Store, feature: features.Feature, story: dict) -> None:
         held = store.document(ops.create_id(story["id"], PURPOSE))
         if held is None:
             raise Refusal(f"{story['identifier']} has no draft to take")
+        if any(r.kind == queue.DROPPED_DRAFT for r in feature.records.get(story["id"], [])):
+            raise Refusal(f"{story['identifier']} dropped its draft; its description stays as the story map wrote it")
         ops.ensure_issue_text(store, story["id"], story["title"], held["body"])
         record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), "agent:captain", {})
         ops.ensure_record(store, story["id"], record)
         print(f"done: took the draft as the description of {story['identifier']}")
+
+    def _drop(self, store: Store, feature: features.Feature, story: dict) -> None:
+        records, ref = feature.records.get(story["id"], []), story["identifier"]
+        saved = versions.held(records, queue.DRAFT, story["id"])
+        if saved is None:
+            raise Refusal(f"{ref} has no saved draft to drop")
+        if any(r.kind == queue.TAKEN for r in records):
+            raise Refusal(f"{ref} took its draft already; its description is the draft")
+        ops.ensure_record(
+            store, story["id"], Record(queue.DROPPED_DRAFT, story["id"], saved.version, "agent:captain", {})
+        )
+        print(f"done: dropped the draft of {ref}; its description stays as the story map wrote it")

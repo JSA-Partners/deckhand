@@ -226,3 +226,21 @@ def test_phase_of_an_open_feature_is_unchanged(counting_store: Callable[[FakeSto
         found.version,
     )
     assert phase(approved) is Phase.BUILDING
+
+
+def test_a_dead_draft_hand_left_stopped_holds_no_gap():
+    from deckhand import asks, features, queue, stalls
+    from tests.test_feature_approval import load as open_alpha
+    from tests.test_feature_approval import mapped, reviewed, setup
+
+    store = setup()
+    reviewed(store)
+    mapped(store, "s1")
+    mapped(store, "s2")
+    story = features.story(store, open_alpha(store), "ACME-2")
+    store.put_record("s2", asks.hand_start(story, store.records("s2"), queue.DRAFT_HAND))
+    start = queue.last_start(store.records("s2"), queue.DRAFT_HAND)
+    assert start is not None
+    assert features.approval_gaps(store, open_alpha(store)) == ["ACME-2: its draft is being written"]
+    store.put_record("s2", Record(stalls.STALLED, "s2", start.at, "person:session-1", {"answer": stalls.LEAVE}))
+    assert features.approval_gaps(store, open_alpha(store)) == []

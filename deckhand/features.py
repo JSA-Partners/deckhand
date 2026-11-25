@@ -75,13 +75,15 @@ def undecided(feature: Feature, story: dict) -> list[str]:
 
 
 def _draft_gaps(records: list[Record], ref: str) -> list[str]:
-    from deckhand import queue
+    from deckhand import queue, stalls
 
     kinds = {r.kind for r in records}
-    if queue.TAKEN in kinds:
+    if kinds & set(queue.TAKEN_KINDS):
         return []
     if queue.DRAFT in kinds:
         return [f"{ref}: its draft is not taken"]
+    if stalls.stall_answer(records, queue.DRAFT_HAND) == stalls.LEAVE:
+        return []
     return [f"{ref}: its draft is being written"] if queue.last_start(records, queue.DRAFT_HAND) else []
 
 

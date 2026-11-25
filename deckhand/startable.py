@@ -36,7 +36,7 @@ def kind(feature: Feature, story: dict) -> str:
 
 
 def why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
-    if any(r.kind in (queue.DRAFT, queue.TAKEN) for r in feature.records.get(story["id"], [])):
+    if any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in feature.records.get(story["id"], [])):
         return f"{story['identifier']} is already drafted"
     if planning.section(store, feature, "Contract") is None:
         return f"the Contract of {features.describe(feature.project)} is not saved, so no story is drafted yet"
@@ -116,6 +116,6 @@ def wake_due(feature: Feature, story: dict) -> Record | None:
     launch = launch_of(kind(feature, story))
     if due is None or queue.last_start(records, launch) is None:
         return None
-    if launch == queue.DRAFT_HAND and any(r.kind in (queue.DRAFT, queue.TAKEN) for r in records):
+    if launch == queue.DRAFT_HAND and any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in records):
         return None
     return due

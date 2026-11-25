@@ -27,6 +27,8 @@ from deckhand.store import Store
 DRAFT = "story-draft"
 DRAFT_HAND, STORY_HAND = "draft", "story"
 TAKEN = "draft-taken"
+DROPPED_DRAFT = "draft-dropped"
+TAKEN_KINDS = (TAKEN, DROPPED_DRAFT)
 FEATURE_SKILL = "/deckhand:feature"
 READY = "the feature is ready for approval"
 REAPPROVE = "the plan changed since approval; approve it again"

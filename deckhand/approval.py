@@ -35,7 +35,7 @@ def _story(store: Store, feature: Feature, story: dict) -> str:
         "",
     ]
     kinds = {r.kind for r in records}
-    tail = "draft: saved, not taken\n" if queue.DRAFT in kinds and queue.TAKEN not in kinds else ""
+    tail = "draft: saved, not taken\n" if queue.DRAFT in kinds and not kinds & set(queue.TAKEN_KINDS) else ""
     tail += _listed("decisions", items)
     tail += f"state chart:\n{chart}\n" if chart else "state chart: none\n"
     tail += _listed("after merge", [f"- {item}" for item in versions.after_merge(records)])
