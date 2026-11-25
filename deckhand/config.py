@@ -7,7 +7,7 @@ from pathlib import Path
 from deckhand.step import Refusal, read_toml
 
 FILE = "config.toml"
-KEYS = frozenset({"clones", "slot_cap", "team_key", "sandbox_write"})
+KEYS = frozenset({"clones", "slot_cap", "team_key", "sandbox_write", "teams"})
 
 
 def config_dir() -> Path:
@@ -24,6 +24,7 @@ class LocalConfig:
     slot_cap: int = 1
     team_key: str = ""
     sandbox_write: list[str] = field(default_factory=list)
+    teams: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> LocalConfig:
@@ -48,9 +49,16 @@ class LocalConfig:
         sandbox_write = table.get("sandbox_write", [])
         if not isinstance(sandbox_write, list) or not all(isinstance(item, str) for item in sandbox_write):
             raise Refusal(f"{path}: sandbox_write must be a list of strings")
+        teams = table.get("teams", {})
+        if not isinstance(teams, dict):
+            raise Refusal(f"{path}: teams must be a table")
+        for key, id in teams.items():
+            if not isinstance(id, str):
+                raise Refusal(f"{path}: teams.{key} must be a team id string")
         return cls(
             clones={label: Path(clone).expanduser() for label, clone in clones.items()},
             slot_cap=slot_cap,
             team_key=team_key,
             sandbox_write=sandbox_write,
+            teams=teams,
         )

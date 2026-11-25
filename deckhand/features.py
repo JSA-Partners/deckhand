@@ -179,10 +179,6 @@ def _started(store: Store, team: str, finished: bool) -> list[Feature]:
     return [load(store, p) for p in held]
 
 
-def released(store: Store, team: str) -> list[Feature]:
-    return _started(store, team, finished=True)
-
-
 def _one_open(found: list[Feature]) -> Feature | None:
     held = [f for f in found if phase(f) in (Phase.PLANNING, Phase.BUILDING)]
     if len(held) > 1:
@@ -202,12 +198,9 @@ def current(store: Store, team: str) -> Feature | None:
     found = open_feature(store, team)
     if found is not None:
         return found
-    return max(released(store, team), key=_released_at, default=None)
-
-
-def _released_at(feature: Feature) -> tuple[str, str, str]:
-    finished = max((s.get("completed_at") or "" for s in feature.stories), default="")
-    return finished, feature.project["start_date"], feature.project["id"]
+    held = [p for p in team_features(store, team) if p["start_date"] and p["finished"]]
+    latest = max(held, key=lambda p: (p["target_date"] or "", p["start_date"], p["id"]), default=None)
+    return load(store, latest) if latest is not None else None
 
 
 def parked(store: Store, team: str) -> list[dict]:

@@ -124,6 +124,10 @@ class FakeStore(Store):
                 return self._public(found)
         return None
 
+    def issues(self, ids: list[str]) -> list[dict]:
+        held = [self._issues[id] for id in ids if id in self._issues]
+        return [self._public(i) | {"state": i["state"], "completed_at": i["completed_at"]} for i in held]
+
     @staticmethod
     def _public(issue: dict[str, Any]) -> dict[str, Any]:
         return {key: copy.deepcopy(value) for key, value in issue.items() if key not in ("state", "completed_at")}

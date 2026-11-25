@@ -422,6 +422,7 @@ def test_setup_writes_config_once(tmp_path: Path, capsys: pytest.CaptureFixture[
         slot_cap=3,
         team_key="ACME",
         sandbox_write=["~/.cache/uv"],
+        teams={"ACME": "team-ACME"},
     )
     captain = json.loads((config_dir / "captain-settings.json").read_text())
     clones = [Path("/elsewhere"), clone]

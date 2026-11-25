@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from typing import Any
 
 from deckhand.records import Record
@@ -11,6 +12,7 @@ READS = frozenset(
     {
         "issue",
         "issue_by_ref",
+        "issues",
         "repository_labels",
         "document",
         "relations",
@@ -63,11 +65,25 @@ class CachedStore(Store):
     ) -> str:
         return self._write("create_issue", id, team, title, description, project, labels)
 
+    def _issue(self, key: str, read: Callable[[], dict | None]) -> dict | None:
+        if ("issue", key) not in self._memo:
+            found = read()
+            self._memo["issue", key] = found
+            if found is not None:
+                self._memo["issue", found["id"]] = self._memo["issue", found["identifier"]] = found
+        return copy.deepcopy(self._memo["issue", key])
+
     def issue(self, id: str) -> dict | None:
-        return self._read("issue", id)
+        return self._issue(id, lambda: self._inner.issue(id))
 
     def issue_by_ref(self, ref: Ref) -> dict | None:
-        return self._read("issue_by_ref", ref)
+        return self._issue(str(ref), lambda: self._inner.issue_by_ref(ref))
+
+    def issues(self, ids: list[str]) -> list[dict]:
+        key = ("issues", tuple(ids))
+        if key not in self._memo:
+            self._memo[key] = self._inner.issues(list(ids))
+        return copy.deepcopy(self._memo[key])
 
     def set_labels(self, issue: str, labels: list[str]) -> None:
         self._write("set_labels", issue, labels)

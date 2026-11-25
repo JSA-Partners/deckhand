@@ -78,21 +78,28 @@ def _parse(args: list[str]) -> dict[str, Any]:
     return parsed
 
 
-def _config_text(team_key: str, slot_cap: int, sandbox_write: list[str], clones: dict[str, Path]) -> str:
+def _table(name: str, rows: dict[str, str]) -> list[str]:
+    return ["", f"[{name}]", *(f"{json.dumps(key)} = {json.dumps(value)}" for key, value in sorted(rows.items()))]
+
+
+def _config_text(
+    team_key: str, slot_cap: int, sandbox_write: list[str], clones: dict[str, Path], teams: dict[str, str]
+) -> str:
     lines = [f"team_key = {json.dumps(team_key)}", f"slot_cap = {slot_cap}"]
     if sandbox_write:
         lines.append(f"sandbox_write = {json.dumps(sandbox_write)}")
     if clones:
-        lines += ["", "[clones]"]
-        lines += [f"{json.dumps(label)} = {json.dumps(str(path))}" for label, path in sorted(clones.items())]
-    return "\n".join(lines) + "\n"
+        lines += _table("clones", {label: str(path) for label, path in clones.items()})
+    return "\n".join([*lines, *_table("teams", teams)]) + "\n"
 
 
-def _local_files(parsed: dict[str, Any]) -> dict[Path, str]:
+def _local_files(parsed: dict[str, Any], team_id: str) -> dict[Path, str]:
     directory = config.config_dir()
     current = config.local()
     clones = {**current.clones, **parsed["clones"]}
-    text = _config_text(parsed["team_key"], parsed["slot_cap"] or current.slot_cap, current.sandbox_write, clones)
+    teams = {**current.teams, parsed["team_key"]: team_id}
+    slot_cap = parsed["slot_cap"] or current.slot_cap
+    text = _config_text(parsed["team_key"], slot_cap, current.sandbox_write, clones, teams)
     captain = launch.captain_settings(launch.protected(directory, answers.state_dir()), clones=clones.values())
     return {directory / config.FILE: text, directory / launch.CAPTAIN_SETTINGS: json.dumps(captain, indent=2) + "\n"}
 
@@ -157,11 +164,11 @@ class Setup:
             return self._workspace
         return Workspace(connect(Credentials.load(config.config_dir()), "person"))
 
-    def _facts(self, key: str, repositories: dict[str, str]) -> dict[str, Any]:
+    def _facts(self, key: str, repositories: dict[str, str]) -> tuple[dict[str, Any], str]:
         workspace = self._workspace_for_run()
         team = workspace.team(key)
         if team is None:
-            return {"team": {"key": key, "found": False}}
+            return {"team": {"key": key, "found": False}}, ""
         return {
             "team": {"key": key, "found": True},
             "states": [
@@ -174,7 +181,7 @@ class Setup:
             "labels": [label["name"] for label in team["labels"]["nodes"]],
             "repositories": [{"label": label, "repository": repository} for label, repository in repositories.items()],
             "planned_changes": [change.text for change in workspace.plan(team, list(repositories))],
-        }
+        }, team["id"]
 
     def context(self, args: list[str]) -> None:
         as_json = "--json" in args
@@ -196,9 +203,9 @@ class Setup:
             args = ["--team-key", key, *args]
         parsed = _parse(args)
         key = parsed["team_key"]
-        facts = self._facts(key, parsed["repositories"])
+        facts, team_id = self._facts(key, parsed["repositories"])
         if facts["team"]["found"]:
-            local = _local_files(parsed)
+            local = _local_files(parsed, team_id)
             facts["local_changes"] = [str(path) for path, text in local.items() if _differs(path, text)]
         report = _report()
         if as_json:
@@ -236,11 +243,11 @@ class Setup:
             print("\n".join(run(places)))
             return
         key = parsed["team_key"]
-        files = _local_files(parsed)
         workspace = self._workspace_for_run()
         team = workspace.team(key)
         if team is None:
             raise Refusal(f"no Linear team has the key {key}")
+        files = _local_files(parsed, team["id"])
         changes = workspace.plan(team, list(parsed["repositories"]))
         workspace.apply(team, changes)
         for change in changes:

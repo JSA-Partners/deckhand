@@ -383,3 +383,16 @@ def test_attach_refuses_nested_metadata() -> None:
         store.attach("i1", "https://linear.app/x", "T", "S", {"a": {"b": 1}})
     assert store.attachments("i1") == {}
     assert [name for name, *_ in store.writes] == ["create_issue"]
+
+
+def test_issues_reads_each_known_id_with_its_state_in_the_order_asked() -> None:
+    store = FakeStore()
+    make_issue(store, "i1")
+    make_issue(store, "i2")
+    store.set_issue_state("i2", "Done")
+    found = store.issues(["i2", "missing", "i1"])
+    assert [(i["id"], i["state"], i["completed_at"] is not None) for i in found] == [
+        ("i2", "Done", True),
+        ("i1", "Backlog", False),
+    ]
+    assert {k: v for k, v in found[1].items() if k not in ("state", "completed_at")} == store.issue("i1")

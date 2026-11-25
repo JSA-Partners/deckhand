@@ -34,19 +34,23 @@ query LabelIds($names: [String!]!, $teamId: ID!) {
 }
 """
 
+ISSUE_FIELDS = (
+    "id identifier number branchName title description team { key } project { id } assignee { id name } "
+    f"labels(first: {ISSUE_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}"
+)
+RELATIONS = f"relations(first: {RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}"
+INVERSE_RELATIONS = f"inverseRelations(first: {RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}"
+
 ISSUE = f"""
 query Issue($id: String!) {{
-  issue(id: $id) {{
-    id
-    identifier
-    number
-    branchName
-    title
-    description
-    team {{ key }}
-    project {{ id }}
-    assignee {{ id name }}
-    labels(first: {ISSUE_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
+  issue(id: $id) {{ {ISSUE_FIELDS} }}
+}}
+"""
+
+ISSUES = f"""
+query Issues($ids: [ID!]!) {{
+  issues(first: {ISSUE_PAGE}, filter: {{ id: {{ in: $ids }} }}) {{
+    nodes {{ {ISSUE_FIELDS} state {{ name }} completedAt }}
   }}
 }}
 """
@@ -108,6 +112,8 @@ query ProjectIssues($id: String!, $after: String) {{
         completedAt
         assignee {{ id name }}
         labels(first: {NESTED_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
+        {RELATIONS}
+        {INVERSE_RELATIONS}
       }}
       {CURSOR}
     }}
@@ -143,11 +149,7 @@ query Viewer {
 
 ISSUE_RELATIONS = f"""
 query IssueRelations($id: String!) {{
-  issue(id: $id) {{
-    id
-    relations(first: {RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}
-    inverseRelations(first: {RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}
-  }}
+  issue(id: $id) {{ id {RELATIONS} {INVERSE_RELATIONS} }}
 }}
 """
 

@@ -4,6 +4,7 @@ import inspect
 from typing import Any
 
 from deckhand.records import Record
+from deckhand.ref import Ref
 from deckhand.store import Store
 from deckhand.store.cached import READS, WRITES, CachedStore
 from deckhand.store.fake import FakeStore
@@ -21,6 +22,14 @@ class Counting(FakeStore):
     def issue(self, id: str) -> dict | None:
         self.calls.append("issue")
         return super().issue(id)
+
+    def issue_by_ref(self, ref: Ref) -> dict | None:
+        self.calls.append("issue_by_ref")
+        return super().issue_by_ref(ref)
+
+    def issues(self, ids: list[str]) -> list[dict]:
+        self.calls.append("issues")
+        return super().issues(ids)
 
     def project_issues(self, project: str) -> list[dict]:
         self.calls.append("project_issues")
@@ -84,3 +93,11 @@ def test_cached_store_never_memoizes_attach() -> None:
     assert inner.attachments(ISSUE)["https://linear.app/x"]["metadata"] == {"v": 2}
     cached.issue(ISSUE)
     assert inner.calls == ["issue", "issue"]
+
+
+def test_issue_and_issue_by_ref_share_one_read() -> None:
+    inner, cached = seeded()
+    by_ref = cached.issue_by_ref(Ref(TEAM, 1))
+    assert by_ref is not None and cached.issue(by_ref["id"]) == by_ref
+    assert cached.issue_by_ref(Ref(TEAM, 1)) == by_ref
+    assert inner.calls == ["issue_by_ref"]

@@ -74,19 +74,22 @@ def test_current_is_the_open_feature_else_the_newest_released():
     assert found is not None and (found.project["name"], phase(found)) == ("Gamma", Phase.PLANNING)
 
 
-def test_current_is_the_last_released_when_two_started_the_same_day():
+def test_current_is_the_released_feature_with_the_latest_target_date():
     store = FakeStore()
-    for name in ("Later", "Earlier"):
+    dates = {
+        "Later": ("2026-11-02", "2026-11-20"),
+        "Same": ("2026-11-02", "2026-11-20"),
+        "Undated": ("2026-11-30", None),
+    }
+    for name, (start, target) in dates.items():
         id = create_id(f"ACME:{name}", "feature")
         store.create_project(id, "ACME", name, "", [FEATURE_LABEL])
-        store.set_project_dates(id, "2026-11-16", None)
+        store.set_project_dates(id, start, target)
         store.create_issue(f"s-{name}", "ACME", name, "", id, [])
-    for name in ("Earlier", "Later"):
         store.set_issue_state(f"s-{name}", "Done")
-    for _ in range(2):
-        found = current(store, "ACME")
-        assert found is not None and found.project["name"] == "Later"
-        store._projects = dict(reversed(store._projects.items()))
+    found = current(store, "ACME")
+    later, same = create_id("ACME:Later", "feature"), create_id("ACME:Same", "feature")
+    assert found is not None and found.project["id"] == max(later, same)
 
 
 def test_renamed_project_stays_a_feature():
@@ -159,7 +162,7 @@ def test_current_with_three_released_and_one_open_feature_reads_each_project_onc
     assert counting.calls["project_documents"] == 1
 
 
-def test_current_with_no_open_feature_loads_the_released_ones(
+def test_current_with_no_open_feature_loads_only_the_latest_released_one(
     counting_store: Callable[[FakeStore], CountingStore],
 ):
     fake = FakeStore()
@@ -168,7 +171,7 @@ def test_current_with_no_open_feature_loads_the_released_ones(
     counting = counting_store(fake)
     found = current(CachedStore(counting), "ACME")
     assert found is not None and phase(found) is Phase.RELEASED
-    assert counting.calls["project_issues"] == 2
+    assert counting.calls["project_issues"] == 1
 
 
 def test_open_feature_loads_no_released_project(counting_store: Callable[[FakeStore], CountingStore]):
