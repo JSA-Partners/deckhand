@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from deckhand.linear import queries
 from deckhand.linear.client import DuplicateId, LinearError
 from deckhand.ops import ensure_relation
 from deckhand.records import Record
@@ -824,10 +825,16 @@ def test_relations_come_from_the_project_issues_read(records: LocalRecords) -> N
     assert store.relations("id-1") == [("id-1", "id-2")]
     assert store.relations("id-2") == [("id-1", "id-2")]
     assert client.names == ["ProjectIssues"]
-    assert "relations(first: 50)" in client.documents[0] and "inverseRelations(first: 50)" in client.documents[0]
 
 
-def test_a_story_with_more_than_fifty_relations_keeps_them_all(records: LocalRecords) -> None:
+def test_the_project_read_keeps_its_nested_pages_small() -> None:
+    document = " ".join(queries.PROJECT_ISSUES.split())
+    pages = ["issues(first: 50,", "labels(first: 10)", "relations(first: 10)", "inverseRelations(first: 10)"]
+    assert [page in document for page in pages] == [True] * len(pages)
+    assert document.count("(first: ") == len(pages)
+
+
+def test_a_story_with_relations_past_one_page_keeps_them_all(records: LocalRecords) -> None:
     outward = page(blocks(*(f"o{n}" for n in range(50))), "r1")
     inward = page(blocked_by(*(f"i{n}" for n in range(50))), "v1")
     client = FakeClient(

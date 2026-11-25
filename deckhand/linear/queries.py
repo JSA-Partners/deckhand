@@ -9,6 +9,7 @@ DOCUMENT_PAGE = 50
 ISSUE_LABEL_PAGE = 20
 NESTED_LABEL_PAGE = 10
 RELATION_PAGE = 50
+NESTED_RELATION_PAGE = 10
 TEAM_PROJECT_PAGE = 50
 TEAM_LABEL_PAGE = 100
 PROJECT_LABEL_LIMIT = 10
@@ -40,6 +41,11 @@ ISSUE_FIELDS = (
 )
 RELATIONS = f"relations(first: {RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}"
 INVERSE_RELATIONS = f"inverseRelations(first: {RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}"
+# Linear refuses a query past its complexity limit, and nested pages multiply by the issue page.
+NESTED_RELATIONS = f"relations(first: {NESTED_RELATION_PAGE}) {{ nodes {{ type relatedIssue {{ id }} }} {CURSOR} }}"
+NESTED_INVERSE_RELATIONS = (
+    f"inverseRelations(first: {NESTED_RELATION_PAGE}) {{ nodes {{ type issue {{ id }} }} {CURSOR} }}"
+)
 
 ISSUE = f"""
 query Issue($id: String!) {{
@@ -112,8 +118,8 @@ query ProjectIssues($id: String!, $after: String) {{
         completedAt
         assignee {{ id name }}
         labels(first: {NESTED_LABEL_PAGE}) {{ nodes {{ id name }} {CURSOR} }}
-        {RELATIONS}
-        {INVERSE_RELATIONS}
+        {NESTED_RELATIONS}
+        {NESTED_INVERSE_RELATIONS}
       }}
       {CURSOR}
     }}
