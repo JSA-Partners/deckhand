@@ -142,3 +142,21 @@ def test_before_a_plan_the_story_map_lists_the_maps_after_merge_items_as_open():
     mapped_stub(store, "s2", [], [])
     [document] = [a for a in mirror.wanted(store, load(store)) if isinstance(a, PutDocument)]
     assert "- After merge: Run the backfill (open)\n" in document.body
+
+
+def test_a_void_still_written_after_a_re_sign_at_a_new_head():
+    store = building()
+    held = signed(store)
+    store.put_record("s1", signoff.void_record("s1", held, "the branch moved past the signed head"))
+    data = held.data | {"nonce": "n2"}
+    store.put_record("s1", Record(signoff.KIND, "s1", "c3:digest", "person:sess", data))
+    found = {a.url: a.title for a in attachments(store)}
+    assert found == {COMMIT: "Sign-off by Ada voided", COMMIT.replace("c2", "c3"): "Signed off by Ada"}
+
+
+def test_a_re_sign_at_the_voided_head_shows_signed():
+    store = building()
+    held = signed(store)
+    store.put_record("s1", signoff.void_record("s1", held, "checks failed: lint"))
+    store.put_record("s1", Record(signoff.KIND, "s1", "c2:digest2", "person:sess", held.data | {"nonce": "n2"}))
+    assert [(a.url, a.title) for a in attachments(store)] == [(COMMIT, "Signed off by Ada")]

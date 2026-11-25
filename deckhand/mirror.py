@@ -37,21 +37,31 @@ def _approvals(store: Store, feature: features.Feature) -> list[Attach]:
     return found
 
 
-def _sign_off(records: list[Record], story: str) -> Attach | None:
-    held = signoff.signed(records, story)
-    if held is None or held.data.get("answer") != signoff.SIGN:
-        return None
-    name, repo = held.data.get("name"), held.data.get("repo")
+def _commit(story: str, data: dict, sha: str, at: str) -> tuple[str, str, dict[str, str]] | None:
+    name, repo = data.get("name"), data.get("repo")
     if not name or not repo:
         return None
-    sha = signoff.signed_head(held)
-    url = COMMIT_URL.format(repo=repo, sha=sha)
-    metadata = {"sha": sha, "signedBy": str(name), "signedAt": held.at}
-    void = signoff.voided(records, story, held)
-    if void is None:
-        return _attach(story, url, f"Signed off by {name}", "{signedAt__since}", metadata)
-    reason = str(void.data.get("reason", ""))
-    return _attach(story, url, f"Sign-off by {name} voided", reason, metadata | {"void": void.at})
+    return str(name), COMMIT_URL.format(repo=repo, sha=sha), {"sha": sha, "signedBy": str(name), "signedAt": at}
+
+
+# Every void is resent, so a re-sign landing before a void was written still marks the old head voided.
+def _sign_offs(records: list[Record], story: str) -> list[Attach]:
+    found: dict[str, Attach] = {}
+    for void in sorted((r for r in records if r.kind == signoff.VOID), key=lambda r: r.at):
+        shown = _commit(story, void.data, void.version, str(void.data.get("signed_at", "")))
+        if shown is not None:
+            name, url, metadata = shown
+            reason = str(void.data.get("reason", ""))
+            held = _attach(story, url, f"Sign-off by {name} voided", reason, metadata | {"void": void.at})
+            found[held.key] = held
+    sign = signoff.signed(records, story)
+    if sign is not None and sign.data.get("answer") == signoff.SIGN and signoff.voided(records, story, sign) is None:
+        shown = _commit(story, sign.data, signoff.signed_head(sign), sign.at)
+        if shown is not None:
+            name, url, metadata = shown
+            held = _attach(story, url, f"Signed off by {name}", "{signedAt__since}", metadata)
+            found[held.key] = held
+    return list(found.values())
 
 
 def _story_lines(feature: features.Feature, story: dict) -> list[str]:
@@ -81,11 +91,14 @@ def _story_map(feature: features.Feature) -> PutDocument | None:
     return PutDocument(f"{PREFIX}{project}", f"{PREFIX}{project}:story-map", content_hash(json.dumps(fields)), *fields)
 
 
-def wanted(store: Store, feature: features.Feature) -> list[Attach | PutDocument]:
-    found: list[Attach | PutDocument] = list(_approvals(store, feature))
+def needs_contract(feature: features.Feature) -> bool:
+    return any(_approval(feature, story) is not None for story in feature.live)
+
+
+def wanted(store: Store, feature: features.Feature) -> list[Mirror]:
+    found: list[Mirror] = list(_approvals(store, feature))
     for story in feature.live:
-        held = _sign_off(feature.records.get(story["id"], []), story["id"])
-        found += [held] if held is not None else []
+        found += _sign_offs(feature.records.get(story["id"], []), story["id"])
     document = _story_map(feature)
     return found + ([document] if document is not None else [])
 

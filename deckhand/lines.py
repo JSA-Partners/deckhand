@@ -26,6 +26,8 @@ def _key(action: Action) -> tuple[str, str, str]:
         return f"{STOP}:{action.why}", action.name, action.short
     if isinstance(action, Remove):
         return REMOVE, action.name, action.short
+    if isinstance(action, Attach | PutDocument):
+        return type(action).__name__, action.name, action.key
     return type(action).__name__, action.name, ""
 
 

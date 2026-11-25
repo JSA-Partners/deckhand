@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from deckhand import budget, config, fleet, planning, policy, reading
+from deckhand import budget, config, fleet, mirror, planning, policy, reading
 from deckhand.linear.client import LinearError, default_transport
 from deckhand.policy import Policy
 from deckhand.reading import Reading
@@ -81,7 +81,7 @@ def link(
                 kept.labels[name] = held("app").repository_labels(name)
         labels = {name: kept.labels[name] for name in teams}
         # Reads the Contract here, so the engine's mirrors never make a Linear read of their own.
-        if found.feature is not None:
+        if found.feature is not None and mirror.needs_contract(found.feature):
             planning.document(held("app"), found.feature, "Contract")
     except (LinearError, Refusal) as error:
         return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)

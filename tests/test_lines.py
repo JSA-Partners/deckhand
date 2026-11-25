@@ -47,3 +47,12 @@ def test_a_failed_mirror_backs_off_across_a_settle_until_it_lands():
     lines.heard(attach(), None, 200.0)
     assert not lines.backing_off(attach(), 201.0)
     assert lines.newest() == ""
+
+
+def test_a_failed_mirror_stays_backed_off_when_its_sibling_on_the_story_lands():
+    lines = Lines()
+    sign = Attach("mirror:s1", "mirror:s1:https://github.com/c2", "d2", "s1", "https://github.com/c2", "S", "", ())
+    lines.heard(attach(), "mirror:s1: network: Linear is unreachable", 100.0)
+    lines.heard(sign, None, 101.0)
+    assert lines.backing_off(attach(), 110.0)
+    assert not lines.backing_off(sign, 110.0)

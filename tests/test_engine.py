@@ -950,3 +950,16 @@ def test_a_released_feature_mirrors_with_no_linear_read_between_links(clone: Pat
         rig.step()
     assert rig.down.calls == calls
     assert [a.name for a in rig.worker.submitted if isinstance(a, Attach)] == ["mirror:s1", "mirror:s2"]
+
+
+def released_link_calls(clone: Path, store: FakeStore) -> int:
+    configure(clone, 1)
+    for story in ("s1", "s2"):
+        store.set_issue_state(story, "Done")
+    rig = Rig(store)
+    rig.link()
+    return rig.down.calls
+
+
+def test_a_link_reads_the_contract_only_for_a_named_approval(clone: Path):
+    assert released_link_calls(clone, building()) + 1 == released_link_calls(clone, named(building()))

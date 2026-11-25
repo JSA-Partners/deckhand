@@ -115,7 +115,9 @@ def signed_head(record: Record) -> str:
 
 def void_record(story: str, sign: Record, reason: str, author: str = "agent:merge") -> Record:
     nonce, head = sign.data.get("nonce", ""), signed_head(sign)
-    return Record(VOID, f"{story}:{nonce}", head, author, {"head": head, "nonce": nonce, "reason": reason})
+    shown = {key: sign.data[key] for key in ("name", "repo") if key in sign.data}
+    data = {"head": head, "nonce": nonce, "reason": reason, "signed_at": sign.at} | shown
+    return Record(VOID, f"{story}:{nonce}", head, author, data)
 
 
 def voided(records: list[Record], story: str, sign: Record) -> Record | None:
