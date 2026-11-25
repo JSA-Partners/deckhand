@@ -319,7 +319,19 @@ def items(
     found = _after_merge([*([feature] if feature is not None else []), *elsewhere], me)
     if feature is not None:
         found += _feature_items(store, feature, me, read, policy_for, quiet, restarts or {}, idle)
+    for chore in elsewhere:
+        found += _chore_items(chore, me, read)
     return ranked(found)
+
+
+# A chore hand in an older feature still asks the person, so its asks and prompts reach the queue.
+def _chore_items(feature: Feature, me: str, read: fleet.Fleet) -> list[Item]:
+    hands, found = fleet.hands(read.sessions), []
+    for story in (s for s in feature.live if s["state"] == order.DONE and s["assignee"] == me):
+        records = feature.records.get(story["id"], [])
+        found += _for_person(story, records, 2)
+        found += [] if read.note else _prompt(story, records, hands.get(story["identifier"]), 2)
+    return found
 
 
 def ranked(found: list[Item]) -> list[Item]:

@@ -4,8 +4,9 @@ from datetime import date
 
 import pytest
 
-from deckhand import budget, linker
+from deckhand import budget, config, linker
 from deckhand.fleet import Fleet
+from deckhand.step import Refusal
 from deckhand.store import open as store_open
 from deckhand.store.cached import CachedStore
 from deckhand.store.fake import FakeStore
@@ -27,6 +28,18 @@ def test_a_link_within_ten_minutes_reuses_the_repository_labels() -> None:
     assert store.calls["repository_labels"] == 1
     linked(store, T + linker.REFRESH, kept)
     assert store.calls["repository_labels"] == 2
+
+
+def test_a_config_that_does_not_load_marks_the_link_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    store, kept = CountingStore(FakeStore()), linker.Kept()
+    assert linked(store, T, kept).configured
+
+    def broken() -> config.LocalConfig:
+        raise Refusal("config.toml: unknown key bogus")
+
+    monkeypatch.setattr(linker.config, "local", broken)
+    found = linked(store, T, kept)
+    assert not found.configured and "config.toml: unknown key bogus" in found.problems
 
 
 def test_links_share_one_memo_of_team_ids_until_it_is_refreshed(monkeypatch: pytest.MonkeyPatch) -> None:

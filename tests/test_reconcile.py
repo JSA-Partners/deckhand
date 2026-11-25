@@ -24,7 +24,7 @@ from tests.shell import Shell, row
 from tests.test_chores import opened_next, released
 from tests.test_feature_approval import P1, TEAM, approve_everything, mapped, reapprove, setup
 from tests.test_implplan import manifest, repo
-from tests.test_mirror import CONTRACT, named
+from tests.test_mirror import CONTRACT, mapped_stub, named, signed
 from tests.test_queue import asked, waiting
 from tests.test_step_after import CHORES
 from tests.test_step_build import Shell as GitShell
@@ -213,6 +213,47 @@ def test_a_chore_hand_that_left_one_item_and_idles_past_its_nudge_is_stopped(clo
     nudged = held(turn_ended=at(T - 200), restarts=1)
     found = reconcile(facts(store, idle, hands=(nudged,), idle=frozenset({"hand-ACME-1"})), store)
     assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
+
+
+def test_a_chore_hand_of_an_older_feature_is_woken_by_its_answer(clone: Path):
+    store = released(CHORES[:1])
+    asked(store, "s1")
+    opened_next(store)
+    stopped = row("ACME-1", "stopped")
+    assert reconcile(facts(store, stopped, hands=(held(),)), store) == []
+    data = {"answer": "Redis", "nonce": "n1", "by": ME}
+    store.put_record("s1", Record(asks.ANSWER, asks.question_id("Which queue?"), "v1", "person:session-1", data))
+    found = reconcile(facts(store, stopped, hands=(held(),)), store)
+    assert [(a.name, a.kind) for a in found if isinstance(a, Post)] == [("hand-ACME-1", asks.ANSWER)]
+
+
+def test_an_older_feature_keeps_its_story_map_and_sign_offs_mirrored(clone: Path):
+    store = named(released(CHORES[:1]))
+    signed(store)
+    for story in ("s1", "s2"):
+        mapped_stub(store, story, [], [])
+    opened_next(store)
+    current = features.current(store, "ACME")
+    assert current is not None
+    [alpha] = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
+    wanted = mirror.wanted(alpha, "")
+    assert {type(a).__name__ for a in wanted} == {"Attach", "PutDocument"}
+    assert reconcile(facts(store, cap=0, contract=CONTRACT), store) == wanted
+    assert reconcile(facts(store, cap=0, contract=CONTRACT, readable=False), store) == []
+
+
+def test_a_chore_with_no_clone_here_goes_to_the_person(clone: Path):
+    why = {"why": "no clone of its repository on this machine", "session": ""}
+    left = tuple(
+        Record(chores.AFTER_PERSON, f"s1:{n}", content_hash(text), "agent:engine", {"n": n, "text": text} | why)
+        for n, text in enumerate(CHORES, start=1)
+    )
+    for opened in (False, True):
+        store = released()
+        if opened:
+            opened_next(store)
+        assert reconcile(facts(store, clones={}, policies={}), store) == [Leave("hand-ACME-1", "s1", left)]
+        assert reconcile(facts(store, clones={}, policies={}, configured=False), store) == []
 
 
 def test_a_name_busy_with_no_launch_resume_or_stop_takes_no_slot(clone: Path):

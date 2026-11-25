@@ -30,6 +30,7 @@ class Linked:
     labels: Mapping[str, list[str]] = field(default_factory=dict)
     broken: Mapping[Path, str] = field(default_factory=dict)
     contract: str = ""
+    configured: bool = True
 
 
 @dataclass
@@ -43,12 +44,12 @@ class Kept:
             self.teams, self.labels, self.at = {}, {}, now
 
 
-def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy], dict[Path, str]]:
+def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Policy], dict[Path, str], bool]:
     try:
-        local = config.local()
+        local, loaded = config.local(), True
     except Refusal as error:
         problems.append(error.rule)
-        local = config.LocalConfig()
+        local, loaded = config.LocalConfig(), False
     policies: dict[Path, Policy] = {}
     broken: dict[Path, str] = {}
     for label, clone in local.clones.items():
@@ -57,7 +58,7 @@ def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Pol
         except Refusal as error:
             broken[clone] = policy.described(error.rule, clone, label)
             problems.append(f"{broken[clone]}; its stories do not start")
-    return local, policies, broken
+    return local, policies, broken, loaded
 
 
 def link(
@@ -71,7 +72,7 @@ def link(
     at, problems = clock(), []
     kept = kept if kept is not None else Kept()
     kept.refresh(at)
-    local, policies, broken = _configured(problems)
+    local, policies, broken, loaded = _configured(problems)
     held = stores() if stores is not None else Stores(teams=kept.teams)
     read = fleet_now() or fleet.Fleet([], NO_FLEET)
     try:
@@ -86,9 +87,11 @@ def link(
         if found.feature is not None and mirror.needs_contract(found.feature):
             held_contract = planning.document(held("app"), found.feature, "Contract")
     except (LinearError, Refusal) as error:
-        return Linked(None, None, at, problem(error), local, policies, tuple(problems), broken=broken)
+        return Linked(
+            None, None, at, problem(error), local, policies, tuple(problems), broken=broken, configured=loaded
+        )
     contract = held_contract["url"] if held_contract else ""
-    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken, contract)
+    return Linked(held, found, at, "", local, policies, tuple(problems), labels, broken, contract, loaded)
 
 
 # The poller calls this on its timer, on a poke and on a wake alike, so the budget gates all three.

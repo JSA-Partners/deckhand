@@ -27,8 +27,10 @@ from deckhand.policy import Policy
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.summary import ChangeSummary, ToCheck
+from tests.test_chores import opened_next, released
 from tests.test_feature_approval import approve_everything, reapprove, setup
 from tests.test_implplan import manifest
+from tests.test_step_after import CHORES
 from tests.test_step_build import repo, state
 from tests.test_step_review import raw
 from tests.test_step_signoff import ready, sign
@@ -361,6 +363,21 @@ def test_released_feature_chore_stays_in_the_queue():
     found = queue.items(store, "ACME", current, ME, Fleet(), lambda story: Policy("widgets"))
     assert [(i.kind, i.ref, i.next) for i in found] == [
         ("after-merge", "ACME-1", ["decide context after-merge ACME-1 --item 1"])
+    ]
+
+
+def test_a_chore_hand_of_an_older_feature_reaches_the_person():
+    store = released(CHORES[:1])
+    asked(store, "s1")
+    opened_next(store)
+    current = features.current(store, "ACME")
+    assert current is not None
+    older = chores.elsewhere(store, "ACME", {s["id"] for s in current.stories})
+    blocked = hand("ACME-1", "blocked", "waiting", fleet.PERMISSION, iso(1795000000500))
+    found = queue.items(store, "ACME", current, ME, Fleet([blocked], ""), lambda s: Policy("w"), elsewhere=older)
+    assert sorted((i.kind, i.ref) for i in found if i.ref == "ACME-1") == [
+        ("prompt", "ACME-1"),
+        (asks.ANSWER, "ACME-1"),
     ]
 
 

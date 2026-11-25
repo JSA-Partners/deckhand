@@ -40,6 +40,7 @@ class Facts:
     mirrored: Mapping[str, str] = field(default_factory=dict)
     asked: frozenset[str] = frozenset()
     contract: str = ""
+    configured: bool = True
 
 
 @dataclass
@@ -101,15 +102,23 @@ def reconcile(facts: Facts, store: Store) -> list[Action]:
         if feature is not None:
             found += _finished(tick, feature) + _answers(tick, feature) + _idle(tick, feature) + _sync(tick, feature)
         for chore in reading.chores:
-            found += _finished(tick, chore) + _idle(tick, chore)
+            found += _finished(tick, chore) + _answers(tick, chore) + _idle(tick, chore)
         found += delivery.deliver(tick, reading.held)
         if feature is not None:
             found += _start(tick, feature, startable.startable(store, feature, tick.me, facts.clones))
-            found += mirror.due(feature, facts.contract, facts.mirrored) if facts.readable else []
         for chore in reading.chores:
             found += _start(tick, chore, startable.after_merge(chore, tick.me, facts.clones))
+        for held in reading.held if facts.configured else []:
+            found += _cloneless(tick, held)
+        found += _mirrors(facts, reading) if facts.readable else []
         found += _spikes(tick) + _stalled_spikes(tick, store, feature)
     return [action for action in found if action.name not in facts.busy]
+
+
+# The link reads only the current feature's Contract, so an older feature's approvals are not resent.
+def _mirrors(facts: Facts, reading: Reading) -> list[Action]:
+    held = [(f, facts.contract if f is reading.feature else "") for f in reading.held]
+    return [action for feature, contract in held for action in mirror.due(feature, contract, facts.mirrored)]
 
 
 def _holding(facts: Facts) -> set[str]:
@@ -304,6 +313,18 @@ def _start(tick: _Tick, feature: Feature, works: list[startable.Work]) -> list[A
         else:
             ref = story["identifier"]
             found.append(tick.take(Launch(name, ref, launch, work.clone, story, tick.me, restart), slot=True))
+    return found
+
+
+# No hand can start without a clone, so the chore goes to the person rather than holding the release.
+def _cloneless(tick: _Tick, feature: Feature) -> list[Action]:
+    found: list[Action] = []
+    for story in startable.cloneless(feature, tick.me, tick.facts.clones):
+        name, records = fleet.hand_name(story["identifier"]), _records(feature, story)
+        if name in tick.acted or tick.alive(name) is not None or stalls.waiting(story, records, False):
+            continue
+        tick.acted.add(name)
+        found.append(Leave(name, story["id"], chores.hand_over(story, records, "", chores.NO_CLONE_WHY)))
     return found
 
 

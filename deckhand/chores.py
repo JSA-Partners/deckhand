@@ -14,6 +14,7 @@ DROPPED, STORY = "dropped", "made into a story"
 DROP, MAKE_STORY = "Drop", "Make it a story"
 ENGINE = "agent:engine"
 STOPPED_WHY = "its hand stopped after the merge"
+NO_CLONE_WHY = "no clone of its repository on this machine"
 NAME_CAP = 64
 _DECIDED = {signoff.DONE: BY_PERSON, DROP: DROPPED, MAKE_STORY: STORY}
 
@@ -117,11 +118,11 @@ def open_chores(story: dict, records: list[Record]) -> bool:
     return any(after_status(records, story["id"], n, text)[0] == OPEN for n, text in items)
 
 
-def hand_over(story: dict, records: list[Record], session: str) -> tuple[Record, ...]:
+def hand_over(story: dict, records: list[Record], session: str, why: str = STOPPED_WHY) -> tuple[Record, ...]:
     found = []
     for n, text in enumerate(after_items(records, story["id"]), start=1):
         if after_status(records, story["id"], n, text)[0] == OPEN:
-            left = after_record(AFTER_PERSON, story["id"], n, text, {"why": STOPPED_WHY, "session": session})
+            left = after_record(AFTER_PERSON, story["id"], n, text, {"why": why, "session": session})
             found.append(replace(left, author=ENGINE))
     return tuple(found)
 
