@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, features, planning, review
+from deckhand import answers, asks, features, planning, review, review_gaps
 from deckhand.features import FEATURE_LABEL
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -194,7 +194,7 @@ def test_a_delivery_finding_of_an_earlier_round_can_still_be_proposed(tmp_path: 
     step.apply([*resolve, "--propose-decline", finding_id(delivery), "--reason", "out of scope"])
     [proposal] = [r for r in store.records("s1") if r.kind == asks.PROPOSAL]
     assert (proposal.subject, proposal.version) == (finding_id(delivery), first.version)
-    assert review.delivery_gaps(store.records("s1"), "s1", "plan") == [
+    assert review_gaps.delivery_gaps(store.records("s1"), "s1", "plan") == [
         f"{finding_id(delivery)} waits for the person's decision"
     ]
 
@@ -618,7 +618,7 @@ def test_a_proceed_after_a_rework_keeps_the_rework_cut(
     records = capped_twice(tmp_path, repo, state, capsys, "Rework").records("s1")
     assert review.counted(records, "s1:plan")[1] == 3
     assert review.waived(records, "s1:plan") == {finding_id(raw(severity="P1", summary="Gap 6."))}
-    assert review.left_open(records, "s1", "plan") == []
+    assert review_gaps.left_open(records, "s1", "plan") == []
 
 
 def test_a_second_proceed_keeps_the_first_waiver(

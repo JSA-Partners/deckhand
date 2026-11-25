@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import features, implplan, quiz, review, versions
+from deckhand import features, implplan, quiz, review, review_gaps, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
 from deckhand.step import Refusal
@@ -78,7 +78,7 @@ def gaps(records: list[Record], story: str, head: str) -> list[str]:
     found += _quiz_gap(records, story, head, summary)
     for stage in ("plan", "branch"):
         found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
-        found += review.delivery_gaps(records, story, stage) + review.left_open_gaps(records, story, stage)
+        found += review_gaps.delivery_gaps(records, story, stage) + review_gaps.left_open_gaps(records, story, stage)
     found += _tuicr_gap(records, story, head)
     if not passing(records, story, head):
         found.append(f"checks are not passing at {head}")

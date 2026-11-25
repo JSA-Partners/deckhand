@@ -13,6 +13,7 @@ from deckhand import (
     order,
     quiz,
     review,
+    review_gaps,
     signoff,
     spikes,
     versions,
@@ -109,7 +110,7 @@ def finding_line(records: list[Record], finding: str) -> tuple[str, str]:
 def finding_lines(records: list[Record], finding: str) -> list[str]:
     _, line = finding_line(records, finding)
     found = review.locate(records, finding)
-    lines = [line] + ([review.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
+    lines = [line] + ([review_gaps.delivery_line(found[1])] if found and found[1].get("changes_delivery") else [])
     proposal = asks.proposed(records, finding)
     return lines + ([asks.proposal_line(proposal)] if proposal else [])
 

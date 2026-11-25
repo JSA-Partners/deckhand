@@ -6,7 +6,22 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import claims, config, features, gh, git, implplan, inputs, ops, order, review, spec, tiers, versions
+from deckhand import (
+    claims,
+    config,
+    features,
+    gh,
+    git,
+    implplan,
+    inputs,
+    ops,
+    order,
+    review,
+    review_gaps,
+    spec,
+    tiers,
+    versions,
+)
 from deckhand.features import Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -236,7 +251,7 @@ class Build(StoryStep):
                 f"the plan review of {story['identifier']} has not stopped clean at the current plan;"
                 " run a plan round; at the cap the person decides"
             )
-        undecided = review.delivery_gaps(records, story["id"], "plan", story["identifier"])
+        undecided = review_gaps.delivery_gaps(records, story["id"], "plan", story["identifier"])
         if undecided:
             raise Refusal("; ".join(undecided))
         branch = branch_of(records, story)
