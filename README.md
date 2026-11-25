@@ -55,7 +55,7 @@ flowchart TB
 | Approval | Reviews the stories against each other | Approve the feature |
 | Hand | Writes the implementation plan and builds it with tests | Answer its questions |
 | Review | Reviews the plan and the branch in rounds, ordered by confidence | Decide what a hand cannot |
-| Sign-off | Shows what changed, the evidence, a targeted tuicr pass and a quiz | Sign off |
+| Sign-off | Shows what changed, the evidence, the lines to check and a targeted tuicr pass | Sign off |
 | Merge | Merges pinned to the commit you signed, then does the after-merge chores it can | Do the ones it leaves you |
 
 You talk only to the captain. The engine, in a terminal tab of its own, starts, resumes and stops

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from deckhand import answers, decisions, signoff, tiers
+from deckhand.cli import main
 from deckhand.questions import as_tool_input
 from deckhand.step import Refusal
 from deckhand.store.fake import FakeStore
@@ -288,7 +289,7 @@ def test_options_the_person_saw_must_match_the_pending_question(tmp_path: Path, 
 def test_question_text_ending_in_a_question_mark_gets_no_second_one():
     label = "ACME-9 Dialog check story"
     shown = decisions.Pin("s9", "v1", ["s9"], "item 1 of 1, What happens?", label, [label])
-    assert "??" not in decisions.make_question("quiz", replace(shown, options=["a", "b"])).text
+    assert "??" not in decisions.make_question("question", replace(shown, options=["a", "b"])).text
 
 
 def test_decision_names_who(tmp_path: Path):
@@ -344,9 +345,14 @@ def test_option_descriptions_say_what_a_choice_does_and_never_repeat_the_subject
         question = decisions.make_question(kind, replace(pin(), options=options or []))
         return [o["description"] for o in as_tool_input(question)["questions"][0]["options"]]
 
-    assert shown("quiz", ["The key", "A new key"]) == ["", ""]
     assert shown("question", ["Redis", "SQS"]) == ["", ""]
     assert shown("finding") == ["the finding stays unfixed", "the hand fixes the finding"]
     for kind in decisions.KINDS:
-        if kind not in ("quiz", "question", "tier"):
+        if kind not in ("question", "tier"):
             assert all("Checkout" not in text for text in shown(kind)), kind
+
+
+def test_no_quiz_kind_remains(capsys: pytest.CaptureFixture[str]):
+    assert "quiz" not in decisions.KINDS
+    assert main(["quiz", "context", "ACME-1"]) == 2
+    assert "unknown command 'quiz'" in capsys.readouterr().err

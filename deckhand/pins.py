@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from deckhand import asks, features, planning, queue, quiz, review, signoff, startable, versions
+from deckhand import asks, features, planning, queue, review, signoff, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
-ITEM_KINDS = {quiz.KIND: "N", signoff.AFTER: "N", asks.EDIT: "ID"}
+ITEM_KINDS = {signoff.AFTER: "N", asks.EDIT: "ID"}
 STORY_ARGUMENT = ("decision-item", asks.ANSWER)
 
 
@@ -77,7 +77,7 @@ def _signoff_pin(store: Store, feature: features.Feature, ref: str, head: str) -
     story = features.story(store, feature, ref)
     records = feature.records.get(story["id"], [])
     missing = [gap.person for gap in signoff.gaps(records, story["id"], head, story["identifier"])]
-    version = signoff.version(records, story["id"], head)
+    version = signoff.version_at(records, story["id"], head)
     label = _label(story)
     if missing and version is None:
         raise Refusal(f"{story['identifier']} is not ready for sign-off: " + "; ".join(missing))
@@ -111,26 +111,6 @@ def _after_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin
     label = _label(story)
     detail = f"item {n}, {items[n - 1]} ({held.data.get('why')})"
     return Pin(held.subject, held.version, [story["id"]], detail, label, [label])
-
-
-def _quiz_pin(store: Store, feature: features.Feature, ref: str, n: int) -> Pin:
-    story = features.story(store, feature, ref)
-    records = feature.records.get(story["id"], [])
-    held = quiz.held_set(records, story["id"])
-    if held is None:
-        raise Refusal(f"no quiz is saved for {story['identifier']}")
-    items = quiz.items_of(held)
-    if not 1 <= n <= len(items):
-        raise Refusal(f"the quiz on {story['identifier']} has no item {n}; it has {len(items)}")
-    if quiz.right(records, story["id"], n):
-        raise Refusal(f"item {n} of the quiz on {story['identifier']} is already answered right")
-    item = items[n - 1]
-    detail = f"item {n} of {len(items)}, {item.question.rstrip('?')}"
-    if quiz.missed(records, story["id"], n):
-        detail += f" (the code is at {item.where})"
-    label = _label(story)
-    options = quiz.shown_options(held.version, n, item.options)
-    return Pin(quiz.subject(story["id"], n), held.version, [story["id"]], detail, label, [label], options)
 
 
 def _find(records: list[Record], kind: str, subject: str, what: str, ref: str) -> Record:
@@ -213,8 +193,6 @@ def pin(
         return _after_pin(store, feature, subject, _number(item or ""))
     if kind == "finding":
         return _finding_pin(store, feature, subject, finding)
-    if kind == quiz.KIND:
-        return _quiz_pin(store, feature, subject, _number(item or ""))
     if kind == asks.EDIT:
         return _edit_pin(store, feature, subject, item or "")
     if kind == queue.STALLED:

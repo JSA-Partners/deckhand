@@ -76,12 +76,12 @@ def test_guards_still_hold_for_the_other_kinds():
     store, feature = asked()
     with pytest.raises(Refusal, match="--story applies only to decision-item and question"):
         pins.pin(store, feature, "contract", "p", ["ACME-1"])
-    with pytest.raises(Refusal, match="--item applies only to quiz, after-merge, config-edit"):
+    with pytest.raises(Refusal, match="--item applies only to after-merge, config-edit"):
         pins.pin(store, feature, "contract", "p", [], item="1")
-    with pytest.raises(Refusal, match="quiz needs --item N"):
-        pins.pin(store, feature, "quiz", "ACME-1", [])
+    with pytest.raises(Refusal, match="after-merge needs --item N"):
+        pins.pin(store, feature, "after-merge", "ACME-1", [])
     with pytest.raises(Refusal, match="--item takes an item number from 1"):
-        pins.pin(store, feature, "quiz", "ACME-1", [], item="x")
+        pins.pin(store, feature, "after-merge", "ACME-1", [], item="x")
 
 
 def capped(store, *items: dict) -> Record:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from deckhand import features, implplan, quiz, review, review_gaps, versions
+from deckhand import features, implplan, review, review_gaps, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
 from deckhand.review_gaps import Gap, both
@@ -36,26 +36,6 @@ def held_summary(records: list[Record], story: str, head: str) -> ChangeSummary 
         return parse_summary(json.dumps(held.data.get("summary")))
     except Refusal:
         return None
-
-
-def _quiz_gap(records: list[Record], story: str, head: str, summary: ChangeSummary | None) -> list[Gap]:
-    held = quiz.held_set(records, story)
-    if held is None or held.data.get("head") != head:
-        text = f"no quiz is saved at {head}"
-        return [Gap("quiz", f"{text}; a story with nothing to ask still saves an empty quiz", text)]
-    found = []
-    if summary is not None and held.data.get("summary") != digest(summary):
-        found.append(
-            Gap(
-                "quiz-summary",
-                "the change summary differs from the one the quiz was written from; save the quiz again",
-                "the change summary differs from the one the quiz was written from",
-            )
-        )
-    if not quiz.passed(records, story, head):
-        open_items = ", ".join(str(n) for n in quiz.open_items(records, story))
-        found.append(both("quiz-open", f"quiz items still open: {open_items}"))
-    return found
 
 
 def _branch_gap(records: list[Record], story: str, head: str) -> list[Gap]:
@@ -97,7 +77,6 @@ def _tuicr_gap(records: list[Record], story: str, head: str, ref: str) -> list[G
 def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     summary = held_summary(records, story, head)
     found = [] if summary else [both("summary", f"no change summary is saved at {head}")]
-    found += _quiz_gap(records, story, head, summary)
     for stage in ("plan", "branch"):
         found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
         found += review_gaps.delivery_gaps(records, story, stage, ref)
@@ -108,12 +87,13 @@ def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
     return found
 
 
-def version(records: list[Record], story: str, head: str) -> str | None:
+def version(head: str, summary: ChangeSummary) -> str:
+    return f"{head}:{digest(summary)}"
+
+
+def version_at(records: list[Record], story: str, head: str) -> str | None:
     summary = held_summary(records, story, head)
-    held = quiz.held_set(records, story)
-    if summary is None or held is None:
-        return None
-    return f"{head}:{digest(summary)}:{held.version}"
+    return version(head, summary) if summary is not None else None
 
 
 def signed(records: list[Record], story: str) -> Record | None:
@@ -139,7 +119,7 @@ def _first(records: list[Record], story: str, head: str) -> bool:
     return (
         held is not None
         and held.data.get("answer") == SIGN
-        and held.version == version(records, story, head)
+        and held.version == version_at(records, story, head)
         and not gaps(records, story, head, story)
         and voided(records, story, held) is None
     )
@@ -185,9 +165,9 @@ def standing(records: list[Record], story: str, head: str, second: bool = False)
     if at != head:
         return f"the head moved to {head}"
     unreviewed = _plan_gap(records, story) + _branch_gap(records, story, head)
-    if unreviewed and held.version == version(records, story, head):
+    if unreviewed and held.version == version_at(records, story, head):
         return unreviewed[0]
-    return "the sign-off no longer matches the change summary or the quiz"
+    return "the sign-off no longer matches the change summary"
 
 
 def after_items(records: list[Record], story: str) -> list[str]:

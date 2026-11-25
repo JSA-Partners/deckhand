@@ -7,20 +7,20 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from deckhand import answers, gh, git, implplan, inputs, ops, quiz, review, signoff, tuicr, versions, wakes
+from deckhand import answers, gh, git, implplan, inputs, ops, review, signoff, tuicr, versions, wakes
 from deckhand.checks import KIND as CHECKS
 from deckhand.checks import passing
 from deckhand.records import Record
 from deckhand.step import Refusal, hand_role, register, team_key
 from deckhand.steps.build import DEFAULT_BASE, Located, StoryStep, branch_of
 from deckhand.store import Store
-from deckhand.summary import ChangeSummary, parse_summary
+from deckhand.summary import SHAPE, ChangeSummary, around, location, parse_summary
 
 USAGE = (
     "signoff takes REF and [--team-key KEY] on both verbs; context [--screen 1-5] [--json],"
     " apply summary --summary SUMMARY.json or apply review [--watch]"
 )
-SCREENS = ("what changed", "evidence", "findings", "tuicr", "quiz")
+SCREENS = ("what changed", "evidence", "findings", "what to check", "tuicr")
 ACTIONS = ("summary", "review")
 PLAN_FILE = "PLAN.md"
 WATCH_POLL = 2
@@ -102,8 +102,8 @@ class Signoff(StoryStep):
             "what changed": "saved" if summary else "no change summary at this head",
             "evidence": "checks pass" if passing(at.records, sid, head) else "checks are not passing",
             "findings": f"{len(_last_branch(at.records, at.story['id']).get('findings', []))} in the last branch round",
+            "what to check": f"{len(summary.to_check)} lines" if summary else "no change summary at this head",
             "tuicr": self._pr_diff(at) if at.path is None else _tuicr_status(built, comments),
-            "quiz": "passed" if quiz.passed(at.records, sid, head) else "not passed",
         }
         found_gaps = signoff.gaps(at.records, sid, head, at.story["identifier"])
         missing = [gap.hand if hand_role() else gap.person for gap in found_gaps]
@@ -117,19 +117,35 @@ class Signoff(StoryStep):
         if hand_role():
             found["unfixed"] = review.unfixed(at.records)
             lines += wakes.unfixed_lines(at.records)
+            shape = ["change summary, a JSON object:", *(f"- {name}: {meaning}" for name, meaning in SHAPE.items())]
+            lines += [] if summary else shape
         return found | {"comments": comments, "lines": lines}
 
     def _screen(self, at: Located, n: int) -> dict:
         if at.head is None:
             return {"screen": n, "lines": [f"{at.story['identifier']} has no worktree on this machine"]}
         lines = [f"{n} {SCREENS[n - 1]} for {at.story['identifier']} at {at.head}"]
-        if n == 4 and at.path is None:
+        if n == 5 and at.path is None:
             return {"screen": n, "lines": [*lines, self._pr_diff(at)]}
-        if n == 4:
+        if n == 5:
             comments = self._comments(at)
             return {"screen": n, "comments": comments, "lines": lines + _tuicr(at, comments)}
-        lines += {1: _what_changed, 2: _evidence, 3: _findings, 5: _quiz}[n](at)
+        lines += {1: _what_changed, 2: _evidence, 3: _findings, 4: self._to_check}[n](at)
         return {"screen": n, "lines": lines}
+
+    def _to_check(self, at: Located) -> list[str]:
+        summary = signoff.held_summary(at.records, at.story["id"], at.head)
+        if summary is None or at.head is None:
+            return ["no change summary is saved at this head"]
+        lines = []
+        for entry in summary.to_check:
+            path, line = location(entry.where)
+            try:
+                code = around(git.show(at.path or at.clone, at.head, path, self._runner), line)
+            except git.GitError:
+                code = [f"{path} cannot be read at {at.head}"]
+            lines += [f"{entry.where}: {entry.why}", *code]
+        return lines
 
     def _pr_diff(self, at: Located) -> str:
         branch = branch_of(at.records, at.story)
@@ -173,6 +189,15 @@ class Signoff(StoryStep):
         summary = parse_summary(_read(parsed.get("summary", "")))
         if git.dirty(at.path, self._runner):
             raise Refusal(f"{at.path} has uncommitted changes; commit them first so the summary is pinned")
+        hunks = tuicr.parse_hunks(
+            git.diff(at.path, git.merge_base(at.path, "HEAD", DEFAULT_BASE, self._runner), runner=self._runner)
+        )
+        for index, entry in enumerate(summary.to_check):
+            if not tuicr.holds(hunks, entry.where):
+                shown = tuicr.describe_ranges(tuicr.shown_ranges(hunks)) or "no line"
+                raise Refusal(
+                    f"to_check entry {index} names {entry.where}, which the diff does not show; it shows {shown}"
+                )
         record = signoff.summary_record(at.story["id"], at.head, summary)
         ops.ensure_record(self._store_for_run(), at.story["id"], record)
         print(f"done: saved the change summary for {at.story['identifier']} at {at.head}")
@@ -297,7 +322,7 @@ def _built(at: Located) -> dict | None:
 def _from_records(at: Located) -> Located:
     if at.head is not None:
         return at
-    held = quiz.held_set(at.records, at.story["id"])
+    held = versions.held(at.records, signoff.SUMMARY, at.story["id"])
     head = held.data.get("head") if held is not None else None
     return replace(at, head=head) if isinstance(head, str) and head else at
 
@@ -367,13 +392,3 @@ def _findings(at: Located) -> list[str]:
     declined = _declined(at.records)
     lines += ["declined by the person:", *(_finding(f) for f in declined)] if declined else []
     return lines
-
-
-def _quiz(at: Located) -> list[str]:
-    held = quiz.held_set(at.records, at.story["id"])
-    if held is None or held.data.get("head") != at.head:
-        return ["no quiz is saved at this head"]
-    items = quiz.items_of(held)
-    left = quiz.open_items(at.records, at.story["id"])
-    lines = [f"{len(items)} items; open: {', '.join(map(str, left)) or 'none'}"]
-    return lines + [f"{n} {items[n - 1].question}" for n in left]

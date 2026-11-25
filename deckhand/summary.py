@@ -11,6 +11,7 @@ SHAPE = {
     "new_here": 'a list of {"text", "path"}, what the change does that the repository does not yet',
     "screenshots": "a list of image paths",
     "state_diagram": "a path, or null",
+    "to_check": 'a list of {"where": "path:line", "why"}, the riskiest lines of the diff and why each matters',
 }
 
 
@@ -27,11 +28,18 @@ class NewHere:
 
 
 @dataclass(frozen=True)
+class ToCheck:
+    where: str
+    why: str
+
+
+@dataclass(frozen=True)
 class ChangeSummary:
     intents: list[Intent]
     new_here: list[NewHere]
     screenshots: list[str]
     state_diagram: str | None
+    to_check: list[ToCheck]
 
 
 def _text(value: object, where: str) -> str:
@@ -45,6 +53,21 @@ def _path(value: object, where: str) -> str:
     if path.startswith("/") or ".." in path.split("/"):
         raise Refusal(f"{where} must be a relative path without .., not {path!r}")
     return path
+
+
+def location(where: str) -> tuple[str, int]:
+    path, _, line = where.rpartition(":")
+    if not path or not line.isdigit() or int(line) < 1:
+        raise Refusal(f"where must be path:line with a line from 1, not {where!r}")
+    return _path(path, "where"), int(line)
+
+
+def around(text: str, line: int) -> list[str]:
+    lines = text.splitlines()
+    if line > len(lines):
+        return [f"the file has {len(lines)} lines, fewer than {line}"]
+    shown = range(max(1, line - 1), min(len(lines), line + 1) + 1)
+    return [f"{'>' if n == line else ' '} {n} {lines[n - 1]}" for n in shown]
 
 
 def _entries(document: dict, name: str, fields: tuple[str, ...]) -> list[dict]:
@@ -98,7 +121,15 @@ def parse_summary(text: str) -> ChangeSummary:
     diagram = document["state_diagram"]
     if diagram is not None:
         diagram = _text(diagram, "summary field state_diagram")
-    return ChangeSummary(intents, new_here, screenshots, diagram)
+    to_check = [_checked(entry, index) for index, entry in enumerate(_entries(document, "to_check", ("where", "why")))]
+    if not to_check:
+        raise Refusal("summary field to_check must hold at least one entry, the riskiest line of the diff")
+    return ChangeSummary(intents, new_here, screenshots, diagram, to_check)
+
+
+def _checked(entry: dict, index: int) -> ToCheck:
+    path, line = location(_text(entry.get("where"), f"to_check entry {index} field where"))
+    return ToCheck(f"{path}:{line}", _text(entry.get("why"), f"to_check entry {index} field why"))
 
 
 def digest(summary: ChangeSummary) -> str:

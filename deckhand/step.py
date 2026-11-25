@@ -20,7 +20,6 @@ HAND_APPLIES: dict[str, Callable[[list[str]], bool]] = {
     "implplan": _any,
     "review": _any,
     "checks": _any,
-    "quiz": _any,
     "signoff": lambda rest: rest[:1] == ["summary"],
     "merge": _any,
     "ask": _any,

@@ -9,7 +9,7 @@ from pathlib import Path
 from deckhand.git import Runner, apply_hunks, call, run
 from deckhand.policy import Policy
 from deckhand.step import Refusal
-from deckhand.summary import ChangeSummary
+from deckhand.summary import ChangeSummary, location
 
 USERNAME = "deckhand"
 REF_PREFIX = "refs/deckhand/review/"
@@ -107,6 +107,7 @@ def select_hunks(
             reasons.append("invariant site")
         if summary:
             reasons += [f"new here: {n.text}" for n in summary.new_here if n.path in hunk.paths]
+            reasons += [f"to check: {c.why}" for c in summary.to_check if holds([hunk], c.where)]
         if not reasons:
             continue
         if not hunk.lines and "\nBinary files " in hunk.header:
@@ -156,6 +157,11 @@ def shown_ranges(hunks: list[Hunk]) -> list[tuple[str, int, int]]:
 
 def shows(ranges: list[tuple[str, int, int]], path: str, line: int) -> bool:
     return any(path == shown and first <= line <= last for shown, first, last in ranges)
+
+
+def holds(hunks: list[Hunk], where: str) -> bool:
+    path, line = location(where)
+    return shows(shown_ranges(hunks), path, line)
 
 
 def describe_ranges(ranges: list[tuple[str, int, int]]) -> str:

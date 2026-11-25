@@ -237,6 +237,10 @@ def changed_files(worktree: Path, base: str, runner: Runner = run) -> list[str]:
     return out.splitlines()
 
 
+def show(repo: Path, ref: str, path: str, runner: Runner = run) -> str:
+    return call(["git", "show", f"{ref}:{path}"], repo, runner)
+
+
 def ls_files(repo: Path, ref: str, runner: Runner = run) -> list[str]:
     return call(["git", "ls-tree", "-r", "--name-only", ref], repo, runner).splitlines()
 

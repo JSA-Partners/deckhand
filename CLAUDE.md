@@ -9,7 +9,7 @@
   `step.py` the registry, `Refusal`, and the shared TOML read
 - `steps/` one module per command, each registered by name: setup, the feature and its planning
   (`feature`, `plan`, `stories`, `sitting`, `decide`, `hook`), and the build (`build`, `implplan`,
-  `review` and `feature-review`, `checks`, `quiz`, `signoff`, `merge` and `after`), a hand's
+  `review` and `feature-review`, `checks`, `signoff`, `merge` and `after`), a hand's
   planning work (`spike`, `draft`), its questions (`ask`) and its messages (`mail`), and the
   person's fleet (`hand` lists the fleet and asks the engine for a spike, `captain` prints the
   brief, the top item and whether the engine runs from the snapshot alone, the status line segment
@@ -18,8 +18,8 @@
   `document` only report
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
-  and their checks, review rounds and their stops, lenses, checks, the change summary, tuicr, the
-  quiz and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
+  and their checks, review rounds and their stops, lenses, checks, the change summary and its lines
+  to check, tuicr and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
   and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
   who owns a story, `asks.py` a hand's questions and wakes, `wakes.py` the text of the messages a
   hand is sent, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the
@@ -151,7 +151,7 @@ install reaches them when the next fix or feature does.
   rounds that left a P1 open; the cap is the person's
 - Findings are ordered by confidence and never deleted; a doubtful one is folded, and only the
   person declines one
-- Sign-off, the change summary, the quiz and the checks are pinned to one head; merging is pinned to
+- Sign-off, the change summary and the checks are pinned to one head; merging is pinned to
   the signed head, never auto-merge, and a moved head or a failed check voids the sign-off
 - Several agents may share one checkout's index: commit with an explicit pathspec
   (`git commit -- <files>`), never `git add -A`, `git commit -a`, or a bare `git stash`, and let only

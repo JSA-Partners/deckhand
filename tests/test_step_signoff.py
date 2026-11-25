@@ -15,17 +15,26 @@ from deckhand.step import Refusal
 from deckhand.steps.checks import Checks
 from deckhand.steps.decide import Decide
 from deckhand.steps.merge import Merge
-from deckhand.steps.quiz import Quiz
 from deckhand.steps.review import Review
 from deckhand.steps.signoff import SCREENS, Signoff
 from deckhand.store.fake import FakeStore
+from deckhand.summary import SHAPE
 from tests.test_implplan import BASE, Git
-from tests.test_quiz import ask, decide, item, reply, submit, summary
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import PLAN, TEAM, answer, checked, raw, record_round
 from tests.test_step_review import submit as submit_plan
 
 __all__ = ["repo", "state"]
+
+SOURCE = "".join(f"line {n}\n" for n in range(1, 31))
+QUEUE_HUNK = "diff --git a/src/queue.py b/src/queue.py\n--- a/src/queue.py\n+++ b/src/queue.py\n@@ -10,3 +10,4 @@\n"
+QUEUE_HUNK += " line 10\n line 11\n+line 12\n line 13\n"
+
+
+def summary(new_here: int = 1, where: str = "src/queue.py:12") -> dict:
+    entries = [{"text": f"new thing {n}", "path": "src/queue.py"} for n in range(new_here)]
+    to_check = [{"where": where, "why": "a retry reuses the key"}]
+    return {"intents": [], "new_here": entries, "screenshots": [], "state_diagram": None, "to_check": to_check}
 
 
 class Gh(Shell):
@@ -86,7 +95,7 @@ def branch_round(
 def save_summary(store: FakeStore, tmp_path: Path, repo: Path, made: dict | None = None) -> None:
     path = tmp_path / "change.json"
     path.write_text(json.dumps(made if made is not None else summary(1)))
-    Signoff(store, Shell(), repo).apply(["s1", "summary", "--summary", str(path), *TEAM])
+    Signoff(store, Diffing(diff=QUEUE_HUNK), repo).apply(["s1", "summary", "--summary", str(path), *TEAM])
 
 
 def built(store: FakeStore, head: str = "c2") -> None:
@@ -106,9 +115,6 @@ def signable(tmp_path: Path, repo: Path, tuicr: bool = True) -> FakeStore:
 def ready(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str], tuicr: bool = True) -> FakeStore:
     store = signable(tmp_path, repo, tuicr)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
-    step = decide(store, repo)
-    reply(state, step, ask(step, capsys), "The idempotency key")
     branch_round(store, raw())
     fixed(store, raw())
     checked(store, "c2")
@@ -145,6 +151,40 @@ def overview(store: FakeStore, repo: Path, capsys: pytest.CaptureFixture[str]) -
     return json.loads(capsys.readouterr().out)
 
 
+class Showing(Shell):
+    def __call__(self, argv, cwd=None, stdin=None):
+        if argv[:2] == ["git", "show"]:
+            self.argvs.append(argv)
+            return subprocess.CompletedProcess(argv, 0, SOURCE, "")
+        return super().__call__(argv, cwd, stdin)
+
+
+def test_a_to_check_entry_outside_the_diff_is_refused(tmp_path: Path, repo: Path):
+    store = signable(tmp_path, repo)
+    written = list(store.writes)
+    made = summary() | {"to_check": [{"where": "src/queue.py:40", "why": "the key"}]}
+    with pytest.raises(Refusal, match="to_check entry 0 names src/queue.py:40, which the diff does not show"):
+        save_summary(store, tmp_path, repo, made)
+    assert store.writes == written
+
+
+def test_screen_four_shows_each_line_to_check_with_its_code(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    shell = Showing()
+    capsys.readouterr()
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4"])
+    assert capsys.readouterr().out.splitlines() == [
+        "4 what to check for ACME-1 at c2",
+        "src/queue.py:12: a retry reuses the key",
+        "  11 line 11",
+        "> 12 line 12",
+        "  13 line 13",
+    ]
+    assert shell.ran("git", "show") == [["git", "show", "c2:src/queue.py"]]
+
+
 def test_overview_without_a_worktree_lists_it_as_missing(
     tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -158,9 +198,6 @@ def test_commits_after_the_last_branch_round_need_a_review(
 ):
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
-    step = decide(store, repo)
-    reply(state, step, ask(step, capsys), "The idempotency key")
     branch_round(store, raw(), head="c1")
     checked(store, "c2")
     assert re.search("the branch review has not reviewed the signed head c2", gap_text(store))
@@ -170,30 +207,11 @@ def test_commits_after_the_last_branch_round_need_a_review(
     assert signoff.current(store.records("s1"), "s1", "c2")
 
 
-def test_an_open_quiz_item_is_a_sign_off_gap(
+def test_not_ready_sign_off_offers_not_yet_and_back_and_records_not_yet(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
-    branch_round(store, raw())
-    fixed(store, raw())
-    checked(store, "c2")
-    assert re.search("quiz items still open: 1", gap_text(store))
-    quizzer = decide(store, repo)
-    reply(state, quizzer, ask(quizzer, capsys), "A new key")
-    assert re.search("quiz items still open: 1", gap_text(store))
-    reply(state, quizzer, ask(quizzer, capsys), "The idempotency key")
-    sign(store, repo, state, capsys)
-    assert signoff.current(store.records("s1"), "s1", "c2")
-
-
-def test_not_ready_sign_off_offers_not_yet_and_back_and_records_not_yet_before_the_quiz(
-    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
-):
-    store = signable(tmp_path, repo)
-    save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
     assert not_ready_options(store, repo, capsys) == [signoff.NOT_YET, signoff.BACK]
     sign(store, repo, state, capsys, signoff.NOT_YET)
     [held] = [r for r in store.records("s1") if r.kind == signoff.KIND]
@@ -206,7 +224,6 @@ def test_an_early_not_yet_wakes_the_hand(tmp_path: Path, repo: Path, state: Path
     start = Record(asks.HAND_START, "s1", "v1", "agent:hand", {})
     store.put_record("s1", start)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
     assert asks.wake_due(store.records("s1"), "s1") is None
     sign(store, repo, state, capsys, signoff.NOT_YET)
     woken = asks.wake_due(store.records("s1"), "s1")
@@ -243,7 +260,6 @@ def test_sign_off_on_a_not_ready_question_is_refused_and_writes_nothing(
 ):
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
     store.writes.clear()
     with pytest.raises(Refusal, match="is not one of Not yet, Back"):
         sign(store, repo, state, capsys, signoff.SIGN)
@@ -256,7 +272,6 @@ def test_back_on_the_sign_off_question_records_nothing(
 ):
     store = signable(tmp_path, repo)
     save_summary(store, tmp_path, repo)
-    submit(store, tmp_path, repo, [item()])
     store.writes.clear()
     sign(store, repo, state, capsys, signoff.BACK)
     assert store.writes == []
@@ -279,15 +294,8 @@ def test_sign_off_lists_everything_missing(tmp_path: Path, repo: Path):
     with pytest.raises(Refusal) as refused:
         Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
     rule = refused.value.rule
-    for gap in ("no change summary", "no quiz is saved", "branch review has not stopped clean", "checks are not"):
+    for gap in ("no change summary", "branch review has not stopped clean", "checks are not"):
         assert gap in rule
-
-
-def test_summary_must_match_the_quiz(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
-    store = ready(tmp_path, repo, state, capsys)
-    other = summary(1) | {"intents": [{"title": "Queue orders", "lines": ["retries reuse the key"]}]}
-    save_summary(store, tmp_path, repo, other)
-    assert re.search("differs from the one the quiz was written from", gap_text(store))
 
 
 def test_a_new_local_commit_leaves_the_sign_off_behind(
@@ -371,7 +379,7 @@ def test_review_commit_is_built_once_per_head(
         Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     assert len(shell.ran("git", "commit")) == 1
     capsys.readouterr()
-    Signoff(store, Shell(), repo).context(["s1", *TEAM, "--screen", "4"])
+    Signoff(store, Shell(), repo).context(["s1", *TEAM, "--screen", "5"])
     out = capsys.readouterr().out
     assert "tuicr -r c1..c2" in out and "src/a.py: contract site" in out
 
@@ -504,7 +512,7 @@ def test_a_session_holding_every_reason_is_left_alone_and_shows_none_as_the_pers
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     assert shell.ran("tuicr", "review", "add") == []
     assert capsys.readouterr().out.splitlines()[0].endswith("the reasons are seeded")
-    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5", "--json"])
     assert json.loads(capsys.readouterr().out)["comments"] == [said("p1", "Why?")]
 
 
@@ -519,7 +527,7 @@ def test_the_persons_tuicr_comments_are_shown_apart_from_the_seeded_reasons(
     shell = Diffing(sessions=[{"slug": SLUG}], comments=[said("seed1", "contract site"), said("p1", "Rename this.")])
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     capsys.readouterr()
-    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5", "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert shown["comments"] == [said("p1", "Rename this.")]
     assert shown["lines"][-2:] == ["your comments:", "- src/a.py:1: Rename this."]
@@ -539,7 +547,7 @@ def test_the_tuicr_screen_prints_when_tuicr_cannot_be_read(
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     shell.broken = broken
     capsys.readouterr()
-    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4", "--json"])
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5", "--json"])
     shown = json.loads(capsys.readouterr().out)
     assert shown["comments"] == [] and "- src/a.py: contract site" in shown["lines"]
 
@@ -555,7 +563,7 @@ def test_the_tuicr_command_is_printed_from_the_story_worktree(
     capsys.readouterr()
     Signoff(store, Diffing(), spaced).apply(["s1", "review", *TEAM])
     assert capsys.readouterr().out.startswith(f"done: cd {worktree} && tuicr -r c1..c2; ")
-    Signoff(store, Diffing(), spaced).context(["s1", *TEAM, "--screen", "4"])
+    Signoff(store, Diffing(), spaced).context(["s1", *TEAM, "--screen", "5"])
     assert capsys.readouterr().out.splitlines()[1] == f"cd {worktree} && tuicr -r c1..c2"
 
 
@@ -643,7 +651,6 @@ def test_sign_off_of_a_story_in_another_repository_refuses(tmp_path: Path, repo:
     [
         (Review, ["s1", "round", "--stage", "branch", "--target", "t", "--findings", "f.json"]),
         (Checks, ["s1"]),
-        (Quiz, ["s1", "--quiz", "q.json", "--summary", "s.json"]),
         (Signoff, ["s1", "summary", "--summary", "s.json"]),
         (Merge, ["s1"]),
     ],
@@ -715,12 +722,12 @@ def test_second_signer_screens_from_records(
         Signoff(store, Gh(), repo).context(["s1", "--screen", str(n), *TEAM])
         return capsys.readouterr().out.splitlines()
 
-    for n in (1, 2, 3, 5):
+    for n in (1, 2, 3, 4):
         out = shown(n)
         assert out[0] == f"{n} {SCREENS[n - 1]} for ACME-1 at c2"
         assert not any("no worktree" in line or "not this head" in line for line in out)
     assert "checks: passed at this head" in shown(2)
-    assert shown(4)[1:] == ["run gh pr diff 7 --repo acme/widgets in a terminal"]
+    assert shown(5)[1:] == ["run gh pr diff 7 --repo acme/widgets in a terminal"]
 
 
 def test_review_names_each_file_s_reason_once(
@@ -731,7 +738,7 @@ def test_review_names_each_file_s_reason_once(
     capsys.readouterr()
     Signoff(store, shell, repo).apply(["s1", "review", *TEAM])
     assert capsys.readouterr().out.splitlines()[1:] == ["- src/a.py: contract site"]
-    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "4"])
+    Signoff(store, shell, repo).context(["s1", *TEAM, "--screen", "5"])
     assert capsys.readouterr().out.count("- src/a.py: contract site") == 1
 
 
@@ -904,3 +911,14 @@ def test_the_overview_prints_hand_text_to_a_hand_and_person_text_to_the_person(
     for lines in (person, hand):
         assert lines[0] == "missing:"
         assert lines.index("missing:") < next(i for i, line in enumerate(lines) if line.startswith("sign-off for"))
+
+
+def test_a_hand_without_a_change_summary_is_shown_its_shape(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+):
+    store = signable(tmp_path, repo)
+    as_hand(tmp_path, repo, monkeypatch)
+    shape = f"- to_check: {SHAPE['to_check']}"
+    assert shape in overview(store, repo, capsys)["lines"]
+    save_summary(store, tmp_path, repo)
+    assert shape not in overview(store, repo, capsys)["lines"]

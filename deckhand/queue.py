@@ -11,7 +11,6 @@ from deckhand import (
     fleet,
     gaps,
     order,
-    quiz,
     review,
     review_gaps,
     signoff,
@@ -67,13 +66,10 @@ def _story_item(kind: str, rank: int, story: dict, at: str, lines: list[str], ne
 
 def _signoff(story: dict, records: list[Record]) -> list[Item]:
     summary = versions.held(records, signoff.SUMMARY, story["id"])
-    held = quiz.held_set(records, story["id"])
     head = summary.data.get("head") if summary else None
-    if summary is None or held is None or not head or held.data.get("head") != head:
-        return []
-    version = signoff.version(records, story["id"], head)
+    version = signoff.version_at(records, story["id"], head) if isinstance(head, str) else None
     sign = versions.held(records, signoff.KIND, story["id"])
-    if version is None or (sign is not None and sign.version == version):
+    if summary is None or version is None or (sign is not None and sign.version == version):
         return []
     next = [f"{SIGNOFF_SKILL} {story['identifier']}"]
     return [_story_item(signoff.KIND, 0, story, summary.at, [f"ready to sign off at {head[:12]}"], next, head)]

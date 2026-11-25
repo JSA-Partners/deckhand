@@ -9,7 +9,7 @@ import pytest
 from deckhand import git, tuicr
 from deckhand.policy import Policy
 from deckhand.step import Refusal
-from deckhand.summary import ChangeSummary, NewHere
+from deckhand.summary import ChangeSummary, NewHere, ToCheck
 
 BASE_FILES = {
     "src/auth.py": "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n",
@@ -115,10 +115,18 @@ def test_selects_contract_sites(story: tuple[Path, Path]) -> None:
 
 
 def test_selects_new_here_paths(story: tuple[Path, Path]) -> None:
-    summary = ChangeSummary([], [NewHere("first queue", "src/util.py")], [], None)
+    summary = ChangeSummary([], [NewHere("first queue", "src/util.py")], [], None, [ToCheck("src/pay.py:99", "x")])
     hunks = tuicr.select_hunks(story_diff(story[1]), policy(), set(), MANIFEST, summary)
     assert [h.path for h in hunks] == ["src/util.py"]
     assert hunks[0].reason == "new here: first queue"
+
+
+def test_select_hunks_keeps_every_to_check_hunk() -> None:
+    header = "diff --git a/src/big.py b/src/big.py\n--- a/src/big.py\n+++ b/src/big.py\n"
+    diff = header + "".join(f"@@ -{n * 10} +{n * 10} @@\n-old{n}\n+new{n}\n" for n in range(1, 31))
+    summary = ChangeSummary([], [], [], None, [ToCheck("src/big.py:170", "the retry reuses the key")])
+    [hunk] = tuicr.select_hunks(diff, policy(), set(), MANIFEST, summary)
+    assert (hunk.lines[0], hunk.reason) == ("@@ -170 +170 @@", "to check: the retry reuses the key")
 
 
 def test_several_reasons_join_into_one(story: tuple[Path, Path]) -> None:

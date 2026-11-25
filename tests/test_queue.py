@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, features, fleet, gaps, implplan, policy, queue, quiz, review, signoff, spikes
+from deckhand import asks, features, fleet, gaps, implplan, policy, queue, review, signoff, spikes
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
 from deckhand.policy import Policy
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
-from deckhand.summary import ChangeSummary, digest
+from deckhand.summary import ChangeSummary, ToCheck
 from tests.test_feature_approval import approve_everything, setup
 from tests.test_implplan import manifest
 from tests.test_step_build import repo, state
@@ -23,7 +23,7 @@ __all__ = ["repo", "state"]
 
 ME = "viewer-1"
 OTHER = "someone-else"
-EMPTY = ChangeSummary([], [], [], None)
+SUMMARY = ChangeSummary([], [], [], None, [ToCheck("src/a.py:1", "the charge")])
 
 
 class Clock:
@@ -59,8 +59,7 @@ def hand(ref: str, state: str, status: str | None, waiting_for: str | None = Non
 
 
 def summarized(store: FakeStore, story: str, head: str) -> None:
-    store.put_record(story, signoff.summary_record(story, head, EMPTY))
-    store.put_record(story, quiz.set_record(story, head, [], digest(EMPTY), 0))
+    store.put_record(story, signoff.summary_record(story, head, SUMMARY))
 
 
 def asked(store: FakeStore, story: str, text: str = "Which queue?") -> None:
@@ -108,6 +107,12 @@ def test_a_story_with_an_open_finding_item_shows_no_signoff_item():
     store.put_record("s1", asks.proposal_record("f1", "v1", "out of scope"))
     assert kinds(waiting(store)) == [("finding", 1, "ACME-1")]
     store.put_record("s1", Record(review.DECISION, "f1", "v1", "person:pat", {"answer": review.ACCEPT}))
+    assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
+
+
+def test_the_signoff_item_needs_only_a_summary_at_head():
+    store = alpha()
+    store.put_record("s1", signoff.summary_record("s1", "c2", SUMMARY))
     assert kinds(waiting(store)) == [("sign-off", 0, "ACME-1")]
 
 
@@ -171,7 +176,7 @@ def test_void_is_not_a_signoff_item_until_new_summary():
     summarized(store, "s1", "c2")
     [item] = waiting(store)
     assert (item.kind, item.next) == ("sign-off", ["/deckhand:signoff ACME-1"])
-    version = signoff.version(store.records("s1"), "s1", "c2")
+    version = signoff.version("c2", SUMMARY)
     held = Record(signoff.KIND, "s1", version, review.PERSON + "s", {"answer": "Sign off", "nonce": "n1", "by": ME})
     store.put_record("s1", held)
     assert waiting(store) == []

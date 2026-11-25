@@ -12,6 +12,7 @@ GOOD = {
     "new_here": [{"text": "first use of a queue", "path": "./src/queue.py"}],
     "screenshots": ["shots/a.png"],
     "state_diagram": None,
+    "to_check": [{"where": "./src/queue.py:12", "why": "a retry must reuse the key"}],
 }
 
 
@@ -32,6 +33,22 @@ def test_parses_a_change_summary() -> None:
     assert parsed.screenshots == ["shots/a.png"]
     assert parsed.state_diagram == "docs/state.svg"
     assert parse().state_diagram is None
+    assert parsed.to_check == [summary.ToCheck("src/queue.py:12", "a retry must reuse the key")]
+
+
+def test_a_summary_without_to_check_is_refused() -> None:
+    assert "to_check must hold at least one entry" in refusal(to_check=[])
+    assert "to_check entry 0 field why" in refusal(to_check=[{"where": "src/queue.py:12"}])
+    assert "where must be path:line" in refusal(to_check=[{"where": "src/queue.py", "why": "w"}])
+    with pytest.raises(Refusal, match="to_check is missing"):
+        summary.parse_summary(json.dumps({k: v for k, v in GOOD.items() if k != "to_check"}))
+
+
+def test_code_around_a_line_is_the_line_and_one_on_each_side() -> None:
+    text = "".join(f"line {n}\n" for n in range(1, 31))
+    assert summary.around(text, 12) == ["  11 line 11", "> 12 line 12", "  13 line 13"]
+    assert summary.around(text, 1) == ["> 1 line 1", "  2 line 2"]
+    assert summary.around(text, 40) == ["the file has 30 lines, fewer than 40"]
 
 
 def test_refuses_with_index_and_field() -> None:

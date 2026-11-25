@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from deckhand import answers, asks, ops, queue, quiz, review, signoff, tiers
+from deckhand import answers, asks, ops, queue, review, signoff, tiers
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -23,7 +23,6 @@ KINDS = (
     "feature-approval",
     "finding",
     review.CAP_DECISION,
-    quiz.KIND,
     signoff.KIND,
     signoff.SECOND,
     signoff.AFTER,
@@ -32,7 +31,7 @@ KINDS = (
     queue.STALLED,
 )
 
-_PIN_OPTIONS = (quiz.KIND, asks.ANSWER, signoff.KIND)
+_PIN_OPTIONS = (asks.ANSWER, signoff.KIND)
 
 _OPTIONS = {
     "contract": ["Approve", "Not yet"],
@@ -82,7 +81,6 @@ _ASKS = {
     "lean": "Is a Lean proof needed for",
     "finding": "Decline or accept the review finding on",
     review.CAP_DECISION: "Three review rounds left a P1 open. Proceed to the build or rework the plan for",
-    quiz.KIND: "Quiz on",
     signoff.KIND: "Sign off",
     signoff.SECOND: "Second sign-off on",
     signoff.AFTER: "Is this after-merge item done for",
@@ -99,7 +97,6 @@ _RECORDED = (
     "decision-item",
     "finding",
     review.CAP_DECISION,
-    quiz.KIND,
     signoff.KIND,
     signoff.SECOND,
     asks.ANSWER,
@@ -109,7 +106,6 @@ _RECORDED = (
 _CHOSEN = (
     "finding",
     review.CAP_DECISION,
-    quiz.KIND,
     signoff.KIND,
     signoff.SECOND,
     signoff.AFTER,
@@ -298,10 +294,6 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         _owner_signs(store, pending, by)
     if pending.kind == signoff.SECOND:
         _another_signs(store, pending, by)
-    graded = {}
-    if pending.kind == quiz.KIND:
-        records = store.records(pending.stories[0])
-        graded = {"correct": quiz.grade(records, pending.subject, pending.version, pending.options, found.answer)}
     record = Record(
         pending.kind,
         pending.subject,
@@ -310,8 +302,7 @@ def decide(store: Store, pending: Pending, state: Path, by: str) -> bool:
         {"answer": answer, "question": pending.question, "nonce": pending.nonce, "by": by}
         | ({"note": note} if note is not None else {})
         | ({"item": pending.detail} if pending.kind == "decision-item" else {})
-        | (_tier_data(found.answer) if pending.kind == "tier" else {})
-        | graded,
+        | (_tier_data(found.answer) if pending.kind == "tier" else {}),
     )
     for story in pending.stories:
         ops.ensure_record(store, story, record)
