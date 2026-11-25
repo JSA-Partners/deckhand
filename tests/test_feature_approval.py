@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, approval, asks, features, ops, planning, queue, review, versions
+from deckhand import answers, approval, asks, features, ops, planning, queue, review, stalls, versions
 from deckhand.features import FEATURE_LABEL, Phase
 from deckhand.ops import create_id
 from deckhand.records import Record, content_hash
@@ -389,3 +389,17 @@ def test_a_draft_being_written_holds_the_approval():
     story = features.story(store, load(store), "ACME-2")
     store.put_record("s2", asks.hand_start(story, store.records("s2"), queue.DRAFT_HAND))
     assert features.approval_gaps(store, load(store)) == ["ACME-2: its draft is being written"]
+
+
+def test_a_dead_draft_hand_left_stopped_holds_no_gap():
+    store = setup()
+    reviewed(store)
+    mapped(store, "s1")
+    mapped(store, "s2")
+    story = features.story(store, load(store), "ACME-2")
+    store.put_record("s2", asks.hand_start(story, store.records("s2"), queue.DRAFT_HAND))
+    start = queue.last_start(store.records("s2"), queue.DRAFT_HAND)
+    assert start is not None
+    assert features.approval_gaps(store, load(store)) == ["ACME-2: its draft is being written"]
+    store.put_record("s2", Record(stalls.STALLED, "s2", start.at, "person:session-1", {"answer": stalls.LEAVE}))
+    assert features.approval_gaps(store, load(store)) == []

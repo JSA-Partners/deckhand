@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import features, launch, ops, planning, queue, spec
+from deckhand import features, launch, ops, planning, queue, spec, versions
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.steps.draft import Draft
 from tests.test_feature_approval import DRAFT as ITEM_DRAFT
@@ -13,6 +14,7 @@ from tests.test_feature_approval import approve_everything, decided, expect, set
 
 TEAM = ["--team-key", "ACME"]
 DRAFT = "Outcome: an order is placed.\n\nExamples:\n- a paid order ships.\n"
+MAP_TEXT = "Outcome: an order is placed.\n\nUnknowns:\n- which carrier"
 
 
 def draft_file(tmp_path: Path, text: str = DRAFT) -> str:
@@ -115,6 +117,32 @@ def test_drop_keeps_the_map_description_and_clears_the_gap(tmp_path: Path):
     written = list(store.writes)
     step.apply(["ACME-1", "drop", *TEAM])
     assert store.writes == written
+    with pytest.raises(Refusal, match="ACME-1 took or dropped its draft already"):
+        step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
+    with pytest.raises(Refusal, match="ACME-1 dropped its draft"):
+        step.apply(["ACME-1", "take", *TEAM])
+    assert store.writes == written
+
+
+def test_drop_after_a_take_restores_the_maps_text(tmp_path: Path):
+    store = setup()
+    stub = {"unknowns": [], "new_here": [], "decisions": [], "after_merge": [], "description": MAP_TEXT}
+    store.put_record("s1", Record("stub", "orders", "1", versions.MAP_AUTHOR, stub))
+    step = Draft(store, me=lambda: "viewer-1")
+    step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
+    step.apply(["ACME-1", "take", *TEAM])
+    assert store.issue("s1")["description"] == DRAFT
+    before = len(store.writes)
+    step.apply(["ACME-1", "drop", *TEAM])
+    assert store.writes[before:] == [
+        ("set_issue_text", "s1", "Orders", MAP_TEXT),
+        ("put_record", "s1", queue.DROPPED_DRAFT, "s1"),
+    ]
+    assert store.issue("s1")["description"] == MAP_TEXT
+    gaps = features.approval_gaps(store, features.open_feature(store, "ACME"))
+    assert not [gap for gap in gaps if gap.startswith("ACME-1: its draft")]
+    written = list(store.writes)
+    step.apply(["ACME-1", "drop", *TEAM])
     with pytest.raises(Refusal, match="ACME-1 took or dropped its draft already"):
         step.apply(["ACME-1", "--file", draft_file(tmp_path, "Outcome: another.\n"), *TEAM])
     with pytest.raises(Refusal, match="ACME-1 dropped its draft"):

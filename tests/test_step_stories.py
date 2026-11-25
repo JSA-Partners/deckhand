@@ -78,7 +78,13 @@ def test_map_creates_stubs_with_labels_and_blockers(tmp_path: Path):
     assert store.relations(story_id("api")) == [(story_id("api"), story_id("ui"))]
     [stub] = [r for r in store.records(story_id("api")) if r.kind == "stub"]
     assert stub.subject == "api"
-    assert stub.data == {"unknowns": ["rate limits"], "new_here": ["queue"], "decisions": [], "after_merge": []}
+    assert stub.data == {
+        "unknowns": ["rate limits"],
+        "new_here": ["queue"],
+        "decisions": [],
+        "after_merge": [],
+        "description": api["description"],
+    }
 
 
 def test_map_keeps_expected_decisions_in_the_stub_and_reruns_write_nothing(tmp_path: Path):
@@ -151,7 +157,10 @@ def test_map_changed_outcome_updates_the_description(tmp_path: Path):
     found = store.issue(story_id("api"))
     assert found is not None
     assert "A better outcome." in found["description"]
-    assert [w[0] for w in store.writes] == ["set_issue_text"]
+    assert [w[:3] for w in store.writes] == [
+        ("set_issue_text", story_id("api"), "Story api"),
+        ("put_record", story_id("api"), "stub"),
+    ]
 
 
 def test_map_refuses_cycle(tmp_path: Path):

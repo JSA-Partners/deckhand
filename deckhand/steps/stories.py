@@ -278,6 +278,7 @@ class Stories:
                 "new_here": entry["new_here"],
                 "decisions": entry.get("decisions", []),
                 "after_merge": entry.get("after_merge", []),
+                "description": _description(entry),
             }
             ops.ensure_record(store, id, Record("stub", entry["key"], "1", versions.MAP_AUTHOR, stub))
             for record in map_records(id, entry):

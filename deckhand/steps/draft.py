@@ -92,7 +92,7 @@ class Draft(StoryStep):
         if held is None:
             raise Refusal(f"{story['identifier']} has no draft to take")
         if any(r.kind == queue.DROPPED_DRAFT for r in feature.records.get(story["id"], [])):
-            raise Refusal(f"{story['identifier']} dropped its draft; its description stays as the story map wrote it")
+            raise Refusal(f"{story['identifier']} dropped its draft; its description is the story map's text")
         ops.ensure_issue_text(store, story["id"], story["title"], held["body"])
         record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), "agent:captain", {})
         ops.ensure_record(store, story["id"], record)
@@ -104,8 +104,12 @@ class Draft(StoryStep):
         if saved is None:
             raise Refusal(f"{ref} has no saved draft to drop")
         if any(r.kind == queue.TAKEN for r in records):
-            raise Refusal(f"{ref} took its draft already; its description is the draft")
+            stub = next((r for r in records if r.kind == "stub"), None)
+            text = stub.data.get("description") if stub else None
+            if not isinstance(text, str):
+                raise Refusal(f"the story map holds no text for {ref}; save the map again, then drop its draft")
+            ops.ensure_issue_text(store, story["id"], story["title"], text)
         ops.ensure_record(
             store, story["id"], Record(queue.DROPPED_DRAFT, story["id"], saved.version, "agent:captain", {})
         )
-        print(f"done: dropped the draft of {ref}; its description stays as the story map wrote it")
+        print(f"done: dropped the draft of {ref}; its description is the story map's text")
