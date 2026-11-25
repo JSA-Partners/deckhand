@@ -189,7 +189,7 @@ def hand_settings(
 # Planning saves its answers through --file, so the captain writes only in deckhand's own input folders.
 def captain_settings(protected: Protected, temp: Path | None = None, clones: Iterable[Path] = ()) -> dict[str, Any]:
     guarded, roots = _guarded(protected, [], []), captain_inputs(temp)
-    planning = [str(git.worktree_path(clone, "planning")) for clone in clones]
+    planning = [str(git.worktree_path(clone, "planning")) for clone in sorted(clones)]
     return {
         "env": {"DECKHAND_ROLE": "captain"},
         "viewMode": "focus",

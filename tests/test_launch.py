@@ -207,8 +207,9 @@ def test_the_captain_may_read_each_clone_planning_worktree(tmp_path: Path) -> No
     clones = [tmp_path / "widgets", tmp_path / "gadgets"]
     settings = launch.captain_settings(protected, clones=clones)
     listed = settings["permissions"]["additionalDirectories"]
-    assert listed[-2:] == [str(clone / ".worktrees" / "planning") for clone in clones]
+    assert listed[-2:] == [str(clone / ".worktrees" / "planning") for clone in sorted(clones)]
     assert launch.captain_current(settings, protected, clones)
+    assert launch.captain_current(settings, protected, clones[::-1])
     assert not launch.captain_current(settings, protected)
 
 
