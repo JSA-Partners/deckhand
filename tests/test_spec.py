@@ -151,11 +151,12 @@ def test_plain_undoes_a_self_autolink_and_escapes():
     assert spec.plain("[docs](<https://x.io>)") == "[docs](<https://x.io>)"
     assert spec.plain("a \\`b\\` c") == "a `b` c"
     assert spec.plain("`[x.io](<http://x.io>) \\*`") == "`[x.io](<http://x.io>) \\*`"
+    assert spec.plain("a ` b \\_c\n\nlater `x` \\*") == "a ` b _c\n\nlater `x` *"
     fenced = "```\n[x.io](<http://x.io>) \\_\n```\n[y.io](<http://y.io>)"
     assert spec.plain(fenced) == "```\n[x.io](<http://x.io>) \\_\n```\ny.io"
 
 
-def test_gather_returns_plain_fields_and_versions_stay_raw():
+def test_gather_returns_plain_fields_and_the_saved_section_stays_raw():
     store = feature_store()
     feature, _ = loaded(store)
     raw = "See [x.io](<http://x.io>), a\\_b."

@@ -18,16 +18,15 @@ Open, pick, or park a feature with `deckhand feature apply new --name N [--refer
 Shape it with superpowers:brainstorming before its Frame; use impeccable:impeccable for any story a
 person sees.
 
-`deckhand plan context` lists the sections; name one to read it back. Save every answer as
+`deckhand plan context` lists the sections and the answered spikes with their keys. Save every answer as
 given with `deckhand plan apply SECTION --file PATH [--drafted]`, `--drafted` for a draft.
 
-At Facts, ask each unverified fact as a spike, its one-line question in a file:
+At Facts, ask each fact as a spike, its one-line question in a file:
 `deckhand hand apply spike --repository LABEL --file QUESTION.md`. Keep drafting what does not rest
 on it, then end the turn. On `deckhand: a spike was answered`, read it with
 `deckhand plan context spike KEY` and fold it into Facts.
 
-Turn the settled plan into stories: `deckhand stories context` prints the map's fields, each story's
-decisions naming its expected items. Save it with `deckhand stories apply --file MAP.json`.
+Turn the settled plan into stories: `deckhand stories context` prints the map's fields and each story's expected items. Save it with `deckhand stories apply --file MAP.json`, which names each REF.
 
 For every decision, run `deckhand decide context KIND SUBJECT`, pass its JSON unchanged to the
 question dialog, then `deckhand decide apply NONCE` once answered. Contract, invariants,

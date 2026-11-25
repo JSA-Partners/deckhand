@@ -48,17 +48,17 @@ class Plan:
         feature = self._feature(store, parsed)
         words = parsed["words"]
         project = feature.project["id"]
-        held = {k: d for d in spikes.answered(store, feature) if (k := spikes.key_of(project, d))}
+        answered_spikes = {k: d for d in spikes.answered(store, feature) if (k := spikes.key_of(project, d))}
         if words[:1] == ["spike"]:
             if len(words) != 2:
                 raise Refusal(f"context spike takes one KEY; {USAGE}")
-            found = held.get(words[1])
+            found = answered_spikes.get(words[1])
             print(spec.plain(found["body"]) if found else f"no answered spike {words[1]}")
             return
         if len(words) > 1:
             raise Refusal(f"context takes at most one SECTION; {USAGE}")
-        if parsed["words"]:
-            name = parsed["words"][0]
+        if words:
+            name = words[0]
             text = planning.section(store, feature, name)
             if parsed["json"]:
                 print(json.dumps({"section": name, "text": text}, indent=2))
@@ -67,12 +67,12 @@ class Plan:
             return
         saved = {name: planning.section(store, feature, name) is not None for name in planning.SECTIONS}
         following = planning.next_section(store, feature)
-        titles = {key: d["title"] for key, d in held.items()}
+        titles = {key: d["title"] for key, d in answered_spikes.items()}
         if parsed["json"]:
             print(json.dumps({"sections": saved, "next": following, "spikes": titles}, indent=2))
             return
-        for name, held in saved.items():
-            print(f"{name}: {'saved' if held else 'empty'}")
+        for name, filled in saved.items():
+            print(f"{name}: {'saved' if filled else 'empty'}")
         print(f"next: {following}" if following else "next: nothing")
         if titles:
             print("answered spikes:")
