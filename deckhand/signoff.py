@@ -7,7 +7,7 @@ from deckhand import features, implplan, review, review_gaps, tuicr, versions
 from deckhand.checks import passing
 from deckhand.records import HAND, Record, content_hash
 from deckhand.review_gaps import Gap, both
-from deckhand.step import Refusal
+from deckhand.step import Refusal, hand_role
 from deckhand.store import Store
 from deckhand.summary import ChangeSummary, digest, parse_summary
 
@@ -77,13 +77,13 @@ def _plan_gap(records: list[Record], story: str) -> list[Gap]:
     return []
 
 
-def _tuicr_gap(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
+def _tuicr_gap(records: list[Record], story: str, head: str) -> list[Gap]:
     held = versions.held(records, TUICR, story)
     summary = held_summary(records, story, head)
     stale = summary is not None and held is not None and held.data.get("summary") != digest(summary)
     if held is None or held.data.get("head") != head or stale:
         text = f"no tuicr review is built at {head}"
-        return [Gap("tuicr", f"{text}; run signoff apply {ref} review", text)]
+        return [Gap("tuicr", f"{text}; it waits for the person's tuicr review", text)]
     return []
 
 
@@ -94,7 +94,7 @@ def gaps(records: list[Record], story: str, head: str, ref: str) -> list[Gap]:
         found += _plan_gap(records, story) if stage == "plan" else _branch_gap(records, story, head)
         found += review_gaps.delivery_gaps(records, story, stage, ref)
         found += review_gaps.left_open_gaps(records, story, stage, ref)
-    found += _tuicr_gap(records, story, head, ref)
+    found += _tuicr_gap(records, story, head)
     if not passing(records, story, head):
         found.append(both("checks", f"checks are not passing at {head}"))
     return found
@@ -179,7 +179,7 @@ def standing(records: list[Record], story: str, head: str, second: bool = False)
         return f"the head moved to {head}"
     unreviewed = _plan_gap(records, story) + _branch_gap(records, story, head)
     if unreviewed and held.version == version_at(records, story, head):
-        return unreviewed[0]
+        return unreviewed[0].hand if hand_role() else unreviewed[0].person
     return "the sign-off no longer matches the change summary"
 
 
