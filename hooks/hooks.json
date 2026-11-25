@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/deckhand\" hook apply bash"
+            "command": "[ \"$DECKHAND_ROLE\" = captain ] || exit 0; \"${CLAUDE_PLUGIN_ROOT}/bin/deckhand\" hook apply bash || exit 2"
           }
         ]
       }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -381,7 +382,9 @@ def test_hooks_json_uses_the_full_path_form():
         [command] = entry["hooks"]
         assert command["command"] == f'"${{CLAUDE_PLUGIN_ROOT}}/bin/deckhand" hook apply {action}'
     pre = {entry["matcher"]: [h["command"] for h in entry["hooks"]] for entry in hooks["PreToolUse"]}
-    assert pre["Bash"] == ['"${CLAUDE_PLUGIN_ROOT}/bin/deckhand" hook apply bash']
+    assert pre["Bash"] == [
+        '[ "$DECKHAND_ROLE" = captain ] || exit 0; "${CLAUDE_PLUGIN_ROOT}/bin/deckhand" hook apply bash || exit 2'
+    ]
 
 
 def test_a_turn_that_ends_on_an_api_error_marks_its_end_as_a_stop_does():
@@ -620,3 +623,42 @@ def test_the_bash_hook_leaves_a_hand_and_a_plain_session_alone(monkeypatch, caps
         monkeypatch.delenv("DECKHAND_ROLE", raising=False)
     assert run(monkeypatch, ["bash"], payload) == 0
     assert capsys.readouterr().out == ""
+
+
+def bash_hook_command() -> str:
+    hooks = json.loads((Path(__file__).parent.parent / "hooks" / "hooks.json").read_text())["hooks"]
+    entry = next(e for e in hooks["PreToolUse"] if e["matcher"] == "Bash")
+    return entry["hooks"][0]["command"]
+
+
+def run_bash_hook(root: Path, role: str | None, stub: str | None) -> int:
+    if stub is not None:
+        (root / "bin").mkdir()
+        script = root / "bin" / "deckhand"
+        script.write_text(stub)
+        script.chmod(0o755)
+    env = {"PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": str(root)}
+    if role:
+        env["DECKHAND_ROLE"] = role
+    return subprocess.run(["/bin/sh", "-c", bash_hook_command()], env=env, input="{}", text=True).returncode
+
+
+def test_the_bash_hook_command_exits_2_in_the_captain_role_when_deckhand_cannot_start(tmp_path: Path):
+    assert run_bash_hook(tmp_path, "captain", None) == 2
+
+
+@pytest.mark.parametrize("role", ["hand", None])
+def test_the_bash_hook_command_exits_0_outside_the_captain_without_starting_deckhand(tmp_path: Path, role):
+    marker = tmp_path / "started"
+    assert run_bash_hook(tmp_path, role, f"#!/bin/sh\ntouch '{marker}'\n") == 0
+    assert not marker.exists()
+
+
+def test_the_bash_hook_command_exits_0_in_the_captain_role_when_deckhand_passes(tmp_path: Path):
+    marker = tmp_path / "started"
+    assert run_bash_hook(tmp_path, "captain", f"#!/bin/sh\ntouch '{marker}'\n") == 0
+    assert marker.exists()
+
+
+def test_the_bash_hook_command_exits_2_in_the_captain_role_when_deckhand_refuses(tmp_path: Path):
+    assert run_bash_hook(tmp_path, "captain", "#!/bin/sh\nexit 1\n") == 2
