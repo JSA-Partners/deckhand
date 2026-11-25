@@ -153,8 +153,8 @@ def make_question(kind: str, pin: Pin) -> Question:
     if not pin.subject.strip():
         raise Refusal("a decision needs a subject")
     options = (pin.options or _OPTIONS.get(kind, [])) if kind in _PIN_OPTIONS else _OPTIONS[kind]
-    held = _FEATURE_DESCRIPTIONS if pin.stage == "feature" else _DESCRIPTIONS
-    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else held.get(kind)
+    held = (_FEATURE_DESCRIPTIONS.get(kind) if pin.stage == "feature" else None) or _DESCRIPTIONS.get(kind)
+    descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else held
     return build(kind, pin.label or pin.subject, question_text(kind, pin), options, descriptions)
 
 

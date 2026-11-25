@@ -399,6 +399,7 @@ def test_a_feature_question_names_the_captain_in_its_options():
     assert shown(review.CAP_DECISION)[1] == "the captain reworks the feature and the rounds count again"
     for kind in ("finding", review.CAP_DECISION):
         assert not any("hand" in text for text in shown(kind))
+    assert shown("feature-approval") == ["the feature moves to the build", "type what to change in your own words"]
 
 
 def test_the_stage_of_a_pin_survives_the_pending_round_trip(tmp_path: Path):
