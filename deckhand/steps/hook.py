@@ -17,10 +17,15 @@ from deckhand.store.state import LocalState
 from deckhand.watch import HOLD
 
 CAPTAIN_DENIED = "the captain runs deckhand commands only; check the fact with Read or Grep, or ask a spike"
+BASH_DENIED = (
+    "the captain runs deckhand commands only, each one bare call with no ; & | < > ` $( or line break,"
+    " quoted text included; check the fact with Read or Grep, or ask a spike"
+)
 REASON = "A deckhand question must match its pending question and must not mark an option as recommended."
 POINTERS = {launch.STORY: spec.pointer, launch.DRAFT: spec.draft_pointer}
+CHAINS = (";", "&", "|", ">", "<", "`", "$(", "\n", "\r")
 USAGE = (
-    "hook apply answer|ask|permission reads one hook event as JSON on stdin; "
+    "hook apply answer|ask|bash|permission reads one hook event as JSON on stdin; "
     "hook apply session reads one in the captain role and none for a hand"
 )
 
@@ -93,6 +98,23 @@ def _captain_denial() -> None:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
 
 
+def _pre_tool_denial(reason: str) -> None:
+    output = {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}
+    print(json.dumps({"hookSpecificOutput": output}))
+
+
+def bare_deckhand(command: object) -> bool:
+    if not isinstance(command, str) or not command.startswith("deckhand "):
+        return False
+    return not any(mark in command for mark in CHAINS)
+
+
+# The SDK host may skip PermissionRequest and auto-allow read-only commands, so the captain's Bash is checked here.
+def _check_captain_bash(hook_input: dict) -> None:
+    if not bare_deckhand((hook_input.get("tool_input") or {}).get("command")):
+        _pre_tool_denial(BASH_DENIED)
+
+
 @register("hook")
 class Hook(StoryStep):
     def __init__(self, store: Store | None = None, captain: Captain | None = None) -> None:
@@ -154,24 +176,20 @@ class Hook(StoryStep):
             if action == "stop":
                 self._stop()
                 return
+            if action == "bash" and os.environ.get("DECKHAND_ROLE") != "captain":
+                return
             hook_input = _read()
-            if action == "permission":
+            if action == "bash":
+                _check_captain_bash(hook_input)
+            elif action == "permission":
                 self._permission(hook_input)
             elif action == "answer":
                 answers.record(hook_input, answers.state_dir())
             elif action == "ask" and _denied(hook_input):
-                print(
-                    json.dumps(
-                        {
-                            "hookSpecificOutput": {
-                                "hookEventName": "PreToolUse",
-                                "permissionDecision": "deny",
-                                "permissionDecisionReason": REASON,
-                            }
-                        }
-                    )
-                )
+                _pre_tool_denial(REASON)
         except Exception as problem:
             if action == "permission" and os.environ.get("DECKHAND_ROLE") == "captain":
                 _captain_denial()
+            if action == "bash":
+                _pre_tool_denial(BASH_DENIED)
             print(f"deckhand: hook {action} skipped: {type(problem).__name__}", file=sys.stderr)
