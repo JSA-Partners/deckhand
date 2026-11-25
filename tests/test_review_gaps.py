@@ -117,3 +117,13 @@ def test_an_open_feature_p1_tells_the_captain_to_fix_or_propose():
     assert waiting.hand.endswith(f"decide context finding p1 --finding {gap.id}")
     decline = Record(review.DECISION, gap.id, "h1", "person:pat", {"answer": review.DECLINE})
     assert review_gaps.feature_gaps("p1", [*records, proposal, decline], "h1", "p1") == []
+
+
+def test_a_feature_p1_the_person_kept_is_only_fixed():
+    p1 = raw(severity="P1")
+    records = [feature_round(1, "h1", p1)]
+    finding = id_of(p1, "feature")
+    proposal = asks.proposal_record(finding, records[0].version, "out of scope")
+    kept = Record(review.DECISION, finding, "h1", "person:pat", {"answer": review.ACCEPT})
+    [gap] = review_gaps.feature_gaps("p1", [*records, proposal, kept], "h1", "p1")
+    assert gap.hand == f"{gap.person}; fix it and review again"

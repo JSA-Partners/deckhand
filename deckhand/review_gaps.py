@@ -111,7 +111,8 @@ def _feature_delivery(records: list[Record], project: str, ref: str) -> list[Gap
 def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) -> list[Gap]:
     held, excusing = counted(records, prefix)[0], excused(records, prefix)
     capped = at_cap(held, excusing, proceeded(records, prefix))
-    proposed = {r.subject for r in records if r.kind == PROPOSAL} - set(decided(records))
+    settled = set(decided(records))
+    proposed = {r.subject for r in records if r.kind == PROPOSAL} - settled
     found = []
     for f in open_p1(latest, excusing):
         id = f["id"]
@@ -120,6 +121,8 @@ def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) ->
             hand = f"{person}; it waits for the person: decide context finding {ref} --finding {id}"
         elif capped:
             hand = f"{person}; three rounds left a P1 open: decide context review-cap {ref} --stage feature"
+        elif id in settled:
+            hand = f"{person}; fix it and review again"
         else:
             hand = (
                 f"{person}; fix it and review again, or propose declining it with feature-review apply resolve"
