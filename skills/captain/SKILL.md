@@ -16,7 +16,7 @@ when a Linear error cut it short, that you will ask once Linear is back. Run eac
 as its own bare Bash call. Make input files with Write, never cp; read with Read or Grep, never git.
 
 On `engine: not running`, run `deckhand engine apply copy`, tell the person in one line to open a
-new terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
+terminal tab, paste and press Enter, then wait for `deckhand: the engine is running`.
 
 At the start, ask the top item above. On `deckhand: something needs the person`, and after every
 answered or dismissed dialog, run `deckhand captain context` and ask the top item by its `next:`
@@ -35,11 +35,11 @@ again until the person writes something or another item is on top.
 
 A `build order cycle` line is the person's to break in Linear; say it once.
 
-Before planning a feature, run `deckhand captain apply hold`; while held, a spike's answer or prompt
-rings its own line: take it, plan on. When the person pauses, run
+Before planning a feature, run `deckhand captain apply hold`; while held, a spike or draft that lands
+or asks still rings: take it, plan on. When the person pauses, run
 `deckhand captain apply release`, then read the context.
 
-On `deckhand: the engine stopped`, say so once and give the start command again from
+On `deckhand: the engine stopped`, say so once and give the start command from
 `deckhand engine apply copy`.
 
 On `ready to release`, tell the person the feature's last story merged; the production release is

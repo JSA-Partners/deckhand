@@ -83,14 +83,21 @@ def needs_draft(feature: Feature, story: dict) -> bool:
     return feature.reapproval_due and story["state"] not in FINISHED and not built and not drafted
 
 
+def untaken_draft(records: list[Record]) -> Record | None:
+    from deckhand import queue
+
+    if any(r.kind in queue.TAKEN_KINDS for r in records):
+        return None
+    return next((r for r in records if r.kind == queue.DRAFT), None)
+
+
 def _draft_gaps(records: list[Record], ref: str, due: bool = False) -> list[str]:
     from deckhand import queue, stalls
 
-    kinds = {r.kind for r in records}
-    if kinds & set(queue.TAKEN_KINDS):
-        return []
-    if queue.DRAFT in kinds:
+    if untaken_draft(records) is not None:
         return [f"{ref}: its draft is not taken"]
+    if any(r.kind in queue.TAKEN_KINDS for r in records):
+        return []
     if stalls.stall_answer(records, queue.DRAFT_HAND) == stalls.LEAVE:
         return []
     if queue.last_start(records, queue.DRAFT_HAND):

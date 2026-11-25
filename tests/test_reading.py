@@ -48,7 +48,7 @@ def read(
 def story(ref: str, title: str, since: str) -> dict:
     stage = {"name": "planning", "round": None, "since": since}
     found = {"ref": ref, "title": title, "state": "Backlog", "owner": None, "mine": True, "blocked_by": []}
-    return found | {"stage": stage, "completed_at": None}
+    return found | {"stage": stage, "completed_at": None, "draft": None}
 
 
 def test_read_returns_the_building_facts():
@@ -144,3 +144,15 @@ def test_the_feature_merged_last_stays_current_over_one_released_on_the_same_dat
         After(store).apply(["ACME-1", "done", n, "--note", "ran it", *TEAM])
     found = read(store)
     assert (found.facts["feature"], found.facts["release"]) == ("Alpha", True)
+
+
+def test_a_story_row_carries_its_draft_until_it_is_taken():
+    from deckhand import queue
+
+    store = alpha(planning=True)
+    store.put_record("s1", Record(queue.DRAFT, "s1", "d1", "agent:draft", {}))
+    [saved] = [r for r in store.records("s1") if r.kind == queue.DRAFT]
+    rows = {row["ref"]: row["draft"] for row in read(store).facts["order"]}
+    assert rows == {"ACME-1": saved.at, "ACME-2": None}
+    store.put_record("s1", Record(queue.TAKEN, "s1", "d1", "agent:captain", {}))
+    assert [row["draft"] for row in read(store).facts["order"]] == [None, None]

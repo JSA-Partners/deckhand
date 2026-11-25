@@ -8,6 +8,7 @@ from pathlib import Path
 from deckhand import chores, claims, config, features, fleet, order, queue, stage
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
+from deckhand.records import Record
 from deckhand.step import Refusal
 from deckhand.store import Store
 
@@ -93,6 +94,11 @@ def _blockers(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict])
     return sorted(s["identifier"] for s in held if s["state"] != order.DONE)
 
 
+def _draft_at(records: list[Record]) -> str | None:
+    draft = features.untaken_draft(records)
+    return draft.at if draft is not None else None
+
+
 def _build_order(store: Store, feature: Feature, me: str | None) -> tuple[list[dict], list[str]]:
     edges = order.edges(store, feature)
     by_id = {s["id"]: s for s in feature.live}
@@ -107,6 +113,7 @@ def _build_order(store: Store, feature: Feature, me: str | None) -> tuple[list[d
             "blocked_by": _blockers(s, edges, by_id),
             "stage": stage.as_data(stage.of(s, feature.records.get(s["id"], []))),
             "completed_at": s.get("completed_at"),
+            "draft": _draft_at(feature.records.get(s["id"], [])),
         }
         for s in placed
     ]

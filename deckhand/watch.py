@@ -13,6 +13,8 @@ RUNNING = "deckhand: the engine is running"
 MAIL = "deckhand: a message waits"
 SPIKE = "deckhand: a spike was answered"
 STUCK = "deckhand: a spike needs the person"
+DRAFT = "deckhand: a draft was saved"
+DRAFT_STUCK = "deckhand: a draft hand needs the person"
 HOLD = "hold"
 WATCHER = "watcher"
 BEAT_EVERY = 10.0
@@ -28,11 +30,16 @@ class Seen:
     stale: bool = False
     recovered: str = ""
     spikes: tuple[str, ...] = ()
+    drafts: tuple[str, ...] = ()
+
+
+def _fresh(heard: tuple[str, ...], found: tuple[tuple[str, str], ...], held: bool) -> list[str]:
+    return [line for key, line in found if key not in heard] if held else []
 
 
 # The captain withholds every item while the engine is down, so an item still on top rings when it returns.
 # A top of None is a snapshot that could not be read: it neither rings nor clears what was shown.
-# spikes pairs each spike item's key with its ring line; while held, only a spike item not seen before rings.
+# spikes and drafts pair a key with its ring line; while held, only a key not seen before rings.
 def captain(
     seen: Seen,
     top: str | None,
@@ -41,6 +48,7 @@ def captain(
     now: float,
     stale: bool = False,
     spikes: tuple[tuple[str, str], ...] = (),
+    drafts: tuple[tuple[str, str], ...] = (),
 ) -> tuple[Seen, list[str]]:
     if now - seen.at > state.SLEEP_GAP:
         return replace(seen, at=now), []
@@ -56,14 +64,14 @@ def captain(
     elif top is not None and top != shown and not held:
         lines.append(QUEUE)
         shown = top
-    heard = seen.spikes
+    heard, drafted = seen.spikes, seen.drafts
     if top is not None:
-        if held:
-            lines += [line for key, line in spikes if key not in heard]
-        heard = tuple(key for key, _ in spikes)
+        lines += _fresh(heard, spikes, held) + _fresh(drafted, drafts, held)
+        heard, drafted = tuple(key for key, _ in spikes), tuple(key for key, _ in drafts)
     if seen.engine is not None and engine != seen.engine:
         lines.append(RUNNING if engine else STOPPED)
-    return Seen(shown, engine, seen.seq, now, seen.stale if top is None else stale, recovered, heard), lines
+    kept = seen.stale if top is None else stale
+    return Seen(shown, engine, seen.seq, now, kept, recovered, heard, drafted), lines
 
 
 def hand(seen: Seen, newest: int, now: float) -> tuple[Seen, list[str]]:
