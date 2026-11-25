@@ -26,8 +26,7 @@ is decided with `deckhand decide context review-cap REF --stage branch`, or
 `--stage plan`. When the context above shows no change summary, the hand is not done: stop here.
 
 Then show screens 1 to 4 in one reply, each from `deckhand signoff context REF --screen N`:
-what changed, evidence, findings, what to check. Tuicr stays a separate step, waiting for the
-person.
+what changed, evidence, findings, what to check. Then go on to tuicr in the same turn.
 
 For the tuicr screen, run `deckhand signoff apply REF review`. When it selects no hunk, go to the
 sign-off question. Otherwise show the person its lines, then decide `deckhand decide context tuicr
