@@ -50,6 +50,8 @@ def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Pol
     except Refusal as error:
         problems.append(error.rule)
         local, loaded = config.LocalConfig(), False
+    if loaded and not local.clones:
+        problems.append(f"no clone is configured in {config.config_dir() / config.FILE}; run setup")
     policies: dict[Path, Policy] = {}
     broken: dict[Path, str] = {}
     for label, clone in local.clones.items():
@@ -58,7 +60,8 @@ def _configured(problems: list[str]) -> tuple[config.LocalConfig, dict[Path, Pol
         except Refusal as error:
             broken[clone] = policy.described(error.rule, clone, label)
             problems.append(f"{broken[clone]}; its stories do not start")
-    return local, policies, broken, loaded
+    # A missing or empty config would read as "no clone of any repository" and hand every chore over.
+    return local, policies, broken, loaded and bool(local.clones)
 
 
 def link(

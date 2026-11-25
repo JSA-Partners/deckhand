@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -30,8 +31,11 @@ def test_a_link_within_ten_minutes_reuses_the_repository_labels() -> None:
     assert store.calls["repository_labels"] == 2
 
 
-def test_a_config_that_does_not_load_marks_the_link_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_config_that_does_not_load_marks_the_link_not_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     store, kept = CountingStore(FakeStore()), linker.Kept()
+    monkeypatch.setattr(linker.config, "local", lambda: config.LocalConfig(clones={"widgets": tmp_path}))
     assert linked(store, T, kept).configured
 
     def broken() -> config.LocalConfig:
@@ -40,6 +44,13 @@ def test_a_config_that_does_not_load_marks_the_link_not_configured(monkeypatch: 
     monkeypatch.setattr(linker.config, "local", broken)
     found = linked(store, T, kept)
     assert not found.configured and "config.toml: unknown key bogus" in found.problems
+
+
+def test_a_config_with_no_clones_marks_the_link_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(linker.config, "local", config.LocalConfig)
+    found = linked(CountingStore(FakeStore()), T, linker.Kept())
+    assert not found.configured
+    assert any(line.startswith("no clone is configured in ") and line.endswith("run setup") for line in found.problems)
 
 
 def test_links_share_one_memo_of_team_ids_until_it_is_refreshed(monkeypatch: pytest.MonkeyPatch) -> None:
