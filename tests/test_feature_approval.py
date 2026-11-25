@@ -70,7 +70,11 @@ def approve_everything(store: FakeStore) -> None:
         if versions.held(store.records(story), "tier", story) is None:
             mapped(store, story)
     assert features.approval_gaps(store, load(store)) == []
-    decided(store, "feature-approval", P1, "Approve", ["s1", "s2"])
+    reapprove(store)
+
+
+def reapprove(store: FakeStore) -> None:
+    decided(store, "feature-approval", P1, "Approve", [s["id"] for s in load(store).live])
 
 
 def test_approval_gaps_lists_each_missing_decision():
@@ -325,3 +329,20 @@ def test_a_tier_written_by_a_person_is_left_unread():
     data = {"answer": "None of these", "level": 0, "fact": "none"}
     store.put_record("s1", Record("tier", "s1", "v1", "person:s", data))
     assert "ACME-1: the story map gives no tier; save the map again" in features.approval_gaps(store, load(store))
+
+
+def test_a_new_dependency_voids_the_approval():
+    store = setup()
+    approve_everything(store)
+    assert features.phase(load(store)) is Phase.BUILDING
+    store.relate("s1", "s2")
+    assert features.phase(load(store)) is Phase.PLANNING
+
+
+def test_a_new_repository_voids_the_approval():
+    store = setup()
+    store.add_repository_label("ACME", "widgets")
+    store.add_repository_label("ACME", "gadgets")
+    approve_everything(store)
+    store.set_labels("s1", ["gadgets"])
+    assert features.phase(load(store)) is Phase.PLANNING

@@ -71,8 +71,7 @@ def test_draft_refused_once_the_feature_is_building(tmp_path: Path):
     assert store.writes == written
 
 
-def test_draft_taken_writes_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-7")
+def test_draft_taken_writes_text(tmp_path: Path):
     store = setup()
     step = Draft(store, me=lambda: "viewer-1")
     step.apply(["ACME-1", "--file", draft_file(tmp_path), *TEAM])
@@ -83,7 +82,7 @@ def test_draft_taken_writes_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         ("put_record", "s1", queue.TAKEN),
     ]
     [taken] = [r for r in store.records("s1") if r.kind == queue.TAKEN]
-    assert taken.author == "person:session-7"
+    assert taken.author == "agent:captain"
     assert store.issue("s1")["description"] == DRAFT
     assert [r.kind for r in store.records("s1") if r.kind == queue.TAKEN] == [queue.TAKEN]
     written = list(store.writes)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from deckhand import claims, features, inputs, ops, planning, queue, spec, versions
 from deckhand.features import Phase
 from deckhand.records import Record, content_hash
@@ -91,7 +89,6 @@ class Draft(StoryStep):
         if held is None:
             raise Refusal(f"{story['identifier']} has no draft to take")
         ops.ensure_issue_text(store, story["id"], story["title"], held["body"])
-        author = f"person:{os.environ.get('CLAUDE_CODE_SESSION_ID', '')}"
-        record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), author, {})
+        record = Record(queue.TAKEN, story["id"], content_hash(held["body"]), "agent:captain", {})
         ops.ensure_record(store, story["id"], record)
         print(f"done: took the draft as the description of {story['identifier']}")

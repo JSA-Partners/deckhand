@@ -17,7 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import Review
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import approve_everything, decided, mapped, setup
+from tests.test_feature_approval import approve_everything, decided, mapped, reapprove, setup
 from tests.test_implplan import BASE, Git, manifest
 from tests.test_step_review import (
     PLAN,
@@ -234,6 +234,7 @@ def test_a_failed_fetch_adds_no_worktree(tmp_path: Path, repo: Path):
 def test_wrong_place_run_refuses(tmp_path: Path, repo: Path):
     store = planned(tmp_path, repo)
     store.set_labels("s1", ["gadgets"])
+    reapprove(store)
     shell = Shell()
     with pytest.raises(Refusal, match="another repository"):
         Build(store, shell, repo).apply(["s1", "worktree", *TEAM])
@@ -448,6 +449,7 @@ def test_locate_story_of_second_repository(tmp_path: Path, repo: Path, monkeypat
     (second / ".claude").mkdir(parents=True)
     (second / ".claude" / "deckhand.toml").write_text('repository_label = "gadgets"\n', encoding="utf-8")
     store.set_labels("s1", ["gadgets"])
+    reapprove(store)
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "config.toml").write_text(f'[clones]\ngadgets = "{second}"\n', encoding="utf-8")

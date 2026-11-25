@@ -13,7 +13,7 @@ from deckhand.policy import Policy
 from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.summary import ChangeSummary, ToCheck
-from tests.test_feature_approval import approve_everything, setup
+from tests.test_feature_approval import approve_everything, reapprove, setup
 from tests.test_implplan import manifest
 from tests.test_step_build import repo, state
 from tests.test_step_review import raw
@@ -135,6 +135,7 @@ def test_ties_unblocks_then_oldest():
     late = hand("ACME-1", "blocked", "waiting", fleet.PERMISSION, iso(1795009999000))
     assert kinds(waiting(store, sessions=(late,))) == [("question", 2, "ACME-2"), ("prompt", 2, "ACME-1")]
     store.relate("s1", "s2")
+    reapprove(store)
     found = waiting(store, sessions=(late,))
     assert kinds(found) == [("prompt", 2, "ACME-1"), ("question", 2, "ACME-2")]
     assert [i.unblocks for i in found] == [1, 0]

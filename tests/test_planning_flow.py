@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import cli, features, planning, queue, startable, watch
+from deckhand import cli, features, planning, startable, watch
 from deckhand.features import Phase
 from deckhand.step import REGISTRY
 from deckhand.steps.decide import Decide
@@ -215,9 +215,7 @@ def test_planning_flow_from_new_to_approval(tmp_path: Path, monkeypatch: pytest.
 
     assert features.phase(features.open_feature(store, "ACME")) is Phase.BUILDING
     [story] = store.project_issues(alpha)
-    decided = sorted(
-        r.kind for r in store.records(story["id"]) if r.author.startswith("person:") and r.kind != queue.TAKEN
-    )
+    decided = sorted(r.kind for r in store.records(story["id"]) if r.author.startswith("person:"))
     assert decided == ["decision-item", "feature-approval"]
     with LocalState(default_path()) as rows:
         assert rows.get(watch.HOLD) is None

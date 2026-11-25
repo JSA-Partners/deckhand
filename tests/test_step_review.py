@@ -17,7 +17,7 @@ from deckhand.steps.decide import Decide
 from deckhand.steps.implplan import ImplPlan
 from deckhand.steps.review import FeatureReview, Review
 from deckhand.store.fake import FakeStore
-from tests.test_feature_approval import P1, approve_everything, decided, load, mapped, setup
+from tests.test_feature_approval import P1, approve_everything, decided, load, mapped, reapprove, setup
 from tests.test_implplan import BASE, Git, manifest, repo
 
 __all__ = ["repo"]
@@ -652,6 +652,7 @@ def test_a_plan_of_another_repository_refuses_to_save(tmp_path: Path, repo: Path
     store = setup()
     approve_everything(store)
     store.set_labels("s1", ["gadgets"])
+    reapprove(store)
     with pytest.raises(Refusal, match="another repository"):
         submit(store, tmp_path, repo)
     assert [r for r in store.records("s1") if r.kind == "implplan"] == []

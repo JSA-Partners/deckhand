@@ -108,7 +108,6 @@ _POSITIVE = {
 }
 
 PENDING = "pending"
-SHORT = 12
 
 
 @dataclass(frozen=True)
@@ -146,17 +145,7 @@ def make_question(kind: str, pin: Pin) -> Question:
         raise Refusal("a decision needs a subject")
     options = (pin.options or _OPTIONS.get(kind, [])) if kind in _PIN_OPTIONS else _OPTIONS[kind]
     descriptions = [_SIGN_OFF.get(o, "") for o in options] if kind == signoff.KIND else _DESCRIPTIONS.get(kind)
-    named = short_name(pin.detail) if kind == ITEM else pin.label or pin.subject
-    return build(kind, named, question_text(kind, pin), options, descriptions)
-
-
-def short_name(text: str) -> str:
-    name = ""
-    for word in text.split():
-        if len(f"{name} {word}".strip()) > SHORT:
-            break
-        name = f"{name} {word}".strip()
-    return name or text.strip()[:SHORT]
+    return build(kind, pin.label or pin.subject, question_text(kind, pin), options, descriptions)
 
 
 def question_text(kind: str, pin: Pin) -> str:

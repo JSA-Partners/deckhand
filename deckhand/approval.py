@@ -19,12 +19,11 @@ def _listed(name: str, lines: list[str]) -> str:
     return f"{name}:\n" + "".join(f"{line}\n" for line in lines) if lines else f"{name}: none\n"
 
 
-def _story(store: Store, feature: Feature, story: dict, edges: list[tuple[str, str]]) -> str:
+def _story(store: Store, feature: Feature, story: dict) -> str:
     records = feature.records.get(story["id"], [])
-    by_id = {s["id"]: s["identifier"] for s in feature.live}
-    blockers = [by_id[a] for a, b in edges if b == story["id"] and a in by_id]
+    ids, repositories = versions.placement(store, feature, story)
+    blockers = [s["identifier"] for s in feature.live if s["id"] in ids]
     level = versions.tier(records, story["id"])
-    repositories = sorted(set(story["labels"]) & set(store.repository_labels(story["team"]))) or story["labels"]
     items = [f"- {item}: {_answer(records, item, draft)}" for item, draft in versions.drafts(records).items()]
     chart = versions.chart(records, story["id"]).strip()
     head = [
@@ -48,5 +47,5 @@ def screen(store: Store, feature: Feature) -> str:
     edges = order.edges(store, feature)
     stories, _ = order.build_order(feature.live, edges)
     shown = [spec.planning_text(store, feature, SECTIONS), "# Story map\n"]
-    shown += [_story(store, feature, s, edges) for s in stories]
+    shown += [_story(store, feature, s) for s in stories]
     return "\n".join(spec.plain(part) for part in shown)

@@ -18,6 +18,7 @@ from deckhand.steps.review import Review
 from deckhand.steps.signoff import SCREENS, Signoff
 from deckhand.store.fake import FakeStore
 from deckhand.summary import SHAPE, digest
+from tests.test_feature_approval import reapprove
 from tests.test_implplan import BASE, Git
 from tests.test_step_build import BRANCH, Shell, labeled, repo, state
 from tests.test_step_review import PLAN, TEAM, answer, checked, raw, record_round
@@ -637,6 +638,7 @@ def test_review_apply_prints_each_selected_hunk_and_its_reason(
 def test_sign_off_of_a_story_in_another_repository_refuses(tmp_path: Path, repo: Path):
     store = signable(tmp_path, repo)
     store.set_labels("s1", ["gadgets"])
+    reapprove(store)
     with pytest.raises(Refusal, match="another repository"):
         Decide(store, runner=Shell(), repo=repo).context(["sign-off", "ACME-1", *TEAM])
 

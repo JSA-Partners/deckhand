@@ -14,7 +14,7 @@ from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
-from tests.test_feature_approval import P1, setup
+from tests.test_feature_approval import P1, reapprove, setup
 from tests.test_queue import asked
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
 from tests.test_step_stories import setup as empty_feature
@@ -114,6 +114,7 @@ def test_a_free_slot_launches_the_next_story_in_build_order(clone: Path):
     store = building()
     assert reconcile(facts(store), store) == [launch(store, clone)]
     store.relate("s2", "s1")
+    reapprove(store)
     assert reconcile(facts(store, cap=2), store) == [launch(store, clone, "ACME-2")]
 
 

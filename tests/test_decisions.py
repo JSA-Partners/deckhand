@@ -379,11 +379,3 @@ def test_yes_settles_a_draft_that_reads_change(tmp_path: Path):
     assert decisions.decide(store, decisions.load_pending(question.nonce, tmp_path), tmp_path, "viewer-1") is True
     [record] = store.records("s1")
     assert record.data["answer"] == "Change"
-
-
-def test_a_decision_item_is_named_by_a_short_name_from_its_text():
-    question = decisions.make_question("decision-item", item_pin())
-    assert question.subject == "Greeting"
-    assert question.header == f"dh {question.nonce}"
-    long_word = replace(item_pin(), detail="Internationalization")
-    assert decisions.make_question("decision-item", long_word).subject == "Internationa"
