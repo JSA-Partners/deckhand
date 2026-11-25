@@ -805,6 +805,34 @@ def test_the_tuicr_line_names_hunks_head_and_what_was_left_out(
     assert tuicr_held(store).data["total"] == 2 and tuicr_held(store).data["left_out"] == ["src/b.py"]
 
 
+def test_a_partly_selected_file_is_named_with_its_hunk_count(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys, tuicr=False)
+    summarize(store, tmp_path, repo, summary(new_here=0), QUEUE_HUNK + "@@ -90 +91 @@\n-old\n+new\n")
+    Signoff(store, Diffing(diff=QUEUE_HUNK + "@@ -90 +91 @@\n-old\n+new\n"), repo).apply(["s1", "review", *TEAM])
+    line = "tuicr shows a review commit of 1 of 2 hunks from head c2; left out: src/queue.py (1 of 2 hunks)"
+    assert screen(store, repo, capsys, 5)[1] == line
+
+
+def test_findings_say_when_the_unreviewed_commits_cannot_be_read(
+    tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
+):
+    store = ready(tmp_path, repo, state, capsys)
+    branch_round(store, raw(), n=2, head="c1")
+    capsys.readouterr()
+    shell = Shell(head="c3")
+    real = shell.__call__
+
+    def failing(argv, cwd=None, stdin=None):
+        if argv[:2] == ["git", "log"]:
+            return subprocess.CompletedProcess(argv, 128, "", "bad revision")
+        return real(argv, cwd, stdin)
+
+    Signoff(store, failing, repo).context(["s1", *TEAM, "--screen", "3"])
+    assert "the commits since c1 cannot be read here" in capsys.readouterr().out.splitlines()
+
+
 def test_the_tuicr_line_says_when_nothing_was_left_out(
     tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]
 ):

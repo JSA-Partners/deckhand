@@ -198,7 +198,7 @@ class Signoff(StoryStep):
         if held is None or (held.data.get("head"), held.data.get("summary")) != (head, digest(summary)):
             sha = tuicr.review_commit(at.path, base, hunks, self._runner) if hunks else None
             selected = [{"path": h.path, "reason": h.reason} for h in hunks]
-            left_out = sorted({h.path for h in every} - {h.path for h in hunks})
+            left_out = _left_out(every, hunks)
             data = {
                 "head": head,
                 "base": base,
@@ -340,8 +340,18 @@ def _evidence(at: Located) -> list[str]:
     return lines
 
 
+def _left_out(every: list[tuicr.Hunk], selected: list[tuicr.Hunk]) -> list[str]:
+    found = []
+    for path in sorted({h.path for h in every}):
+        total = sum(h.path == path for h in every)
+        shown = sum(h.path == path for h in selected)
+        if shown < total:
+            found.append(path if not shown else f"{path} ({shown} of {total} hunks)")
+    return found
+
+
 def _unreviewed(at: Located, reviewed: str, runner: git.Runner) -> list[str]:
     try:
         return [f"- {line}" for line in git.commits_between(at.path or at.clone, reviewed, at.head or "", runner)]
     except git.GitError:
-        return []
+        return [f"the commits since {reviewed} cannot be read here"]
