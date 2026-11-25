@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import answers, asks, decisions, features, planning, queue, review, spec, versions, watch
+from deckhand import answers, asks, decisions, features, planning, review, spec, stalls, versions, watch
 from deckhand.credentials import Credentials
 from deckhand.features import FEATURE_LABEL
 from deckhand.ops import create_id
@@ -313,7 +313,7 @@ def test_a_stalled_item_asks_through_decide(state: Path, capsys: pytest.CaptureF
     assert [o["label"] for o in asked["options"]] == ["Restart", "Leave it stopped"]
     record_answer(state, asked, "Leave it stopped")
     Decide(store).apply([shown["nonce"], *TEAM])
-    [record] = [r for r in store.records("s1") if r.kind == queue.STALLED]
+    [record] = [r for r in store.records("s1") if r.kind == stalls.STALLED]
     assert (record.subject, record.version, record.author) == ("s1", start.at, "person:sess")
     assert record.data["answer"] == "Leave it stopped"
     with pytest.raises(Refusal, match="already settled"):

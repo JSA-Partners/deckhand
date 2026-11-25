@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from deckhand import asks, chores, features, queue, review, signoff, startable, versions
+from deckhand import asks, chores, features, queue, review, signoff, stalls, startable, versions
 from deckhand.decisions import KINDS, Pin
 from deckhand.records import Record
 from deckhand.step import Refusal
@@ -152,7 +152,7 @@ def _stalled_pin(store: Store, feature: features.Feature, ref: str) -> Pin:
     start = queue.last_start(records, launch)
     if start is None:
         raise Refusal(f"{story['identifier']} has no hand started")
-    if queue.stall_answer(records, launch) is not None:
+    if stalls.stall_answer(records, launch) is not None:
         raise Refusal(f"the stop of {story['identifier']}'s hand since it last started is already settled")
     detail = "its hand stopped and has written nothing since it last started. Restart it"
     return Pin(story["id"], start.at, [story["id"]], detail, story["identifier"], [story["identifier"]])
@@ -197,7 +197,7 @@ def pin(
         return _finding_pin(store, feature, subject, finding)
     if kind == asks.EDIT:
         return _edit_pin(store, feature, subject, item or "")
-    if kind == queue.STALLED:
+    if kind == stalls.STALLED:
         return _stalled_pin(store, feature, subject)
     if kind == asks.ANSWER:
         if len(stories) != 1:

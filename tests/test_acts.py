@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, launch, queue
+from deckhand import asks, config, features, fleet, launch, queue, stalls
 from deckhand.actions import Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.acts import Acts, unheard
 from deckhand.linear.client import LinearError
@@ -307,7 +307,7 @@ def test_a_restart_answer_whose_launch_fails_is_retried(clone: Path, rows: Local
     stopped_after_one_restart(loop)
     start = queue.last_start(loop.store.records("s1"))
     assert start is not None
-    loop.store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": queue.RESTART}))
+    loop.store.put_record("s1", Record(stalls.STALLED, "s1", start.at, "person:session-1", {"answer": stalls.RESTART}))
     loop.world.fail.add(("claude", "--bg"))
     assert loop.tick() != [None]
     loop.world.fail.clear()

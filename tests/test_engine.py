@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, status, watch
+from deckhand import acts, answers, asks, budget, engine, fleet, linker, queue, stalls, status, watch
 from deckhand.actions import Action, Launch, Post, Remove, Resume, Stop
 from deckhand.engine import Engine
 from deckhand.linear.client import LinearError
@@ -447,18 +447,18 @@ def test_a_fresh_launch_shows_no_stalled_item_before_the_next_fleet_read(rig: Ri
     started(rig.store, "s1")
     rig.ready()
     rig.step()
-    assert queue.STALLED in rig.kinds() and NAME not in {a.name for a in rig.worker.submitted}
+    assert stalls.STALLED in rig.kinds() and NAME not in {a.name for a in rig.worker.submitted}
     rig.worker.finish(Launch(NAME, "ACME-1", queue.STORY_HAND, clone, None, "viewer-1"))
     rig.step()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     rig.step()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     rig.sessions(row("ACME-1", "working", "busy"))
     rig.step()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     rig.sessions()
     rig.step()
-    assert queue.STALLED in rig.kinds()
+    assert stalls.STALLED in rig.kinds()
 
 
 def test_a_hand_stopped_as_unheard_shows_no_stalled_item_while_its_mail_waits(clone: Path):
@@ -471,7 +471,7 @@ def test_a_hand_stopped_as_unheard_shows_no_stalled_item_while_its_mail_waits(cl
     [message] = rig.state.pending()
     rig.state.put(acts.UNHEARD, {"seqs": [message.seq]})
     rig.ready()
-    assert queue.STALLED not in rig.kinds()
+    assert stalls.STALLED not in rig.kinds()
     assert [(type(a), a.seqs) for a in rig.worker.submitted] == [(Resume, (message.seq,))]
 
 

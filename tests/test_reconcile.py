@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, config, features, fleet, queue, wakes
+from deckhand import asks, config, features, fleet, queue, stalls, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.idle import IDLE_AFTER
 from deckhand.policy import Policy
@@ -317,7 +317,7 @@ def test_a_first_stop_with_unacknowledged_mail_is_resumed_once_as_its_restart(cl
     feature = features.current(store, "ACME")
     read = fleet.sessions(Shell(stopped))
     waiting = queue.items(store, "ACME", feature, ME, read, lambda _: Policy("widgets"), restarts={"ACME-1": 1})
-    assert [(item.kind, item.ref) for item in waiting] == [(queue.STALLED, "ACME-1")]
+    assert [(item.kind, item.ref) for item in waiting] == [(stalls.STALLED, "ACME-1")]
 
 
 def nudge(store: FakeStore) -> Resume:
@@ -352,7 +352,7 @@ def test_a_first_stop_resumes_once_across_ticks_then_asks(clone: Path):
     assert hand.restarts == 1
     assert reconcile(facts(store, working, hands=(hand,)), store) == []
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == []
-    assert stalled_items(store, stopped, hand.restarts) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, hand.restarts) == [(stalls.STALLED, "ACME-1")]
 
 
 def test_a_restart_answer_resumes_once_across_ticks_then_asks_again(clone: Path):
@@ -362,17 +362,17 @@ def test_a_restart_answer_resumes_once_across_ticks_then_asks_again(clone: Path)
     stopped, working = row("ACME-1", "stopped"), row("ACME-1", "working", "busy")
     hand = held(restarts=1)
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == []
-    assert stalled_items(store, stopped, 1) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, 1) == [(stalls.STALLED, "ACME-1")]
     start = queue.last_start(store.records("s1"))
     assert start is not None
-    store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": queue.RESTART}))
+    store.put_record("s1", Record(stalls.STALLED, "s1", start.at, "person:session-1", {"answer": stalls.RESTART}))
     assert stalled_items(store, stopped, 1) == []
     [again] = reconcile(facts(store, stopped, hands=(hand,)), store)
     assert again == nudge(store)
     hand = acted(store, again, hand)
     assert reconcile(facts(store, working, hands=(hand,)), store) == []
     assert reconcile(facts(store, stopped, hands=(hand,)), store) == []
-    assert stalled_items(store, stopped, hand.restarts) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, hand.restarts) == [(stalls.STALLED, "ACME-1")]
 
 
 def test_a_relaunched_session_is_adopted_over_the_recorded_one(clone: Path):
@@ -589,7 +589,7 @@ def test_a_hand_stopped_as_unheard_keeps_its_slot_until_its_resume(clone: Path):
     assert found == [Stop("hand-ACME-1", "id-ACME-1", "unheard", (1,))]
     found = reconcile(facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 125, unheard=heard), store)
     assert found == [Resume("hand-ACME-1", "sid-ACME-1", "/w/acme-1", wakes.prompt([sync]), (1,))]
-    assert stalled_items(store, stopped, 1) == [(queue.STALLED, "ACME-1")]
+    assert stalled_items(store, stopped, 1) == [(stalls.STALLED, "ACME-1")]
     failed = {"hand-ACME-1": (1, T + 125)}
     waits = facts(store, stopped, hands=(hand,), pending=(sync,), now=T + 130, unheard=heard, failed=failed)
     assert reconcile(waits, store) == []
@@ -710,13 +710,13 @@ def test_an_idle_hand_past_its_restart_waits_for_the_person(clone: Path):
 
 
 def test_an_answered_idle_hand_is_stopped_for_the_restart_or_to_stay_stopped(clone: Path):
-    for answer in (queue.RESTART, queue.LEAVE):
+    for answer in (stalls.RESTART, stalls.LEAVE):
         store = alone()
         store.assign("s1", ME)
         started(store)
         start = queue.last_start(store.records("s1"), queue.STORY_HAND)
         assert start is not None
-        store.put_record("s1", Record(queue.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
+        store.put_record("s1", Record(stalls.STALLED, "s1", start.at, "person:session-1", {"answer": answer}))
         found = reconcile(idle_facts(store, held(turn_ended=ENDED, restarts=1)), store)
         assert found == [Stop("hand-ACME-1", "id-ACME-1", "idle")]
 

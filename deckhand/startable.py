@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckhand import asks, chores, config, features, fleet, order, planning, queue
+from deckhand import asks, chores, config, features, fleet, order, planning, queue, stalls
 from deckhand.features import Feature, Phase
 from deckhand.policy import Policy
 from deckhand.records import Record
@@ -103,9 +103,9 @@ def due(
     if queue.last_start(records, launch) is None:
         return True
     second = queue.second_due(story, records, policy_for) is not None
-    if not queue.stalled(story, records, session, launch, second):
+    if not stalls.stalled(story, records, session, launch, second):
         return False
-    return queue.auto_restart(records, launch, restarts) or queue.stall_answer(records, launch) == queue.RESTART
+    return stalls.auto_restart(records, launch, restarts) or stalls.stall_answer(records, launch) == stalls.RESTART
 
 
 def wake_due(feature: Feature, story: dict) -> Record | None:

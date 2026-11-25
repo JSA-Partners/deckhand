@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckhand import asks, chores, fleet, order, queue, startable, wakes
+from deckhand import asks, chores, fleet, order, queue, stalls, startable, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
 from deckhand.features import Feature
 from deckhand.launch import SPIKE
@@ -225,13 +225,13 @@ def _idle(tick: _Tick, feature: Feature) -> list[Action]:
         launch = startable.launch_of(startable.kind(feature, story))
         known = startable.clone_of(story, tick.facts.clones) in tick.facts.policies
         second = known and queue.second_due(story, records, tick.policy_for) is not None
-        if story["assignee"] != tick.me or not queue.stalled(story, records, session, launch, second, idle=True):
+        if story["assignee"] != tick.me or not stalls.stalled(story, records, session, launch, second, idle=True):
             continue
-        if queue.auto_restart(records, launch, row.restarts):
+        if stalls.auto_restart(records, launch, row.restarts):
             start = asks.hand_start(story, records, launch)
             key = f"nudge:{story['id']}:{row.turn_ended}"
             found.append(Post(name, key, wakes.NUDGE, wakes.nudge_body(), story["id"], start, restart=True))
-        elif queue.stall_answer(records, launch) is not None:
+        elif stalls.stall_answer(records, launch) is not None:
             found.append(tick.take(Stop(name, session.id, "idle"), slot=False))
     return found
 
@@ -340,7 +340,7 @@ def _resume(tick: _Tick, feature: Feature | None, name: str, messages: list[Mess
         return Resume(name, session, cwd, text, seqs)
     launch = row.kind if row is not None else str(start.data.get("kind")) if start is not None else queue.STORY_HAND
     restarts = row.restarts if row is not None else None
-    if not queue.auto_restart(records, launch, restarts) and queue.stall_answer(records, launch) != queue.RESTART:
+    if not stalls.auto_restart(records, launch, restarts) and stalls.stall_answer(records, launch) != stalls.RESTART:
         return None
     fresh = asks.hand_start(story, records, launch) if story is not None else None
     return Resume(name, session, cwd, text, seqs, fresh, restart=True)

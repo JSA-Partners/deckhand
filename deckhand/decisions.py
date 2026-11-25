@@ -5,7 +5,7 @@ import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from deckhand import answers, asks, chores, ops, queue, review, signoff
+from deckhand import answers, asks, chores, ops, review, signoff, stalls
 from deckhand.answers import Answer
 from deckhand.questions import Question, as_tool_input, build
 from deckhand.records import Record, content_hash
@@ -25,7 +25,7 @@ KINDS = (
     chores.AFTER,
     asks.ANSWER,
     asks.EDIT,
-    queue.STALLED,
+    stalls.STALLED,
 )
 
 _PIN_OPTIONS = (asks.ANSWER, signoff.KIND)
@@ -40,7 +40,7 @@ _OPTIONS = {
     signoff.SECOND: [signoff.SIGN, signoff.NOT_YET],
     chores.AFTER: [signoff.DONE, signoff.NOT_YET],
     asks.EDIT: asks.EDIT_OPTIONS,
-    queue.STALLED: [queue.RESTART, queue.LEAVE],
+    stalls.STALLED: [stalls.RESTART, stalls.LEAVE],
 }
 
 _SIGN_OFF = {
@@ -60,7 +60,7 @@ _DESCRIPTIONS = {
     signoff.SECOND: ["the hand merges it, pinned to the signed head", "the story waits for a new sign-off"],
     chores.AFTER: ["the item is done", "the item stays in your queue"],
     asks.EDIT: ["you made the change", "the hand carries on without it"],
-    queue.STALLED: ["the hand starts again", "the hand stays stopped"],
+    stalls.STALLED: ["the hand starts again", "the hand stays stopped"],
 }
 _FEATURE_DESCRIPTIONS = {
     "finding": ["the finding stays unfixed", "the captain fixes the finding"],
@@ -80,7 +80,7 @@ _ASKS = {
     chores.AFTER: "Is this after-merge item done for",
     asks.ANSWER: "A hand asks on",
     asks.EDIT: "Make this change to Claude Code's own config for",
-    queue.STALLED: "",
+    stalls.STALLED: "",
 }
 _STAGE_CAP = {
     "branch": "Three review rounds left a P1 open. Proceed to sign-off or rework the branch for",
@@ -93,7 +93,7 @@ _RECORDED = (
     signoff.SECOND,
     asks.ANSWER,
     asks.EDIT,
-    queue.STALLED,
+    stalls.STALLED,
 )
 _CHOSEN = (
     "finding",
@@ -102,7 +102,7 @@ _CHOSEN = (
     signoff.SECOND,
     chores.AFTER,
     asks.EDIT,
-    queue.STALLED,
+    stalls.STALLED,
 )
 
 _OWN_WORDS = (signoff.KIND, signoff.SECOND)
