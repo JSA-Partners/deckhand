@@ -19,7 +19,8 @@
 - The core modules beside them hold the rules the steps share and never print: features and their
   phases, decisions and their pending answers, versions of held records, tiers, implementation plans
   and their checks, review rounds and their stops, lenses, checks, the change summary and its lines
-  to check, tuicr and the sign-off; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
+  to check, tuicr and the sign-off; `review_gaps.py` the review's gaps, worded for the hand or the
+  person, and `approval.py` the feature's one approval screen; `queue.py` the person's ranked items, `fleet.py` the Claude Code sessions
   and their slots, `startable.py` which stories a hand may start and when one is due, `claims.py`
   who owns a story, `asks.py` a hand's questions and wakes, `wakes.py` the text of the messages a
   hand is sent, `gaps.py` permission gaps, `spikes.py` spike questions and answers, `order.py` the
@@ -149,6 +150,9 @@ install reaches them when the next fix or feature does.
 - Review rounds are computed from records: never rerun on an unchanged target, scope a revision to
   the story's own change, review every head that merges at that head, and count toward the cap only
   rounds that left a P1 open; the cap is the person's
+- The captain is denied, never prompted, for anything outside its allowlist; planning reads
+  `origin`, never the clone's own checkout
+- tuicr is never watched: the person says when it is done, and its comments are read then
 - Findings are ordered by confidence and never deleted; a doubtful one is folded, and only the
   person declines one
 - Sign-off, the change summary and the checks are pinned to one head; merging is pinned to

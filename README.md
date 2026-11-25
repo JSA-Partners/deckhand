@@ -49,11 +49,11 @@ flowchart TB
 | Step | Claude | You, to move it on |
 | --- | --- | --- |
 | Frame | Shapes the problem with you, then lists the facts it rests on and spikes the unverified ones | Write the frame, or take a draft |
-| Story map | Proposes one-line stories with their tiers, state charts and after-merge chores, and the contract they share | Approve the contract and the invariants |
-| Approval | Reviews the stories against each other | Approve the feature |
+| Story map | Proposes one-line stories with their tiers, state charts, after-merge chores and drafted answers to the open decisions | Confirm each answer, or give your own |
+| Approval | Shows the contract, the examples, the invariants and the story map on one screen, and reviews the stories against each other | Approve or change |
 | Hand | Writes the implementation plan and builds it with tests | Answer its questions |
 | Review | Reviews the plan and the branch in rounds, ordered by confidence | Decide what a hand cannot |
-| Sign-off | Shows what changed, the evidence, the lines to check and a targeted tuicr pass | Sign off |
+| Sign-off | Shows what changed, the evidence and the riskiest lines with why each matters, then your pass in tuicr | Say when tuicr is done, then sign off |
 | Merge | Merges pinned to the commit you signed, then does the after-merge chores it can | Do the ones it leaves you |
 
 You talk only to the captain. The engine, in a terminal tab of its own, starts, resumes and stops
