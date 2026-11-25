@@ -105,6 +105,16 @@ def test_an_ack_stamps_delivered_when_the_row_was_never_delivered(tmp_path: Path
     ]
 
 
+def test_heard_is_each_hands_last_delivery_acknowledged_or_not(tmp_path: Path) -> None:
+    rows = state(tmp_path, now=ticking())
+    rows.post("k1", "hand-ACME-1", "answer", "one")
+    rows.post("k2", "hand-ACME-1", "answer", "two")
+    rows.post("k3", "hand-ACME-2", "answer", "three")
+    rows.ack("hand-ACME-1", 1)
+    rows.delivered([2])
+    assert rows.heard() == {"hand-ACME-1": "2026-11-19T10:00:04.000Z"}
+
+
 def test_delivered_stamps_the_named_rows(tmp_path: Path) -> None:
     rows = state(tmp_path, now=lambda: "2026-11-19T10:00:00.000Z")
     rows.post("k1", "hand-ACME-1", "answer", "one")

@@ -7,12 +7,24 @@ from deckhand.records import epoch
 from deckhand.store.state import HandRow, Message
 
 IDLE_AFTER = 120.0
-BLOCKED = "blocked"
+
+
+# Deckhand's own turn end outranks the fleet's state word, which can read working long after a turn ends.
+def _turn_over(row: HandRow, session: fleet.Session, heard: Mapping[str, str]) -> bool:
+    if not row.turn_ended:
+        return False
+    since = (at for at in (session.started_at, heard.get(row.name)) if at)
+    return all(epoch(row.turn_ended) > epoch(at) for at in since)
 
 
 # A hand's own nudge does not end its idleness, so it still reads as idle while the nudge goes unheard.
 def idle(
-    read: fleet.Fleet, hands: Mapping[str, HandRow], pending: list[Message], now: float, woke: float
+    read: fleet.Fleet,
+    hands: Mapping[str, HandRow],
+    pending: list[Message],
+    now: float,
+    woke: float,
+    heard: Mapping[str, str],
 ) -> frozenset[str]:
     if read.note:
         return frozenset()
@@ -21,9 +33,9 @@ def idle(
     for name, row in hands.items():
         alive = [s for s in read.sessions if s.name == name and fleet.alive(s)]
         session = max(alive, key=lambda s: s.started_at, default=None)
-        if session is None or session.state != BLOCKED or session.waiting_for or name in mailed:
+        if session is None or not fleet.live(session) or session.waiting_for or name in mailed:
             continue
-        if row.turn_ended and now - max(epoch(row.turn_ended), woke) > IDLE_AFTER:
+        if _turn_over(row, session, heard) and now - max(epoch(row.turn_ended), woke) > IDLE_AFTER:
             found.add(name)
     return frozenset(found)
 

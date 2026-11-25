@@ -100,6 +100,10 @@ class LocalState:
     def posted(self) -> frozenset[str]:
         return frozenset(row[0] for row in self._read("SELECT key FROM messages"))
 
+    def heard(self) -> dict[str, str]:
+        rows = self._read("SELECT hand, MAX(delivered) FROM messages WHERE delivered IS NOT NULL GROUP BY hand")
+        return dict(rows)
+
     def delivered(self, seqs: Sequence[int]) -> None:
         if not seqs:
             return

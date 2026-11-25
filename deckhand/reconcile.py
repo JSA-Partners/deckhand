@@ -185,12 +185,16 @@ def _records(feature: Feature, story: dict) -> list[Record]:
     return feature.records.get(story["id"], [])
 
 
+# A saved draft ends a draft hand's work, so it stops whatever state the fleet reports.
 def _finished(tick: _Tick, feature: Feature) -> list[Action]:
     found = []
     for story in feature.live:
         name, records = fleet.hand_name(story["identifier"]), _records(feature, story)
         session, start = tick.alive(name), queue.last_start(records)
-        if session is None or session.state == WORKING or start is None:
+        if session is None or start is None:
+            continue
+        busy = session.state == WORKING and name not in tick.facts.idle
+        if busy and start.data.get("kind") != queue.DRAFT_HAND:
             continue
         if queue.finished(story, records, start):
             found.append(tick.take(Stop(name, session.id, "finished"), slot=False))

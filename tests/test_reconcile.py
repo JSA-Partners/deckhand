@@ -7,6 +7,8 @@ import pytest
 
 from deckhand import asks, config, features, fleet, queue, wakes
 from deckhand.actions import Action, Adopt, Launch, Post, Remove, Resume, Stop
+from deckhand.idle import IDLE_AFTER
+from deckhand.idle import idle as idle_hands
 from deckhand.policy import Policy
 from deckhand.reading import Reading
 from deckhand.reconcile import Facts, reconcile, reserved
@@ -14,7 +16,7 @@ from deckhand.records import HAND, Record, iso
 from deckhand.store.fake import FakeStore
 from deckhand.store.state import HandRow, Message
 from tests.shell import Shell, row
-from tests.test_feature_approval import P1, reapprove, setup
+from tests.test_feature_approval import P1, approve_everything, reapprove, setup
 from tests.test_queue import asked
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
 from tests.test_step_stories import setup as empty_feature
@@ -474,6 +476,33 @@ def test_a_written_draft_stops_its_idle_hand(clone: Path):
     idle = row("ACME-1", "idle", "idle")
     found = reconcile(facts(store, idle, hands=(held(kind=queue.DRAFT_HAND),)), store)
     assert found == [Stop("hand-ACME-1", "id-ACME-1", "finished")]
+
+
+def test_a_written_draft_stops_its_hand_reported_working_then_the_story_hand_starts(clone: Path):
+    store = setup()
+    store.assign("s2", "someone-else")
+    started(store, kind=queue.DRAFT_HAND)
+    store.put_record("s1", Record(queue.DRAFT, "s1", "v1", HAND, {}))
+    hand = held(kind=queue.DRAFT_HAND, turn_ended=at(T + 30))
+    working, now = row("ACME-1", "working", "busy"), T + 30 + IDLE_AFTER + 1
+    quiet = idle_hands(fleet.sessions(Shell(working)), {hand.name: hand}, [], now, 0.0, {})
+    assert quiet == {hand.name}
+    stop = Stop("hand-ACME-1", "id-ACME-1", "finished")
+    assert reconcile(facts(store, working, hands=(hand,), now=now, idle=quiet), store) == [stop]
+    store.put_record("s1", Record(queue.TAKEN, "s1", "v1", "agent:captain", {}))
+    approve_everything(store)
+    assert reconcile(facts(store, working, hands=(hand,), now=now, idle=quiet), store) == [stop]
+    assert reconcile(facts(store, row("ACME-1", "stopped"), hands=(hand,), now=now), store) == [launch(store, clone)]
+
+
+def test_a_working_draft_hand_stops_once_its_draft_is_saved_and_not_before(clone: Path):
+    store = setup()
+    store.assign("s2", "someone-else")
+    started(store, kind=queue.DRAFT_HAND)
+    working, hand = row("ACME-1", "working", "busy"), held(kind=queue.DRAFT_HAND)
+    assert reconcile(facts(store, working, hands=(hand,)), store) == []
+    store.put_record("s1", Record(queue.DRAFT, "s1", "v1", HAND, {}))
+    assert reconcile(facts(store, working, hands=(hand,)), store) == [Stop("hand-ACME-1", "id-ACME-1", "finished")]
 
 
 def test_a_stopped_session_of_another_kind_is_not_adopted(clone: Path):

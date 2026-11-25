@@ -20,13 +20,19 @@ def hand(turn_ended: float | None = T) -> HandRow:
 
 
 def blocked(**changes: object) -> dict:
-    return row("ACME-1", "blocked", "busy") | changes
+    return row("ACME-1", "blocked", "busy", at=int((T - 30) * 1000)) | changes
 
 
-def found(*sessions: dict, row_: HandRow | None = None, pending: tuple[Message, ...] = (), **when: float):
+def found(
+    *sessions: dict,
+    row_: HandRow | None = None,
+    pending: tuple[Message, ...] = (),
+    heard: dict[str, str] | None = None,
+    **when: float,
+):
     read = fleet.sessions(Shell(*sessions))
     now, woke = when.get("now", T + IDLE_AFTER + 1), when.get("woke", 0.0)
-    return idle(read, {NAME: row_ or hand()}, list(pending), now, woke)
+    return idle(read, {NAME: row_ or hand()}, list(pending), now, woke, heard or {})
 
 
 def message(kind: str) -> Message:
@@ -42,13 +48,27 @@ def test_not_idle_before_two_minutes_or_without_a_turn_end() -> None:
     assert found(blocked(), row_=hand(None)) == frozenset()
 
 
-def test_a_working_stopped_or_prompting_hand_is_not_idle() -> None:
-    for session in (
-        row("ACME-1", "working", "busy"),
-        row("ACME-1", "stopped"),
-        blocked(waitingFor="permission prompt"),
-    ):
+def test_a_stopped_or_prompting_hand_or_one_working_with_no_turn_end_since_its_start_is_not_idle() -> None:
+    working = row("ACME-1", "working", "busy", at=int((T + 10) * 1000))
+    for session in (working, row("ACME-1", "stopped"), blocked(waitingFor="permission prompt")):
         assert found(session) == frozenset()
+
+
+def test_a_hand_reported_working_whose_turn_ended_after_its_start_is_idle() -> None:
+    working = row("ACME-1", "working", "busy", at=int((T - 30) * 1000))
+    assert found(working) == {NAME}
+    assert found(working, now=T + IDLE_AFTER) == frozenset()
+
+
+def test_a_hand_whose_last_start_is_newer_than_its_turn_end_is_not_idle() -> None:
+    for state in (("working", "busy"), ("blocked", "busy")):
+        assert found(row("ACME-1", *state, at=int((T + 5) * 1000))) == frozenset()
+
+
+def test_a_message_delivered_after_the_turn_end_keeps_a_working_hand_busy() -> None:
+    working = row("ACME-1", "working", "busy", at=int((T - 30) * 1000))
+    assert found(working, heard={NAME: at(T + 5)}) == frozenset()
+    assert found(working, heard={NAME: at(T - 5)}) == {NAME}
 
 
 def test_mail_waiting_ends_idleness_but_its_own_nudge_does_not() -> None:
@@ -61,7 +81,7 @@ def test_the_idle_clock_restarts_on_a_wake_from_sleep() -> None:
 
 
 def test_a_failed_fleet_read_finds_no_idle_hand() -> None:
-    assert idle(fleet.sessions(Shell(fleet_fails=True)), {NAME: hand()}, [], T + 600, 0.0) == frozenset()
+    assert idle(fleet.sessions(Shell(fleet_fails=True)), {NAME: hand()}, [], T + 600, 0.0, {}) == frozenset()
 
 
 def test_a_hand_is_nudged_while_its_nudge_is_unheard_inside_the_window() -> None:
