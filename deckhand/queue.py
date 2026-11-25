@@ -133,25 +133,37 @@ def _findings(story: dict, records: list[Record]) -> list[Item]:
     return found
 
 
+def _feature_records(feature: Feature) -> list[Record]:
+    return [r for s in feature.live for r in feature.records.get(s["id"], [])]
+
+
+def _feature_proposals(feature: Feature) -> list[Record]:
+    records = _feature_records(feature)
+    return [p for p in asks.open_proposals(records) if _of_feature(records, p.subject)]
+
+
 def _feature_findings(feature: Feature) -> list[Item]:
-    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
+    records = _feature_records(feature)
     project, name = feature.project["id"], feature.project["name"]
     found = []
-    for proposal in asks.open_proposals(records):
-        if _of_feature(records, proposal.subject):
-            lines = [name, *finding_lines(records, proposal.subject)]
-            next = [f"decide context finding {project} --finding {proposal.subject}"]
-            found.append(Item(review.DECISION, 1, name, name, proposal.at, 0, lines, next))
+    for proposal in _feature_proposals(feature):
+        lines = [name, *finding_lines(records, proposal.subject)]
+        next = [f"decide context finding {project} --finding {proposal.subject}"]
+        found.append(Item(review.DECISION, 1, name, name, proposal.at, 0, lines, next))
     return found
 
 
-def _feature_cap(feature: Feature) -> list[Item]:
-    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
-    project, name = feature.project["id"], feature.project["name"]
-    prefix = f"{project}:feature"
+def _capped(records: list[Record], prefix: str) -> Record | None:
     held, _ = review.counted(records, prefix)
     latest = review.last(held)
-    if latest is None or not review.at_cap(held, review.excused(records, prefix), review.proceeded(records, prefix)):
+    capped = review.at_cap(held, review.excused(records, prefix), review.proceeded(records, prefix))
+    return latest if capped else None
+
+
+def _feature_cap(feature: Feature) -> list[Item]:
+    project, name = feature.project["id"], feature.project["name"]
+    latest = _capped(_feature_records(feature), f"{project}:feature")
+    if latest is None:
         return []
     lines = ["three feature review rounds left a P1 open"]
     next = [f"decide context review-cap {project} --stage feature"]
@@ -159,12 +171,8 @@ def _feature_cap(feature: Feature) -> list[Item]:
 
 
 def _cap(story: dict, records: list[Record], stage: str) -> list[Item]:
-    prefix = f"{story['id']}:{stage}"
-    held, _ = review.counted(records, prefix)
-    latest = review.last(held)
-    excused = review.excused(records, prefix)
-    since = review.proceeded(records, prefix)
-    if latest is None or not review.at_cap(held, excused, since):
+    latest = _capped(records, f"{story['id']}:{stage}")
+    if latest is None:
         return []
     lines = [f"three {stage} review rounds left a P1 open"]
     next = [f"decide context review-cap {story['identifier']} --stage {stage}"]
@@ -238,22 +246,16 @@ def _day(date: str | None) -> str:
     return f"{date}T00:00:00.000Z" if date else ""
 
 
-def _own_findings(feature: Feature) -> list[str]:
-    records = [r for s in feature.live for r in feature.records.get(s["id"], [])]
-    return [p.subject for p in asks.open_proposals(records) if _of_feature(records, p.subject)]
-
-
-def _planning(store: Store, feature: Feature) -> list[Item]:
+def _planning(store: Store, feature: Feature, cap: list[Item]) -> list[Item]:
     if not features.replanning(feature):
         return []
-    gaps = features.approval_gaps(store, feature)
-    own = {f"{review_gaps.OPEN_P1} {i}:" for i in _own_findings(feature)}
-    if _feature_cap(feature):
-        own.add(review_gaps.OPEN_P1)
-    found = (
-        [g for g in gaps if not any(mark in g for mark in own)]
-        if gaps
-        else [REAPPROVE if feature.reapproval_due else READY]
+    own = {p.subject for p in _feature_proposals(feature)}
+    typed = features.review_gap_list(store, feature)
+    shown = [g for g in typed if not (g.kind == review_gaps.P1_KIND and (cap or g.id in own))]
+    plain = features.plain_gaps(store, feature)
+    covered = len(shown) < len(typed)
+    found = [*plain, *(g.person for g in shown)] or (
+        [] if covered else [REAPPROVE if feature.reapproval_due else READY]
     )
     if not found:
         return []
@@ -359,9 +361,8 @@ def _feature_items(
         elif story["assignee"] is not None:
             found += _second(story, records, policy_for)
     found = [replace(i, unblocks=weights.get(i.ref, 0)) for i in found] + _feature_findings(feature)
-    found += _planning(store, feature)
-    if features.replanning(feature):
-        found += _feature_cap(feature)
+    cap = _feature_cap(feature) if features.replanning(feature) else []
+    found += cap + _planning(store, feature, cap)
     if not building:
         found += _spikes(store, feature, read, restarts, idle, quiet)
     return found

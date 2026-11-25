@@ -5,7 +5,21 @@ from pathlib import Path
 
 import pytest
 
-from deckhand import asks, chores, features, fleet, gaps, implplan, planning, policy, queue, review, signoff, spikes
+from deckhand import (
+    asks,
+    chores,
+    features,
+    fleet,
+    gaps,
+    implplan,
+    planning,
+    policy,
+    queue,
+    review,
+    review_gaps,
+    signoff,
+    spikes,
+)
 from deckhand.features import FEATURE_LABEL
 from deckhand.fleet import Fleet, Session
 from deckhand.ops import create_id
@@ -570,8 +584,32 @@ def test_proceed_clears_it():
     assert [i for i in waiting(store) if i.kind == review.DECISION] == []
 
 
-def test_a_feature_finding_is_not_also_the_planning_line():
+def test_a_capped_feature_leaves_no_planning_line():
     store = voided()
     capped_rounds(store)
-    lines = [line for i in waiting(store) if i.kind == "planning" for line in i.lines]
-    assert not any("open P1" in line for line in lines)
+    assert [i for i in waiting(store) if i.kind == "planning"] == []
+
+
+def proposed_p1(store: FakeStore) -> None:
+    feature = features.open_feature(store, "ACME")
+    project = feature.project["id"]
+    current = features.content_hash(features.review_text(store, feature))
+    p1 = review.parse_findings(json.dumps([raw(severity="P1", changes_delivery=True)]))
+    round = review.round_record(project, "feature", review.RoundPlan(1, False, ""), current, p1)
+    for story in ("s1", "s2"):
+        store.put_record(story, round)
+        store.put_record(story, asks.proposal_record(round.data["findings"][0]["id"], round.version, "out of scope"))
+
+
+def test_a_feature_finding_is_not_also_the_planning_line():
+    store = voided()
+    proposed_p1(store)
+    found = waiting(store)
+    assert [i.kind for i in found] == [review.DECISION]
+
+
+def test_rewording_the_person_text_does_not_change_which_gap_is_dropped(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(review_gaps, "OPEN_P1", "the feature review is stuck on")
+    store = voided()
+    proposed_p1(store)
+    assert [i.kind for i in waiting(store)] == [review.DECISION]

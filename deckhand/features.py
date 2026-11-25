@@ -111,6 +111,11 @@ def _map_gaps(feature: Feature, story: dict) -> list[str]:
 
 
 def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list[str]:
+    review = [gap.hand if captain else gap.person for gap in review_gap_list(store, feature)]
+    return [*plain_gaps(store, feature), *review]
+
+
+def plain_gaps(store: Store, feature: Feature) -> list[str]:
     gaps = [
         f"the {name} section is not saved"
         for name in planning.SECTIONS
@@ -119,7 +124,6 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
     live = feature.live
     if not live:
         return [*gaps, "the feature has no stories"]
-    project = feature.project["id"]
     for story in live:
         gaps += _map_gaps(feature, story)
         gaps += [f"{story['identifier']}: decision item {item} is not decided" for item in undecided(feature, story)]
@@ -135,11 +139,16 @@ def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list
             drafted = drafts.get(record.subject)
             if story in live and (drafted is None or versions.settles(record, *drafted)):
                 settled.add(record.subject)
-    gaps += [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
-    held = [record for story in live for record in feature.records.get(story["id"], [])]
+    return gaps + [f"decision item {items[subject]} is open" for subject in sorted(items) if subject not in settled]
+
+
+def review_gap_list(store: Store, feature: Feature) -> list[review_gaps.Gap]:
+    if not feature.live:
+        return []
+    project = feature.project["id"]
+    held = [record for story in feature.live for record in feature.records.get(story["id"], [])]
     text = review_text(store, feature)
-    found = review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "", project)
-    return gaps + [gap.hand if captain else gap.person for gap in found]
+    return review_gaps.feature_gaps(project, held, content_hash(text) if text is not None else "", project)
 
 
 def review_text(store: Store, feature: Feature) -> str | None:

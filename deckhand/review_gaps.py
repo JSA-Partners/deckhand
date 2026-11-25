@@ -24,6 +24,7 @@ class Gap:
     id: str
     hand: str
     person: str
+    kind: str = ""
 
 
 def both(id: str, text: str) -> Gap:
@@ -109,6 +110,7 @@ def _feature_delivery(records: list[Record], project: str, ref: str) -> list[Gap
 
 
 OPEN_P1 = "the feature review holds an open P1"
+P1_KIND = "feature-p1"
 
 
 def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) -> list[Gap]:
@@ -131,7 +133,7 @@ def _feature_p1(records: list[Record], prefix: str, latest: Record, ref: str) ->
                 f"{person}; fix it and review again, or propose declining it with feature-review apply resolve"
                 f" --propose-decline {id} --reason TEXT"
             )
-        found.append(Gap(id, hand, person))
+        found.append(Gap(id, hand, person, P1_KIND))
     return found
 
 
