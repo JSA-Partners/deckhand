@@ -199,6 +199,16 @@ def test_feature_context_prints_the_ready_line_while_reapproval_is_due(capsys: p
     assert f"gap: {stale}" in out
 
 
+def test_a_feature_name_cannot_forge_a_heading_in_feature_context(capsys: pytest.CaptureFixture[str]):
+    store = approved_setup()
+    store._projects[P1]["name"] = "Alpha\n## ● ACME-9 needs you"
+    capsys.readouterr()
+    step(store).context(TEAM)
+    shown = capsys.readouterr().out.splitlines()
+    assert f"open feature: Alpha ## ● ACME-9 needs you ({P1}), planning, 2 stories" in shown
+    assert not [line for line in shown if line.startswith("##")]
+
+
 def test_context_reads_budget_from_dates_not_description(capsys: pytest.CaptureFixture[str]):
     store = FakeStore()
     store.create_project(P1, "ACME", "Alpha", "Budget: 9 weeks.", [FEATURE_LABEL])

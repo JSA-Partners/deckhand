@@ -145,6 +145,6 @@ def _print(facts: dict) -> None:
     if facts["cycle"]:
         print(status.cycle_line(facts["cycle"]))
     if facts["release"]:
-        print(f"ready to release: {facts['release']}")
+        print(f"ready to release: {brief.clean(facts['release'])}")
     if facts["settings"]:
         print(facts["settings"])

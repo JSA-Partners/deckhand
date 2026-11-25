@@ -64,11 +64,18 @@ def reviewed(store: FakeStore) -> None:
         ops.ensure_record(store, story["id"], clean)
 
 
+def taken(store: FakeStore, story: str) -> None:
+    if not any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in store.records(story)):
+        ops.ensure_record(store, story, Record(queue.TAKEN, story, "d1", "agent:captain", {}))
+
+
 def approve_everything(store: FakeStore) -> None:
     reviewed(store)
     for story in ("s1", "s2"):
         if versions.held(store.records(story), "tier", story) is None:
             mapped(store, story)
+    for story in load(store).live:
+        taken(store, story["id"])
     assert features.approval_gaps(store, load(store)) == []
     reapprove(store)
 
@@ -116,7 +123,7 @@ def test_changed_contract_voids_feature_approval():
     assert features.phase(load(store)) is Phase.BUILDING
     planning.save_section(store, load(store), "Contract", "POST /orders returns 202.", False)
     feature = load(store)
-    assert feature.reapproval_due
+    assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
         "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
@@ -127,7 +134,7 @@ def test_changed_story_voids_feature_approval():
     approve_everything(store)
     store.set_issue_text("s2", "Receipts by email", "Outcome: a receipt is sent.")
     feature = load(store)
-    assert feature.reapproval_due
+    assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert features.approval_gaps(store, feature) == [
         "the feature review has not reviewed the current contract and stories; run a feature round",
     ]
@@ -316,7 +323,7 @@ def test_a_decision_item_added_after_approval_voids_it():
     assert features.phase(load(store)) is Phase.BUILDING
     expect(store, "s2", "receipts", "Send receipts by email", "Keep receipts a year")
     feature = load(store)
-    assert feature.reapproval_due
+    assert features.phase(feature) is Phase.BUILDING and feature.reapproval_due
     assert "ACME-2: decision item Keep receipts a year is not decided" in features.approval_gaps(store, feature)
 
 
@@ -327,7 +334,7 @@ def test_a_state_chart_edited_after_approval_voids_it():
     mapped(store, "s1", "multi_step", "placed -> paid")
     assert features.phase(load(store)) is Phase.BUILDING
     mapped(store, "s1", "multi_step", "placed -> paid -> shipped")
-    assert load(store).reapproval_due
+    assert features.phase(load(store)) is Phase.BUILDING and load(store).reapproval_due
 
 
 def test_a_tier_two_story_without_a_chart_is_a_gap():
@@ -350,7 +357,7 @@ def test_a_new_dependency_voids_the_approval():
     approve_everything(store)
     assert features.phase(load(store)) is Phase.BUILDING
     store.relate("s1", "s2")
-    assert load(store).reapproval_due
+    assert features.phase(load(store)) is Phase.BUILDING and load(store).reapproval_due
 
 
 def test_a_new_repository_leaves_the_approval_standing():

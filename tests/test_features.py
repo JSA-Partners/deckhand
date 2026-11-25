@@ -13,6 +13,7 @@ from deckhand.features import (
     current,
     is_feature,
     load,
+    needs_draft,
     open_feature,
     phase,
     replanning,
@@ -73,6 +74,18 @@ def test_a_plan_changed_after_approval_keeps_building_and_waits_for_reapproval()
     )
     released = Feature(project(), [story("a", "Done")], {"a": [APPROVAL]})
     assert (phase(released), replanning(released)) == (Phase.RELEASED, False)
+
+
+def test_only_an_unbuilt_undrafted_open_story_needs_a_draft_while_reapproval_is_due():
+    built = Record("hand-start", "b", "", "agent:hand", {"kind": "story"})
+    drafted = Record("draft-taken", "c", "d1", "agent:captain", {})
+    stories = [story("a"), story("b"), story("c"), story("d", "Done")]
+    records = {"a": [], "b": [APPROVAL, built], "c": [APPROVAL, drafted], "d": [APPROVAL]}
+    due = Feature(project(), stories, records, "1")
+    assert [s["id"] for s in stories if needs_draft(due, s)] == ["a"]
+    records = {"a": [APPROVAL], "b": [APPROVAL], "c": [APPROVAL], "d": [APPROVAL]}
+    current = Feature(project(), stories, records, "1")
+    assert [s["id"] for s in stories if needs_draft(current, s)] == []
 
 
 def test_open_feature_refuses_two():

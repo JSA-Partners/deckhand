@@ -155,6 +155,9 @@ def test_a_feature_is_planned_approved_and_voided_by_a_contract_change(
     session.decide("decision-item", ITEM, "Yes", "--story", "ACME-1")
 
     assert session.facts()["gaps"] == ["the feature review has not run"]
+    for ref in ("ACME-1", "ACME-2", "ACME-3"):
+        session.run("draft", "apply", ref, *TEAM, "--file", session.write("draft.md", f"Outcome of {ref}."))
+        session.run("draft", "apply", ref, "take", *TEAM)
     session.review_feature(session.run)
     assert session.facts()["gaps"] == []
     session.decide("feature-approval", alpha, "Approve")

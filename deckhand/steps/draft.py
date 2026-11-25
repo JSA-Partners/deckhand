@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from deckhand import approval, claims, features, inputs, ops, planning, queue, spec, versions
-from deckhand.features import Phase
 from deckhand.records import Record, content_hash
 from deckhand.step import Refusal, register, team_key
 from deckhand.steps.build import StoryStep
@@ -64,9 +63,8 @@ class Draft(StoryStep):
         store = self._store_for_run()
         feature = features.owning(store, team_key(parsed), ref)
         story = features.story(store, feature, ref)
-        phase = features.phase(feature)
-        if phase is not Phase.PLANNING:
-            raise Refusal(f"{features.describe(feature.project)} is {phase.value}, not planning")
+        if not features.replanning(feature):
+            raise Refusal(f"{features.describe(feature.project)} is {features.phase(feature).value}, not planning")
         claims.owned(story, self.viewer())
         if verb == ["take"]:
             self._take(store, feature, story)

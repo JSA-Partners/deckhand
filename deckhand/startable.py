@@ -32,7 +32,7 @@ def _blocked_by(story: dict, edges: list[tuple[str, str]], by_id: dict[str, dict
 def kind(feature: Feature, story: dict) -> str:
     if story["state"] == order.DONE:
         return AFTER
-    return DRAFT if features.phase(feature) is Phase.PLANNING else BUILD
+    return DRAFT if features.phase(feature) is Phase.PLANNING or features.needs_draft(feature, story) else BUILD
 
 
 def why_not_drafted(store: Store, feature: Feature, story: dict) -> str | None:
@@ -58,7 +58,7 @@ def why_not(
             return f"{ref} is Done and not yours"
         if not chores.open_chores(story, feature.records.get(story["id"], [])):
             return f"{ref} is Done with no open after-merge item"
-    elif features.phase(feature) is Phase.PLANNING:
+    elif features.phase(feature) is Phase.PLANNING or features.needs_draft(feature, story):
         drafted = why_not_drafted(store, feature, story)
         if drafted is not None:
             return drafted

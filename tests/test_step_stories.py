@@ -259,6 +259,7 @@ def test_a_voided_approval_keeps_the_rule_for_new_stories(tmp_path: Path):
     planning.save_section(store, feature, "Contract", "POST /orders, changed.", False)
     feature = features.open_feature(store, "ACME")
     assert feature is not None and feature.reapproval_due
+    assert features.phase(feature) is features.Phase.BUILDING
     store.writes.clear()
     with pytest.raises(Refusal, match="b is new after approval; it needs missed_by"):
         run(store, tmp_path, [entry("a"), entry("b")])

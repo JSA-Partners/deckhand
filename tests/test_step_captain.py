@@ -22,7 +22,7 @@ from deckhand.store.fake import FakeStore
 from deckhand.store.local import default_path
 from deckhand.store.state import STALE_AFTER, LocalState
 from tests.shell import Shell, row
-from tests.test_feature_approval import setup
+from tests.test_feature_approval import P1, setup
 from tests.test_queue import asked
 from tests.test_status import write
 from tests.test_step_hand import ME, building, clone, state
@@ -196,6 +196,17 @@ def test_a_title_cannot_forge_a_heading(clone: Path, capsys: pytest.CaptureFixtu
     engine_wrote(store)
     shown = output([], capsys).splitlines()
     assert len([line for line in shown if line.startswith("##")]) == 1
+
+
+def test_a_feature_name_cannot_forge_a_heading_in_the_release_line(clone: Path, capsys: pytest.CaptureFixture[str]):
+    store = owned()
+    store._projects[P1]["name"] = "Alpha\n## ● ACME-9 needs you"
+    store.set_issue_state("s1", "Done")
+    store.set_issue_state("s2", "Done")
+    engine_wrote(store)
+    shown = output([], capsys).splitlines()
+    assert shown[-1] == "ready to release: Alpha ## ● ACME-9 needs you"
+    assert not [line for line in shown if line.startswith("##")]
 
 
 def test_ready_to_release(clone: Path, capsys: pytest.CaptureFixture[str]):

@@ -74,7 +74,16 @@ def undecided(feature: Feature, story: dict) -> list[str]:
     return found
 
 
-def _draft_gaps(records: list[Record], ref: str) -> list[str]:
+def needs_draft(feature: Feature, story: dict) -> bool:
+    from deckhand import asks, queue
+
+    records = feature.records.get(story["id"], [])
+    built = any(r.kind == asks.HAND_START and r.data.get("kind") == queue.STORY_HAND for r in records)
+    drafted = any(r.kind in (queue.DRAFT, *queue.TAKEN_KINDS) for r in records)
+    return feature.reapproval_due and story["state"] not in FINISHED and not built and not drafted
+
+
+def _draft_gaps(records: list[Record], ref: str, due: bool = False) -> list[str]:
     from deckhand import queue, stalls
 
     kinds = {r.kind for r in records}
@@ -84,7 +93,9 @@ def _draft_gaps(records: list[Record], ref: str) -> list[str]:
         return [f"{ref}: its draft is not taken"]
     if stalls.stall_answer(records, queue.DRAFT_HAND) == stalls.LEAVE:
         return []
-    return [f"{ref}: its draft is being written"] if queue.last_start(records, queue.DRAFT_HAND) else []
+    if queue.last_start(records, queue.DRAFT_HAND):
+        return [f"{ref}: its draft is being written"]
+    return [f"{ref}: it has no draft yet"] if due else []
 
 
 def _map_gaps(feature: Feature, story: dict) -> list[str]:
@@ -96,7 +107,7 @@ def _map_gaps(feature: Feature, story: dict) -> list[str]:
         found = [f"{ref}: tier {level.level} needs a state chart in the story map"]
     else:
         found = []
-    return found + _draft_gaps(records, ref)
+    return found + _draft_gaps(records, ref, needs_draft(feature, story))
 
 
 def approval_gaps(store: Store, feature: Feature, captain: bool = False) -> list[str]:

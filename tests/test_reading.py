@@ -53,8 +53,8 @@ def test_read_returns_the_building_facts():
         "feature": "Alpha",
         "budget": {"feature": "Alpha", "days_used": 1, "budget_days": 7, "planning_note": False},
         "order": [
-            story("ACME-1", "Orders", "2026-11-18T11:06:54.000Z"),
-            story("ACME-2", "Receipts", "2026-11-18T11:06:55.000Z"),
+            story("ACME-1", "Orders", "2026-11-18T11:06:56.000Z"),
+            story("ACME-2", "Receipts", "2026-11-18T11:06:57.000Z"),
         ],
         "cycle": [],
         "release": False,

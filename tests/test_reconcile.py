@@ -14,6 +14,7 @@ from deckhand.reconcile import IN_PROGRESS, Facts, reconcile, reserved
 from deckhand.records import HAND, Record, iso
 from deckhand.steps.build import Build
 from deckhand.steps.decide import Decide
+from deckhand.steps.draft import Draft
 from deckhand.steps.plan import Plan
 from deckhand.steps.review import FeatureReview
 from deckhand.store.fake import FakeStore
@@ -25,6 +26,7 @@ from tests.test_mirror import CONTRACT, named
 from tests.test_queue import asked, waiting
 from tests.test_step_after import CHORES
 from tests.test_step_build import Shell as GitShell
+from tests.test_step_draft import draft_file
 from tests.test_step_hand import ME, building, clone, configure, decided, spike_row, state
 from tests.test_step_review import answer as answered
 from tests.test_step_review import record_round
@@ -741,3 +743,28 @@ def test_approving_again_starts_the_waiting_story(
     feature = features.open_feature(store, "ACME")
     assert feature is not None and not feature.reapproval_due
     assert launch(store, clone, "ACME-2") in reconcile(facts(store, cap=3), store)
+
+
+def test_a_story_added_mid_build_is_drafted_before_the_approval(clone: Path, tmp_path: Path):
+    store = building()
+    for issue in ("s1", "s2"):
+        store.assign(issue, ME)
+    started(store, "s1")
+    store.create_issue("s3", "ACME", "Refunds", "Outcome: a refund is paid.", P1, ["widgets"])
+    store.assign("s3", ME)
+    mapped(store, "s3")
+    working = row("ACME-1", "working", "busy")
+    launched = [a for a in reconcile(facts(store, working, cap=3), store) if isinstance(a, Launch)]
+    added = Launch("hand-ACME-3", "ACME-3", queue.DRAFT_HAND, clone, story(store, "ACME-3"), ME, False)
+    assert launched == [added]
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None
+    assert "ACME-3: it has no draft yet" in features.approval_gaps(store, feature)
+    step = Draft(store, me=lambda: ME)
+    step.apply(["ACME-3", "--file", draft_file(tmp_path), *TEAM])
+    assert "ACME-3: its draft is not taken" in features.approval_gaps(store, features.open_feature(store, "ACME"))
+    step.apply(["ACME-3", "take", *TEAM])
+    feature = features.open_feature(store, "ACME")
+    assert feature is not None and feature.reapproval_due
+    assert not [gap for gap in features.approval_gaps(store, feature) if gap.startswith("ACME-3")]
+    assert [a for a in reconcile(facts(store, working, cap=3), store) if isinstance(a, Launch)] == []

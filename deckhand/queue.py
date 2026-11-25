@@ -321,7 +321,8 @@ def _feature_items(
             if not read.note:
                 session = hands.get(story["identifier"])
                 second = second_due(story, records, policy_for) is not None
-                launch = STORY_HAND if building or story["state"] == order.DONE else DRAFT_HAND
+                drafting = not building and story["state"] != order.DONE or features.needs_draft(feature, story)
+                launch = DRAFT_HAND if drafting else STORY_HAND
                 found += _prompt(story, records, session, rank)
                 ref = story["identifier"]
                 if ref not in quiet:

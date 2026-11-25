@@ -62,7 +62,8 @@ def test_a_signed_story_merges_while_reapproval_is_due(
     assert load(store).reapproval_due and features.phase(load(store)) is features.Phase.BUILDING
     gh = Gh(buckets=[["pass"]])
     merge(store, repo, gh)
-    assert len(gh.ran("gh", "pr", "merge")) == 1
+    merged = ["gh", "pr", "merge", "7", "--repo", "acme/widgets", "--squash", "--match-head-commit", "c2"]
+    assert gh.ran("gh", "pr", "merge") == [merged]
 
 
 def test_merge_refuses_when_head_moved(tmp_path: Path, repo: Path, state: Path, capsys: pytest.CaptureFixture[str]):
