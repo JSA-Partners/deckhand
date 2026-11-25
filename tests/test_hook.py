@@ -512,8 +512,9 @@ BASH_DENIAL = {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": (
-            "the captain runs deckhand commands only, one call with no unquoted ; & | < > or line break"
-            " and no $( or backtick outside single quotes; check the fact with Read or Grep, or ask a spike"
+            "the captain runs deckhand commands only: deckhand, then words of letters, digits and _./:=@,+%-,"
+            " 'single-quoted' text or \"double-quoted\" text without $ ` \\ !, separated by spaces;"
+            " check the fact with Read or Grep, or ask a spike"
         ),
     }
 }
@@ -528,13 +529,13 @@ def bash(command: object) -> dict:
     [
         "deckhand captain context",
         "deckhand",
-        " deckhand captain context",
         'deckhand feature apply new --name "Help files" --weeks 1',
         'deckhand review apply X resolve --reason "a; b & c"',
         "deckhand decide context decision-item 'Search & filter'",
+        "deckhand plan apply Facts --file /tmp/x/facts.md --drafted",
+        'deckhand x "don\'t stop"',
         "deckhand plan context 'a $(b)'",
-        "deckhand plan context 'one\ntwo'",
-        'deckhand plan context "\\$(id)"',
+        'deckhand x \'say "hi"\' "a # * ? [b] ~ {c}"',
     ],
 )
 def test_a_captain_bare_deckhand_call_passes(monkeypatch, capsys, command):
@@ -547,6 +548,24 @@ def test_a_captain_bare_deckhand_call_passes(monkeypatch, capsys, command):
     "command",
     [
         "deckhand captain context; ls",
+        "deckhand next#;echo PWNED",
+        "deckhand next # '\necho PWNED\n# '",
+        "deckhand $'\\'' $(echo PWNED) '$'\\'''",
+        'deckhand x "a $(b)"',
+        'deckhand plan context "\\$(id)"',
+        'deckhand x "hi!"',
+        'deckhand x a"b"',
+        "deckhand x 'a''b'",
+        "deckhand plan context 'one\ntwo'",
+        "deckhand x\techo",
+        "deckhand x 'café'",
+        "deckhand x ~/f",
+        "deckhand x *",
+        "deckhand x {a,b}",
+        " deckhand captain context",
+        "deckhand captain context ",
+        "deckhandx",
+        "",
         "deckhand x;rm y",
         "deckhand x | tee",
         "deckhand x > f",
