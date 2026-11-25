@@ -9,7 +9,8 @@ from deckhand.records import iso
 
 COMMAND = ["claude", "agents", "--json", "--all"]
 HAND, SPIKE, CAPTAIN = "hand-", "spike-", "captain"
-LIVE = ("working", "blocked")
+WORKING = "working"
+LIVE = (WORKING, "blocked")
 FAILED = ("failed", "stopped")
 PERMISSION = "permission prompt"
 
@@ -125,7 +126,7 @@ def failed(session: Session) -> bool:
 
 
 def holds(state: str, waiting_for: str | None, alive: bool) -> bool:
-    return alive and (state == "working" or (state in LIVE and waiting_for == PERMISSION))
+    return alive and (state == WORKING or (state in LIVE and waiting_for == PERMISSION))
 
 
 def holds_slot(session: Session) -> bool:
