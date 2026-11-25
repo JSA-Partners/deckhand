@@ -50,6 +50,16 @@ def test_an_unanswered_decision_item_is_left_out():
     assert spec.gather(store, *loaded(store)).decisions == [{"item": "Refunds wait", "answer": "Discuss", "note": None}]
 
 
+def test_each_story_reads_only_its_own_answers():
+    store = feature_store()
+    item(store, "s1", "Greeting wording", {"answer": "Bonjour", "item": "Greeting wording"})
+    item(store, "s2", "Greeting wording", {"answer": "Hola", "item": "Greeting wording"})
+    feature, _ = loaded(store)
+    for ref, said in (("ACME-1", "Bonjour"), ("ACME-2", "Hola")):
+        found = spec.gather(store, feature, features.story(store, feature, ref))
+        assert found.decisions == [{"item": "Greeting wording", "answer": said, "note": None}]
+
+
 def test_a_missing_section_is_none_and_prints_as_not_written():
     store = feature_store()
     found = spec.gather(store, *loaded(store))

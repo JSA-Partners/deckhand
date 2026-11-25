@@ -51,12 +51,11 @@ def plain(text: str) -> str:
     return "".join(kept) + _prose(text[end:])
 
 
-def _answered(feature: Feature) -> list[dict]:
+def _answered(records: list[Record]) -> list[dict]:
     latest: dict[str, Record] = {}
-    for story in feature.stories:
-        for record in feature.records.get(story["id"], []):
-            if record.kind == "decision-item":
-                latest[record.subject] = record
+    for record in records:
+        if record.kind == "decision-item":
+            latest[record.subject] = record
     return [
         {
             "item": plain(str(r.data.get("item", r.subject))),
@@ -75,7 +74,7 @@ def gather(store: Store, feature: Feature, story: dict) -> Spec:
     scope = f"{story['title']}\n\n{description}" if description else story["title"]
     records = feature.records.get(story["id"], [])
     chart = versions.chart(records, story["id"])
-    return Spec(contract, examples, invariants, plain(scope), _answered(feature), versions.after_merge(records), chart)
+    return Spec(contract, examples, invariants, plain(scope), _answered(records), versions.after_merge(records), chart)
 
 
 def _decision(entry: dict) -> str:
